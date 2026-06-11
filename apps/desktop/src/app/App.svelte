@@ -15,6 +15,7 @@
   import SettingsView from "./SettingsView.svelte";
   import SkillsView from "./SkillsView.svelte";
   import ExtensionsView from "./ExtensionsView.svelte";
+  import AutomationsView from "./AutomationsView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import Toasts from "./Toasts.svelte";
 
@@ -90,6 +91,12 @@
       <ExtensionsView
         projects={snapshot.current.projects}
         projectId={selectedThread?.projectId ?? null}
+      />
+    {:else if view === "automations"}
+      <AutomationsView
+        projects={snapshot.current.projects}
+        automations={snapshot.current.automations}
+        onSelectThread={selectThread}
       />
     {:else if view === "testing"}
       <TestingView

@@ -96,6 +96,26 @@ export interface SessionMeta {
   contextPercent: number | null;
 }
 
+/** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */
+export interface Automation {
+  id: string;
+  name: string;
+  cron: string;
+  projectId: ProjectId | null;
+  prompt: string;
+  enabled: boolean;
+  lastFiredAt?: string;
+  nextFireAt?: string;
+  createdAt: string;
+}
+
+export interface AutomationRun {
+  id: string;
+  automationId: string;
+  threadId: ThreadId | null;
+  firedAt: string;
+}
+
 /** A skill discovered by pi's resource loader. */
 export interface SkillInfo {
   name: string;
@@ -152,5 +172,6 @@ export interface ExtensionStatusPayload {
 export interface AppSnapshot {
   projects: Project[];
   threads: Thread[];
+  automations: Automation[];
   ui: UiState;
 }

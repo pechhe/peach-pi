@@ -4,6 +4,7 @@ import { openDb } from "./persistence/db.ts";
 import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
 import { AppService } from "./services/app-service.ts";
 import { ThreadService } from "./services/thread-service.ts";
+import { AutomationService } from "./services/automation-service.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 
 // Test isolation: override userData before any path use.
@@ -29,6 +30,9 @@ async function boot(): Promise<void> {
     emit,
     () => emit("event:snapshot", appService.snapshot()),
     path.join(app.getPath("userData"), "chats"),
+  );
+  const automationService = new AutomationService(db, threadService, () =>
+    emit("event:snapshot", appService.snapshot()),
   );
 
   async function pickProject() {
@@ -56,6 +60,13 @@ async function boot(): Promise<void> {
     "threads:getMeta": (id) => threadService.getMeta(id),
     "threads:respondExtensionUi": (requestId, value) =>
       threadService.respondExtensionUi(requestId, value),
+    "threads:compact": (id) => threadService.compact(id),
+    "automations:create": (fields) => automationService.create(fields),
+    "automations:setEnabled": (id, enabled) => automationService.setEnabled(id, enabled),
+    "automations:delete": (id) => automationService.delete(id),
+    "automations:runNow": (id) => automationService.runNow(id),
+    "automations:runs": (id) => automationService.runs(id),
+    "automations:previewNext": (cron) => automationService.previewNext(cron),
     "resources:inspect": (projectId) => threadService.inspectResources(projectId),
     "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
     "threads:archive": (id) => threadService.archive(id),
@@ -71,6 +82,7 @@ async function boot(): Promise<void> {
   });
 
   appService.start();
+  automationService.start();
   createMainWindow();
 
   app.on("second-instance", () => {
@@ -91,6 +103,7 @@ async function boot(): Promise<void> {
 
   app.on("before-quit", () => {
     appService.stop();
+    automationService.stop();
     threadService.dispose();
     db.close();
   });

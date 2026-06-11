@@ -44,4 +44,30 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE automations (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          cron TEXT NOT NULL,
+          project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+          prompt TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_fired_at TEXT,
+          next_fire_at TEXT,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE automation_runs (
+          id TEXT PRIMARY KEY,
+          automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+          thread_id TEXT,
+          fired_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_automation_runs ON automation_runs(automation_id, fired_at DESC);
+      `);
+    },
+  },
 ];

@@ -2,7 +2,13 @@ import { basename } from "node:path";
 import { existsSync } from "node:fs";
 import type { AppSnapshot, Project, UiState } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
-import { defaultUiState, KvRepo, ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
+import {
+  AutomationRepo,
+  defaultUiState,
+  KvRepo,
+  ProjectRepo,
+  ThreadRepo,
+} from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
 
 const UI_STATE_KEY = "ui-state";
@@ -12,6 +18,7 @@ export class AppService {
   private projects: ProjectRepo;
   private threads: ThreadRepo;
   private kv: KvRepo;
+  private automations: AutomationRepo;
   private snoozeTimer: NodeJS.Timeout | null = null;
   private emit: Emit;
 
@@ -20,6 +27,7 @@ export class AppService {
     this.projects = new ProjectRepo(db);
     this.threads = new ThreadRepo(db);
     this.kv = new KvRepo(db);
+    this.automations = new AutomationRepo(db);
   }
 
   start(): void {
@@ -36,6 +44,7 @@ export class AppService {
     return {
       projects: this.projects.all(),
       threads: this.threads.all(),
+      automations: this.automations.all(),
       ui: this.kv.get<UiState>(UI_STATE_KEY) ?? defaultUiState,
     };
   }

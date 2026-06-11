@@ -1,6 +1,8 @@
 import type {
   AppSnapshot,
   CommandInfo,
+  Automation,
+  AutomationRun,
   ExtensionStatusPayload,
   ExtensionUiRequest,
   ImagePayload,
@@ -92,6 +94,25 @@ export const ipcContracts = {
     [requestId: string, value: string | boolean | undefined],
     void
   >((id) => requireNonEmptyString(id, "requestId")),
+
+  "threads:compact": invoke<[threadId: ThreadId], void>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
+
+  // automations (scheduled prompts)
+  "automations:create": invoke<
+    [fields: { name: string; cron: string; projectId: string | null; prompt: string }],
+    Automation
+  >((f) => {
+    requireNonEmptyString(f?.name, "name");
+    requireNonEmptyString(f?.cron, "cron");
+    requireNonEmptyString(f?.prompt, "prompt");
+  }),
+  "automations:setEnabled": invoke<[id: string, enabled: boolean], void>(),
+  "automations:delete": invoke<[id: string], void>(),
+  "automations:runNow": invoke<[id: string], void>(),
+  "automations:runs": invoke<[id: string], AutomationRun[]>(),
+  "automations:previewNext": invoke<[cron: string], string | null>(),
 
   // resources (skills / extensions / prompts visible for a project)
   "resources:inspect": invoke<[projectId: string | null], ResourceInspection>(),

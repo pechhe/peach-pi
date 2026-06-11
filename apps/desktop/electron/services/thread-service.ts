@@ -134,6 +134,10 @@ export class ThreadService {
     return { threadId, ...session.meta() };
   }
 
+  async compact(threadId: string): Promise<void> {
+    (await this.sessionFor(threadId)).compact();
+  }
+
   respondExtensionUi(requestId: string, value: string | boolean | undefined): void {
     const resolve = this.pendingDialogs.get(requestId);
     if (resolve) {
@@ -147,6 +151,11 @@ export class ThreadService {
     const cwd = project?.path ?? this.chatsDir;
     const { inspectResources } = await import("@peach-pi/pi-client");
     return inspectResources(cwd);
+  }
+
+  setTitle(threadId: string, title: string): void {
+    this.threads.setTitle(threadId, title);
+    this.onThreadsChanged();
   }
 
   archive(threadId: string): void {

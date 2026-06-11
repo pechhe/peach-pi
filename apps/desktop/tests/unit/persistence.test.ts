@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb, migrate } from "../../electron/persistence/db.ts";
-import { ProjectRepo, ThreadRepo, KvRepo } from "../../electron/persistence/repositories.ts";
+import { AutomationRepo, ProjectRepo, ThreadRepo, KvRepo } from "../../electron/persistence/repositories.ts";
 import { DatabaseSync } from "node:sqlite";
 
 function memoryDb() {
@@ -14,7 +14,36 @@ test("migrations are idempotent", () => {
   const db = memoryDb();
   migrate(db); // second run = no-op
   const v = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  assert.equal(v.user_version, 1);
+  assert.equal(v.user_version, 2);
+});
+
+test("automation lifecycle: insert, due, fire, runs, disable", () => {
+  const db = memoryDb();
+  const repo = new AutomationRepo(db);
+  const auto = repo.insert({
+    name: "Morning",
+    cron: "0 9 * * *",
+    projectId: null,
+    prompt: "do the thing",
+    nextFireAt: "2026-01-01T09:00:00.000Z",
+  });
+  assert.equal(auto.enabled, true);
+  assert.equal(repo.due("2026-01-01T08:59:00.000Z").length, 0);
+  assert.equal(repo.due("2026-01-01T09:00:00.000Z").length, 1);
+
+  repo.markFired(auto.id, "2026-01-01T09:00:01.000Z", "2026-01-02T09:00:00.000Z");
+  assert.equal(repo.due("2026-01-01T10:00:00.000Z").length, 0);
+  assert.equal(repo.get(auto.id)!.lastFiredAt, "2026-01-01T09:00:01.000Z");
+
+  repo.recordRun(auto.id, "thread-1", "2026-01-01T09:00:01.000Z");
+  assert.equal(repo.runs(auto.id).length, 1);
+  assert.equal(repo.runs(auto.id)[0]!.threadId, "thread-1");
+
+  repo.setEnabled(auto.id, false, null);
+  assert.equal(repo.due("2026-01-03T10:00:00.000Z").length, 0);
+
+  repo.delete(auto.id);
+  assert.equal(repo.all().length, 0);
 });
 
 test("project add/list/remove round-trip", () => {

@@ -372,6 +372,14 @@
               </div>
               <span class="text-[10px] text-zinc-600">{Math.round(meta.contextPercent)}%</span>
             </div>
+            {#if meta.contextPercent > 30 && !running}
+              <button
+                class="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                onclick={() => api.invoke("threads:compact", thread.id)}
+                data-testid="compact-button"
+                title="Compact context (auto-compacts at 80%)"
+              >compact</button>
+            {/if}
           {/if}
 
           <span class="text-[10px] text-zinc-600">

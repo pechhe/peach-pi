@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Project, Thread, UiState } from "@peach-pi/shared-types";
+import type { Automation, AutomationRun, Project, Thread, UiState } from "@peach-pi/shared-types";
 import type { AppDb } from "./db.ts";
 
 interface ProjectRow {
@@ -166,6 +166,118 @@ export class ThreadRepo {
       .prepare("UPDATE threads SET snoozed_until = NULL WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?")
       .run(now);
     return rows.map((r) => toThread({ ...r, snoozed_until: null }));
+  }
+}
+
+interface AutomationRow {
+  id: string;
+  name: string;
+  cron: string;
+  project_id: string | null;
+  prompt: string;
+  enabled: number;
+  last_fired_at: string | null;
+  next_fire_at: string | null;
+  created_at: string;
+}
+
+const toAutomation = (r: AutomationRow): Automation => ({
+  id: r.id,
+  name: r.name,
+  cron: r.cron,
+  projectId: r.project_id,
+  prompt: r.prompt,
+  enabled: r.enabled === 1,
+  lastFiredAt: r.last_fired_at ?? undefined,
+  nextFireAt: r.next_fire_at ?? undefined,
+  createdAt: r.created_at,
+});
+
+export class AutomationRepo {
+  private db: AppDb;
+  constructor(db: AppDb) {
+    this.db = db;
+  }
+
+  all(): Automation[] {
+    const rows = this.db
+      .prepare("SELECT * FROM automations ORDER BY created_at")
+      .all() as unknown as AutomationRow[];
+    return rows.map(toAutomation);
+  }
+
+  get(id: string): Automation | null {
+    const row = this.db.prepare("SELECT * FROM automations WHERE id = ?").get(id) as
+      | AutomationRow
+      | undefined;
+    return row ? toAutomation(row) : null;
+  }
+
+  insert(fields: {
+    name: string;
+    cron: string;
+    projectId: string | null;
+    prompt: string;
+    nextFireAt: string | null;
+  }): Automation {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        "INSERT INTO automations (id, name, cron, project_id, prompt, enabled, next_fire_at, created_at) VALUES (?,?,?,?,?,1,?,?)",
+      )
+      .run(id, fields.name, fields.cron, fields.projectId, fields.prompt, fields.nextFireAt, now);
+    return this.get(id)!;
+  }
+
+  setEnabled(id: string, enabled: boolean, nextFireAt: string | null): void {
+    this.db
+      .prepare("UPDATE automations SET enabled = ?, next_fire_at = ? WHERE id = ?")
+      .run(enabled ? 1 : 0, nextFireAt, id);
+  }
+
+  markFired(id: string, firedAt: string, nextFireAt: string | null): void {
+    this.db
+      .prepare("UPDATE automations SET last_fired_at = ?, next_fire_at = ? WHERE id = ?")
+      .run(firedAt, nextFireAt, id);
+  }
+
+  delete(id: string): void {
+    this.db.prepare("DELETE FROM automations WHERE id = ?").run(id);
+  }
+
+  due(nowIso: string): Automation[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM automations WHERE enabled = 1 AND next_fire_at IS NOT NULL AND next_fire_at <= ?",
+      )
+      .all(nowIso) as unknown as AutomationRow[];
+    return rows.map(toAutomation);
+  }
+
+  recordRun(automationId: string, threadId: string | null, firedAt: string): void {
+    this.db
+      .prepare("INSERT INTO automation_runs (id, automation_id, thread_id, fired_at) VALUES (?,?,?,?)")
+      .run(randomUUID(), automationId, threadId, firedAt);
+  }
+
+  runs(automationId: string, limit = 20): AutomationRun[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY fired_at DESC LIMIT ?",
+      )
+      .all(automationId, limit) as unknown as Array<{
+      id: string;
+      automation_id: string;
+      thread_id: string | null;
+      fired_at: string;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      automationId: r.automation_id,
+      threadId: r.thread_id,
+      firedAt: r.fired_at,
+    }));
   }
 }
 

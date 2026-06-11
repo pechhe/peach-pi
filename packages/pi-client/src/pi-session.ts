@@ -42,6 +42,9 @@ export interface PiSessionMeta {
 /** Tools allowed while plan mode runs. Mutating tools stay disabled. */
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 
+/** Auto-compact after a run ends past this context usage. */
+const AUTO_COMPACT_PERCENT = 80;
+
 /**
  * One live pi session bound to a thread. Owns the SDK session, the
  * transcript recorder, and event fan-out. Disposable.
@@ -71,6 +74,34 @@ export class PiSession {
       if (event.type === "agent_start") this.callbacks.onRunningChange(true);
       if (event.type === "agent_end" && !event.willRetry) {
         this.callbacks.onRunningChange(false);
+        this.callbacks.onMetaChange?.();
+        this.maybeAutoCompact();
+      }
+      if (event.type === "compaction_start") {
+        this.callbacks.onOps([
+          {
+            op: "upsert",
+            item: {
+              id: `compaction-${Date.now()}`,
+              kind: "notice",
+              text: `Compacting context (${event.reason})…`,
+            },
+          },
+        ]);
+      }
+      if (event.type === "compaction_end") {
+        this.callbacks.onOps([
+          {
+            op: "upsert",
+            item: {
+              id: `compaction-end-${Date.now()}`,
+              kind: "notice",
+              text: event.aborted
+                ? "Compaction aborted."
+                : (event.errorMessage ?? "Context compacted."),
+            },
+          },
+        ]);
         this.callbacks.onMetaChange?.();
       }
       if (event.type === "thinking_level_changed") this.callbacks.onMetaChange?.();
@@ -209,6 +240,28 @@ export class PiSession {
 
   async steer(text: string): Promise<void> {
     await this.session.steer(text);
+  }
+
+  /** Manual compaction. Progress/result surface as notice transcript items. */
+  compact(): void {
+    if (this.session.isCompacting || this.session.isStreaming) return;
+    void this.session.compact().catch((error: unknown) =>
+      this.callbacks.onOps([
+        {
+          op: "upsert",
+          item: {
+            id: `compaction-err-${Date.now()}`,
+            kind: "notice",
+            text: `Compaction failed: ${String(error)}`,
+          },
+        },
+      ]),
+    );
+  }
+
+  private maybeAutoCompact(): void {
+    const percent = this.session.getContextUsage()?.percent;
+    if (percent != null && percent >= AUTO_COMPACT_PERCENT) this.compact();
   }
 
   async abort(): Promise<void> {
