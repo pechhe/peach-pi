@@ -1,0 +1,84 @@
+import type { AppSnapshot, Project, Thread, ThreadId } from "./entities.js";
+
+/**
+ * Typed IPC contract registry (pattern carried over from peche-pi's
+ * desktop-ipc-seam — single source of truth, no drift between main,
+ * preload, and renderer).
+ *
+ * - `invoke`: renderer → main, async result (ipcRenderer.invoke)
+ * - `event`:  main → renderer subscription (webContents.send)
+ */
+
+export interface InvokeContract<Args extends unknown[] = unknown[], Result = unknown> {
+  kind: "invoke";
+  /** Optional runtime guard executed in main before the handler. */
+  validate?: (...args: Args) => void;
+  __args?: Args;
+  __result?: Result;
+}
+
+export interface EventContract<Payload = unknown> {
+  kind: "event";
+  __payload?: Payload;
+}
+
+const invoke = <Args extends unknown[], Result>(
+  validate?: (...args: Args) => void,
+): InvokeContract<Args, Result> => ({ kind: "invoke", validate });
+
+const event = <Payload>(): EventContract<Payload> => ({ kind: "event" });
+
+function requireNonEmptyString(value: unknown, label: string): void {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${label} must be a non-empty string`);
+  }
+}
+
+/** All IPC channels. Channel name = object key, namespaced by domain. */
+export const ipcContracts = {
+  // app
+  "app:getSnapshot": invoke<[], AppSnapshot>(),
+  "app:ping": invoke<[], { pong: true; version: string }>(),
+
+  // projects
+  "projects:add": invoke<[path: string], Project>((path) =>
+    requireNonEmptyString(path, "path"),
+  ),
+  "projects:remove": invoke<[projectId: string], void>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+
+  // threads
+  "threads:snooze": invoke<[threadId: ThreadId, until: string], void>(),
+  "threads:unsnooze": invoke<[threadId: ThreadId], void>(),
+  "threads:markToTest": invoke<[threadId: ThreadId, note?: string], void>(),
+  "threads:unmarkToTest": invoke<[threadId: ThreadId], void>(),
+
+  // events (main → renderer)
+  "event:snapshot": event<AppSnapshot>(),
+  "event:threadChanged": event<Thread>(),
+} as const;
+
+export type IpcContracts = typeof ipcContracts;
+export type IpcChannel = keyof IpcContracts;
+
+export type InvokeChannel = {
+  [K in IpcChannel]: IpcContracts[K] extends { kind: "invoke" } ? K : never;
+}[IpcChannel];
+
+export type EventChannel = {
+  [K in IpcChannel]: IpcContracts[K] extends { kind: "event" } ? K : never;
+}[IpcChannel];
+
+export type InvokeArgs<K extends InvokeChannel> =
+  IpcContracts[K] extends InvokeContract<infer A, infer _R> ? A : never;
+export type InvokeResult<K extends InvokeChannel> =
+  IpcContracts[K] extends InvokeContract<infer _A, infer R> ? R : never;
+export type EventPayload<K extends EventChannel> =
+  IpcContracts[K] extends EventContract<infer P> ? P : never;
+
+/** Shape of the API exposed on `window.peachPi` by preload. */
+export type PeachPiApi = {
+  invoke<K extends InvokeChannel>(channel: K, ...args: InvokeArgs<K>): Promise<InvokeResult<K>>;
+  on<K extends EventChannel>(channel: K, listener: (payload: EventPayload<K>) => void): () => void;
+};

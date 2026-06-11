@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+.vite/
+*.log
+.DS_Store
+test-results/
+playwright-report/
+*.tsbuildinfo
+apps/desktop/out/

@@ -1,0 +1,35 @@
+{
+  "name": "@peach-pi/desktop",
+  "productName": "Peach Pi",
+  "version": "0.1.0",
+  "private": true,
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "dev": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
+    "test": "node --test --experimental-strip-types tests/unit/*.test.ts",
+    "test:e2e": "playwright test tests/core"
+  },
+  "dependencies": {
+    "@peach-pi/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.10.2",
+    "@electron-forge/maker-dmg": "^7.10.2",
+    "@electron-forge/maker-zip": "^7.10.2",
+    "@electron-forge/plugin-vite": "^7.10.2",
+    "@electron-forge/shared-types": "^7.11.2",
+    "@playwright/test": "^1.60.0",
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^24.13.1",
+    "electron": "^42.3.3",
+    "svelte": "^5.45.0",
+    "svelte-check": "^4.3.4",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.4"
+  }
+}

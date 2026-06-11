@@ -1,0 +1,24 @@
+{
+  "name": "peach-pi",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm --filter @peach-pi/desktop dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "package": "pnpm --filter @peach-pi/desktop package",
+    "make": "pnpm --filter @peach-pi/desktop make",
+    "e2e": "pnpm --filter @peach-pi/desktop test:e2e"
+  },
+  "pnpm": {
+    "overrides": {
+      "yauzl": "^3.3.1"
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
