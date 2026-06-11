@@ -1,4 +1,12 @@
-import type { AppSnapshot, Project, Thread, ThreadId } from "./entities.ts";
+import type {
+  AppSnapshot,
+  CommandInfo,
+  ImagePayload,
+  Project,
+  QueueState,
+  Thread,
+  ThreadId,
+} from "./entities.ts";
 import type { TranscriptDelta, TranscriptItem } from "./transcript.ts";
 
 /**
@@ -55,13 +63,21 @@ export const ipcContracts = {
   "threads:create": invoke<[projectId: string], Thread>((id) =>
     requireNonEmptyString(id, "projectId"),
   ),
-  "threads:prompt": invoke<[threadId: ThreadId, text: string], void>((id, text) => {
+  "threads:createChat": invoke<[], Thread>(),
+  "threads:prompt": invoke<
+    [threadId: ThreadId, text: string, images?: ImagePayload[]],
+    void
+  >((id, text) => {
     requireNonEmptyString(id, "threadId");
     requireNonEmptyString(text, "text");
   }),
   "threads:steer": invoke<[threadId: ThreadId, text: string], void>(),
   "threads:abort": invoke<[threadId: ThreadId], void>(),
   "threads:getTranscript": invoke<[threadId: ThreadId], TranscriptItem[]>(),
+  "threads:listCommands": invoke<[threadId: ThreadId], CommandInfo[]>(),
+  "threads:archive": invoke<[threadId: ThreadId], void>(),
+  "threads:unarchive": invoke<[threadId: ThreadId], void>(),
+  "threads:delete": invoke<[threadId: ThreadId], void>(),
   "threads:snooze": invoke<[threadId: ThreadId, until: string], void>(),
   "threads:unsnooze": invoke<[threadId: ThreadId], void>(),
   "threads:markToTest": invoke<[threadId: ThreadId, note?: string], void>(),
@@ -71,6 +87,7 @@ export const ipcContracts = {
   "event:snapshot": event<AppSnapshot>(),
   "event:threadChanged": event<Thread>(),
   "event:transcript": event<TranscriptDelta>(),
+  "event:queue": event<QueueState>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;
@@ -95,4 +112,6 @@ export type EventPayload<K extends EventChannel> =
 export type PeachPiApi = {
   invoke<K extends InvokeChannel>(channel: K, ...args: InvokeArgs<K>): Promise<InvokeResult<K>>;
   on<K extends EventChannel>(channel: K, listener: (payload: EventPayload<K>) => void): () => void;
+  /** Resolve an OS path for a dropped/picked File (Electron webUtils). */
+  getPathForFile(file: File): string;
 };

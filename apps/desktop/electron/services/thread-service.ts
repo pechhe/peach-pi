@@ -1,4 +1,13 @@
-import type { Thread, TranscriptItem, TranscriptOp } from "@peach-pi/shared-types";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type {
+  CommandInfo,
+  ImagePayload,
+  Thread,
+  TranscriptItem,
+  TranscriptOp,
+} from "@peach-pi/shared-types";
 import type { PiSession } from "@peach-pi/pi-client";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
@@ -16,15 +25,17 @@ export class ThreadService {
   private projects: ProjectRepo;
   private emit: Emit;
   private onThreadsChanged: () => void;
+  private chatsDir: string;
   private sessions = new Map<string, PiSession>();
   private pendingOps = new Map<string, TranscriptOp[]>();
   private flushTimer: NodeJS.Timeout | null = null;
 
-  constructor(db: AppDb, emit: Emit, onThreadsChanged: () => void) {
+  constructor(db: AppDb, emit: Emit, onThreadsChanged: () => void, chatsDir: string) {
     this.threads = new ThreadRepo(db);
     this.projects = new ProjectRepo(db);
     this.emit = emit;
     this.onThreadsChanged = onThreadsChanged;
+    this.chatsDir = chatsDir;
   }
 
   async createThread(projectId: string): Promise<Thread> {
@@ -36,15 +47,29 @@ export class ThreadService {
     return this.threads.get(thread.id)!;
   }
 
-  async prompt(threadId: string, text: string): Promise<void> {
+  /** Chat = thread without a repo, rooted in its own workspace dir. */
+  async createChat(): Promise<Thread> {
+    const dir = path.join(this.chatsDir, randomUUID());
+    mkdirSync(dir, { recursive: true });
+    const thread = this.threads.insert({
+      projectId: null,
+      title: "New chat",
+      chatWorkspaceDir: dir,
+    });
+    await this.ensureSession(thread.id, dir, null);
+    this.onThreadsChanged();
+    return this.threads.get(thread.id)!;
+  }
+
+  async prompt(threadId: string, text: string, images?: ImagePayload[]): Promise<void> {
     const session = await this.sessionFor(threadId);
     const thread = this.threads.get(threadId)!;
-    if (thread.title === "New thread") {
+    if (thread.title === "New thread" || thread.title === "New chat") {
       this.threads.setTitle(threadId, text.length > 60 ? `${text.slice(0, 60)}…` : text);
       this.onThreadsChanged();
     }
     // Fire and forget: resolution = run complete; status flows via events.
-    void session.prompt(text).catch((err) => {
+    void session.prompt(text, images).catch((err) => {
       this.queueOps(threadId, [
         {
           op: "upsert",
@@ -66,6 +91,35 @@ export class ThreadService {
 
   async getTranscript(threadId: string): Promise<TranscriptItem[]> {
     return (await this.sessionFor(threadId)).transcript();
+  }
+
+  async listCommands(threadId: string): Promise<CommandInfo[]> {
+    return (await this.sessionFor(threadId)).commands();
+  }
+
+  archive(threadId: string): void {
+    this.disposeSession(threadId);
+    this.threads.setArchived(threadId, new Date().toISOString());
+    this.onThreadsChanged();
+  }
+
+  unarchive(threadId: string): void {
+    this.threads.setArchived(threadId, null);
+    this.onThreadsChanged();
+  }
+
+  delete(threadId: string): void {
+    this.disposeSession(threadId);
+    this.threads.delete(threadId);
+    this.onThreadsChanged();
+  }
+
+  private disposeSession(threadId: string): void {
+    const session = this.sessions.get(threadId);
+    if (session) {
+      session.dispose();
+      this.sessions.delete(threadId);
+    }
   }
 
   dispose(): void {
@@ -100,6 +154,8 @@ export class ThreadService {
       {
         onOps: (ops) => this.queueOps(threadId, ops),
         onRunningChange: (running) => this.setStatus(threadId, running ? "running" : "idle"),
+        onQueueChange: (steering, followUp) =>
+          this.emit("event:queue", { threadId, steering, followUp }),
       },
       sessionFile ?? undefined,
     );

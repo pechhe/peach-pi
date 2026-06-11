@@ -1,15 +1,13 @@
 <script lang="ts">
   import type { Thread } from "@peach-pi/shared-types";
   import { transcripts } from "../stores/transcripts.svelte";
-  import { api } from "../lib/ipc";
+  import Composer from "./Composer.svelte";
 
   let { thread }: { thread: Thread } = $props();
 
-  let draft = $state("");
   let scrollEl = $state<HTMLElement | null>(null);
 
   const items = $derived(transcripts.itemsFor(thread.id));
-  const running = $derived(thread.status === "running");
 
   $effect(() => {
     void transcripts.ensure(thread.id);
@@ -23,22 +21,6 @@
     }
   });
 
-  async function send() {
-    const text = draft.trim();
-    if (!text) return;
-    draft = "";
-    await api.invoke("threads:prompt", thread.id, text);
-  }
-
-  function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void send();
-    }
-    if (e.key === "Escape" && running) {
-      void api.invoke("threads:abort", thread.id);
-    }
-  }
 </script>
 
 <div class="flex h-full flex-1 flex-col">
@@ -85,31 +67,5 @@
     </div>
   </div>
 
-  <footer class="shrink-0 px-6 pb-5">
-    <div class="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-zinc-700 bg-zinc-900 p-2 focus-within:border-zinc-500">
-      <!-- Placeholder composer — full peche-pi composer port lands in Phase 2 -->
-      <textarea
-        class="max-h-48 min-h-[2.25rem] flex-1 resize-none bg-transparent px-2 py-1 text-sm outline-none"
-        placeholder={running ? "Steer the run… (Enter)" : "Message… (Enter to send)"}
-        bind:value={draft}
-        onkeydown={onKeydown}
-        data-testid="composer-input"
-        rows="1"
-      ></textarea>
-      {#if running}
-        <button
-          class="rounded-lg bg-red-500/20 px-3 py-1.5 text-sm text-red-300 hover:bg-red-500/30"
-          onclick={() => api.invoke("threads:abort", thread.id)}
-          data-testid="abort">Stop</button
-        >
-      {:else}
-        <button
-          class="rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 disabled:opacity-30"
-          onclick={send}
-          disabled={!draft.trim()}
-          data-testid="send">Send</button
-        >
-      {/if}
-    </div>
-  </footer>
+  <Composer {thread} />
 </div>

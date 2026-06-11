@@ -24,8 +24,11 @@ async function boot(): Promise<void> {
   const db = openDb(path.join(app.getPath("userData"), "peach-pi.sqlite"));
   const emit = createEmitter(() => BrowserWindow.getAllWindows());
   const appService = new AppService(db, emit);
-  const threadService = new ThreadService(db, emit, () =>
-    emit("event:snapshot", appService.snapshot()),
+  const threadService = new ThreadService(
+    db,
+    emit,
+    () => emit("event:snapshot", appService.snapshot()),
+    path.join(app.getPath("userData"), "chats"),
   );
 
   async function pickProject() {
@@ -43,7 +46,12 @@ async function boot(): Promise<void> {
     "projects:remove": (id) => appService.removeProject(id),
     "projects:pick": () => pickProject(),
     "threads:create": (projectId) => threadService.createThread(projectId),
-    "threads:prompt": (id, text) => threadService.prompt(id, text),
+    "threads:createChat": () => threadService.createChat(),
+    "threads:prompt": (id, text, images) => threadService.prompt(id, text, images),
+    "threads:listCommands": (id) => threadService.listCommands(id),
+    "threads:archive": (id) => threadService.archive(id),
+    "threads:unarchive": (id) => threadService.unarchive(id),
+    "threads:delete": (id) => threadService.delete(id),
     "threads:steer": (id, text) => threadService.steer(id, text),
     "threads:abort": (id) => threadService.abort(id),
     "threads:getTranscript": (id) => threadService.getTranscript(id),

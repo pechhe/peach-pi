@@ -1,21 +1,63 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { AppView } from "@peach-pi/shared-types";
   import { snapshot } from "../stores/snapshot.svelte";
   import { transcripts } from "../stores/transcripts.svelte";
+  import { queues } from "../stores/composer.svelte";
+  import { preloadSounds } from "../lib/sound/button-click-sound";
+  import { playDoneSound } from "../lib/sound/done-sound";
   import Sidebar from "./Sidebar.svelte";
   import ThreadView from "./ThreadView.svelte";
+  import TestingView from "./TestingView.svelte";
+  import SearchOverlay from "./SearchOverlay.svelte";
 
   let selectedThreadId = $state<string | null>(null);
+  let view = $state<AppView>("thread");
+  let searchOpen = $state(false);
 
   const selectedThread = $derived(
     snapshot.current?.threads.find((t) => t.id === selectedThreadId) ?? null,
   );
 
+  // Done sound: any thread transitioning running → idle chimes once.
+  let lastStatuses = new Map<string, string>();
+  $effect(() => {
+    const threads = snapshot.current?.threads ?? [];
+    for (const t of threads) {
+      const prev = lastStatuses.get(t.id);
+      if (prev === "running" && t.status === "idle") playDoneSound();
+      lastStatuses.set(t.id, t.status);
+    }
+  });
+
+  function selectThread(id: string) {
+    selectedThreadId = id;
+    view = "thread";
+  }
+
+  function onGlobalKeydown(e: KeyboardEvent) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      e.preventDefault();
+      searchOpen = !searchOpen;
+      return;
+    }
+    // Shift+digit shortcuts only outside inputs.
+    const target = e.target as HTMLElement;
+    if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") return;
+    if (e.shiftKey && e.key === "^") {
+      view = "testing";
+    }
+  }
+
   onMount(() => {
     transcripts.init();
+    queues.init();
     void snapshot.init();
+    preloadSounds();
   });
 </script>
+
+<svelte:window onkeydown={onGlobalKeydown} />
 
 <div class="flex h-full">
   {#if snapshot.current}
@@ -23,9 +65,18 @@
       projects={snapshot.current.projects}
       threads={snapshot.current.threads}
       {selectedThreadId}
-      onSelect={(id) => (selectedThreadId = id)}
+      activeView={view}
+      onSelect={selectThread}
+      onOpenView={(v) => (view = v)}
+      onOpenSearch={() => (searchOpen = true)}
     />
-    {#if selectedThread}
+    {#if view === "testing"}
+      <TestingView
+        projects={snapshot.current.projects}
+        threads={snapshot.current.threads}
+        onSelect={selectThread}
+      />
+    {:else if selectedThread}
       <ThreadView thread={selectedThread} />
     {:else}
       <main class="flex flex-1 items-center justify-center" data-testid="boot-ok">
@@ -35,6 +86,14 @@
           select or create a thread
         </p>
       </main>
+    {/if}
+    {#if searchOpen}
+      <SearchOverlay
+        projects={snapshot.current.projects}
+        threads={snapshot.current.threads}
+        onSelect={selectThread}
+        onClose={() => (searchOpen = false)}
+      />
     {/if}
   {:else}
     <main class="flex flex-1 items-center justify-center">

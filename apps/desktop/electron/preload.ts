@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { ipcContracts, type PeachPiApi } from "@peach-pi/shared-types";
 
 const invokeChannels = new Set(
@@ -27,6 +27,7 @@ const api: PeachPiApi = {
     ipcRenderer.on(channel, wrapped);
     return () => ipcRenderer.removeListener(channel, wrapped);
   },
+  getPathForFile: (file) => webUtils.getPathForFile(file),
 };
 
 contextBridge.exposeInMainWorld("peachPi", api);

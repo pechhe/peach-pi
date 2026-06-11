@@ -95,15 +95,37 @@ export class ThreadRepo {
     return rows.map(toThread);
   }
 
-  insert(fields: { projectId: string | null; title: string; piSessionFile?: string }): Thread {
+  insert(fields: {
+    projectId: string | null;
+    title: string;
+    piSessionFile?: string;
+    chatWorkspaceDir?: string;
+  }): Thread {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
       .prepare(
-        "INSERT INTO threads (id, project_id, pi_session_file, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO threads (id, project_id, pi_session_file, chat_workspace_dir, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?,?,?,?)",
       )
-      .run(id, fields.projectId, fields.piSessionFile ?? null, fields.title, "idle", now, now);
+      .run(
+        id,
+        fields.projectId,
+        fields.piSessionFile ?? null,
+        fields.chatWorkspaceDir ?? null,
+        fields.title,
+        "idle",
+        now,
+        now,
+      );
     return this.get(id)!;
+  }
+
+  setArchived(id: string, at: string | null): void {
+    this.db.prepare("UPDATE threads SET archived_at = ? WHERE id = ?").run(at, id);
+  }
+
+  delete(id: string): void {
+    this.db.prepare("DELETE FROM threads WHERE id = ?").run(id);
   }
 
   setStatus(id: string, status: Thread["status"]): void {
