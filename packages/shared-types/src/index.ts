@@ -1,2 +1,3 @@
-export * from "./entities.js";
-export * from "./ipc.js";
+export * from "./entities.ts";
+export * from "./ipc.ts";
+export * from "./transcript.ts";

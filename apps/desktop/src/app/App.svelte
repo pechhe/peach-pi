@@ -1,30 +1,44 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { snapshot } from "../stores/snapshot.svelte";
-  import { api } from "../lib/ipc";
+  import { transcripts } from "../stores/transcripts.svelte";
+  import Sidebar from "./Sidebar.svelte";
+  import ThreadView from "./ThreadView.svelte";
 
-  let version = $state("");
+  let selectedThreadId = $state<string | null>(null);
 
-  onMount(async () => {
-    const [pong] = await Promise.all([api.invoke("app:ping"), snapshot.init()]);
-    version = pong.version;
+  const selectedThread = $derived(
+    snapshot.current?.threads.find((t) => t.id === selectedThreadId) ?? null,
+  );
+
+  onMount(() => {
+    transcripts.init();
+    void snapshot.init();
   });
 </script>
 
-<div class="flex h-full flex-col">
-  <header class="titlebar-drag flex h-12 shrink-0 items-center justify-center text-xs text-zinc-500">
-    Peach Pi
-  </header>
-  <main class="flex flex-1 items-center justify-center">
-    {#if snapshot.current}
-      <div class="text-center" data-testid="boot-ok">
-        <p class="text-lg font-medium">Peach Pi {version}</p>
-        <p class="mt-1 text-sm text-zinc-500">
-          {snapshot.current.projects.length} projects · {snapshot.current.threads.length} threads
-        </p>
-      </div>
+<div class="flex h-full">
+  {#if snapshot.current}
+    <Sidebar
+      projects={snapshot.current.projects}
+      threads={snapshot.current.threads}
+      {selectedThreadId}
+      onSelect={(id) => (selectedThreadId = id)}
+    />
+    {#if selectedThread}
+      <ThreadView thread={selectedThread} />
     {:else}
-      <p class="text-sm text-zinc-600">Loading…</p>
+      <main class="flex flex-1 items-center justify-center" data-testid="boot-ok">
+        <div class="titlebar-drag absolute inset-x-0 top-0 h-12"></div>
+        <p class="text-sm text-zinc-600">
+          {snapshot.current.projects.length} projects · {snapshot.current.threads.length} threads —
+          select or create a thread
+        </p>
+      </main>
     {/if}
-  </main>
+  {:else}
+    <main class="flex flex-1 items-center justify-center">
+      <p class="text-sm text-zinc-600">Loading…</p>
+    </main>
+  {/if}
 </div>

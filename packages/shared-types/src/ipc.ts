@@ -1,4 +1,5 @@
-import type { AppSnapshot, Project, Thread, ThreadId } from "./entities.js";
+import type { AppSnapshot, Project, Thread, ThreadId } from "./entities.ts";
+import type { TranscriptDelta, TranscriptItem } from "./transcript.ts";
 
 /**
  * Typed IPC contract registry (pattern carried over from peche-pi's
@@ -47,8 +48,20 @@ export const ipcContracts = {
   "projects:remove": invoke<[projectId: string], void>((id) =>
     requireNonEmptyString(id, "projectId"),
   ),
+  /** Native folder picker; returns the added project or null if cancelled. */
+  "projects:pick": invoke<[], Project | null>(),
 
   // threads
+  "threads:create": invoke<[projectId: string], Thread>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+  "threads:prompt": invoke<[threadId: ThreadId, text: string], void>((id, text) => {
+    requireNonEmptyString(id, "threadId");
+    requireNonEmptyString(text, "text");
+  }),
+  "threads:steer": invoke<[threadId: ThreadId, text: string], void>(),
+  "threads:abort": invoke<[threadId: ThreadId], void>(),
+  "threads:getTranscript": invoke<[threadId: ThreadId], TranscriptItem[]>(),
   "threads:snooze": invoke<[threadId: ThreadId, until: string], void>(),
   "threads:unsnooze": invoke<[threadId: ThreadId], void>(),
   "threads:markToTest": invoke<[threadId: ThreadId, note?: string], void>(),
@@ -57,6 +70,7 @@ export const ipcContracts = {
   // events (main → renderer)
   "event:snapshot": event<AppSnapshot>(),
   "event:threadChanged": event<Thread>(),
+  "event:transcript": event<TranscriptDelta>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

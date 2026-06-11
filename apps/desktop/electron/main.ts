@@ -1,8 +1,9 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import path from "node:path";
 import { openDb } from "./persistence/db.ts";
 import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
 import { AppService } from "./services/app-service.ts";
+import { ThreadService } from "./services/thread-service.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 
 // Test isolation: override userData before any path use.
@@ -23,12 +24,29 @@ async function boot(): Promise<void> {
   const db = openDb(path.join(app.getPath("userData"), "peach-pi.sqlite"));
   const emit = createEmitter(() => BrowserWindow.getAllWindows());
   const appService = new AppService(db, emit);
+  const threadService = new ThreadService(db, emit, () =>
+    emit("event:snapshot", appService.snapshot()),
+  );
+
+  async function pickProject() {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory"],
+    });
+    const dir = result.filePaths[0];
+    return result.canceled || !dir ? null : appService.addProject(dir);
+  }
 
   registerIpcHandlers({
     "app:getSnapshot": () => appService.snapshot(),
     "app:ping": () => ({ pong: true, version: app.getVersion() }),
     "projects:add": (p) => appService.addProject(p),
     "projects:remove": (id) => appService.removeProject(id),
+    "projects:pick": () => pickProject(),
+    "threads:create": (projectId) => threadService.createThread(projectId),
+    "threads:prompt": (id, text) => threadService.prompt(id, text),
+    "threads:steer": (id, text) => threadService.steer(id, text),
+    "threads:abort": (id) => threadService.abort(id),
+    "threads:getTranscript": (id) => threadService.getTranscript(id),
     "threads:snooze": (id, until) => appService.snoozeThread(id, until),
     "threads:unsnooze": (id) => appService.unsnoozeThread(id),
     "threads:markToTest": (id, note) => appService.markToTest(id, note),
@@ -56,6 +74,7 @@ async function boot(): Promise<void> {
 
   app.on("before-quit", () => {
     appService.stop();
+    threadService.dispose();
     db.close();
   });
 }

@@ -3,7 +3,9 @@ import { defineConfig } from "vite";
 export default defineConfig({
   build: {
     rollupOptions: {
-      external: ["electron", /^node:/],
+      // pi SDK stays external: it loads extensions/resources at runtime
+      // and must not be inlined into the main bundle.
+      external: ["electron", /^node:/, /^@earendil-works\//],
     },
   },
   resolve: {

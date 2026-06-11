@@ -14,6 +14,12 @@ Status: Accepted (2026-06-11)
      (compiles to `void 0` silently).
    - Signing/notarization + auto-update still unproven — revisit before
      first release; electron-builder remains the fallback.
+   - **Open**: `@earendil-works/pi-coding-agent` is external to the main
+     bundle (it loads extensions/resources at runtime) but electron-packager
+     does not copy pnpm-hoisted root node_modules — packaged app currently
+     ships without the pi SDK. ThreadService lazy-imports it so boot is
+     unaffected. Fix before Phase 6: Forge packaging hook that vendors the
+     pi dependency tree into the app dir (or switch to electron-builder).
 
 2. **node:sqlite (`DatabaseSync`)** instead of better-sqlite3.
    Ships inside Electron's Node (24.16) — no native rebuild, no asar
