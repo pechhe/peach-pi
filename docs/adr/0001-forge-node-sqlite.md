@@ -14,12 +14,21 @@ Status: Accepted (2026-06-11)
      (compiles to `void 0` silently).
    - Signing/notarization + auto-update still unproven — revisit before
      first release; electron-builder remains the fallback.
-   - **Open**: `@earendil-works/pi-coding-agent` is external to the main
-     bundle (it loads extensions/resources at runtime) but electron-packager
-     does not copy pnpm-hoisted root node_modules — packaged app currently
-     ships without the pi SDK. ThreadService lazy-imports it so boot is
-     unaffected. Fix before Phase 6: Forge packaging hook that vendors the
-     pi dependency tree into the app dir (or switch to electron-builder).
+   - **Resolved (2026-06-11)**: `@earendil-works/pi-coding-agent` stays
+     external to the main bundle (it loads extensions/resources at runtime).
+     Packaging fixed by two pieces:
+     1. `packageAfterCopy` hook in forge.config.ts (`vendorPiSdk`) walks the
+        SDK's production dependency closure (~130 packages) from the hoisted
+        workspace node_modules and copies it into the app dir; missing
+        optional platform prebuilds are skipped; `asar: { unpack: "**/*.node" }`
+        keeps N-API prebuilds (clipboard, pi-tui) loadable.
+     2. The SDK is ESM-only (`exports` has only an `import` condition), so
+        CJS `require()` of it fails with ERR_PACKAGE_PATH_NOT_EXPORTED.
+        pi-client therefore imports SDK *values* via dynamic `import()` (types
+        stay static) — Rollup's `dynamicImportInCjs` preserves real import()
+        in the CJS main bundle. Do not convert these to static imports.
+     Verified by tests/core/thread-create.spec.ts (packaged app creates a
+     live pi session with a persisted session file).
 
 2. **node:sqlite (`DatabaseSync`)** instead of better-sqlite3.
    Ships inside Electron's Node (24.16) — no native rebuild, no asar

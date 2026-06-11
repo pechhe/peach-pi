@@ -23,13 +23,9 @@ const emptyDraft = (): ComposerDraft => ({
 class DraftStore {
   private byThread = new SvelteMap<string, ComposerDraft>();
 
+  /** Pure read — safe inside $derived. Missing drafts materialize on first update(). */
   for(threadId: string): ComposerDraft {
-    let draft = this.byThread.get(threadId);
-    if (!draft) {
-      draft = emptyDraft();
-      this.byThread.set(threadId, draft);
-    }
-    return draft;
+    return this.byThread.get(threadId) ?? emptyDraft();
   }
 
   update(threadId: string, patch: Partial<ComposerDraft>): void {

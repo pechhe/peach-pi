@@ -1,12 +1,10 @@
-import {
-  AuthStorage,
-  createAgentSession,
+// Type-only imports stay static; runtime values load via dynamic import so the
+// CJS Electron main bundle can consume the ESM-only pi SDK (require(esm) fails
+// on its import-only exports map).
+import type {
+  AgentSession,
   DefaultResourceLoader,
-  getAgentDir,
-  ModelRegistry,
-  SessionManager,
-  type AgentSession,
-  type LoadExtensionsResult,
+  LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import type {
   CommandInfo,
@@ -90,14 +88,15 @@ export class PiSession {
     callbacks: PiSessionCallbacks,
     sessionFile?: string,
   ): Promise<PiSession> {
-    const authStorage = AuthStorage.create();
-    const modelRegistry = ModelRegistry.create(authStorage);
+    const sdk = await import("@earendil-works/pi-coding-agent");
+    const authStorage = sdk.AuthStorage.create();
+    const modelRegistry = sdk.ModelRegistry.create(authStorage);
     const sessionManager = sessionFile
-      ? SessionManager.open(sessionFile)
-      : SessionManager.create(cwd);
-    const loader = new DefaultResourceLoader({ cwd, agentDir: getAgentDir() });
+      ? sdk.SessionManager.open(sessionFile)
+      : sdk.SessionManager.create(cwd);
+    const loader = new sdk.DefaultResourceLoader({ cwd, agentDir: sdk.getAgentDir() });
     await loader.reload();
-    const { session, extensionsResult } = await createAgentSession({
+    const { session, extensionsResult } = await sdk.createAgentSession({
       cwd,
       sessionManager,
       authStorage,

@@ -1,5 +1,4 @@
 import path from "node:path";
-import { DefaultResourceLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ResourceInspection } from "@peach-pi/shared-types";
 
 /**
@@ -7,6 +6,8 @@ import type { ResourceInspection } from "@peach-pi/shared-types";
  * errors), and prompt templates. Powers the Skills/Extensions views.
  */
 export async function inspectResources(cwd: string): Promise<ResourceInspection> {
+  // Dynamic import: see pi-session.ts — SDK is ESM-only, main bundle is CJS.
+  const { DefaultResourceLoader, getAgentDir } = await import("@earendil-works/pi-coding-agent");
   const loader = new DefaultResourceLoader({ cwd, agentDir: getAgentDir() });
   await loader.reload();
 

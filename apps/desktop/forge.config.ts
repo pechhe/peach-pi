@@ -1,14 +1,71 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { MakerDMG } from "@electron-forge/maker-dmg";
 
+/**
+ * Vendor the pi SDK dependency tree into the packaged app.
+ *
+ * The SDK is external to the Vite main bundle (it loads extensions and
+ * resources from disk at runtime), and electron-packager does not copy
+ * pnpm-hoisted workspace-root node_modules. So after Forge copies the app
+ * source, walk the SDK's production dependency closure and copy each package
+ * into the build dir's node_modules. Missing optional platform packages
+ * (e.g. linux clipboard prebuilds) are skipped.
+ */
+function vendorPiSdk(buildPath: string): void {
+  const resolved = new Map<string, string>();
+
+  const findPkg = (name: string, fromDir: string): string | null => {
+    let dir = fromDir;
+    for (;;) {
+      const candidate = path.join(dir, "node_modules", name);
+      if (fs.existsSync(path.join(candidate, "package.json"))) return candidate;
+      const parent = path.dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+    }
+  };
+
+  const visit = (name: string, fromDir: string, optional: boolean): void => {
+    if (resolved.has(name)) return;
+    const dir = findPkg(name, fromDir);
+    if (!dir) {
+      if (optional) return;
+      throw new Error(`vendorPiSdk: cannot resolve required dependency ${name}`);
+    }
+    resolved.set(name, dir);
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+    for (const dep of Object.keys(pkg.dependencies ?? {})) visit(dep, dir, false);
+    for (const dep of Object.keys(pkg.optionalDependencies ?? {})) visit(dep, dir, true);
+  };
+
+  visit("@earendil-works/pi-coding-agent", __dirname, false);
+
+  for (const [name, src] of resolved) {
+    const dest = path.join(buildPath, "node_modules", name);
+    fs.cpSync(src, dest, { recursive: true, dereference: true });
+  }
+  console.log(`vendorPiSdk: copied ${resolved.size} packages into ${buildPath}`);
+}
+
 const config: ForgeConfig = {
   packagerConfig: {
     appBundleId: "com.peach-pi.desktop",
-    asar: true,
+    // Native N-API prebuilds (clipboard, pi-tui) must live outside the asar.
+    asar: { unpack: "**/*.node" },
     // Notarization/signing wired once certs are configured:
     // osxSign: {}, osxNotarize: { ... }
+  },
+  hooks: {
+    packageAfterCopy: async (_config, buildPath) => {
+      vendorPiSdk(buildPath);
+    },
   },
   makers: [new MakerZIP({}, ["darwin"]), new MakerDMG({}, ["darwin"])],
   plugins: [
