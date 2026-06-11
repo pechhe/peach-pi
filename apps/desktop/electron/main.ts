@@ -54,6 +54,10 @@ async function boot(): Promise<void> {
     "threads:setModel": (id, provider, modelId) => threadService.setModel(id, provider, modelId),
     "threads:setThinking": (id, level) => threadService.setThinking(id, level),
     "threads:getMeta": (id) => threadService.getMeta(id),
+    "threads:respondExtensionUi": (requestId, value) =>
+      threadService.respondExtensionUi(requestId, value),
+    "resources:inspect": (projectId) => threadService.inspectResources(projectId),
+    "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
     "threads:archive": (id) => threadService.archive(id),
     "threads:unarchive": (id) => threadService.unarchive(id),
     "threads:delete": (id) => threadService.delete(id),

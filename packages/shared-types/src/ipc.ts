@@ -1,10 +1,14 @@
 import type {
   AppSnapshot,
   CommandInfo,
+  ExtensionStatusPayload,
+  ExtensionUiRequest,
   ImagePayload,
   ModelInfo,
+  NoticePayload,
   Project,
   QueueState,
+  ResourceInspection,
   SessionMeta,
   ThinkingLevel,
   Thread,
@@ -83,6 +87,19 @@ export const ipcContracts = {
   "threads:setModel": invoke<[threadId: ThreadId, provider: string, modelId: string], SessionMeta>(),
   "threads:setThinking": invoke<[threadId: ThreadId, level: ThinkingLevel], SessionMeta>(),
   "threads:getMeta": invoke<[threadId: ThreadId], SessionMeta>(),
+  /** Resolve a pending extension dialog. Value type depends on request kind. */
+  "threads:respondExtensionUi": invoke<
+    [requestId: string, value: string | boolean | undefined],
+    void
+  >((id) => requireNonEmptyString(id, "requestId")),
+
+  // resources (skills / extensions / prompts visible for a project)
+  "resources:inspect": invoke<[projectId: string | null], ResourceInspection>(),
+  /** Read a skill/prompt markdown file surfaced by resources:inspect. */
+  "resources:readMarkdown": invoke<[filePath: string], string>((p) => {
+    requireNonEmptyString(p, "filePath");
+    if (!p.endsWith(".md")) throw new Error("filePath must be a .md file");
+  }),
   "threads:archive": invoke<[threadId: ThreadId], void>(),
   "threads:unarchive": invoke<[threadId: ThreadId], void>(),
   "threads:delete": invoke<[threadId: ThreadId], void>(),
@@ -97,6 +114,9 @@ export const ipcContracts = {
   "event:transcript": event<TranscriptDelta>(),
   "event:queue": event<QueueState>(),
   "event:sessionMeta": event<SessionMeta>(),
+  "event:extensionUi": event<ExtensionUiRequest>(),
+  "event:notice": event<NoticePayload>(),
+  "event:extensionStatus": event<ExtensionStatusPayload>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

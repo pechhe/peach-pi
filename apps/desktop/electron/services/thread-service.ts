@@ -1,10 +1,12 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { randomUUID as uuid } from "node:crypto";
 import type {
   CommandInfo,
   ImagePayload,
   ModelInfo,
+  ResourceInspection,
   SessionMeta,
   ThinkingLevel,
   Thread,
@@ -33,6 +35,8 @@ export class ThreadService {
   private sessions = new Map<string, PiSession>();
   private pendingOps = new Map<string, TranscriptOp[]>();
   private flushTimer: NodeJS.Timeout | null = null;
+  /** Pending extension dialog resolvers keyed by requestId. */
+  private pendingDialogs = new Map<string, (value: string | boolean | undefined) => void>();
 
   constructor(db: AppDb, emit: Emit, onThreadsChanged: () => void, chatsDir: string) {
     this.threads = new ThreadRepo(db);
@@ -130,6 +134,21 @@ export class ThreadService {
     return { threadId, ...session.meta() };
   }
 
+  respondExtensionUi(requestId: string, value: string | boolean | undefined): void {
+    const resolve = this.pendingDialogs.get(requestId);
+    if (resolve) {
+      this.pendingDialogs.delete(requestId);
+      resolve(value);
+    }
+  }
+
+  async inspectResources(projectId: string | null): Promise<ResourceInspection> {
+    const project = projectId ? this.projects.all().find((p) => p.id === projectId) : null;
+    const cwd = project?.path ?? this.chatsDir;
+    const { inspectResources } = await import("@peach-pi/pi-client");
+    return inspectResources(cwd);
+  }
+
   archive(threadId: string): void {
     this.disposeSession(threadId);
     this.threads.setArchived(threadId, new Date().toISOString());
@@ -193,6 +212,28 @@ export class ThreadService {
           const live = this.sessions.get(threadId);
           if (live) this.emit("event:sessionMeta", this.metaFor(threadId, live));
         },
+        onExtensionDialog: (req) =>
+          new Promise((resolve) => {
+            const requestId = uuid();
+            this.pendingDialogs.set(requestId, resolve);
+            const settle = (value: string | boolean | undefined) =>
+              this.respondExtensionUi(requestId, value);
+            if (req.timeout) setTimeout(() => settle(undefined), req.timeout);
+            req.signal?.addEventListener("abort", () => settle(undefined));
+            this.emit("event:extensionUi", {
+              threadId,
+              requestId,
+              kind: req.kind,
+              title: req.title,
+              message: req.message,
+              options: req.options,
+              placeholder: req.placeholder,
+            });
+          }),
+        onExtensionNotify: (message, level) =>
+          this.emit("event:notice", { threadId, message, level }),
+        onExtensionStatus: (key, text) =>
+          this.emit("event:extensionStatus", { threadId, key, text }),
       },
       sessionFile ?? undefined,
     );

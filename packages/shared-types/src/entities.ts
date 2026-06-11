@@ -96,6 +96,58 @@ export interface SessionMeta {
   contextPercent: number | null;
 }
 
+/** A skill discovered by pi's resource loader. */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  filePath: string;
+  /** "global" | "project" | package name etc. — human-readable origin. */
+  source: string;
+}
+
+/** A loaded pi extension (or a load failure). */
+export interface ExtensionInfo {
+  /** Extension path as configured. */
+  path: string;
+  name: string;
+  source: string;
+  tools: string[];
+  commands: string[];
+  error?: string;
+}
+
+/** Resources visible for a given cwd (global + project-local). */
+export interface ResourceInspection {
+  skills: SkillInfo[];
+  extensions: ExtensionInfo[];
+  prompts: CommandInfo[];
+}
+
+/** Extension dialog request proxied main → renderer. */
+export interface ExtensionUiRequest {
+  threadId: ThreadId;
+  requestId: string;
+  kind: "select" | "confirm" | "input";
+  title: string;
+  message?: string;
+  options?: string[];
+  placeholder?: string;
+}
+
+/** Toast-style notification (extension notify or app notices). */
+export interface NoticePayload {
+  threadId?: ThreadId;
+  message: string;
+  level: "info" | "warning" | "error";
+}
+
+/** Extension status-bar text for a thread (key = extension-chosen slot). */
+export interface ExtensionStatusPayload {
+  threadId: ThreadId;
+  key: string;
+  text: string | null;
+}
+
 /** Snapshot published main → renderer. Grows with features. */
 export interface AppSnapshot {
   projects: Project[];

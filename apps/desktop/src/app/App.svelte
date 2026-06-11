@@ -5,6 +5,7 @@
   import { transcripts } from "../stores/transcripts.svelte";
   import { queues } from "../stores/composer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
+  import { extensionUi } from "../stores/extension-ui.svelte";
   import { preloadSounds } from "../lib/sound/button-click-sound";
   import { playDoneSound } from "../lib/sound/done-sound";
   import Sidebar from "./Sidebar.svelte";
@@ -12,6 +13,10 @@
   import TestingView from "./TestingView.svelte";
   import SearchOverlay from "./SearchOverlay.svelte";
   import SettingsView from "./SettingsView.svelte";
+  import SkillsView from "./SkillsView.svelte";
+  import ExtensionsView from "./ExtensionsView.svelte";
+  import ExtensionDialog from "./ExtensionDialog.svelte";
+  import Toasts from "./Toasts.svelte";
 
   let selectedThreadId = $state<string | null>(null);
   let view = $state<AppView>("thread");
@@ -55,6 +60,7 @@
     transcripts.init();
     queues.init();
     sessionMetas.init();
+    extensionUi.init();
     void snapshot.init();
     preloadSounds();
   });
@@ -75,6 +81,16 @@
     />
     {#if view === "settings"}
       <SettingsView />
+    {:else if view === "skills"}
+      <SkillsView
+        projects={snapshot.current.projects}
+        projectId={selectedThread?.projectId ?? null}
+      />
+    {:else if view === "extensions"}
+      <ExtensionsView
+        projects={snapshot.current.projects}
+        projectId={selectedThread?.projectId ?? null}
+      />
     {:else if view === "testing"}
       <TestingView
         projects={snapshot.current.projects}
@@ -105,4 +121,9 @@
       <p class="text-sm text-zinc-600">Loading…</p>
     </main>
   {/if}
+
+  {#if extensionUi.dialogs[0]}
+    <ExtensionDialog request={extensionUi.dialogs[0]} />
+  {/if}
+  <Toasts />
 </div>

@@ -6,6 +6,7 @@ import {
   ModelRegistry,
   SessionManager,
   type AgentSession,
+  type LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import type {
   CommandInfo,
@@ -17,6 +18,7 @@ import type {
   TranscriptOp,
 } from "@peach-pi/shared-types";
 import { TranscriptRecorder, type RecorderEvent } from "./transcript-recorder.ts";
+import { createUiBridge, type UiBridgeCallbacks } from "./extension-ui-bridge.ts";
 
 export interface PiSessionCallbacks {
   onOps(ops: TranscriptOp[]): void;
@@ -24,6 +26,10 @@ export interface PiSessionCallbacks {
   onQueueChange?(steering: string[], followUp: string[]): void;
   /** Model/thinking/context-usage changed; payload = PiSession.meta(). */
   onMetaChange?(): void;
+  /** Extension dialog (select/confirm/input). Resolve with user's answer. */
+  onExtensionDialog?: UiBridgeCallbacks["onDialog"];
+  onExtensionNotify?(message: string, level: "info" | "warning" | "error"): void;
+  onExtensionStatus?(key: string, text: string | null): void;
 }
 
 export interface PiSessionMeta {
@@ -48,6 +54,7 @@ export class PiSession {
   private callbacks: PiSessionCallbacks;
   private unsubscribe: () => void;
   private loader: DefaultResourceLoader;
+  private extensionsResult: LoadExtensionsResult | null = null;
   private allToolNames: string[];
   private toolMode: ToolMode = "all";
 
@@ -90,7 +97,7 @@ export class PiSession {
       : SessionManager.create(cwd);
     const loader = new DefaultResourceLoader({ cwd, agentDir: getAgentDir() });
     await loader.reload();
-    const { session } = await createAgentSession({
+    const { session, extensionsResult } = await createAgentSession({
       cwd,
       sessionManager,
       authStorage,
@@ -100,6 +107,23 @@ export class PiSession {
     const recorder = new TranscriptRecorder();
     const loadOps = recorder.load(session.messages);
     const pi = new PiSession(session, recorder, callbacks, loader);
+    pi.extensionsResult = extensionsResult;
+    await session.bindExtensions({
+      mode: "rpc",
+      uiContext: createUiBridge({
+        onDialog: (req) =>
+          callbacks.onExtensionDialog
+            ? callbacks.onExtensionDialog(req)
+            : Promise.resolve(undefined),
+        onNotify: (message, level) => callbacks.onExtensionNotify?.(message, level),
+        onStatus: (key, text) => callbacks.onExtensionStatus?.(key, text),
+      }),
+      onError: (err) =>
+        callbacks.onExtensionNotify?.(
+          `Extension error (${err.extensionPath}): ${err.error}`,
+          "error",
+        ),
+    });
     if (session.messages.length > 0) callbacks.onOps(loadOps);
     return pi;
   }
@@ -147,12 +171,19 @@ export class PiSession {
     this.callbacks.onMetaChange?.();
   }
 
-  /** Slash-menu entries: file-based prompt templates discovered for this cwd. */
+  /** Slash-menu entries: prompt templates + extension-registered commands. */
   commands(): CommandInfo[] {
-    return this.loader.getPrompts().prompts.map((p) => ({
+    const prompts = this.loader.getPrompts().prompts.map((p) => ({
       name: p.name,
       description: p.description ?? "",
     }));
+    const extension = (this.extensionsResult?.extensions ?? []).flatMap((e) =>
+      [...e.commands.values()].map((c) => ({ name: c.name, description: c.description ?? "" })),
+    );
+    const seen = new Set<string>();
+    return [...prompts, ...extension].filter((c) =>
+      seen.has(c.name) ? false : (seen.add(c.name), true),
+    );
   }
 
   async prompt(text: string, images?: ImagePayload[], toolMode?: ToolMode): Promise<void> {

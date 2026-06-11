@@ -2,6 +2,7 @@
   import type { Thread } from "@peach-pi/shared-types";
   import { transcripts } from "../stores/transcripts.svelte";
   import Composer from "./Composer.svelte";
+  import { extensionUi } from "../stores/extension-ui.svelte";
 
   let { thread }: { thread: Thread } = $props();
 
@@ -24,8 +25,13 @@
 </script>
 
 <div class="flex h-full flex-1 flex-col">
-  <header class="titlebar-drag flex h-12 shrink-0 items-center px-4">
+  <header class="titlebar-drag flex h-12 shrink-0 items-center gap-2 px-4">
     <h1 class="truncate text-sm font-medium text-zinc-300">{thread.title}</h1>
+    {#each extensionUi.statusesFor(thread.id) as status (status)}
+      <span class="shrink-0 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-400">
+        {status}
+      </span>
+    {/each}
   </header>
 
   <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-4" data-testid="transcript">
