@@ -13,6 +13,8 @@
  *  - "chord"     A full major chord struck together with a soft swell.
  */
 
+import { soundsMuted } from "./sound-prefs";
+
 export type DoneSoundVariant = "arpeggio" | "marimba" | "bell" | "pop" | "coin" | "chord";
 
 // 🔊 Change this to audition a different cue.
@@ -144,6 +146,7 @@ const VARIANTS: Record<DoneSoundVariant, (ctx: AudioContext, now: number) => voi
 };
 
 export function playDoneSound(variant: DoneSoundVariant = DONE_SOUND_VARIANT): void {
+  if (soundsMuted()) return;
   const ctx = getAudioContext();
   if (!ctx) return;
   if (ctx.state === "suspended") {

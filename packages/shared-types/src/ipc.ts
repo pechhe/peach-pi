@@ -2,10 +2,14 @@ import type {
   AppSnapshot,
   CommandInfo,
   ImagePayload,
+  ModelInfo,
   Project,
   QueueState,
+  SessionMeta,
+  ThinkingLevel,
   Thread,
   ThreadId,
+  ToolMode,
 } from "./entities.ts";
 import type { TranscriptDelta, TranscriptItem } from "./transcript.ts";
 
@@ -65,7 +69,7 @@ export const ipcContracts = {
   ),
   "threads:createChat": invoke<[], Thread>(),
   "threads:prompt": invoke<
-    [threadId: ThreadId, text: string, images?: ImagePayload[]],
+    [threadId: ThreadId, text: string, images?: ImagePayload[], toolMode?: ToolMode],
     void
   >((id, text) => {
     requireNonEmptyString(id, "threadId");
@@ -75,6 +79,10 @@ export const ipcContracts = {
   "threads:abort": invoke<[threadId: ThreadId], void>(),
   "threads:getTranscript": invoke<[threadId: ThreadId], TranscriptItem[]>(),
   "threads:listCommands": invoke<[threadId: ThreadId], CommandInfo[]>(),
+  "threads:listModels": invoke<[threadId: ThreadId], ModelInfo[]>(),
+  "threads:setModel": invoke<[threadId: ThreadId, provider: string, modelId: string], SessionMeta>(),
+  "threads:setThinking": invoke<[threadId: ThreadId, level: ThinkingLevel], SessionMeta>(),
+  "threads:getMeta": invoke<[threadId: ThreadId], SessionMeta>(),
   "threads:archive": invoke<[threadId: ThreadId], void>(),
   "threads:unarchive": invoke<[threadId: ThreadId], void>(),
   "threads:delete": invoke<[threadId: ThreadId], void>(),
@@ -88,6 +96,7 @@ export const ipcContracts = {
   "event:threadChanged": event<Thread>(),
   "event:transcript": event<TranscriptDelta>(),
   "event:queue": event<QueueState>(),
+  "event:sessionMeta": event<SessionMeta>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

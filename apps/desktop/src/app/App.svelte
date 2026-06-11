@@ -4,12 +4,14 @@
   import { snapshot } from "../stores/snapshot.svelte";
   import { transcripts } from "../stores/transcripts.svelte";
   import { queues } from "../stores/composer.svelte";
+  import { sessionMetas } from "../stores/session-meta.svelte";
   import { preloadSounds } from "../lib/sound/button-click-sound";
   import { playDoneSound } from "../lib/sound/done-sound";
   import Sidebar from "./Sidebar.svelte";
   import ThreadView from "./ThreadView.svelte";
   import TestingView from "./TestingView.svelte";
   import SearchOverlay from "./SearchOverlay.svelte";
+  import SettingsView from "./SettingsView.svelte";
 
   let selectedThreadId = $state<string | null>(null);
   let view = $state<AppView>("thread");
@@ -52,6 +54,7 @@
   onMount(() => {
     transcripts.init();
     queues.init();
+    sessionMetas.init();
     void snapshot.init();
     preloadSounds();
   });
@@ -70,7 +73,9 @@
       onOpenView={(v) => (view = v)}
       onOpenSearch={() => (searchOpen = true)}
     />
-    {#if view === "testing"}
+    {#if view === "settings"}
+      <SettingsView />
+    {:else if view === "testing"}
       <TestingView
         projects={snapshot.current.projects}
         threads={snapshot.current.threads}

@@ -7,14 +7,36 @@ import {
   SessionManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import type { CommandInfo, ImagePayload, TranscriptItem, TranscriptOp } from "@peach-pi/shared-types";
+import type {
+  CommandInfo,
+  ImagePayload,
+  ModelInfo,
+  ThinkingLevel,
+  ToolMode,
+  TranscriptItem,
+  TranscriptOp,
+} from "@peach-pi/shared-types";
 import { TranscriptRecorder, type RecorderEvent } from "./transcript-recorder.ts";
 
 export interface PiSessionCallbacks {
   onOps(ops: TranscriptOp[]): void;
   onRunningChange(running: boolean): void;
   onQueueChange?(steering: string[], followUp: string[]): void;
+  /** Model/thinking/context-usage changed; payload = PiSession.meta(). */
+  onMetaChange?(): void;
 }
+
+export interface PiSessionMeta {
+  model: ModelInfo | null;
+  thinkingLevel: ThinkingLevel;
+  availableThinkingLevels: ThinkingLevel[];
+  contextTokens: number | null;
+  contextWindow: number | null;
+  contextPercent: number | null;
+}
+
+/** Tools allowed while plan mode runs. Mutating tools stay disabled. */
+const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 
 /**
  * One live pi session bound to a thread. Owns the SDK session, the
@@ -26,6 +48,8 @@ export class PiSession {
   private callbacks: PiSessionCallbacks;
   private unsubscribe: () => void;
   private loader: DefaultResourceLoader;
+  private allToolNames: string[];
+  private toolMode: ToolMode = "all";
 
   private constructor(
     session: AgentSession,
@@ -37,9 +61,14 @@ export class PiSession {
     this.recorder = recorder;
     this.callbacks = callbacks;
     this.loader = loader;
+    this.allToolNames = session.getAllTools().map((t) => t.name);
     this.unsubscribe = session.subscribe((event) => {
       if (event.type === "agent_start") this.callbacks.onRunningChange(true);
-      if (event.type === "agent_end" && !event.willRetry) this.callbacks.onRunningChange(false);
+      if (event.type === "agent_end" && !event.willRetry) {
+        this.callbacks.onRunningChange(false);
+        this.callbacks.onMetaChange?.();
+      }
+      if (event.type === "thinking_level_changed") this.callbacks.onMetaChange?.();
       if (event.type === "queue_update") {
         this.callbacks.onQueueChange?.([...event.steering], [...event.followUp]);
       }
@@ -87,6 +116,37 @@ export class PiSession {
     return this.recorder.transcript();
   }
 
+  meta(): PiSessionMeta {
+    const model = this.session.model;
+    const usage = this.session.getContextUsage();
+    return {
+      model: model ? { provider: model.provider, id: model.id, name: model.name } : null,
+      thinkingLevel: this.session.thinkingLevel,
+      availableThinkingLevels: this.session.getAvailableThinkingLevels(),
+      contextTokens: usage?.tokens ?? null,
+      contextWindow: usage?.contextWindow ?? null,
+      contextPercent: usage?.percent ?? null,
+    };
+  }
+
+  listModels(): ModelInfo[] {
+    return this.session.modelRegistry
+      .getAvailable()
+      .map((m) => ({ provider: m.provider, id: m.id, name: m.name }));
+  }
+
+  async setModel(provider: string, modelId: string): Promise<void> {
+    const model = this.session.modelRegistry.find(provider, modelId);
+    if (!model) throw new Error(`Unknown model: ${provider}/${modelId}`);
+    await this.session.setModel(model);
+    this.callbacks.onMetaChange?.();
+  }
+
+  setThinking(level: ThinkingLevel): void {
+    this.session.setThinkingLevel(level);
+    this.callbacks.onMetaChange?.();
+  }
+
   /** Slash-menu entries: file-based prompt templates discovered for this cwd. */
   commands(): CommandInfo[] {
     return this.loader.getPrompts().prompts.map((p) => ({
@@ -95,7 +155,15 @@ export class PiSession {
     }));
   }
 
-  async prompt(text: string, images?: ImagePayload[]): Promise<void> {
+  async prompt(text: string, images?: ImagePayload[], toolMode?: ToolMode): Promise<void> {
+    if (toolMode && toolMode !== this.toolMode) {
+      this.toolMode = toolMode;
+      this.session.setActiveToolsByName(
+        toolMode === "readOnly"
+          ? this.allToolNames.filter((n) => READ_ONLY_TOOLS.includes(n))
+          : this.allToolNames,
+      );
+    }
     const imageContent = images?.map((img) => ({
       type: "image" as const,
       data: img.data,

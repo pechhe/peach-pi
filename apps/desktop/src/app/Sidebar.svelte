@@ -175,6 +175,14 @@
       <span>👁 Testing {#if toTestCount > 0}<span class="ml-1 rounded-full bg-zinc-800 px-1.5 text-[10px]">{toTestCount}</span>{/if}</span>
       <kbd class="text-[10px] text-zinc-600">⇧6</kbd>
     </button>
+    <button
+      class="flex items-center justify-between rounded px-2 py-1 text-sm
+        {activeView === 'settings' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
+      onclick={() => onOpenView("settings")}
+      data-testid="nav-settings"
+    >
+      <span>⚙︎ Settings</span>
+    </button>
   </nav>
 
   <!-- Projects -->

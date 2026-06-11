@@ -74,6 +74,28 @@ export interface QueueState {
   followUp: string[];
 }
 
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface ModelInfo {
+  provider: string;
+  id: string;
+  name: string;
+}
+
+/** Plan mode runs read-only tools; build mode runs everything. */
+export type ToolMode = "all" | "readOnly";
+
+/** Live per-session metadata published main → renderer. */
+export interface SessionMeta {
+  threadId: ThreadId;
+  model: ModelInfo | null;
+  thinkingLevel: ThinkingLevel;
+  availableThinkingLevels: ThinkingLevel[];
+  contextTokens: number | null;
+  contextWindow: number | null;
+  contextPercent: number | null;
+}
+
 /** Snapshot published main → renderer. Grows with features. */
 export interface AppSnapshot {
   projects: Project[];

@@ -7,8 +7,9 @@
     hasFilesInDataTransfer,
     readComposerAttachmentsFromFiles,
   } from "../lib/composer/attachments";
-  import { playButtonClick, playKey } from "../lib/sound/button-click-sound";
+  import { playButtonClick, playKey, playRotary } from "../lib/sound/button-click-sound";
   import { drafts, queues } from "../stores/composer.svelte";
+  import { sessionMetas } from "../stores/session-meta.svelte";
   import { api } from "../lib/ipc";
 
   let { thread }: { thread: Thread } = $props();
@@ -16,6 +17,34 @@
   const draft = $derived(drafts.for(thread.id));
   const queue = $derived(queues.for(thread.id));
   const running = $derived(thread.status === "running");
+  const meta = $derived(sessionMetas.for(thread.id));
+
+  let modelMenuOpen = $state(false);
+
+  $effect(() => {
+    sessionMetas.ensure(thread.id);
+  });
+
+  async function openModelMenu(e: MouseEvent) {
+    e.stopPropagation();
+    modelMenuOpen = !modelMenuOpen;
+    if (modelMenuOpen) await sessionMetas.loadModels(thread.id);
+  }
+
+  async function pickModel(provider: string, id: string) {
+    modelMenuOpen = false;
+    playRotary();
+    sessionMetas.set(await api.invoke("threads:setModel", thread.id, provider, id));
+  }
+
+  async function cycleThinking() {
+    if (!meta) return;
+    const levels = meta.availableThinkingLevels;
+    if (levels.length === 0) return;
+    const next = levels[(levels.indexOf(meta.thinkingLevel) + 1) % levels.length]!;
+    playRotary();
+    sessionMetas.set(await api.invoke("threads:setThinking", thread.id, next));
+  }
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
   let dragActive = $state(false);
@@ -111,6 +140,7 @@
           mode: draft.mode,
           isFirst: !draft.planPromptSent,
         });
+    const toolMode = draft.mode === "plan" && !isSlashCommand ? "readOnly" : "all";
 
     const snapshotText = draft.text;
     const snapshotAttachments = draft.attachments;
@@ -123,7 +153,7 @@
       if (asSteer && running) {
         await api.invoke("threads:steer", thread.id, outgoing);
       } else {
-        await api.invoke("threads:prompt", thread.id, outgoing, images);
+        await api.invoke("threads:prompt", thread.id, outgoing, images, toolMode);
       }
     } catch (err) {
       // Restore draft on failure.
@@ -171,6 +201,8 @@
     }
   }
 </script>
+
+<svelte:window onclick={() => (modelMenuOpen = false)} />
 
 <footer class="shrink-0 px-6 pb-5">
   <div class="relative mx-auto max-w-3xl">
@@ -281,7 +313,67 @@
           <span class="z-10 flex-1 text-center {draft.mode === 'plan' ? 'text-indigo-300' : 'text-zinc-500'}">Plan</span>
         </button>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <!-- Model selector -->
+          <div class="relative">
+            <button
+              class="max-w-44 truncate rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              onclick={openModelMenu}
+              data-testid="model-selector"
+              title="Model"
+            >{meta?.model?.name ?? "model…"}</button>
+            {#if modelMenuOpen}
+              <div
+                class="absolute right-0 bottom-full z-30 mb-1 max-h-64 w-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
+                data-testid="model-menu"
+              >
+                {#each sessionMetas.models as m (`${m.provider}/${m.id}`)}
+                  <button
+                    class="flex w-full items-baseline gap-2 px-3 py-1 text-left text-xs hover:bg-zinc-800
+                      {meta?.model?.id === m.id && meta?.model?.provider === m.provider ? 'text-zinc-100' : 'text-zinc-400'}"
+                    onclick={() => pickModel(m.provider, m.id)}
+                  >
+                    <span class="truncate">{m.name}</span>
+                    <span class="ml-auto shrink-0 text-[10px] text-zinc-600">{m.provider}</span>
+                  </button>
+                {:else}
+                  <p class="px-3 py-2 text-xs text-zinc-600">Loading…</p>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Thinking level -->
+          {#if meta && meta.availableThinkingLevels.length > 1}
+            <button
+              class="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              onclick={cycleThinking}
+              data-testid="thinking-selector"
+              title="Thinking level (click to cycle)"
+            >🧠 {meta.thinkingLevel}</button>
+          {/if}
+
+          <!-- Context usage -->
+          {#if meta?.contextPercent != null}
+            <div
+              class="flex items-center gap-1"
+              title={`Context: ${meta.contextTokens?.toLocaleString() ?? "?"} / ${meta.contextWindow?.toLocaleString() ?? "?"} tokens`}
+              data-testid="context-usage"
+            >
+              <div class="h-1 w-12 overflow-hidden rounded-full bg-zinc-800">
+                <div
+                  class="h-full rounded-full {meta.contextPercent > 80
+                    ? 'bg-red-400'
+                    : meta.contextPercent > 60
+                      ? 'bg-amber-400'
+                      : 'bg-emerald-500'}"
+                  style="width: {Math.min(100, meta.contextPercent)}%"
+                ></div>
+              </div>
+              <span class="text-[10px] text-zinc-600">{Math.round(meta.contextPercent)}%</span>
+            </div>
+          {/if}
+
           <span class="text-[10px] text-zinc-600">
             {running ? "Enter to queue" : "Enter to send"} · ⇧Enter newline
           </span>

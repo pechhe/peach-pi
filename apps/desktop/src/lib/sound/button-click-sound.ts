@@ -13,6 +13,7 @@
 // file://, and Chromium blocks fetch() of file:// URLs — so resolving sounds to
 // file:// paths (the old behaviour) silently failed in the DMG. data: URIs are
 // fetchable under file:// and work in dev too.
+import { soundsMuted } from "./sound-prefs";
 import clickMp3 from "./click.mp3?inline";
 import keyOnMp3 from "./key-on.mp3?inline";
 import keyOffMp3 from "./key-off.mp3?inline";
@@ -330,6 +331,7 @@ export function preloadSounds(): void {
 
 /** Play a click sound (down = lower pitch, up = normal pitch) */
 export function playClick(kind: ClickKind = "down"): void {
+  if (soundsMuted()) return;
   if (clickBuffer) {
     void fire(clickBuffer, CLICK_RATE[kind] ?? 1);
     return;
@@ -341,6 +343,7 @@ export function playClick(kind: ClickKind = "down"): void {
 
 /** Play a key sound (press/release pair) */
 export function playKey(phase: KeyPhase = "press"): void {
+  if (soundsMuted()) return;
   if (keyBuffers.length === 0) {
     void loadAll().then(() => {
       if (keyBuffers.length > 0) playKey(phase);
@@ -362,6 +365,7 @@ export function playKey(phase: KeyPhase = "press"): void {
 
 /** Play a random rotary switch sound */
 export function playRotary(): void {
+  if (soundsMuted()) return;
   if (rotaryBuffers.length === 0) {
     void loadAll().then(() => {
       if (rotaryBuffers.length > 0) playRotary();

@@ -14,5 +14,12 @@ test("⌘K opens search overlay; testing view reachable from nav", async () => {
   await window.getByTestId("nav-testing").click();
   await expect(window.getByTestId("testing-view")).toBeVisible();
 
+  await window.getByTestId("nav-settings").click();
+  await expect(window.getByTestId("settings-view")).toBeVisible();
+  const toggle = window.getByTestId("sounds-toggle");
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+
   await app.close();
 });

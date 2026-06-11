@@ -4,7 +4,11 @@ import { randomUUID } from "node:crypto";
 import type {
   CommandInfo,
   ImagePayload,
+  ModelInfo,
+  SessionMeta,
+  ThinkingLevel,
   Thread,
+  ToolMode,
   TranscriptItem,
   TranscriptOp,
 } from "@peach-pi/shared-types";
@@ -61,7 +65,12 @@ export class ThreadService {
     return this.threads.get(thread.id)!;
   }
 
-  async prompt(threadId: string, text: string, images?: ImagePayload[]): Promise<void> {
+  async prompt(
+    threadId: string,
+    text: string,
+    images?: ImagePayload[],
+    toolMode?: ToolMode,
+  ): Promise<void> {
     const session = await this.sessionFor(threadId);
     const thread = this.threads.get(threadId)!;
     if (thread.title === "New thread" || thread.title === "New chat") {
@@ -69,7 +78,7 @@ export class ThreadService {
       this.onThreadsChanged();
     }
     // Fire and forget: resolution = run complete; status flows via events.
-    void session.prompt(text, images).catch((err) => {
+    void session.prompt(text, images, toolMode).catch((err) => {
       this.queueOps(threadId, [
         {
           op: "upsert",
@@ -95,6 +104,30 @@ export class ThreadService {
 
   async listCommands(threadId: string): Promise<CommandInfo[]> {
     return (await this.sessionFor(threadId)).commands();
+  }
+
+  async listModels(threadId: string): Promise<ModelInfo[]> {
+    return (await this.sessionFor(threadId)).listModels();
+  }
+
+  async setModel(threadId: string, provider: string, modelId: string): Promise<SessionMeta> {
+    const session = await this.sessionFor(threadId);
+    await session.setModel(provider, modelId);
+    return this.metaFor(threadId, session);
+  }
+
+  async setThinking(threadId: string, level: ThinkingLevel): Promise<SessionMeta> {
+    const session = await this.sessionFor(threadId);
+    session.setThinking(level);
+    return this.metaFor(threadId, session);
+  }
+
+  async getMeta(threadId: string): Promise<SessionMeta> {
+    return this.metaFor(threadId, await this.sessionFor(threadId));
+  }
+
+  private metaFor(threadId: string, session: PiSession): SessionMeta {
+    return { threadId, ...session.meta() };
   }
 
   archive(threadId: string): void {
@@ -156,6 +189,10 @@ export class ThreadService {
         onRunningChange: (running) => this.setStatus(threadId, running ? "running" : "idle"),
         onQueueChange: (steering, followUp) =>
           this.emit("event:queue", { threadId, steering, followUp }),
+        onMetaChange: () => {
+          const live = this.sessions.get(threadId);
+          if (live) this.emit("event:sessionMeta", this.metaFor(threadId, live));
+        },
       },
       sessionFile ?? undefined,
     );
