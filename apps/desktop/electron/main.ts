@@ -8,6 +8,7 @@ import { AutomationService } from "./services/automation-service.ts";
 import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
+import { GraphifyService } from "./services/graphify-service.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import { createOverlayWindow } from "./windows/overlay-window.ts";
 
@@ -61,6 +62,7 @@ async function boot(): Promise<void> {
   const terminalService = new TerminalService(db, emit);
   const gitService = new GitService(db, path.join(app.getPath("userData"), "worktrees"));
   const subagentService = new SubagentService(db);
+  const graphifyService = new GraphifyService(db);
   setupSubagentEnvironment(app.getPath("userData"));
 
   async function pickProject() {
@@ -120,6 +122,11 @@ async function boot(): Promise<void> {
       }
     },
     "subagents:listAgents": (projectId) => subagentService.listAgents(projectId),
+    "graphify:status": (id) => graphifyService.status(id),
+    "graphify:build": (id) => graphifyService.build(id),
+    "graphify:update": (id) => graphifyService.update(id),
+    "graphify:openViewer": (id) => graphifyService.openViewer(id),
+    "graphify:report": (id) => graphifyService.report(id),
     "git:info": (id) => gitService.info(id),
     "git:changedFiles": (id) => gitService.changedFiles(id),
     "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),

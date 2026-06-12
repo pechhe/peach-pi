@@ -18,6 +18,7 @@
   import ExtensionsView from "./ExtensionsView.svelte";
   import AutomationsView from "./AutomationsView.svelte";
   import AgentsView from "./AgentsView.svelte";
+  import GraphView from "./GraphView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import Toasts from "./Toasts.svelte";
 
@@ -106,6 +107,8 @@
       />
     {:else if view === "agents"}
       <AgentsView projects={snapshot.current.projects} />
+    {:else if view === "graph"}
+      <GraphView projects={snapshot.current.projects} />
     {:else if view === "testing"}
       <TestingView
         projects={snapshot.current.projects}

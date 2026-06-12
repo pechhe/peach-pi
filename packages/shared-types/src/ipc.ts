@@ -7,6 +7,7 @@ import type {
   GitChangedFile,
   GitCommitPushResult,
   GitInfo,
+  GraphifyStatus,
   SubagentAgentInfo,
   ExtensionStatusPayload,
   ExtensionUiRequest,
@@ -120,6 +121,15 @@ export const ipcContracts = {
   "automations:runNow": invoke<[id: string], void>(),
   "automations:runs": invoke<[id: string], AutomationRun[]>(),
   "automations:previewNext": invoke<[cron: string], string | null>(),
+
+  // graphify knowledge graph (per project)
+  "graphify:status": invoke<[projectId: string], GraphifyStatus>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+  "graphify:build": invoke<[projectId: string], { ok: boolean; error?: string }>(),
+  "graphify:update": invoke<[projectId: string], { ok: boolean; error?: string }>(),
+  "graphify:openViewer": invoke<[projectId: string], boolean>(),
+  "graphify:report": invoke<[projectId: string], string | null>(),
 
   // subagents (pi-subagents extension roster)
   "subagents:listAgents": invoke<[projectId: string | null], SubagentAgentInfo[]>(),

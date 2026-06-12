@@ -161,6 +161,17 @@ export interface SubagentAgentInfo {
   body: string;
 }
 
+/** Knowledge-graph state for a project (graphify CLI, graphify-out/). */
+export interface GraphifyStatus {
+  /** graphify binary found on this machine. */
+  available: boolean;
+  hasGraph: boolean;
+  nodeCount: number;
+  edgeCount: number;
+  builtAt: string | null;
+  building: boolean;
+}
+
 /** A skill discovered by pi's resource loader. */
 export interface SkillInfo {
   name: string;
