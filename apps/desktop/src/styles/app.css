@@ -127,6 +127,14 @@ button:active:not(:disabled) {
   }
 }
 
+/* Sidebar nav: mute emoji glyphs so they read as icons, not stickers. */
+.main-nav-item > span:first-child {
+  filter: grayscale(1) opacity(0.9);
+}
+.main-nav-item:hover > span:first-child {
+  filter: grayscale(0.4) opacity(1);
+}
+
 /* Smooth detail expansion (height jumps still snap, but content fades). */
 details[open] > *:not(summary) {
   animation: item-enter 0.15s ease-out;

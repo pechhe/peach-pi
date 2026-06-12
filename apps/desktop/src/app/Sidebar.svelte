@@ -164,14 +164,14 @@
   <!-- Nav -->
   <nav class="flex flex-col gap-0.5 px-2 pb-2">
     <button
-      class="flex items-center justify-between rounded px-2 py-1 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
       onclick={onOpenSearch}
       data-testid="nav-search"
     >
       <span>🔍 Search</span><kbd class="text-[10px] text-zinc-600">⌘K</kbd>
     </button>
     <button
-      class="flex items-center justify-between rounded px-2 py-1 text-sm
+      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
         {activeView === 'testing' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
       onclick={() => onOpenView("testing")}
       data-testid="nav-testing"
@@ -180,7 +180,7 @@
       <kbd class="text-[10px] text-zinc-600">⇧6</kbd>
     </button>
     <button
-      class="flex items-center justify-between rounded px-2 py-1 text-sm
+      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
         {activeView === 'automations' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
       onclick={() => onOpenView("automations")}
       data-testid="nav-automations"
@@ -188,7 +188,7 @@
       <span>⏰ Automations</span>
     </button>
     <button
-      class="flex items-center justify-between rounded px-2 py-1 text-sm
+      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
         {activeView === 'agents' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
       onclick={() => onOpenView("agents")}
       data-testid="nav-agents"
@@ -196,7 +196,7 @@
       <span>🤖 Agents</span>
     </button>
     <button
-      class="flex items-center justify-between rounded px-2 py-1 text-sm
+      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
         {activeView === 'graph' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
       onclick={() => onOpenView("graph")}
       data-testid="nav-graph"
@@ -204,7 +204,7 @@
       <span>🕸 Graph</span>
     </button>
     <button
-      class="flex items-center justify-between rounded px-2 py-1 text-sm
+      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
         {activeView === 'skills' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
       onclick={() => onOpenView("skills")}
       data-testid="nav-skills"
@@ -212,7 +212,7 @@
       <span>📚 Skills</span>
     </button>
     <button
-      class="flex items-center justify-between rounded px-2 py-1 text-sm
+      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
         {activeView === 'extensions' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
       onclick={() => onOpenView("extensions")}
       data-testid="nav-extensions"
@@ -220,7 +220,7 @@
       <span>🧩 Extensions</span>
     </button>
     <button
-      class="flex items-center justify-between rounded px-2 py-1 text-sm
+      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
         {activeView === 'settings' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
       onclick={() => onOpenView("settings")}
       data-testid="nav-settings"

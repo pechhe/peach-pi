@@ -63,7 +63,13 @@
   </header>
 
   <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-5" data-testid="transcript">
-    <div class="mx-auto flex max-w-3xl flex-col gap-5">
+    <div class="mx-auto flex h-full max-w-3xl flex-col gap-5">
+      {#if items.length === 0}
+        <div class="flex flex-1 flex-col items-center justify-center gap-1 text-center">
+          <p class="text-[15px] font-medium text-zinc-400">What are we building?</p>
+          <p class="text-xs text-zinc-600">Enter to send · / for commands · ⌘P plan mode · ⌃` terminal</p>
+        </div>
+      {/if}
       {#each items as item (item.id)}
         {#if item.kind === "user"}
           <div class="item-enter max-w-[85%] self-end rounded-2xl rounded-br-md border border-zinc-700/40 bg-zinc-800/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-zinc-100 select-text">
