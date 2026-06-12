@@ -5,7 +5,8 @@ export default defineConfig({
     rollupOptions: {
       // pi SDK stays external: it loads extensions/resources at runtime
       // and must not be inlined into the main bundle.
-      external: ["electron", /^node:/, /^@earendil-works\//],
+      // node-pty: native module, also external + vendored.
+      external: ["electron", "node-pty", /^node:/, /^@earendil-works\//],
     },
   },
   resolve: {

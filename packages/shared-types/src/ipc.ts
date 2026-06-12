@@ -116,6 +116,14 @@ export const ipcContracts = {
   "automations:runs": invoke<[id: string], AutomationRun[]>(),
   "automations:previewNext": invoke<[cron: string], string | null>(),
 
+  // integrated terminal (one PTY per thread, lives in main)
+  "terminal:open": invoke<[threadId: ThreadId], { buffer: string }>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
+  "terminal:input": invoke<[threadId: ThreadId, data: string], void>(),
+  "terminal:resize": invoke<[threadId: ThreadId, cols: number, rows: number], void>(),
+  "terminal:kill": invoke<[threadId: ThreadId], void>(),
+
   // overlay quick-composer window
   "overlay:hide": invoke<[], void>(),
   "overlay:toggle": invoke<[], void>(),
@@ -146,6 +154,8 @@ export const ipcContracts = {
   "event:extensionStatus": event<ExtensionStatusPayload>(),
   /** Notification click — main window should select this thread. */
   "event:focusThread": event<ThreadId>(),
+  "event:terminalData": event<{ threadId: ThreadId; data: string }>(),
+  "event:terminalExit": event<{ threadId: ThreadId; exitCode: number }>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

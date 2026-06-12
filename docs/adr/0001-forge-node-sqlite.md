@@ -29,6 +29,17 @@ Status: Accepted (2026-06-11)
         in the CJS main bundle. Do not convert these to static imports.
      Verified by tests/core/thread-create.spec.ts (packaged app creates a
      live pi session with a persisted session file).
+   - **node-pty (integrated terminal)**: uses the N-API prebuilds shipped in
+     the npm tarball (no compile). Three traps, all handled:
+     1. npm strips the exec bit from `prebuilds/*/spawn-helper` → chmod 755
+        in the vendor hook (packaged) and lazily in TerminalService (dev).
+     2. Forge's electron-rebuild emits `build/Release/pty.node` WITHOUT
+        spawn-helper, shadowing the complete prebuilds dir → rebuild disabled
+        via `rebuildConfig: { onlyModules: [] }` (safe: all native deps are
+        ABI-stable N-API prebuilds).
+     3. spawn-helper must live outside the asar → unpack glob is
+        `{**/*.node,**/node-pty/prebuilds/**}`.
+     Verified by tests/core/terminal.spec.ts (packaged PTY echo round-trip).
 
 2. **node:sqlite (`DatabaseSync`)** instead of better-sqlite3.
    Ships inside Electron's Node (24.16) — no native rebuild, no asar

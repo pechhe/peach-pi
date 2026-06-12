@@ -2,9 +2,20 @@
   import type { Thread } from "@peach-pi/shared-types";
   import { transcripts } from "../stores/transcripts.svelte";
   import Composer from "./Composer.svelte";
+  import TerminalPane from "./TerminalPane.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
 
   let { thread }: { thread: Thread } = $props();
+
+  let showTerminal = $state(false);
+
+  function onKeydown(e: KeyboardEvent) {
+    // ⌃` toggles the integrated terminal (VS Code muscle memory).
+    if (e.ctrlKey && e.key === "`") {
+      e.preventDefault();
+      showTerminal = !showTerminal;
+    }
+  }
 
   let scrollEl = $state<HTMLElement | null>(null);
 
@@ -32,6 +43,16 @@
         {status}
       </span>
     {/each}
+    <div class="ml-auto">
+      <button
+        class="rounded px-2 py-0.5 font-mono text-[11px] {showTerminal
+          ? 'bg-zinc-800 text-zinc-200'
+          : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300'}"
+        onclick={() => (showTerminal = !showTerminal)}
+        title="Toggle terminal (⌃`)"
+        data-testid="terminal-toggle">&gt;_</button
+      >
+    </div>
   </header>
 
   <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-4" data-testid="transcript">
@@ -73,5 +94,10 @@
     </div>
   </div>
 
+  {#if showTerminal}
+    <TerminalPane threadId={thread.id} onClose={() => (showTerminal = false)} />
+  {/if}
   <Composer {thread} />
 </div>
+
+<svelte:window onkeydown={onKeydown} />

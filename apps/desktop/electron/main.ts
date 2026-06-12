@@ -5,6 +5,7 @@ import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
 import { AppService } from "./services/app-service.ts";
 import { ThreadService } from "./services/thread-service.ts";
 import { AutomationService } from "./services/automation-service.ts";
+import { TerminalService } from "./services/terminal-service.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import { createOverlayWindow } from "./windows/overlay-window.ts";
 
@@ -55,6 +56,7 @@ async function boot(): Promise<void> {
   const automationService = new AutomationService(db, threadService, () =>
     emit("event:snapshot", appService.snapshot()),
   );
+  const terminalService = new TerminalService(db, emit);
 
   async function pickProject() {
     const result = await dialog.showOpenDialog({
@@ -93,6 +95,10 @@ async function boot(): Promise<void> {
       overlayWindow?.hide();
     },
     "overlay:toggle": () => toggleOverlay(),
+    "terminal:open": (id) => terminalService.open(id),
+    "terminal:input": (id, data) => terminalService.input(id, data),
+    "terminal:resize": (id, cols, rows) => terminalService.resize(id, cols, rows),
+    "terminal:kill": (id) => terminalService.kill(id),
     "resources:inspect": (projectId) => threadService.inspectResources(projectId),
     "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
     "threads:archive": (id) => threadService.archive(id),
@@ -146,6 +152,7 @@ async function boot(): Promise<void> {
     globalShortcut.unregisterAll();
     appService.stop();
     automationService.stop();
+    terminalService.dispose();
     threadService.dispose();
     db.close();
   });

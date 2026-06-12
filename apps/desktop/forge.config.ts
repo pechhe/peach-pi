@@ -46,19 +46,32 @@ function vendorPiSdk(buildPath: string): void {
   };
 
   visit("@earendil-works/pi-coding-agent", __dirname, false);
+  visit("node-pty", __dirname, false); // native PTY for the integrated terminal
 
   for (const [name, src] of resolved) {
     const dest = path.join(buildPath, "node_modules", name);
     fs.cpSync(src, dest, { recursive: true, dereference: true });
   }
+  // npm tarball ships spawn-helper without the exec bit.
+  const helper = path.join(
+    buildPath,
+    `node_modules/node-pty/prebuilds/${process.platform}-${process.arch}/spawn-helper`,
+  );
+  if (fs.existsSync(helper)) fs.chmodSync(helper, 0o755);
   console.log(`vendorPiSdk: copied ${resolved.size} packages into ${buildPath}`);
 }
 
 const config: ForgeConfig = {
+  // Skip electron-rebuild: every native dep (node-pty, clipboard, pi-tui)
+  // ships ABI-stable N-API prebuilds. Rebuilding node-pty actually breaks it:
+  // it emits build/Release/pty.node WITHOUT spawn-helper, shadowing the
+  // complete prebuilds dir (loader prefers build/Release).
+  rebuildConfig: { onlyModules: [] },
   packagerConfig: {
     appBundleId: "com.peach-pi.desktop",
     // Native N-API prebuilds (clipboard, pi-tui) must live outside the asar.
-    asar: { unpack: "**/*.node" },
+    // node-pty's prebuilds dir also holds the spawn-helper executable.
+    asar: { unpack: "{**/*.node,**/node-pty/prebuilds/**}" },
     // Notarization/signing wired once certs are configured:
     // osxSign: {}, osxNotarize: { ... }
   },
