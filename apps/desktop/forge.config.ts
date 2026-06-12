@@ -72,8 +72,20 @@ const config: ForgeConfig = {
     // Native N-API prebuilds (clipboard, pi-tui) must live outside the asar.
     // node-pty's prebuilds dir also holds the spawn-helper executable.
     asar: { unpack: "{**/*.node,**/node-pty/prebuilds/**}" },
-    // Notarization/signing wired once certs are configured:
-    // osxSign: {}, osxNotarize: { ... }
+    // Signing/notarization activate when credentials are present in the env
+    // (CI release lane); local/dev packaging stays unsigned.
+    ...(process.env.PEACH_PI_SIGN_IDENTITY
+      ? { osxSign: { identity: process.env.PEACH_PI_SIGN_IDENTITY } }
+      : {}),
+    ...(process.env.APPLE_ID && process.env.APPLE_ID_PASSWORD && process.env.APPLE_TEAM_ID
+      ? {
+          osxNotarize: {
+            appleId: process.env.APPLE_ID,
+            appleIdPassword: process.env.APPLE_ID_PASSWORD,
+            teamId: process.env.APPLE_TEAM_ID,
+          },
+        }
+      : {}),
   },
   hooks: {
     packageAfterCopy: async (_config, buildPath) => {

@@ -4,6 +4,7 @@
   import Composer from "./Composer.svelte";
   import TerminalPane from "./TerminalPane.svelte";
   import GitWidget from "./GitWidget.svelte";
+  import Markdown from "./Markdown.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
 
   let { thread }: { thread: Thread } = $props();
@@ -26,11 +27,15 @@
     void transcripts.ensure(thread.id);
   });
 
-  // Pin to bottom while streaming.
+  // Pin to bottom while streaming (rAF batches layout reads under fast deltas).
   $effect(() => {
     void items;
-    if (scrollEl && scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 200) {
-      scrollEl.scrollTop = scrollEl.scrollHeight;
+    const el = scrollEl;
+    if (!el) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+      });
     }
   });
 
@@ -57,42 +62,55 @@
     </div>
   </header>
 
-  <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-4" data-testid="transcript">
-    <div class="mx-auto flex max-w-3xl flex-col gap-4">
+  <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-5" data-testid="transcript">
+    <div class="mx-auto flex max-w-3xl flex-col gap-5">
       {#each items as item (item.id)}
         {#if item.kind === "user"}
-          <div class="self-end rounded-2xl rounded-br-sm bg-zinc-800 px-4 py-2 text-sm whitespace-pre-wrap">
+          <div class="item-enter max-w-[85%] self-end rounded-2xl rounded-br-md border border-zinc-700/40 bg-zinc-800/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-zinc-100 select-text">
             {item.text}
           </div>
         {:else if item.kind === "assistant"}
-          <div class="text-sm leading-relaxed whitespace-pre-wrap text-zinc-200">
+          <div class="item-enter text-[13.5px] leading-relaxed text-zinc-200 select-text">
             {#if item.thinking}
-              <details class="mb-2 text-xs text-zinc-500">
-                <summary class="cursor-pointer">Thinking</summary>
-                <div class="mt-1 whitespace-pre-wrap">{item.thinking}</div>
+              <details class="group mb-2 text-xs text-zinc-500">
+                <summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-zinc-300">
+                  <span class="mr-1 inline-block transition-transform group-open:rotate-90">›</span>Thinking
+                </summary>
+                <div class="mt-1.5 border-l-2 border-zinc-800 pl-3 leading-relaxed whitespace-pre-wrap text-zinc-500">{item.thinking}</div>
               </details>
             {/if}
-            {item.text}{#if item.streaming}<span class="animate-pulse">▌</span>{/if}
+            <Markdown text={item.text} />{#if item.streaming}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-zinc-300"></span>{/if}
             {#if item.error}
-              <p class="mt-2 text-xs text-red-400">{item.error}</p>
+              <p class="mt-2 rounded-lg border border-red-900/40 bg-red-950/30 px-3 py-1.5 text-xs text-red-400">{item.error}</p>
             {/if}
           </div>
         {:else if item.kind === "tool"}
-          <details class="rounded border border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-xs">
-            <summary class="cursor-pointer text-zinc-400">
-              <span class="font-mono text-zinc-300">{item.toolName}</span>
-              <span class="ml-1 text-zinc-600">{item.argsSummary}</span>
-              {#if item.status === "running"}<span class="ml-1 animate-pulse text-amber-400">●</span>
-              {:else if item.status === "error"}<span class="ml-1 text-red-400">✕</span>{/if}
+          <details class="item-enter group -my-1.5 text-xs">
+            <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-colors select-none hover:bg-zinc-900">
+              {#if item.status === "running"}
+                <span class="spinner size-3 shrink-0"></span>
+              {:else if item.status === "error"}
+                <span class="shrink-0 text-red-400">✕</span>
+              {:else}
+                <span class="shrink-0 text-zinc-600">✓</span>
+              {/if}
+              <span class="shrink-0 font-mono font-medium text-zinc-400">{item.toolName}</span>
+              <span class="truncate font-mono text-zinc-600">{item.argsSummary}</span>
+              <span class="ml-auto shrink-0 text-zinc-700 transition-transform group-open:rotate-90">›</span>
             </summary>
             {#if item.output}
-              <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-zinc-400">{item.output}</pre>
+              <pre class="mx-2 mt-1 max-h-64 overflow-auto rounded-lg border border-zinc-800/80 bg-zinc-900/60 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-400 select-text">{item.output}</pre>
             {/if}
           </details>
         {:else}
-          <p class="text-center text-xs text-zinc-500 italic">{item.text}</p>
+          <p class="item-enter text-center text-xs text-zinc-500 italic">{item.text}</p>
         {/if}
       {/each}
+      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming)}
+        <div class="item-enter flex items-center gap-2 text-xs text-zinc-500">
+          <span class="spinner size-3"></span> Working…
+        </div>
+      {/if}
     </div>
   </div>
 

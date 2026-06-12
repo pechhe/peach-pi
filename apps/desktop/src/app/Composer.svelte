@@ -265,8 +265,8 @@
 
     <!-- Surface -->
     <div
-      class="rounded-xl border bg-zinc-900 p-2 transition-colors focus-within:border-zinc-500
-        {dragActive ? 'border-sky-500 bg-sky-500/5' : 'border-zinc-700'}
+      class="rounded-2xl border bg-zinc-900/90 p-2 shadow-lg shadow-black/20 backdrop-blur transition-all duration-150 focus-within:border-zinc-500 focus-within:shadow-xl focus-within:shadow-black/30
+        {dragActive ? 'border-sky-500 bg-sky-500/5' : 'border-zinc-700/80'}
         {draft.mode === 'plan' ? 'border-indigo-600/60' : ''}"
       ondragover={(e) => {
         if (hasFilesInDataTransfer(e.dataTransfer)) {

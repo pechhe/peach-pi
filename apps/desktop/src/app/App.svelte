@@ -87,6 +87,8 @@
       onOpenView={(v) => (view = v)}
       onOpenSearch={() => (searchOpen = true)}
     />
+    {#key view === "thread" ? `thread:${selectedThreadId}` : view}
+    <div class="view-enter flex min-w-0 flex-1">
     {#if view === "settings"}
       <SettingsView />
     {:else if view === "skills"}
@@ -126,6 +128,8 @@
         </p>
       </main>
     {/if}
+    </div>
+    {/key}
     {#if searchOpen}
       <SearchOverlay
         projects={snapshot.current.projects}

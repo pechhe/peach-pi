@@ -25,6 +25,109 @@ body {
   -webkit-app-region: drag;
 }
 .titlebar-drag button,
-.titlebar-drag input {
+.titlebar-drag input,
+.titlebar-drag select {
   -webkit-app-region: no-drag;
+}
+
+/* ---------- polish: motion, scrollbars, focus ---------- */
+
+/* Thin overlay scrollbars everywhere. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Keyboard focus ring without mouse-click rings. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid rgba(161, 161, 170, 0.5);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+
+/* Buttons feel pressable. */
+button {
+  cursor: default;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease,
+    transform 0.06s ease;
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* New transcript items ease in. */
+.item-enter {
+  animation: item-enter 0.18s ease-out;
+}
+@keyframes item-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Views cross-fade on switch. */
+.view-enter {
+  animation: view-enter 0.14s ease-out;
+}
+@keyframes view-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Streaming caret. */
+.cursor-blink {
+  animation: cursor-blink 1s steps(2, start) infinite;
+}
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Inline spinner. */
+.spinner {
+  display: inline-block;
+  border-radius: 9999px;
+  border: 1.5px solid #3f3f46;
+  border-top-color: #a1a1aa;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Smooth detail expansion (height jumps still snap, but content fades). */
+details[open] > *:not(summary) {
+  animation: item-enter 0.15s ease-out;
 }

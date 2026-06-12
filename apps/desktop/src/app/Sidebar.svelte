@@ -69,14 +69,18 @@
 {#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived")}
   <div class="group relative flex items-center">
     <button
-      class="flex w-full items-center gap-2 truncate rounded px-2 py-1 text-left text-sm
+      class="flex w-full items-center gap-2 truncate rounded-md px-2 py-[5px] text-left text-[13px]
         {selectedThreadId === thread.id
-        ? 'bg-zinc-800 text-zinc-100'
-        : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
+        ? 'bg-zinc-800 text-zinc-100 shadow-sm shadow-black/20'
+        : 'text-zinc-400 hover:bg-zinc-900/80 hover:text-zinc-200'}"
       onclick={() => onSelect(thread.id)}
     >
       {#if thread.status === "running"}
-        <span class="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-400"></span>
+        <span class="relative size-1.5 shrink-0 rounded-full bg-emerald-400">
+          <span class="absolute inset-0 animate-ping rounded-full bg-emerald-400/60"></span>
+        </span>
+      {:else if thread.status === "failed"}
+        <span class="size-1.5 shrink-0 rounded-full bg-red-400"></span>
       {/if}
       <span class="truncate {variant === 'archived' ? 'text-zinc-600' : ''}">{thread.title}</span>
       {#if variant === "snoozed" && thread.snoozedUntil}
