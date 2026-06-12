@@ -6,6 +6,7 @@ import { AppService } from "./services/app-service.ts";
 import { ThreadService } from "./services/thread-service.ts";
 import { AutomationService } from "./services/automation-service.ts";
 import { TerminalService } from "./services/terminal-service.ts";
+import { GitService } from "./services/git-service.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import { createOverlayWindow } from "./windows/overlay-window.ts";
 
@@ -57,6 +58,7 @@ async function boot(): Promise<void> {
     emit("event:snapshot", appService.snapshot()),
   );
   const terminalService = new TerminalService(db, emit);
+  const gitService = new GitService(db, path.join(app.getPath("userData"), "worktrees"));
 
   async function pickProject() {
     const result = await dialog.showOpenDialog({
@@ -73,7 +75,10 @@ async function boot(): Promise<void> {
     "projects:add": (p) => appService.addProject(p),
     "projects:remove": (id) => appService.removeProject(id),
     "projects:pick": () => pickProject(),
-    "threads:create": (projectId) => threadService.createThread(projectId),
+    "threads:create": async (projectId, opts) => {
+      const worktreeDir = opts?.worktree ? await gitService.createWorktree(projectId) : undefined;
+      return threadService.createThread(projectId, worktreeDir);
+    },
     "threads:createChat": () => threadService.createChat(),
     "threads:prompt": (id, text, images, toolMode) =>
       threadService.prompt(id, text, images, toolMode),
@@ -103,7 +108,18 @@ async function boot(): Promise<void> {
     "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
     "threads:archive": (id) => threadService.archive(id),
     "threads:unarchive": (id) => threadService.unarchive(id),
-    "threads:delete": (id) => threadService.delete(id),
+    "threads:delete": async (id) => {
+      const thread = appService.snapshot().threads.find((t) => t.id === id);
+      threadService.delete(id);
+      if (thread?.worktreeDir && thread.projectId) {
+        const project = appService.snapshot().projects.find((p) => p.id === thread.projectId);
+        if (project) await gitService.removeWorktree(project.path, thread.worktreeDir);
+      }
+    },
+    "git:info": (id) => gitService.info(id),
+    "git:changedFiles": (id) => gitService.changedFiles(id),
+    "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),
+    "git:commitPush": (id, message) => gitService.commitPush(id, message),
     "threads:steer": (id, text) => threadService.steer(id, text),
     "threads:abort": (id) => threadService.abort(id),
     "threads:getTranscript": (id) => threadService.getTranscript(id),

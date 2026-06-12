@@ -46,9 +46,9 @@
     expanded = { ...expanded, [key]: !expanded[key] };
   }
 
-  async function newThread(projectId: string) {
+  async function newThread(projectId: string, worktree = false) {
     playButtonSecondary("click");
-    const thread = await api.invoke("threads:create", projectId);
+    const thread = await api.invoke("threads:create", projectId, { worktree });
     onSelect(thread.id);
   }
 
@@ -229,6 +229,12 @@
             onclick={() => newThread(group.project.id)}
             data-testid="new-thread"
             title="New thread">+</button
+          >
+          <button
+            class="rounded px-1 font-mono text-[11px] text-zinc-500 opacity-0 group-hover:opacity-100 hover:bg-zinc-800 hover:text-zinc-100"
+            onclick={() => newThread(group.project.id, true)}
+            data-testid="new-worktree-thread"
+            title="New worktree thread (isolated checkout)">⎇+</button
           >
         </div>
         {#each group.active as thread (thread.id)}

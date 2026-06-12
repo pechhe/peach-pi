@@ -25,6 +25,8 @@ export interface Thread {
   piSessionFile: string | null;
   /** For custom chats: the chat-specific workspace directory. */
   chatWorkspaceDir?: string;
+  /** For worktree threads: the isolated git worktree this thread works in. */
+  worktreeDir?: string;
   title: string;
   status: ThreadStatus;
   snoozedUntil?: string;
@@ -95,6 +97,29 @@ export interface SessionMeta {
   contextWindow: number | null;
   contextPercent: number | null;
 }
+
+/** Git status for a thread's working directory. */
+export interface GitInfo {
+  isRepo: boolean;
+  /** Current branch; null while on a detached HEAD (worktree pre-commit). */
+  branch: string | null;
+  changedCount: number;
+  insertions: number;
+  deletions: number;
+  ahead: number;
+  behind: number;
+  isWorktree: boolean;
+}
+
+export interface GitChangedFile {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed" | "untracked";
+  staged: boolean;
+}
+
+export type GitCommitPushResult =
+  | { ok: true; branch: string; message: string; pushed: boolean }
+  | { ok: false; error: string };
 
 /** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */
 export interface Automation {

@@ -54,11 +54,11 @@ export class ThreadService {
     this.onRunIdle = onRunIdle;
   }
 
-  async createThread(projectId: string): Promise<Thread> {
+  async createThread(projectId: string, worktreeDir?: string): Promise<Thread> {
     const project = this.projects.all().find((p) => p.id === projectId);
     if (!project) throw new Error(`Unknown project: ${projectId}`);
-    const thread = this.threads.insert({ projectId, title: "New thread" });
-    await this.ensureSession(thread.id, project.path, null);
+    const thread = this.threads.insert({ projectId, title: "New thread", worktreeDir });
+    await this.ensureSession(thread.id, worktreeDir ?? project.path, null);
     this.onThreadsChanged();
     return this.threads.get(thread.id)!;
   }

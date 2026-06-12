@@ -3,6 +3,7 @@
   import { transcripts } from "../stores/transcripts.svelte";
   import Composer from "./Composer.svelte";
   import TerminalPane from "./TerminalPane.svelte";
+  import GitWidget from "./GitWidget.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
 
   let { thread }: { thread: Thread } = $props();
@@ -43,7 +44,8 @@
         {status}
       </span>
     {/each}
-    <div class="ml-auto">
+    <div class="ml-auto flex items-center gap-1">
+      <GitWidget {thread} />
       <button
         class="rounded px-2 py-0.5 font-mono text-[11px] {showTerminal
           ? 'bg-zinc-800 text-zinc-200'

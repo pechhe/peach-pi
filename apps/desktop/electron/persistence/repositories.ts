@@ -17,6 +17,7 @@ interface ThreadRow {
   project_id: string | null;
   pi_session_file: string | null;
   chat_workspace_dir: string | null;
+  worktree_dir: string | null;
   title: string;
   status: string;
   snoozed_until: string | null;
@@ -42,6 +43,7 @@ const toThread = (r: ThreadRow): Thread => ({
   projectId: r.project_id,
   piSessionFile: r.pi_session_file,
   chatWorkspaceDir: r.chat_workspace_dir ?? undefined,
+  worktreeDir: r.worktree_dir ?? undefined,
   title: r.title,
   status: r.status as Thread["status"],
   snoozedUntil: r.snoozed_until ?? undefined,
@@ -100,18 +102,20 @@ export class ThreadRepo {
     title: string;
     piSessionFile?: string;
     chatWorkspaceDir?: string;
+    worktreeDir?: string;
   }): Thread {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
       .prepare(
-        "INSERT INTO threads (id, project_id, pi_session_file, chat_workspace_dir, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO threads (id, project_id, pi_session_file, chat_workspace_dir, worktree_dir, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?,?,?,?,?)",
       )
       .run(
         id,
         fields.projectId,
         fields.piSessionFile ?? null,
         fields.chatWorkspaceDir ?? null,
+        fields.worktreeDir ?? null,
         fields.title,
         "idle",
         now,

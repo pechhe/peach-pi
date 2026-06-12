@@ -3,6 +3,9 @@ import type {
   CommandInfo,
   Automation,
   AutomationRun,
+  GitChangedFile,
+  GitCommitPushResult,
+  GitInfo,
   ExtensionStatusPayload,
   ExtensionUiRequest,
   ImagePayload,
@@ -72,7 +75,7 @@ export const ipcContracts = {
   "projects:pick": invoke<[], Project | null>(),
 
   // threads
-  "threads:create": invoke<[projectId: string], Thread>((id) =>
+  "threads:create": invoke<[projectId: string, opts?: { worktree?: boolean }], Thread>((id) =>
     requireNonEmptyString(id, "projectId"),
   ),
   "threads:createChat": invoke<[], Thread>(),
@@ -115,6 +118,12 @@ export const ipcContracts = {
   "automations:runNow": invoke<[id: string], void>(),
   "automations:runs": invoke<[id: string], AutomationRun[]>(),
   "automations:previewNext": invoke<[cron: string], string | null>(),
+
+  // git (per-thread working directory)
+  "git:info": invoke<[threadId: ThreadId], GitInfo>((id) => requireNonEmptyString(id, "threadId")),
+  "git:changedFiles": invoke<[threadId: ThreadId], GitChangedFile[]>(),
+  "git:fileDiff": invoke<[threadId: ThreadId, filePath: string], string>(),
+  "git:commitPush": invoke<[threadId: ThreadId, message?: string], GitCommitPushResult>(),
 
   // integrated terminal (one PTY per thread, lives in main)
   "terminal:open": invoke<[threadId: ThreadId], { buffer: string }>((id) =>

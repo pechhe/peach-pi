@@ -70,4 +70,12 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    up: (db) => {
+      // Worktree threads: isolated git worktree per thread (detached HEAD,
+      // lazy branch on first commit — ADR-0003 model from peche-pi).
+      db.exec("ALTER TABLE threads ADD COLUMN worktree_dir TEXT");
+    },
+  },
 ];
