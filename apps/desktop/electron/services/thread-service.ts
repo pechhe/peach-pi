@@ -251,6 +251,8 @@ export class ThreadService {
           this.emit("event:notice", { threadId, message, level }),
         onExtensionStatus: (key, text) =>
           this.emit("event:extensionStatus", { threadId, key, text }),
+        onExtensionWidget: (key, lines) =>
+          this.emit("event:extensionWidget", { threadId, key, lines }),
       },
       sessionFile ?? undefined,
     );

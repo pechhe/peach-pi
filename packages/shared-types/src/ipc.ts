@@ -3,9 +3,11 @@ import type {
   CommandInfo,
   Automation,
   AutomationRun,
+  ExtensionWidgetPayload,
   GitChangedFile,
   GitCommitPushResult,
   GitInfo,
+  SubagentAgentInfo,
   ExtensionStatusPayload,
   ExtensionUiRequest,
   ImagePayload,
@@ -119,6 +121,9 @@ export const ipcContracts = {
   "automations:runs": invoke<[id: string], AutomationRun[]>(),
   "automations:previewNext": invoke<[cron: string], string | null>(),
 
+  // subagents (pi-subagents extension roster)
+  "subagents:listAgents": invoke<[projectId: string | null], SubagentAgentInfo[]>(),
+
   // git (per-thread working directory)
   "git:info": invoke<[threadId: ThreadId], GitInfo>((id) => requireNonEmptyString(id, "threadId")),
   "git:changedFiles": invoke<[threadId: ThreadId], GitChangedFile[]>(),
@@ -163,6 +168,7 @@ export const ipcContracts = {
   "event:extensionStatus": event<ExtensionStatusPayload>(),
   /** Notification click — main window should select this thread. */
   "event:focusThread": event<ThreadId>(),
+  "event:extensionWidget": event<ExtensionWidgetPayload>(),
   "event:terminalData": event<{ threadId: ThreadId; data: string }>(),
   "event:terminalExit": event<{ threadId: ThreadId; exitCode: number }>(),
 } as const;

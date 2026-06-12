@@ -185,6 +185,14 @@
     </button>
     <button
       class="flex items-center justify-between rounded px-2 py-1 text-sm
+        {activeView === 'agents' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
+      onclick={() => onOpenView("agents")}
+      data-testid="nav-agents"
+    >
+      <span>🤖 Agents</span>
+    </button>
+    <button
+      class="flex items-center justify-between rounded px-2 py-1 text-sm
         {activeView === 'skills' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'}"
       onclick={() => onOpenView("skills")}
       data-testid="nav-skills"

@@ -7,6 +7,7 @@ import { ThreadService } from "./services/thread-service.ts";
 import { AutomationService } from "./services/automation-service.ts";
 import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
+import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import { createOverlayWindow } from "./windows/overlay-window.ts";
 
@@ -59,6 +60,8 @@ async function boot(): Promise<void> {
   );
   const terminalService = new TerminalService(db, emit);
   const gitService = new GitService(db, path.join(app.getPath("userData"), "worktrees"));
+  const subagentService = new SubagentService(db);
+  setupSubagentEnvironment(app.getPath("userData"));
 
   async function pickProject() {
     const result = await dialog.showOpenDialog({
@@ -116,6 +119,7 @@ async function boot(): Promise<void> {
         if (project) await gitService.removeWorktree(project.path, thread.worktreeDir);
       }
     },
+    "subagents:listAgents": (projectId) => subagentService.listAgents(projectId),
     "git:info": (id) => gitService.info(id),
     "git:changedFiles": (id) => gitService.changedFiles(id),
     "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),

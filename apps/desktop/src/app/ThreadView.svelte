@@ -96,6 +96,11 @@
     </div>
   </div>
 
+  {#each extensionUi.widgetsFor(thread.id) as widget (widget.key)}
+    <div class="mx-6 mb-1 shrink-0 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2" data-testid="extension-widget">
+      <pre class="overflow-x-auto font-mono text-[10px] leading-relaxed text-zinc-400">{widget.lines.join("\n")}</pre>
+    </div>
+  {/each}
   {#if showTerminal}
     <TerminalPane threadId={thread.id} onClose={() => (showTerminal = false)} />
   {/if}

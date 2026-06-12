@@ -28,6 +28,7 @@ export interface PiSessionCallbacks {
   onExtensionDialog?: UiBridgeCallbacks["onDialog"];
   onExtensionNotify?(message: string, level: "info" | "warning" | "error"): void;
   onExtensionStatus?(key: string, text: string | null): void;
+  onExtensionWidget?(key: string, lines: string[] | null): void;
 }
 
 export interface PiSessionMeta {
@@ -147,6 +148,7 @@ export class PiSession {
             : Promise.resolve(undefined),
         onNotify: (message, level) => callbacks.onExtensionNotify?.(message, level),
         onStatus: (key, text) => callbacks.onExtensionStatus?.(key, text),
+        onWidget: (key, lines) => callbacks.onExtensionWidget?.(key, lines),
       }),
       onError: (err) =>
         callbacks.onExtensionNotify?.(

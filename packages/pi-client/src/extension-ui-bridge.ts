@@ -13,6 +13,8 @@ export interface UiBridgeCallbacks {
   }): Promise<string | boolean | undefined>;
   onNotify(message: string, level: "info" | "warning" | "error"): void;
   onStatus(key: string, text: string | null): void;
+  /** Text widgets (e.g. pi-subagents fleet feed). Component widgets are dropped. */
+  onWidget?(key: string, lines: string[] | null): void;
 }
 
 /**
@@ -51,7 +53,13 @@ export function createUiBridge(callbacks: UiBridgeCallbacks): ExtensionUIContext
     setWorkingVisible: () => {},
     setWorkingIndicator: () => {},
     setHiddenThinkingLabel: () => {},
-    setWidget: () => {},
+    setWidget: (key: string, content: unknown) => {
+      if (content === undefined) callbacks.onWidget?.(key, null);
+      else if (Array.isArray(content) && content.every((l) => typeof l === "string")) {
+        callbacks.onWidget?.(key, content);
+      }
+      // Component-factory widgets are TUI-only — dropped.
+    },
     setFooter: () => {},
     setHeader: () => {},
     setTitle: () => {},

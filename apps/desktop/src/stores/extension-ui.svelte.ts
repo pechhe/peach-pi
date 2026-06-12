@@ -12,6 +12,8 @@ class ExtensionUiStore {
   toasts = $state<Toast[]>([]);
   /** threadId → (key → text) */
   private statuses = new SvelteMap<string, SvelteMap<string, string>>();
+  /** threadId → (key → widget lines) — e.g. pi-subagents fleet feed. */
+  private widgets = new SvelteMap<string, SvelteMap<string, string[]>>();
   private toastSeq = 0;
 
   init(): void {
@@ -28,6 +30,15 @@ class ExtensionUiStore {
       if (text === null) map.delete(key);
       else map.set(key, text);
     });
+    api.on("event:extensionWidget", ({ threadId, key, lines }) => {
+      let map = this.widgets.get(threadId);
+      if (!map) {
+        map = new SvelteMap();
+        this.widgets.set(threadId, map);
+      }
+      if (lines === null) map.delete(key);
+      else map.set(key, lines);
+    });
   }
 
   pushToast(notice: NoticePayload): void {
@@ -40,6 +51,10 @@ class ExtensionUiStore {
 
   statusesFor(threadId: string): string[] {
     return [...(this.statuses.get(threadId)?.values() ?? [])];
+  }
+
+  widgetsFor(threadId: string): Array<{ key: string; lines: string[] }> {
+    return [...(this.widgets.get(threadId)?.entries() ?? [])].map(([key, lines]) => ({ key, lines }));
   }
 
   async respond(requestId: string, value: string | boolean | undefined): Promise<void> {

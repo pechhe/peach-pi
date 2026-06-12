@@ -141,6 +141,26 @@ export interface AutomationRun {
   firedAt: string;
 }
 
+/** Text widget published by an extension (e.g. pi-subagents fleet feed). */
+export interface ExtensionWidgetPayload {
+  threadId: ThreadId;
+  key: string;
+  lines: string[] | null;
+}
+
+/** A subagent definition file (~/.pi/agent/agents or <project>/.pi/agents). */
+export interface SubagentAgentInfo {
+  name: string;
+  description?: string;
+  model?: string;
+  thinking?: string;
+  mode?: string;
+  enabled: boolean;
+  scope: "global" | "project";
+  filePath: string;
+  body: string;
+}
+
 /** A skill discovered by pi's resource loader. */
 export interface SkillInfo {
   name: string;
