@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { AppView } from "@peach-pi/shared-types";
+  import { api } from "../lib/ipc";
   import { snapshot } from "../stores/snapshot.svelte";
   import { transcripts } from "../stores/transcripts.svelte";
   import { queues } from "../stores/composer.svelte";
@@ -41,7 +42,11 @@
   function selectThread(id: string) {
     selectedThreadId = id;
     view = "thread";
+    void api.invoke("app:setSelectedThread", id); // overlay prompt target
   }
+
+  // Notification click in main → jump to thread.
+  api.on("event:focusThread", (threadId) => selectThread(threadId));
 
   function onGlobalKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === "k") {

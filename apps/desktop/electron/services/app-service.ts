@@ -61,6 +61,12 @@ export class AppService {
     this.publish();
   }
 
+  setSelectedThread(threadId: string | null): void {
+    const ui = this.kv.get<UiState>(UI_STATE_KEY) ?? defaultUiState;
+    this.kv.set(UI_STATE_KEY, { ...ui, selectedThreadId: threadId });
+    this.publish();
+  }
+
   snoozeThread(threadId: string, until: string): void {
     this.threads.setSnoozedUntil(threadId, until);
     this.publish();

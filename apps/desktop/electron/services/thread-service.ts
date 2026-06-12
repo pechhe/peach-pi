@@ -32,18 +32,26 @@ export class ThreadService {
   private emit: Emit;
   private onThreadsChanged: () => void;
   private chatsDir: string;
+  private onRunIdle?: (thread: Thread) => void;
   private sessions = new Map<string, PiSession>();
   private pendingOps = new Map<string, TranscriptOp[]>();
   private flushTimer: NodeJS.Timeout | null = null;
   /** Pending extension dialog resolvers keyed by requestId. */
   private pendingDialogs = new Map<string, (value: string | boolean | undefined) => void>();
 
-  constructor(db: AppDb, emit: Emit, onThreadsChanged: () => void, chatsDir: string) {
+  constructor(
+    db: AppDb,
+    emit: Emit,
+    onThreadsChanged: () => void,
+    chatsDir: string,
+    onRunIdle?: (thread: Thread) => void,
+  ) {
     this.threads = new ThreadRepo(db);
     this.projects = new ProjectRepo(db);
     this.emit = emit;
     this.onThreadsChanged = onThreadsChanged;
     this.chatsDir = chatsDir;
+    this.onRunIdle = onRunIdle;
   }
 
   async createThread(projectId: string): Promise<Thread> {
@@ -256,6 +264,10 @@ export class ThreadService {
   private setStatus(threadId: string, status: Thread["status"]): void {
     this.threads.setStatus(threadId, status);
     this.onThreadsChanged();
+    if (status === "idle" && this.onRunIdle) {
+      const thread = this.threads.get(threadId);
+      if (thread) this.onRunIdle(thread);
+    }
   }
 
   private queueOps(threadId: string, ops: TranscriptOp[]): void {

@@ -58,6 +58,8 @@ export const ipcContracts = {
   // app
   "app:getSnapshot": invoke<[], AppSnapshot>(),
   "app:ping": invoke<[], { pong: true; version: string }>(),
+  /** Persist selection so the overlay window knows the prompt target. */
+  "app:setSelectedThread": invoke<[threadId: ThreadId | null], void>(),
 
   // projects
   "projects:add": invoke<[path: string], Project>((path) =>
@@ -114,6 +116,10 @@ export const ipcContracts = {
   "automations:runs": invoke<[id: string], AutomationRun[]>(),
   "automations:previewNext": invoke<[cron: string], string | null>(),
 
+  // overlay quick-composer window
+  "overlay:hide": invoke<[], void>(),
+  "overlay:toggle": invoke<[], void>(),
+
   // resources (skills / extensions / prompts visible for a project)
   "resources:inspect": invoke<[projectId: string | null], ResourceInspection>(),
   /** Read a skill/prompt markdown file surfaced by resources:inspect. */
@@ -138,6 +144,8 @@ export const ipcContracts = {
   "event:extensionUi": event<ExtensionUiRequest>(),
   "event:notice": event<NoticePayload>(),
   "event:extensionStatus": event<ExtensionStatusPayload>(),
+  /** Notification click — main window should select this thread. */
+  "event:focusThread": event<ThreadId>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;
