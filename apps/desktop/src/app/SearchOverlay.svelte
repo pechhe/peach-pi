@@ -68,14 +68,14 @@
 >
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
   <div
-    class="w-[32rem] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
+    class="w-[32rem] overflow-hidden rounded-xl border border-border-strong bg-surface shadow-2xl"
     onclick={(e) => e.stopPropagation()}
     data-testid="search-overlay"
   >
     <input
       bind:this={inputEl}
       bind:value={query}
-      class="w-full border-b border-zinc-800 bg-transparent px-4 py-3 text-sm outline-none"
+      class="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none"
       placeholder="Search threads…"
       data-testid="search-input"
     />
@@ -83,17 +83,17 @@
       {#each matches as thread, i (thread.id)}
         <button
           class="flex w-full items-baseline gap-2 px-4 py-1.5 text-left text-sm
-            {i === index ? 'bg-zinc-800' : ''} hover:bg-zinc-800"
+            {i === index ? 'bg-surface-2' : ''} hover:bg-surface-2"
           onclick={() => {
             onSelect(thread.id);
             onClose();
           }}
         >
-          <span class="truncate text-zinc-200">{thread.title}</span>
-          <span class="ml-auto shrink-0 text-xs text-zinc-500">{projectName(thread.projectId)}</span>
+          <span class="truncate text-fg">{thread.title}</span>
+          <span class="ml-auto shrink-0 text-xs text-faint">{projectName(thread.projectId)}</span>
         </button>
       {:else}
-        <p class="px-4 py-3 text-xs text-zinc-600">No matches.</p>
+        <p class="px-4 py-3 text-xs text-fainter">No matches.</p>
       {/each}
     </div>
   </div>

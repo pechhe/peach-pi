@@ -2,6 +2,7 @@
   import type { Automation, AutomationRun, Project } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
 
   let {
     projects,
@@ -73,9 +74,9 @@
 
 <main class="flex h-full flex-1 flex-col" data-testid="automations-view">
   <header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-6">
-    <h1 class="text-sm font-medium text-zinc-300">Automations</h1>
+    <h1 class="text-sm font-medium text-fg-soft">Automations</h1>
     <button
-      class="rounded-lg bg-zinc-100 px-3 py-1 text-sm font-medium text-zinc-900"
+      class="rounded-lg bg-primary px-3 py-1 text-sm font-medium text-primary-fg"
       onclick={() => (creating = !creating)}
       data-testid="new-automation">{creating ? "Cancel" : "New"}</button
     >
@@ -84,15 +85,15 @@
   <div class="flex-1 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex max-w-2xl flex-col gap-3">
       {#if creating}
-        <div class="flex flex-col gap-2 rounded-lg border border-zinc-700 bg-zinc-900 p-4" data-testid="automation-form">
+        <div class="flex flex-col gap-2 rounded-lg border border-border-strong bg-surface p-4" data-testid="automation-form">
           <input
-            class="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm outline-none focus:border-zinc-500"
+            class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"
             placeholder="Name (e.g. Morning triage)"
             bind:value={name}
           />
           <div class="flex gap-2">
             <select
-              class="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm outline-none"
+              class="rounded-lg border border-border-strong bg-bg px-2 py-1.5 text-sm outline-none"
               onchange={(e) => e.currentTarget.value && (cron = e.currentTarget.value)}
             >
               <option value="">Preset…</option>
@@ -101,12 +102,12 @@
               {/each}
             </select>
             <input
-              class="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 font-mono text-sm outline-none focus:border-zinc-500"
+              class="flex-1 rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm outline-none focus:border-border-focus"
               placeholder="cron (m h dom mon dow)"
               bind:value={cron}
             />
             <select
-              class="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm outline-none"
+              class="rounded-lg border border-border-strong bg-bg px-2 py-1.5 text-sm outline-none"
               bind:value={projectId}
             >
               <option value="">New chat</option>
@@ -116,30 +117,30 @@
             </select>
           </div>
           <textarea
-            class="min-h-20 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm outline-none focus:border-zinc-500"
+            class="min-h-20 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"
             placeholder="Prompt to run"
             bind:value={prompt}
           ></textarea>
           <div class="flex items-center justify-between">
-            <span class="text-xs {nextPreview ? 'text-zinc-500' : 'text-red-400'}">
+            <span class="text-xs {nextPreview ? 'text-faint' : 'text-danger'}">
               {nextPreview ? `Next run: ${fmt(nextPreview)}` : "Invalid cron expression"}
             </span>
             <button
-              class="rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 disabled:opacity-30"
+              class="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg disabled:opacity-30"
               disabled={!name.trim() || !prompt.trim() || !nextPreview}
               onclick={create}
               data-testid="create-automation">Create</button
             >
           </div>
-          {#if createError}<p class="text-xs text-red-400">{createError}</p>{/if}
+          {#if createError}<p class="text-xs text-danger">{createError}</p>{/if}
         </div>
       {/if}
 
       {#each automations as auto (auto.id)}
-        <div class="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-3">
+        <div class="rounded-lg border border-border bg-surface/50 px-4 py-3">
           <div class="flex items-center gap-3">
             <button
-              class="relative h-4 w-7 shrink-0 rounded-full transition-colors {auto.enabled ? 'bg-emerald-600' : 'bg-zinc-700'}"
+              class="relative h-4 w-7 shrink-0 rounded-full transition-colors {auto.enabled ? 'bg-success' : 'bg-surface-3'}"
               onclick={() => api.invoke("automations:setEnabled", auto.id, !auto.enabled)}
               aria-label="Toggle automation"
               role="switch"
@@ -152,50 +153,50 @@
               ></span>
             </button>
             <div class="min-w-0 flex-1">
-              <span class="block truncate text-sm text-zinc-200">{auto.name}</span>
-              <span class="text-xs text-zinc-500">
+              <span class="block truncate text-sm text-fg">{auto.name}</span>
+              <span class="text-xs text-faint">
                 <span class="font-mono">{auto.cron}</span>
                 · {projectName(auto.projectId)}
                 · next {auto.enabled ? fmt(auto.nextFireAt) : "paused"}
               </span>
             </div>
             <button
-              class="rounded px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              class="rounded px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg"
               onclick={() => api.invoke("automations:runNow", auto.id)}>Run now</button
             >
             <button
-              class="rounded px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              class="rounded px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg"
               onclick={() => toggleRuns(auto.id)}>History</button
             >
             <button
-              class="rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
-              onclick={() => api.invoke("automations:delete", auto.id)}>✕</button
+              class="rounded p-1.5 text-faint hover:bg-surface-2 hover:text-danger"
+              onclick={() => api.invoke("automations:delete", auto.id)}><Trash2 size={14} /></button
             >
           </div>
-          <p class="mt-1.5 line-clamp-2 text-xs whitespace-pre-wrap text-zinc-500">{auto.prompt}</p>
+          <p class="mt-1.5 line-clamp-2 text-xs whitespace-pre-wrap text-faint">{auto.prompt}</p>
           {#if runsFor === auto.id}
-            <div class="mt-2 border-t border-zinc-800 pt-2">
+            <div class="mt-2 border-t border-border pt-2">
               {#each runs as run (run.id)}
                 <div class="flex items-center justify-between py-0.5 text-xs">
-                  <span class="text-zinc-500">{fmt(run.firedAt)}</span>
+                  <span class="text-faint">{fmt(run.firedAt)}</span>
                   {#if run.threadId}
                     <button
-                      class="text-zinc-400 hover:text-zinc-100"
+                      class="text-muted hover:text-fg"
                       onclick={() => onSelectThread(run.threadId!)}>Open thread →</button
                     >
                   {:else}
-                    <span class="text-red-400">failed</span>
+                    <span class="text-danger">failed</span>
                   {/if}
                 </div>
               {:else}
-                <p class="text-xs text-zinc-600">No runs yet.</p>
+                <p class="text-xs text-fainter">No runs yet.</p>
               {/each}
             </div>
           {/if}
         </div>
       {:else}
         {#if !creating}
-          <p class="mt-8 text-center text-sm text-zinc-600">
+          <p class="mt-8 text-center text-sm text-fainter">
             No automations. Schedule a recurring prompt — it fires into a fresh thread.
           </p>
         {/if}

@@ -15,6 +15,7 @@ export interface ThemeOption {
 
 export const THEMES: ThemeOption[] = [
   { id: "default", label: "Peach Dark", scheme: "dark" },
+  { id: "light", label: "Light", scheme: "light" },
   { id: "dracula", label: "Dracula", scheme: "dark" },
   { id: "dracula-light", label: "Dracula Light", scheme: "light" },
 ];

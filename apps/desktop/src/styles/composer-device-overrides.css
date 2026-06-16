@@ -1,0 +1,13 @@
+/* Local overrides applied AFTER the verbatim peche-pi port. */
+
+/* Model slider: sit flush on the chassis like the other controls — drop the
+   raised keycap "socket" panel and its press-on-hover effect. */
+.composer-device .model-selector__badge--slider,
+.composer-device .model-selector__badge--slider:hover:not(:disabled),
+.composer-device .model-selector__badge--slider:active:not(:disabled) {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  filter: none;
+  transform: none;
+}

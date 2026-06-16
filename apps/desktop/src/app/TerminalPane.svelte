@@ -3,45 +3,69 @@
   import { FitAddon } from "@xterm/addon-fit";
   import "@xterm/xterm/css/xterm.css";
   import { api } from "../lib/ipc";
+  import { theme } from "../lib/theme.svelte";
+  import X from "@lucide/svelte/icons/x";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
   let { threadId, onClose }: { threadId: string; onClose: () => void } = $props();
 
   let container = $state<HTMLDivElement | null>(null);
   let exited = $state(false);
+  let term = $state<Terminal | null>(null);
+
+  /** Resolve a semantic color token from the active theme. */
+  function cssVar(name: string): string {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  function xtermTheme() {
+    return {
+      background: cssVar("--color-bg"),
+      foreground: cssVar("--color-fg-soft"),
+      cursor: cssVar("--color-muted"),
+      selectionBackground: cssVar("--color-surface-3"),
+    };
+  }
+
+  // Re-theme the live terminal when the global theme changes.
+  $effect(() => {
+    theme.current;
+    if (term) term.options.theme = xtermTheme();
+  });
 
   $effect(() => {
     if (!container) return;
     const currentThread = threadId;
-    const term = new Terminal({
+    const t = new Terminal({
       fontSize: 12,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      theme: { background: "#101012", foreground: "#d4d4d8", cursor: "#a1a1aa" },
+      theme: xtermTheme(),
       cursorBlink: true,
     });
+    term = t;
     const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(container);
+    t.loadAddon(fit);
+    t.open(container);
     fit.fit();
-    term.focus();
+    t.focus();
 
     const offData = api.on("event:terminalData", ({ threadId: id, data }) => {
-      if (id === currentThread) term.write(data);
+      if (id === currentThread) t.write(data);
     });
     const offExit = api.on("event:terminalExit", ({ threadId: id, exitCode }) => {
       if (id !== currentThread) return;
       exited = true;
-      term.write(`\r\n\x1b[2m[process exited with code ${exitCode}]\x1b[0m\r\n`);
+      t.write(`\r\n\x1b[2m[process exited with code ${exitCode}]\x1b[0m\r\n`);
     });
-    term.onData((data) => void api.invoke("terminal:input", currentThread, data));
+    t.onData((data) => void api.invoke("terminal:input", currentThread, data));
 
     void api.invoke("terminal:open", currentThread).then(({ buffer }) => {
-      if (buffer) term.write(buffer);
-      api.invoke("terminal:resize", currentThread, term.cols, term.rows);
+      if (buffer) t.write(buffer);
+      api.invoke("terminal:resize", currentThread, t.cols, t.rows);
     });
 
     const observer = new ResizeObserver(() => {
       fit.fit();
-      void api.invoke("terminal:resize", currentThread, term.cols, term.rows);
+      void api.invoke("terminal:resize", currentThread, t.cols, t.rows);
     });
     observer.observe(container);
 
@@ -49,27 +73,28 @@
       observer.disconnect();
       offData();
       offExit();
-      term.dispose();
+      t.dispose();
+      term = null;
     };
   });
 </script>
 
-<div class="flex h-56 shrink-0 flex-col border-t border-zinc-800 bg-[#101012]" data-testid="terminal-pane">
+<div class="flex h-56 shrink-0 flex-col border-t border-border bg-bg" data-testid="terminal-pane">
   <div class="flex h-7 shrink-0 items-center justify-between px-3">
-    <span class="text-[11px] text-zinc-500">Terminal {exited ? "· exited" : ""}</span>
+    <span class="text-[11px] text-faint">Terminal {exited ? "· exited" : ""}</span>
     <div class="flex gap-1">
       <button
-        class="rounded px-1.5 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+        class="flex items-center gap-1 rounded px-1.5 text-[11px] text-faint hover:bg-surface-2 hover:text-fg"
         onclick={() => {
           void api.invoke("terminal:kill", threadId);
           onClose();
         }}
-        title="Kill terminal">✕ kill</button
+        title="Kill terminal"><X size={12} /> kill</button
       >
       <button
-        class="rounded px-1.5 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+        class="flex items-center gap-1 rounded px-1.5 text-[11px] text-faint hover:bg-surface-2 hover:text-fg"
         onclick={onClose}
-        title="Hide (process keeps running) — ⌃`">▾ hide</button
+        title="Hide (process keeps running) — ⌃`"><ChevronDown size={12} /> hide</button
       >
     </div>
   </div>

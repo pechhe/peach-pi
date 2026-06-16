@@ -60,9 +60,9 @@
   }
 
   const statusColor = (s: GitChangedFile["status"]) =>
-    s === "added" || s === "untracked" ? "text-emerald-400"
-    : s === "deleted" ? "text-red-400"
-    : "text-amber-400";
+    s === "added" || s === "untracked" ? "text-success"
+    : s === "deleted" ? "text-danger"
+    : "text-warning";
   const statusChar = (s: GitChangedFile["status"]) =>
     s === "untracked" ? "U" : s.charAt(0).toUpperCase();
 </script>
@@ -71,38 +71,38 @@
   <div class="relative">
     <button
       class="flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[11px] transition-colors
-        {open ? 'bg-zinc-800 text-zinc-200' : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300'}"
+        {open ? 'bg-surface-2 text-fg' : 'text-faint hover:bg-surface hover:text-fg-soft'}"
       onclick={toggle}
       data-testid="git-widget"
       title="Git status"
     >
       <span>⎇ {info.branch ?? "detached"}</span>
-      {#if info.isWorktree}<span class="rounded bg-zinc-800 px-1 text-[9px] text-zinc-400">wt</span>{/if}
+      {#if info.isWorktree}<span class="rounded bg-surface-2 px-1 text-[9px] text-muted">wt</span>{/if}
       {#if info.insertions || info.deletions}
-        <span class="text-emerald-500">+{info.insertions}</span>
-        <span class="text-red-400">−{info.deletions}</span>
+        <span class="text-success">+{info.insertions}</span>
+        <span class="text-danger">−{info.deletions}</span>
       {/if}
       {#if info.changedCount}
-        <span class="rounded-full bg-zinc-800 px-1.5 text-[10px] text-zinc-300">{info.changedCount}</span>
+        <span class="rounded-full bg-surface-2 px-1.5 text-[10px] text-fg-soft">{info.changedCount}</span>
       {/if}
-      {#if info.ahead}<span class="text-zinc-500">↑{info.ahead}</span>{/if}
-      {#if info.behind}<span class="text-zinc-500">↓{info.behind}</span>{/if}
+      {#if info.ahead}<span class="text-faint">↑{info.ahead}</span>{/if}
+      {#if info.behind}<span class="text-faint">↓{info.behind}</span>{/if}
     </button>
 
     {#if open}
       <div
-        class="absolute top-full right-0 z-30 mt-1 flex max-h-[60vh] w-[480px] flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/50"
+        class="absolute top-full right-0 z-30 mt-1 flex max-h-[60vh] w-[480px] flex-col overflow-hidden rounded-xl border border-border bg-bg shadow-2xl shadow-black/50"
         data-testid="git-panel"
       >
-        <div class="flex items-center gap-2 border-b border-zinc-800/80 px-3 py-2">
+        <div class="flex items-center gap-2 border-b border-border/80 px-3 py-2">
           <input
-            class="min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+            class="min-w-0 flex-1 rounded-md border border-border bg-surface px-2 py-1 text-xs outline-none placeholder:text-fainter focus:border-border-focus"
             placeholder="Commit message (empty = AI-generated)"
             bind:value={commitMessage}
             onkeydown={(e) => e.key === "Enter" && commitPush()}
           />
           <button
-            class="shrink-0 rounded-md bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-900 transition-opacity disabled:opacity-40"
+            class="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-fg transition-opacity disabled:opacity-40"
             onclick={commitPush}
             disabled={committing || !info.changedCount}
             data-testid="commit-push"
@@ -111,26 +111,26 @@
           </button>
         </div>
         {#if lastResult}
-          <p class="border-b border-zinc-800/80 px-3 py-1.5 text-[11px] {lastResult.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}">
+          <p class="border-b border-border/80 px-3 py-1.5 text-[11px] {lastResult.startsWith('✓') ? 'text-success' : 'text-danger'}">
             {lastResult}
           </p>
         {/if}
         <div class="flex-1 overflow-y-auto py-1">
           {#each files as file (file.path)}
             <button
-              class="flex w-full items-center gap-2 px-3 py-1 text-left font-mono text-[11px] transition-colors hover:bg-zinc-900
-                {selectedFile === file.path ? 'bg-zinc-900' : ''}"
+              class="flex w-full items-center gap-2 px-3 py-1 text-left font-mono text-[11px] transition-colors hover:bg-surface
+                {selectedFile === file.path ? 'bg-surface' : ''}"
               onclick={() => showDiff(file.path)}
             >
               <span class={statusColor(file.status)}>{statusChar(file.status)}</span>
-              <span class="truncate text-zinc-300">{file.path}</span>
+              <span class="truncate text-fg-soft">{file.path}</span>
             </button>
             {#if selectedFile === file.path}
-              <pre class="max-h-64 overflow-auto border-y border-zinc-800/60 bg-zinc-900/40 px-3 py-2 font-mono text-[10px] leading-relaxed whitespace-pre">{#each diff.split("\n") as line, i (i)}<span class={line.startsWith("+") && !line.startsWith("+++") ? "text-emerald-400" : line.startsWith("-") && !line.startsWith("---") ? "text-red-400" : line.startsWith("@@") ? "text-sky-400" : "text-zinc-400"}>{line}
+              <pre class="max-h-64 overflow-auto border-y border-border/60 bg-surface/40 px-3 py-2 font-mono text-[10px] leading-relaxed whitespace-pre">{#each diff.split("\n") as line, i (i)}<span class={line.startsWith("+") && !line.startsWith("+++") ? "text-success" : line.startsWith("-") && !line.startsWith("---") ? "text-danger" : line.startsWith("@@") ? "text-accent" : "text-muted"}>{line}
 </span>{/each}</pre>
             {/if}
           {:else}
-            <p class="px-3 py-3 text-center text-xs text-zinc-600">Working tree clean</p>
+            <p class="px-3 py-3 text-center text-xs text-fainter">Working tree clean</p>
           {/each}
         </div>
       </div>

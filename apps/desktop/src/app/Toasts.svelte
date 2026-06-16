@@ -2,9 +2,9 @@
   import { extensionUi } from "../stores/extension-ui.svelte";
 
   const colors = {
-    info: "border-zinc-700 bg-zinc-900 text-zinc-200",
-    warning: "border-amber-700 bg-amber-950 text-amber-200",
-    error: "border-red-700 bg-red-950 text-red-200",
+    info: "border-border-strong bg-surface text-fg",
+    warning: "border-warning-border bg-warning-surface text-warning",
+    error: "border-danger-border bg-danger-surface text-danger",
   } as const;
 </script>
 

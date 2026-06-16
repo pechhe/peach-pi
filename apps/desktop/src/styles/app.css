@@ -32,6 +32,33 @@
   color-scheme: dark;
 }
 
+/* Light — white surfaces, light-gray base, indigo accent */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #f4f4f6;
+  --color-surface: #ffffff;
+  --color-surface-2: #e9e9ed;
+  --color-surface-3: #dcdce1;
+  --color-border: #e6e6ea;
+  --color-border-strong: #d6d6dc;
+  --color-border-focus: #6d5ef0;
+  --color-fg: #1f2024;
+  --color-fg-soft: #3a3b40;
+  --color-muted: #6b6c74;
+  --color-faint: #9a9ba3;
+  --color-fainter: #b6b7be;
+  --color-primary: #1f2024;
+  --color-primary-fg: #ffffff;
+  --color-accent: #6d5ef0;
+  --color-danger: #dc2626;
+  --color-danger-border: #f4c9c9;
+  --color-danger-surface: #fdeaea;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-warning-border: #f1d9a8;
+  --color-warning-surface: #fdf3e2;
+}
+
 /* Dracula (dark) */
 :root[data-theme="dracula"] {
   color-scheme: dark;

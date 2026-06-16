@@ -26,7 +26,7 @@ test("integrated terminal spawns a PTY in the project dir and echoes output", as
   await expect(window.getByTestId("terminal-pane")).toContainText("pty-42", { timeout: 10_000 });
 
   // Hide keeps the PTY; reopening replays the scrollback buffer.
-  await window.getByText("▾ hide").click();
+  await window.getByRole("button", { name: "hide" }).click();
   await expect(window.getByTestId("terminal-pane")).toBeHidden();
   await window.getByTestId("terminal-toggle").click();
   await expect(window.getByTestId("terminal-pane")).toContainText("pty-42", { timeout: 5_000 });

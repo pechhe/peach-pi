@@ -5,6 +5,7 @@ import { theme } from "./lib/theme.svelte";
 import "./styles/app.css";
 import "./styles/composer-device.css";
 import "./styles/composer-device-parts.css";
+import "./styles/composer-device-overrides.css";
 
 // Apply the persisted theme before mount so there's no flash of the default.
 theme.init();

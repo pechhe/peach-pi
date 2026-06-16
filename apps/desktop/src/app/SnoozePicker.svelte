@@ -17,12 +17,12 @@
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
 
 <div
-  class="absolute top-full right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
+  class="absolute top-full right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
   data-testid="snooze-picker"
 >
   {#each options as opt (opt.label)}
     <button
-      class="block w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+      class="block w-full px-3 py-1.5 text-left text-xs text-fg-soft hover:bg-surface-2"
       onclick={() => pick(opt.ms)}>{opt.label}</button
     >
   {/each}

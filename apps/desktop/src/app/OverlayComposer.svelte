@@ -47,14 +47,14 @@
 </script>
 
 <div
-  class="flex h-screen flex-col gap-2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 text-zinc-100"
+  class="flex h-screen flex-col gap-2 rounded-xl border border-border-strong bg-bg p-3 text-fg"
   data-testid="overlay-composer"
 >
-  <div class="flex items-center justify-between text-xs text-zinc-500" style="-webkit-app-region: drag">
+  <div class="flex items-center justify-between text-xs text-faint" style="-webkit-app-region: drag">
     <span class="truncate">
       {#if target}
         → {target.title || "Untitled thread"}
-        {#if target.status === "running"}<span class="text-emerald-400">·&nbsp;running</span>{/if}
+        {#if target.status === "running"}<span class="text-success">·&nbsp;running</span>{/if}
       {:else}
         → New chat
       {/if}
@@ -66,7 +66,7 @@
     bind:value={text}
     onkeydown={onKeydown}
     placeholder={target ? "Send to thread… (Enter)" : "Start a chat… (Enter)"}
-    class="flex-1 resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+    class="flex-1 resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none placeholder:text-fainter focus:border-border-focus"
     data-testid="overlay-input"
   ></textarea>
 </div>

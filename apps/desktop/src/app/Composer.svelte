@@ -10,6 +10,8 @@
     readImageAttachmentsFromPaths,
   } from "../lib/composer/attachments";
   import { playButtonClick, playKey, playRotary } from "../lib/sound/button-click-sound";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import X from "@lucide/svelte/icons/x";
   import { drafts, queues } from "../stores/composer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { caveman } from "../stores/caveman.svelte";
@@ -228,17 +230,17 @@
     <!-- Slash menu -->
     {#if slashMatches.length > 0}
       <div
-        class="absolute bottom-full mb-2 w-full overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
+        class="absolute bottom-full mb-2 w-full overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
         data-testid="slash-menu"
       >
         {#each slashMatches as cmd, i (cmd.name)}
           <button
             class="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-sm
-              {i === slashIndex ? 'bg-zinc-800' : ''} hover:bg-zinc-800"
+              {i === slashIndex ? 'bg-surface-2' : ''} hover:bg-surface-2"
             onclick={() => pickSlash(cmd)}
           >
-            <span class="font-mono text-zinc-200">/{cmd.name}</span>
-            <span class="truncate text-xs text-zinc-500">{cmd.description}</span>
+            <span class="font-mono text-fg">/{cmd.name}</span>
+            <span class="truncate text-xs text-faint">{cmd.description}</span>
           </button>
         {/each}
       </div>
@@ -248,8 +250,8 @@
     {#if queue.steering.length > 0 || queue.followUp.length > 0}
       <div class="mb-2 flex flex-col gap-1" data-testid="queued-shelf">
         {#each [...queue.steering.map((t) => ({ t, k: "steer" })), ...queue.followUp.map((t) => ({ t, k: "follow-up" }))] as q, i (i)}
-          <div class="flex items-center gap-2 rounded-lg border border-dashed border-zinc-700 px-3 py-1.5 text-xs text-zinc-400">
-            <span class="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase">{q.k}</span>
+          <div class="flex items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs text-muted">
+            <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">{q.k}</span>
             <span class="truncate">{q.t}</span>
           </div>
         {/each}
@@ -265,17 +267,17 @@
               <img
                 src={`data:${att.mimeType};base64,${att.data}`}
                 alt={att.name}
-                class="h-16 w-16 rounded-lg border border-zinc-700 object-cover"
+                class="h-16 w-16 rounded-lg border border-border-strong object-cover"
               />
             {:else}
-              <div class="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300">
-                <span class="font-mono">📄</span>
+              <div class="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg-soft">
+                <FileText size={13} />
                 <span class="max-w-40 truncate">{att.name}</span>
               </div>
             {/if}
             <button
-              class="absolute -top-1.5 -right-1.5 hidden size-4 items-center justify-center rounded-full bg-zinc-700 text-[10px] text-zinc-200 group-hover:flex hover:bg-red-500"
-              onclick={() => removeAttachment(att.id)}>✕</button
+              class="absolute -top-1.5 -right-1.5 hidden size-4 items-center justify-center rounded-full bg-surface-3 text-[10px] text-fg group-hover:flex hover:bg-danger"
+              onclick={() => removeAttachment(att.id)}><X size={10} /></button
             >
           </div>
         {/each}
@@ -297,7 +299,7 @@
       ondrop={onDrop}
     >
       <div class="composer__editor">
-        <div class="composer__screen {dragActive ? 'ring-2 ring-sky-400' : ''}">
+        <div class="composer__screen {dragActive ? 'ring-2 ring-accent' : ''}">
           <textarea
             bind:this={textareaEl}
             placeholder={running
@@ -365,7 +367,7 @@
             onRequestModels={() => sessionMetas.loadModels(thread.id)}
           />
 
-          {#if meta && meta.availableThinkingLevels.length > 1}
+          {#if meta && meta.availableThinkingLevels.length >= 1}
             <ReasoningDial
               level={meta.thinkingLevel}
               available={meta.availableThinkingLevels}

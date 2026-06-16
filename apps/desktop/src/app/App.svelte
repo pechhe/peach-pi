@@ -122,7 +122,7 @@
     {:else}
       <main class="flex flex-1 items-center justify-center" data-testid="boot-ok">
         <div class="titlebar-drag absolute inset-x-0 top-0 h-12"></div>
-        <p class="text-sm text-zinc-600">
+        <p class="text-sm text-fainter">
           {snapshot.current.projects.length} projects · {snapshot.current.threads.length} threads —
           select or create a thread
         </p>
@@ -140,7 +140,7 @@
     {/if}
   {:else}
     <main class="flex flex-1 items-center justify-center">
-      <p class="text-sm text-zinc-600">Loading…</p>
+      <p class="text-sm text-fainter">Loading…</p>
     </main>
   {/if}
 
