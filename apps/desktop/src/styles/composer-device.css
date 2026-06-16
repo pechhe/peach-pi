@@ -1,0 +1,750 @@
+/* ================================================================ */
+/* Skeuomorphic hardware composer — ported from peche-pi            */
+/* main.css (modular + cream + light brushed-metal variant).        */
+/* Flattened: only the light cream-metal device is reproduced,      */
+/* scoped to .composer-device (not :root) so it lives inside the    */
+/* dark app as a freestanding machined panel.                       */
+/* ================================================================ */
+
+.composer-device {
+  /* Chassis palette */
+  --crt-body-top: oklch(0.255 0.005 250);
+  --crt-body: oklch(0.21 0.005 250);
+  --crt-body-bottom: oklch(0.17 0.005 250);
+  --crt-ink: oklch(0.92 0.005 250);
+  --crt-ink-muted: oklch(0.62 0.005 250);
+  --crt-seg: 9px;
+  --crt-seg-gap: 3px;
+
+  /* Cream screen */
+  --cream-bg: oklch(0.955 0.018 92);
+  --cream-bg-hi: oklch(0.985 0.014 92);
+  --cream-bg-lo: oklch(0.925 0.02 90);
+  --cream-ink: oklch(0.34 0.012 250);
+  --cream-ink-muted: oklch(0.54 0.012 250);
+  --cream-caret: oklch(0.7 0.17 52);
+
+  /* Orange metal (send dial active) */
+  --crt-orange-metal-bg:
+    linear-gradient(180deg, oklch(1 0.05 76 / 0.28) 0%, oklch(1 0.05 76 / 0.1) 8%, transparent 22%),
+    radial-gradient(ellipse 70% 42% at 15% 14%, oklch(1 0.08 76 / 0.14), transparent 58%),
+    radial-gradient(ellipse 85% 48% at 88% 82%, oklch(0.42 0.17 45 / 0.12), transparent 70%),
+    linear-gradient(145deg, oklch(0.82 0.19 61) 0%, oklch(0.75 0.21 58) 32%, oklch(0.66 0.22 55) 72%, oklch(0.55 0.2 50) 100%);
+
+  position: relative;
+  padding: 0;
+  user-select: none;
+}
+
+/* ---------------- Chassis ---------------- */
+.composer-device .composer__surface {
+  position: relative;
+  padding: 12px 12px 10px;
+  border-radius: 14px;
+  isolation: isolate;
+  overflow: visible;
+  background:
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.42), oklch(0.9 0.003 250 / 0.1) 46%, oklch(0.64 0.003 250 / 0.09) 100%),
+    radial-gradient(ellipse 95% 76% at 24% 20%, oklch(1 0.002 250 / 0.13), transparent 64%),
+    radial-gradient(ellipse 90% 78% at 88% 82%, oklch(0.42 0.003 250 / 0.055), transparent 70%),
+    linear-gradient(180deg, var(--crt-body-top) 0%, var(--crt-body) 54%, var(--crt-body-bottom) 100%);
+  background-blend-mode: normal, soft-light, multiply, normal;
+  box-shadow:
+    inset 0 1px 0 oklch(1 0.002 250 / 0.88),
+    inset 0 3px 5px oklch(1 0.002 250 / 0.24),
+    inset 1px 0 0 oklch(1 0.002 250 / 0.5),
+    inset -1px 0 0 oklch(0.34 0.004 250 / 0.36),
+    0 0 0 0.5px oklch(0.92 0.002 250 / 0.78),
+    0 -0.5px 0 0.5px oklch(0.97 0.002 250 / 0.7),
+    0 1px 0 1px oklch(0.58 0.004 250 / 0.7),
+    0 2px 3px 1px oklch(0.22 0.004 250 / 0.6),
+    0 6px 14px -3px oklch(0 0 0 / 0.42),
+    0 16px 30px -12px oklch(0 0 0 / 0.6);
+}
+
+.composer-device .composer__surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: inherit;
+  opacity: 0.66;
+  background:
+    linear-gradient(90deg, oklch(1 0.002 250 / 0.34), transparent 9%, transparent 91%, oklch(0.3 0.004 250 / 0.12)),
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.36), transparent 11%, transparent 88%, oklch(0.3 0.004 250 / 0.16)),
+    radial-gradient(ellipse 130% 60% at 45% 0%, oklch(1 0.002 250 / 0.1), transparent 62%);
+}
+
+.composer-device .composer__editor,
+.composer-device .composer__footer-row {
+  position: relative;
+  z-index: 2;
+}
+
+/* ---------------- Cream screen ---------------- */
+.composer-device .composer__editor {
+  padding: 0;
+  overflow: visible;
+}
+
+.composer-device .composer__screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 118px;
+  border-radius: 14px;
+  padding: 14px 16px;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 120% 100% at 50% 0%, var(--cream-bg-hi), transparent 62%),
+    linear-gradient(180deg, var(--cream-bg) 0%, var(--cream-bg-lo) 100%);
+  box-shadow:
+    inset 0 5px 12px -3px oklch(0.48 0.024 82 / 0.36),
+    inset 0 2px 6px oklch(0.54 0.02 86 / 0.22),
+    inset 2px 0 7px -4px oklch(0.52 0.02 86 / 0.18),
+    inset -2px 0 7px -4px oklch(0.52 0.02 86 / 0.16),
+    inset 0 -2px 8px oklch(0.6 0.02 90 / 0.13),
+    inset 0 0 0 1px oklch(0.78 0.015 90 / 0.55),
+    0 1px 1px 0 oklch(1 0.002 250 / 0.9),
+    0 2px 4px 0 oklch(1 0.001 250 / 0.5),
+    0 5px 12px -3px oklch(0.42 0.004 250 / 0.32);
+}
+
+.composer-device .composer__screen textarea {
+  flex: 0 0 auto;
+  width: 100%;
+  max-height: 400px;
+  min-height: 24px;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  color: var(--cream-ink);
+  caret-color: var(--cream-caret);
+  caret-shape: bar;
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+
+.composer-device .composer__screen textarea::placeholder {
+  color: var(--cream-ink-muted);
+}
+
+/* ---------------- Context readout (in screen) ---------------- */
+.composer-device .composer__context {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 18px;
+  padding-bottom: 2px;
+  color: var(--cream-ink);
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.composer-device .composer__context-track {
+  position: relative;
+  height: 8px;
+  border-radius: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    oklch(0.42 0.012 250 / 0.2) 0 var(--crt-seg),
+    transparent var(--crt-seg) calc(var(--crt-seg) + var(--crt-seg-gap))
+  );
+}
+
+.composer-device .composer__context-fill {
+  height: 100%;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--cream-ink) 0 var(--crt-seg),
+    transparent var(--crt-seg) calc(var(--crt-seg) + var(--crt-seg-gap))
+  );
+  transition: width 160ms ease;
+}
+
+.composer-device .composer__context-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.composer-device .composer__context-compact {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  color: oklch(0.6 0.16 52);
+}
+.composer-device .composer__context-compact:hover {
+  color: oklch(0.7 0.18 52);
+}
+
+/* ---------------- Controls strip ---------------- */
+.composer-device .composer__footer-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 66px;
+  padding: 10px 10px 4px;
+}
+
+.composer-device .composer__controls {
+  grid-column: 1;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.composer-device .composer__actions {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+}
+
+/* Engraved section labels above clusters. */
+.composer-device .control-anchor {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+.composer-device .control-anchor[data-label]::before {
+  content: attr(data-label);
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: oklch(0.55 0.01 250);
+  line-height: 1;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ---------------- Metal keycap (shared recipe) ---------------- */
+.composer-device .device-key {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 134px;
+  height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  overflow: hidden;
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.16 0.005 250);
+  text-shadow: 0 1px 0 oklch(1 0.002 250 / 0.7);
+  background:
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.85) 0%, transparent 6%),
+    radial-gradient(ellipse 120% 82% at 50% 0%, oklch(1 0.002 250 / 0.32), transparent 60%),
+    repeating-linear-gradient(90deg, oklch(1 0.002 250 / 0.06) 0 1.5px, oklch(0.55 0.004 250 / 0.05) 1.5px 3px),
+    linear-gradient(180deg, oklch(0.92 0.004 250) 0%, oklch(0.8 0.004 250) 52%, oklch(0.7 0.004 250) 100%);
+  box-shadow:
+    inset 0 1.5px 0 oklch(1 0.002 250 / 0.9),
+    inset 0 -1.5px 1px oklch(0.42 0.004 250 / 0.55),
+    inset 0 0 0 1px oklch(0.6 0.004 250 / 0.4),
+    0 0 0 1px oklch(0.34 0.004 250 / 0.6),
+    0 2px 2px oklch(0 0 0 / 0.3),
+    0 5px 9px -2px oklch(0 0 0 / 0.32);
+  transition: transform 80ms ease, box-shadow 80ms ease, filter 120ms ease;
+}
+
+.composer-device .device-key:hover:not(:disabled) {
+  filter: brightness(1.03);
+}
+
+.composer-device .device-key:is(:active, .is-pressed):not(:disabled) {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 2px 5px oklch(0 0 0 / 0.4),
+    inset 0 1px 0 oklch(0.42 0.004 250 / 0.5),
+    inset 0 0 0 1px oklch(0.55 0.004 250 / 0.5),
+    0 1px 2px oklch(0 0 0 / 0.4);
+}
+
+.composer-device .device-key:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  filter: saturate(0.5);
+}
+
+/* ---------------- BUILD / PLAN mode switch ---------------- */
+.composer-device .mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.composer-device .mode-switch__label {
+  position: relative;
+  z-index: 2;
+  min-width: 44px;
+  text-align: center;
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.18 0.004 250);
+  transition: color 120ms ease, text-shadow 120ms ease;
+}
+
+.composer-device .mode-switch__label--active {
+  color: oklch(0.74 0.185 52);
+  text-shadow: 0 0 5px oklch(0.78 0.2 55 / 0.7), 0 0 12px oklch(0.78 0.2 55 / 0.35);
+}
+
+.composer-device .mode-switch__track {
+  position: relative;
+  z-index: 1;
+  width: 74px;
+  height: 34px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, oklch(0.43 0.004 250), oklch(0.62 0.004 250));
+  box-shadow:
+    inset 2px 2px 4px oklch(0 0 0 / 0.38),
+    inset -1px -1px 2px oklch(1 0.002 250 / 0.28);
+}
+
+.composer-device .mode-switch__thumb {
+  position: absolute;
+  top: -6px;
+  left: -5px;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  transition: transform 140ms ease;
+  background:
+    radial-gradient(circle at 50% 46%, oklch(1 0.002 250 / 0.5), transparent 46%),
+    conic-gradient(
+      from 0deg,
+      oklch(0.78 0.004 250) 0deg, oklch(0.6 0.004 250) 45deg,
+      oklch(0.8 0.004 250) 90deg, oklch(0.97 0.002 250) 135deg,
+      oklch(0.8 0.004 250) 180deg, oklch(0.6 0.004 250) 225deg,
+      oklch(0.8 0.004 250) 270deg, oklch(0.97 0.002 250) 315deg,
+      oklch(0.78 0.004 250) 360deg
+    );
+  box-shadow:
+    inset 0 1.5px 0 oklch(1 0.002 250 / 0.9),
+    inset 0 -1.5px 1px oklch(0.42 0.004 250 / 0.55),
+    inset 0 0 0 1px oklch(0.6 0.004 250 / 0.4),
+    0 0 0 1px oklch(0.34 0.004 250 / 0.6),
+    0 2px 2px oklch(0 0 0 / 0.3),
+    0 5px 9px -2px oklch(0 0 0 / 0.32);
+}
+
+.composer-device .mode-switch__thumb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse 70% 52% at 30% 24%, oklch(1 0.002 250 / 0.36), transparent 60%),
+    radial-gradient(ellipse 70% 52% at 72% 78%, oklch(1 0.002 250 / 0.28), transparent 60%),
+    repeating-conic-gradient(from 0deg, oklch(1 0.002 250 / 0.05) 0 1.3deg, oklch(0.42 0.004 250 / 0.045) 1.3deg 2.6deg);
+}
+
+.composer-device .mode-switch--plan .mode-switch__thumb {
+  transform: translateX(36px);
+}
+
+/* ---------------- MODEL slider ---------------- */
+.composer-device .model-slider {
+  position: relative;
+  width: 360px;
+  height: 80px;
+  cursor: default;
+}
+
+.composer-device .model-slider__rail {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 30px;
+  height: 12px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.16), transparent 40%),
+    linear-gradient(90deg, oklch(0.02 0.004 250), oklch(0.1 0.04 50) 46%, oklch(0.3 0.11 48) 50%, oklch(0.1 0.04 50) 54%, oklch(0.02 0.004 250));
+  box-shadow:
+    inset 0 1px 2px oklch(0 0 0 / 0.82),
+    inset 0 -1px 0 oklch(1 0.002 250 / 0.24),
+    0 0 0 1px oklch(0.12 0.004 250 / 0.8),
+    0 1px 0 oklch(1 0.002 250 / 0.34);
+}
+
+.composer-device .model-slider__glow,
+.composer-device .model-slider__thumb {
+  position: absolute;
+  left: calc(52px + (var(--slider-pos, 1) * 128px));
+  transform: translateX(-50%);
+  transition: left 460ms cubic-bezier(0.18, 0.9, 0.16, 1.08), filter 180ms ease;
+}
+
+.composer-device .model-slider__glow {
+  top: 32px;
+  width: 48px;
+  height: 8px;
+  border-radius: 999px;
+  background: oklch(0.72 0.19 52);
+  box-shadow: 0 0 8px oklch(0.74 0.2 55 / 0.62);
+}
+
+.composer-device .model-slider__thumb {
+  top: 25px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 44%, oklch(1 0.002 250 / 0.58), transparent 46%),
+    conic-gradient(from 0deg,
+      oklch(0.78 0.004 250) 0deg, oklch(0.6 0.004 250) 45deg,
+      oklch(0.8 0.004 250) 90deg, oklch(0.97 0.002 250) 135deg,
+      oklch(0.8 0.004 250) 180deg, oklch(0.6 0.004 250) 225deg,
+      oklch(0.8 0.004 250) 270deg, oklch(0.97 0.002 250) 315deg,
+      oklch(0.78 0.004 250) 360deg);
+  box-shadow:
+    inset 0 1.5px 0 oklch(1 0.002 250 / 0.94),
+    inset 0 -1.5px 1px oklch(0.34 0.004 250 / 0.62),
+    inset 0 0 0 1px oklch(0.64 0.004 250 / 0.48),
+    0 0 0 0.5px oklch(0.92 0.002 250 / 0.78),
+    0 1px 0 1px oklch(0.56 0.004 250 / 0.72),
+    0 2px 3px 1px oklch(0.18 0.004 250 / 0.62),
+    0 7px 14px -4px oklch(0 0 0 / 0.44);
+}
+
+.composer-device .model-slider__label {
+  position: absolute;
+  top: 22px;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 76px;
+  max-width: 76px;
+  height: 58px;
+  padding: 34px 0 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--crt-ink);
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1.08;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 oklch(1 0.002 250 / 0.52);
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.composer-device .model-slider__label:disabled {
+  cursor: default;
+  opacity: 0.36;
+}
+
+.composer-device .model-slider__label--prev {
+  left: 0;
+  text-align: left;
+  justify-content: flex-start;
+}
+.composer-device .model-slider__label--active {
+  left: 50%;
+  width: 92px;
+  max-width: 92px;
+  transform: translateX(-50%);
+  color: oklch(0.72 0.18 52);
+  text-shadow: 0 0 6px oklch(0.74 0.2 55 / 0.42);
+}
+.composer-device .model-slider__label--active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  width: 12px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+.composer-device .model-slider__label--next {
+  right: 34px;
+  text-align: right;
+  justify-content: flex-end;
+}
+.composer-device .model-slider__label--menu {
+  top: 46px;
+  right: 0;
+  width: 30px;
+  max-width: 30px;
+  height: auto;
+  padding: 0;
+  color: var(--crt-ink-muted);
+  font-size: 18px;
+  line-height: 0.8;
+  letter-spacing: 0;
+  text-align: center;
+  justify-content: center;
+}
+
+/* press feedback: nudge the thumb toward the pressed adjacent slot */
+.composer-device .model-slider:has(.model-slider__label--prev:active) .model-slider__thumb,
+.composer-device .model-slider:has(.model-slider__label--prev:active) .model-slider__glow {
+  filter: brightness(1.12);
+}
+.composer-device .model-slider:has(.model-slider__label--next:active) .model-slider__thumb,
+.composer-device .model-slider:has(.model-slider__label--next:active) .model-slider__glow {
+  filter: brightness(1.12);
+}
+
+/* ---------------- REASONING dial ---------------- */
+.composer-device .reasoning-dial {
+  --dial-size: 68px;
+  --panel-w: calc(var(--dial-size) * 2.45);
+  --panel-h: calc(var(--dial-size) * 1.62);
+  position: relative;
+  display: inline-block;
+  width: var(--panel-w);
+  height: var(--panel-h);
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.composer-device .reasoning-dial__face {
+  position: absolute;
+  inset: 0;
+}
+
+.composer-device .reasoning-dial__setting {
+  position: absolute;
+  left: var(--sx);
+  top: var(--sy);
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--crt-ink-muted);
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-shadow: 0 1px 0 oklch(1 0.002 250 / 0.32);
+}
+.composer-device .reasoning-dial__setting--right {
+  flex-direction: row-reverse;
+}
+
+.composer-device .reasoning-dial__light {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 36% 32%, oklch(0.82 0.01 250), oklch(0.18 0.005 250) 55%, oklch(0.04 0.005 250) 100%);
+  box-shadow: inset 0 0 0 1px oklch(0 0 0 / 0.62), 0 1px 0 oklch(1 0.002 250 / 0.34);
+}
+
+.composer-device .reasoning-dial__setting--active {
+  color: oklch(0.2 0.005 250);
+}
+.composer-device .reasoning-dial__setting--active .reasoning-dial__light {
+  background: radial-gradient(circle at 34% 28%, oklch(1 0.13 78), oklch(0.83 0.18 63) 38%, oklch(0.54 0.18 49) 72%, oklch(0.18 0.05 45) 100%);
+  box-shadow:
+    inset 0 0 0 1px oklch(0.42 0.11 45 / 0.72),
+    0 0 4px oklch(0.84 0.17 66 / 0.86),
+    0 0 10px oklch(0.82 0.18 60 / 0.42);
+}
+
+.composer-device .reasoning-dial__knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--dial-size);
+  height: var(--dial-size);
+  z-index: 1;
+  border-radius: 999px;
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+  background:
+    radial-gradient(circle at 50% 44%, oklch(1 0.002 250 / 0.56), transparent 46%),
+    conic-gradient(
+      from -14deg,
+      oklch(0.7 0.004 250) 0deg, oklch(0.94 0.003 250) 36deg,
+      oklch(0.64 0.004 250) 76deg, oklch(0.97 0.002 250) 118deg,
+      oklch(0.66 0.004 250) 168deg, oklch(0.45 0.004 250) 215deg,
+      oklch(0.82 0.004 250) 262deg, oklch(0.98 0.002 250) 312deg,
+      oklch(0.7 0.004 250) 360deg
+    );
+  box-shadow:
+    inset 0 1.5px 0 oklch(1 0.002 250 / 0.94),
+    inset 1px 0 0 oklch(1 0.002 250 / 0.45),
+    inset -1px 0 0 oklch(0.46 0.004 250 / 0.38),
+    inset 0 -1.5px 1px oklch(0.34 0.004 250 / 0.62),
+    inset 0 0 0 1px oklch(0.64 0.004 250 / 0.48),
+    0 0 0 0.5px oklch(0.92 0.002 250 / 0.78),
+    0 1px 0 1px oklch(0.56 0.004 250 / 0.72),
+    0 2px 3px 1px oklch(0.18 0.004 250 / 0.62),
+    0 7px 14px -4px oklch(0 0 0 / 0.44);
+}
+
+.composer-device .reasoning-dial__knob::before {
+  content: "";
+  position: absolute;
+  inset: 6%;
+  border-radius: inherit;
+  transform: rotate(var(--dial-angle, -125deg));
+  transition: transform 360ms cubic-bezier(0.2, 0.85, 0.2, 1);
+  background:
+    radial-gradient(ellipse 70% 50% at 30% 22%, oklch(1 0.002 250 / 0.34), transparent 62%),
+    radial-gradient(ellipse 62% 42% at 74% 78%, oklch(1 0.002 250 / 0.22), transparent 64%),
+    repeating-conic-gradient(from 0deg, oklch(1 0.002 250 / 0.055) 0 1.2deg, oklch(0.3 0.004 250 / 0.05) 1.2deg 2.5deg);
+}
+
+.composer-device .reasoning-dial__knob::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: calc(var(--dial-size) * 0.24);
+  border-radius: 999px;
+  background: linear-gradient(180deg, oklch(0.08 0.004 250 / 0.86), oklch(0.38 0.004 250 / 0.62));
+  box-shadow: 0 1px 0 oklch(1 0.002 250 / 0.34), 0 -1px 0 oklch(0 0 0 / 0.32);
+  transform: translate(-50%, -50%) rotate(var(--dial-angle, -125deg)) translateY(calc(var(--dial-size) * -0.28));
+  transform-origin: center;
+  transition: transform 360ms cubic-bezier(0.2, 0.85, 0.2, 1);
+}
+
+/* ---------------- SEND dial (orange-metal circle) ---------------- */
+.composer-device .send-dial {
+  position: relative;
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  overflow: hidden;
+  color: oklch(0.14 0.004 250);
+  background:
+    radial-gradient(circle at 50% 46%, oklch(1 0.002 250 / 0.5), transparent 46%),
+    conic-gradient(
+      from 0deg,
+      oklch(0.78 0.004 250) 0deg, oklch(0.6 0.004 250) 45deg,
+      oklch(0.8 0.004 250) 90deg, oklch(0.97 0.002 250) 135deg,
+      oklch(0.8 0.004 250) 180deg, oklch(0.6 0.004 250) 225deg,
+      oklch(0.8 0.004 250) 270deg, oklch(0.97 0.002 250) 315deg,
+      oklch(0.78 0.004 250) 360deg
+    ),
+    radial-gradient(circle at 50% 50%, oklch(0.82 0.004 250) 0 100%);
+  box-shadow:
+    inset 0 1.5px 0 oklch(1 0.002 250 / 0.9),
+    inset 0 -1.5px 1px oklch(0.42 0.004 250 / 0.55),
+    inset 0 0 0 1px oklch(0.6 0.004 250 / 0.4),
+    0 0 0 1px oklch(0.34 0.004 250 / 0.6),
+    0 2px 2px oklch(0 0 0 / 0.3),
+    0 5px 9px -2px oklch(0 0 0 / 0.32);
+  transition: transform 80ms ease, box-shadow 80ms ease, filter 120ms ease;
+}
+
+.composer-device .send-dial::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 52% at 30% 24%, oklch(1 0.002 250 / 0.36), transparent 60%),
+    radial-gradient(ellipse 70% 52% at 72% 78%, oklch(1 0.002 250 / 0.28), transparent 60%),
+    repeating-conic-gradient(from 0deg, oklch(1 0.002 250 / 0.05) 0 1.3deg, oklch(0.42 0.004 250 / 0.045) 1.3deg 2.6deg);
+}
+
+.composer-device .send-dial::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.composer-device .send-dial[data-has-input] {
+  color: oklch(0.74 0.185 52);
+}
+.composer-device .send-dial[data-has-input]::after {
+  background: radial-gradient(circle at 50% 58%, oklch(0.8 0.2 55 / 0.32), transparent 26%);
+}
+
+.composer-device .send-dial svg {
+  position: relative;
+  z-index: 2;
+  width: 27px;
+  height: 27px;
+  filter:
+    drop-shadow(0 1px 0 oklch(1 0.002 250 / 0.55))
+    drop-shadow(0 -0.5px 0.5px oklch(0.22 0.005 250 / 0.7));
+}
+.composer-device .send-dial[data-has-input] svg {
+  filter:
+    drop-shadow(0 1px 0 oklch(1 0.002 250 / 0.55))
+    drop-shadow(0 -0.5px 0.5px oklch(0.22 0.06 40 / 0.7))
+    drop-shadow(0 0 6px oklch(0.78 0.2 55 / 0.6));
+}
+
+.composer-device .send-dial:is(:active, .is-pressed):not(:disabled) {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 2px 5px oklch(0 0 0 / 0.4),
+    inset 0 1px 0 oklch(0.42 0.004 250 / 0.5),
+    inset 0 0 0 1px oklch(0.55 0.004 250 / 0.5),
+    0 1px 2px oklch(0 0 0 / 0.4);
+}
+
+.composer-device .send-dial:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Stop state: orange-metal alarm cap. */
+.composer-device .send-dial--stop {
+  background: var(--crt-orange-metal-bg);
+  color: oklch(0.18 0.05 50);
+}

@@ -11,6 +11,8 @@
   import { drafts, queues } from "../stores/composer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { api } from "../lib/ipc";
+  import ReasoningDial from "./composer/ReasoningDial.svelte";
+  import ModelSlider from "./composer/ModelSlider.svelte";
 
   let { thread }: { thread: Thread } = $props();
 
@@ -19,23 +21,21 @@
   const running = $derived(thread.status === "running");
   const meta = $derived(sessionMetas.for(thread.id));
 
-  let modelMenuOpen = $state(false);
-
   $effect(() => {
     sessionMetas.ensure(thread.id);
   });
 
-  async function openModelMenu(e: MouseEvent) {
-    e.stopPropagation();
-    modelMenuOpen = !modelMenuOpen;
-    if (modelMenuOpen) await sessionMetas.loadModels(thread.id);
-  }
-
   async function pickModel(provider: string, id: string) {
-    modelMenuOpen = false;
     playRotary();
     sessionMetas.set(await api.invoke("threads:setModel", thread.id, provider, id));
   }
+
+  const fmtTokens = (n: number | null | undefined): string => {
+    if (n == null) return "\u2014";
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+    return String(Math.round(n));
+  };
 
   async function cycleThinking() {
     if (!meta) return;
@@ -202,9 +202,7 @@
   }
 </script>
 
-<svelte:window onclick={() => (modelMenuOpen = false)} />
-
-<footer class="shrink-0 px-6 pb-5">
+<footer class="composer-device shrink-0 px-6 pb-5">
   <div class="relative mx-auto max-w-3xl">
     <!-- Slash menu -->
     {#if slashMatches.length > 0}
@@ -263,11 +261,11 @@
       </div>
     {/if}
 
-    <!-- Surface -->
+    <!-- Device chassis -->
     <div
-      class="rounded-2xl border bg-zinc-900/90 p-2 shadow-lg shadow-black/20 backdrop-blur transition-all duration-150 focus-within:border-zinc-500 focus-within:shadow-xl focus-within:shadow-black/30
-        {dragActive ? 'border-sky-500 bg-sky-500/5' : 'border-zinc-700/80'}
-        {draft.mode === 'plan' ? 'border-indigo-600/60' : ''}"
+      class="composer__surface"
+      role="region"
+      aria-label="Composer"
       ondragover={(e) => {
         if (hasFilesInDataTransfer(e.dataTransfer)) {
           e.preventDefault();
@@ -276,131 +274,104 @@
       }}
       ondragleave={() => (dragActive = false)}
       ondrop={onDrop}
-      role="region"
-      aria-label="Composer"
     >
-      <textarea
-        bind:this={textareaEl}
-        class="max-h-[400px] min-h-[2.5rem] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
-        placeholder={running
-          ? "Enter queues a steer · ⌘Enter steers · Esc stops"
-          : draft.mode === "plan"
-            ? "Plan something… (read-only exploration)"
-            : "Message… (Enter to send, / for commands)"}
-        value={draft.text}
-        oninput={(e) => drafts.update(thread.id, { text: e.currentTarget.value })}
-        onkeydown={onKeydown}
-        onpaste={onPaste}
-        data-testid="composer-input"
-        rows="1"
-      ></textarea>
+      <div class="composer__editor">
+        <div class="composer__screen {dragActive ? 'ring-2 ring-sky-400' : ''}">
+          <textarea
+            bind:this={textareaEl}
+            placeholder={running
+              ? "enter queues a steer · ⌘enter steers · esc stops"
+              : draft.mode === "plan"
+                ? "plan something…"
+                : " message the clanker"}
+            value={draft.text}
+            oninput={(e) => drafts.update(thread.id, { text: e.currentTarget.value })}
+            onkeydown={onKeydown}
+            onpaste={onPaste}
+            data-testid="composer-input"
+            rows="1"
+          ></textarea>
 
-      <!-- Footer row -->
-      <div class="flex items-center justify-between px-1 pt-1">
-        <button
-          class="relative flex h-6 w-24 items-center rounded-full border border-zinc-700 bg-zinc-950 text-[10px] font-semibold tracking-wide uppercase"
-          onclick={toggleMode}
-          data-testid="mode-toggle"
-          title="⌘B build · ⌘P plan"
-        >
-          <span
-            class="absolute top-0.5 h-5 w-11 rounded-full transition-transform duration-150
-              {draft.mode === 'plan'
-              ? 'translate-x-[2.9rem] bg-indigo-500/30'
-              : 'translate-x-0.5 bg-zinc-700'}"
-          ></span>
-          <span class="z-10 flex-1 text-center {draft.mode === 'build' ? 'text-zinc-100' : 'text-zinc-500'}">Build</span>
-          <span class="z-10 flex-1 text-center {draft.mode === 'plan' ? 'text-indigo-300' : 'text-zinc-500'}">Plan</span>
-        </button>
-
-        <div class="flex items-center gap-2">
-          <!-- Model selector -->
-          <div class="relative">
-            <button
-              class="max-w-44 truncate rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-              onclick={openModelMenu}
-              data-testid="model-selector"
-              title="Model"
-            >{meta?.model?.name ?? "model…"}</button>
-            {#if modelMenuOpen}
-              <div
-                class="absolute right-0 bottom-full z-30 mb-1 max-h-64 w-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
-                data-testid="model-menu"
-              >
-                {#each sessionMetas.models as m (`${m.provider}/${m.id}`)}
-                  <button
-                    class="flex w-full items-baseline gap-2 px-3 py-1 text-left text-xs hover:bg-zinc-800
-                      {meta?.model?.id === m.id && meta?.model?.provider === m.provider ? 'text-zinc-100' : 'text-zinc-400'}"
-                    onclick={() => pickModel(m.provider, m.id)}
-                  >
-                    <span class="truncate">{m.name}</span>
-                    <span class="ml-auto shrink-0 text-[10px] text-zinc-600">{m.provider}</span>
-                  </button>
-                {:else}
-                  <p class="px-3 py-2 text-xs text-zinc-600">Loading…</p>
-                {/each}
-              </div>
-            {/if}
-          </div>
-
-          <!-- Thinking level -->
-          {#if meta && meta.availableThinkingLevels.length > 1}
-            <button
-              class="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-              onclick={cycleThinking}
-              data-testid="thinking-selector"
-              title="Thinking level (click to cycle)"
-            >🧠 {meta.thinkingLevel}</button>
-          {/if}
-
-          <!-- Context usage -->
           {#if meta?.contextPercent != null}
-            <div
-              class="flex items-center gap-1"
-              title={`Context: ${meta.contextTokens?.toLocaleString() ?? "?"} / ${meta.contextWindow?.toLocaleString() ?? "?"} tokens`}
-              data-testid="context-usage"
-            >
-              <div class="h-1 w-12 overflow-hidden rounded-full bg-zinc-800">
-                <div
-                  class="h-full rounded-full {meta.contextPercent > 80
-                    ? 'bg-red-400'
-                    : meta.contextPercent > 60
-                      ? 'bg-amber-400'
-                      : 'bg-emerald-500'}"
-                  style="width: {Math.min(100, meta.contextPercent)}%"
-                ></div>
+            <div class="composer__context" data-testid="context-usage">
+              <div class="composer__context-track">
+                <div class="composer__context-fill" style="width: {Math.min(100, meta.contextPercent)}%"></div>
               </div>
-              <span class="text-[10px] text-zinc-600">{Math.round(meta.contextPercent)}%</span>
+              <span class="composer__context-label">
+                {fmtTokens(meta.contextTokens)} / {fmtTokens(meta.contextWindow)}
+                {#if meta.contextPercent > 30 && !running}
+                  <button
+                    class="composer__context-compact"
+                    onclick={() => api.invoke("threads:compact", thread.id)}
+                    data-testid="compact-button"
+                    title="Compact context (auto-compacts at 80%)"
+                  >Compact</button>
+                {/if}
+              </span>
             </div>
-            {#if meta.contextPercent > 30 && !running}
-              <button
-                class="rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-                onclick={() => api.invoke("threads:compact", thread.id)}
-                data-testid="compact-button"
-                title="Compact context (auto-compacts at 80%)"
-              >compact</button>
-            {/if}
+          {:else}
+            <div class="composer__context">
+              <div class="composer__context-track"></div>
+              <span class="composer__context-label">Context —</span>
+            </div>
           {/if}
+        </div>
+      </div>
 
-          <span class="text-[10px] text-zinc-600">
-            {running ? "Enter to queue" : "Enter to send"} · ⇧Enter newline
-          </span>
+      <!-- Controls strip -->
+      <div class="composer__footer-row">
+        <div class="composer__controls">
+          <!-- BUILD / PLAN mode switch -->
+          <button
+            class="mode-switch {draft.mode === 'plan' ? 'mode-switch--plan' : ''}"
+            onclick={toggleMode}
+            data-testid="mode-toggle"
+            title="⌘B build · ⌘P plan"
+          >
+            <span class="mode-switch__label {draft.mode === 'build' ? 'mode-switch__label--active' : ''}">Build</span>
+            <span class="mode-switch__track"><span class="mode-switch__thumb"></span></span>
+            <span class="mode-switch__label {draft.mode === 'plan' ? 'mode-switch__label--active' : ''}">Plan</span>
+          </button>
+
+          <ModelSlider
+            model={meta?.model ?? null}
+            models={sessionMetas.models}
+            onPick={pickModel}
+            onRequestModels={() => sessionMetas.loadModels(thread.id)}
+          />
+
+          {#if meta && meta.availableThinkingLevels.length > 1}
+            <ReasoningDial
+              level={meta.thinkingLevel}
+              available={meta.availableThinkingLevels}
+              onCycle={cycleThinking}
+            />
+          {/if}
+        </div>
+
+        <div class="composer__actions">
           {#if running && !draft.text.trim()}
             <button
-              class="rounded-lg bg-red-500/20 px-3 py-1.5 text-sm text-red-300 hover:bg-red-500/30"
+              class="send-dial send-dial--stop"
               onclick={() => api.invoke("threads:abort", thread.id)}
-              data-testid="abort">Stop</button
+              data-testid="abort"
+              title="Stop run"
+              aria-label="Stop run"
             >
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+            </button>
           {:else}
             <button
-              class="rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-30
-                {draft.mode === 'plan'
-                ? 'bg-indigo-500 text-white'
-                : 'bg-zinc-100 text-zinc-900'}"
+              class="send-dial"
               onclick={() => submit()}
               disabled={!draft.text.trim() && draft.attachments.length === 0}
-              data-testid="send">{running ? "Queue" : "Send"}</button
+              data-has-input={draft.text.trim() || draft.attachments.length > 0 ? "" : undefined}
+              data-testid="send"
+              title={running ? "Queue message" : "Send message"}
+              aria-label={running ? "Queue message" : "Send message"}
             >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+            </button>
           {/if}
         </div>
       </div>
