@@ -9,7 +9,7 @@
     readComposerAttachmentsFromFiles,
     readImageAttachmentsFromPaths,
   } from "../lib/composer/attachments";
-  import { playButtonClick, playKey, playRotary } from "../lib/sound/button-click-sound";
+  import { playButtonClick, playClick, playRotary } from "../lib/sound/button-click-sound";
   import FileText from "@lucide/svelte/icons/file-text";
   import X from "@lucide/svelte/icons/x";
   import { drafts, queues } from "../stores/composer.svelte";
@@ -32,8 +32,9 @@
   });
   void caveman.load();
 
+  // Caveman shares the heavier "clanky" click with the send button.
   function toggleCaveman() {
-    playKey("press");
+    playClick("down");
     void caveman.toggle(thread.id);
   }
 
@@ -185,8 +186,9 @@
     }
   }
 
+  // Build/Plan flip uses the subtle rotary click (like the dial and model slider).
   function toggleMode() {
-    playKey("press");
+    playRotary();
     drafts.update(thread.id, { mode: draft.mode === "build" ? "plan" : "build" });
   }
 
