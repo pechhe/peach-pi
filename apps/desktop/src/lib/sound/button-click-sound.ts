@@ -121,11 +121,27 @@ function getContext(): AudioContext | null {
   return context;
 }
 
+function dataUriToArrayBuffer(uri: string): ArrayBuffer {
+  const base64 = uri.slice(uri.indexOf(",") + 1);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
 async function fetchBuffer(ctx: AudioContext, url: string): Promise<AudioBuffer | undefined> {
   try {
-    const response = await fetch(url);
-    if (!response.ok) return undefined;
-    const data = await response.arrayBuffer();
+    // Samples are bundled as inline `data:` URIs. The app's CSP (default-src
+    // 'self') blocks fetch() of data: URIs (connect-src falls back to it), so
+    // decode the base64 payload directly instead of fetching it.
+    let data: ArrayBuffer;
+    if (url.startsWith("data:")) {
+      data = dataUriToArrayBuffer(url);
+    } else {
+      const response = await fetch(url);
+      if (!response.ok) return undefined;
+      data = await response.arrayBuffer();
+    }
     return await ctx.decodeAudioData(data);
   } catch {
     return undefined;
