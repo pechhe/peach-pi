@@ -44,6 +44,8 @@ export interface UiState {
   sidebarCollapsed: boolean;
   activeView: AppView;
   selectedThreadId: ThreadId | null;
+  /** Project IDs the user has collapsed in the sidebar. */
+  collapsedProjects: string[];
 }
 
 export type AppView =

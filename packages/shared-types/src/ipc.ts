@@ -71,6 +71,18 @@ export const ipcContracts = {
   "app:getCavemanState": invoke<[], CavemanState>(),
   /** Enable/disable caveman compression for future sessions. */
   "app:setCavemanEnabled": invoke<[enabled: boolean], CavemanState>(),
+  /** All auth-configured models (global, not session-scoped). */
+  "app:listModels": invoke<[], ModelInfo[]>(),
+  /** Read the configured "utility" model for background LLM tasks (titles/commits). */
+  "app:getUtilityModel": invoke<[], ModelInfo | null>(),
+  /** Persist the "utility" model choice. Pass null to clear (fall back to defaults). */
+  "app:setUtilityModel": invoke<[model: ModelInfo | null], ModelInfo | null>(),
+  /** Persist the sidebar width (pixels). */
+  "ui:setSidebarWidth": invoke<[width: number], void>((w) => {
+    if (typeof w !== "number" || !Number.isFinite(w)) {
+      throw new Error("width must be a finite number");
+    }
+  }),
 
   // projects
   "projects:add": invoke<[path: string], Project>((path) =>
@@ -81,6 +93,19 @@ export const ipcContracts = {
   ),
   /** Native folder picker; returns the added project or null if cancelled. */
   "projects:pick": invoke<[], Project | null>(),
+  /** Persist a new sidebar order (full ordered list of project IDs). */
+  "projects:reorder": invoke<[orderedIds: string[]], void>((ids) => {
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || id.length === 0)) {
+      throw new Error("orderedIds must be an array of non-empty strings");
+    }
+  }),
+  /** Collapse/expand a project's thread list in the sidebar. */
+  "projects:setCollapsed": invoke<[projectId: string, collapsed: boolean], void>(
+    (id, collapsed) => {
+      requireNonEmptyString(id, "projectId");
+      if (typeof collapsed !== "boolean") throw new Error("collapsed must be a boolean");
+    },
+  ),
 
   // threads
   "threads:create": invoke<[projectId: string, opts?: { worktree?: boolean }], Thread>((id) =>

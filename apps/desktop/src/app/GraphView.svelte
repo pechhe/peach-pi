@@ -1,11 +1,9 @@
 <script lang="ts">
-  import type { GraphifyStatus, Project } from "@peach-pi/shared-types";
+  import type { GraphifyStatus } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
 
-  let { projects }: { projects: Project[] } = $props();
+  let { projectId }: { projectId: string | null } = $props();
 
-  let selectedId = $state<string>("");
-  const projectId = $derived(selectedId || (projects[0]?.id ?? ""));
   let status = $state<GraphifyStatus | null>(null);
   let report = $state<string | null>(null);
   let working = $state<"build" | "update" | null>(null);
@@ -41,25 +39,14 @@
 </script>
 
 <main class="flex h-full flex-1 flex-col" data-testid="graph-view">
-  <header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-6">
+  <header class="titlebar-drag flex h-12 shrink-0 items-center px-6">
     <h1 class="text-sm font-medium text-fg-soft">Knowledge graph</h1>
-    <select
-      class="rounded-lg border border-border-strong bg-surface px-2 py-1 text-xs text-fg-soft outline-none"
-      bind:value={
-        () => projectId,
-        (v) => (selectedId = v)
-      }
-    >
-      {#each projects as p (p.id)}
-        <option value={p.id}>{p.name}</option>
-      {/each}
-    </select>
   </header>
 
   <div class="flex-1 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex max-w-3xl flex-col gap-4">
       {#if !projectId}
-        <p class="mt-12 text-center text-sm text-fainter">Add a project first.</p>
+        <p class="mt-12 text-center text-sm text-fainter">No project for this thread.</p>
       {:else if status}
         <div class="rounded-xl border border-border bg-surface/50 p-4">
           <div class="flex items-center justify-between">

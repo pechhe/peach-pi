@@ -80,12 +80,17 @@ async function boot(): Promise<void> {
       });
       note.show();
     },
+    () => appService.getUtilityModel(),
   );
   const automationService = new AutomationService(db, threadService, () =>
     emit("event:snapshot", appService.snapshot()),
   );
   const terminalService = new TerminalService(db, emit);
-  const gitService = new GitService(db, path.join(app.getPath("userData"), "worktrees"));
+  const gitService = new GitService(
+    db,
+    path.join(app.getPath("userData"), "worktrees"),
+    () => appService.getUtilityModel(),
+  );
   const subagentService = new SubagentService(db);
   const graphifyService = new GraphifyService(db);
   setupSubagentEnvironment(app.getPath("userData"));
@@ -104,9 +109,16 @@ async function boot(): Promise<void> {
     "app:setSelectedThread": (id) => appService.setSelectedThread(id),
     "app:getCavemanState": () => getCavemanState(),
     "app:setCavemanEnabled": (enabled) => setCavemanEnabled(enabled),
+    "app:listModels": () => appService.listModels(),
+    "app:getUtilityModel": () => appService.getUtilityModel(),
+    "app:setUtilityModel": (model) => appService.setUtilityModel(model),
+    "ui:setSidebarWidth": (width) => appService.setSidebarWidth(width),
     "projects:add": (p) => appService.addProject(p),
     "projects:remove": (id) => appService.removeProject(id),
     "projects:pick": () => pickProject(),
+    "projects:reorder": (orderedIds) => appService.reorderProjects(orderedIds),
+    "projects:setCollapsed": (projectId, collapsed) =>
+      appService.setProjectCollapsed(projectId, collapsed),
     "threads:create": async (projectId, opts) => {
       const worktreeDir = opts?.worktree ? await gitService.createWorktree(projectId) : undefined;
       return threadService.createThread(projectId, worktreeDir);

@@ -1,9 +1,10 @@
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
-import type { AppSnapshot, Project, UiState } from "@peach-pi/shared-types";
+import type { AppSnapshot, ModelInfo, Project, UiState } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import {
   AutomationRepo,
+  UTILITY_MODEL_KV_KEY,
   defaultUiState,
   KvRepo,
   ProjectRepo,
@@ -31,7 +32,7 @@ export class AppService {
   }
 
   start(): void {
-    // Auto-return snoozed threads to active (60s poll, cheap).
+    // Auto-return snoozed threads to active (60s poll, utility).
     this.snoozeTimer = setInterval(() => this.wakeExpiredSnoozes(), 60_000);
     this.wakeExpiredSnoozes();
   }
@@ -45,8 +46,19 @@ export class AppService {
       projects: this.projects.all(),
       threads: this.threads.all(),
       automations: this.automations.all(),
-      ui: this.kv.get<UiState>(UI_STATE_KEY) ?? defaultUiState,
+      ui: this.loadUiState(),
     };
+  }
+
+  /** Merge persisted UiState over defaults so newly-added fields (like
+   *  collapsedProjects) always have a value, even for older state blobs. */
+  private loadUiState(): UiState {
+    const persisted = this.kv.get<Partial<UiState>>(UI_STATE_KEY) ?? {};
+    return { ...defaultUiState, ...persisted } as UiState;
+  }
+
+  private saveUiState(patch: Partial<UiState>): void {
+    this.kv.set(UI_STATE_KEY, { ...this.loadUiState(), ...patch });
   }
 
   addProject(path: string): Project {
@@ -58,12 +70,36 @@ export class AppService {
 
   removeProject(id: string): void {
     this.projects.remove(id);
+    this.saveUiState({
+      collapsedProjects: this.loadUiState().collapsedProjects.filter((cid) => cid !== id),
+    });
+    this.publish();
+  }
+
+  /** Persist a new sidebar order (full ordered list of project IDs). */
+  reorderProjects(orderedIds: string[]): void {
+    this.projects.reorder(orderedIds);
+    this.publish();
+  }
+
+  /** Collapse/expand a project's thread list in the sidebar. */
+  setProjectCollapsed(projectId: string, collapsed: boolean): void {
+    const collapsedProjects = new Set(this.loadUiState().collapsedProjects);
+    if (collapsed) collapsedProjects.add(projectId);
+    else collapsedProjects.delete(projectId);
+    this.saveUiState({ collapsedProjects: [...collapsedProjects] });
+    this.publish();
+  }
+
+  /** Persist the sidebar width (clamped to a sane range). */
+  setSidebarWidth(width: number): void {
+    this.saveUiState({ sidebarWidth: Math.round(Math.min(560, Math.max(200, width))) });
     this.publish();
   }
 
   setSelectedThread(threadId: string | null): void {
-    const ui = this.kv.get<UiState>(UI_STATE_KEY) ?? defaultUiState;
-    this.kv.set(UI_STATE_KEY, { ...ui, selectedThreadId: threadId });
+    this.saveUiState({ selectedThreadId: threadId });
+    if (threadId) this.threads.markSeen(threadId);
     this.publish();
   }
 
@@ -85,6 +121,22 @@ export class AppService {
   unmarkToTest(threadId: string): void {
     this.threads.setToTest(threadId, null, null);
     this.publish();
+  }
+
+  /** All auth-configured models (global). Lazy import keeps pi SDK out of boot path. */
+  async listModels(): Promise<ModelInfo[]> {
+    const { listAvailableModels } = await import("@peach-pi/pi-client");
+    return listAvailableModels();
+  }
+
+  getUtilityModel(): ModelInfo | null {
+    return this.kv.get<ModelInfo>(UTILITY_MODEL_KV_KEY);
+  }
+
+  setUtilityModel(model: ModelInfo | null): ModelInfo | null {
+    if (model) this.kv.set(UTILITY_MODEL_KV_KEY, model);
+    else this.kv.set(UTILITY_MODEL_KV_KEY, null);
+    return this.getUtilityModel();
   }
 
   private wakeExpiredSnoozes(): void {

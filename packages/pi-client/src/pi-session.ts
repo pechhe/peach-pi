@@ -17,6 +17,7 @@ import type {
 } from "@peach-pi/shared-types";
 import { TranscriptRecorder, type RecorderEvent } from "./transcript-recorder.ts";
 import { createUiBridge, type UiBridgeCallbacks } from "./extension-ui-bridge.ts";
+import { scopeModels } from "./scope-models.ts";
 
 export interface PiSessionCallbacks {
   onOps(ops: TranscriptOp[]): void;
@@ -59,6 +60,8 @@ export class PiSession {
   private extensionsResult: LoadExtensionsResult | null = null;
   private allToolNames: string[];
   private toolMode: ToolMode = "all";
+  /** Stable id of the in-flight compaction card, so start→end update one item. */
+  private activeCompactionId: string | null = null;
 
   private constructor(
     session: AgentSession,
@@ -79,27 +82,34 @@ export class PiSession {
         this.maybeAutoCompact();
       }
       if (event.type === "compaction_start") {
+        this.activeCompactionId = `compaction-${Date.now()}`;
         this.callbacks.onOps([
           {
             op: "upsert",
             item: {
-              id: `compaction-${Date.now()}`,
-              kind: "notice",
-              text: `Compacting context (${event.reason})…`,
+              id: this.activeCompactionId,
+              kind: "compaction",
+              running: true,
+              reason: event.reason,
             },
           },
         ]);
       }
       if (event.type === "compaction_end") {
+        const id = this.activeCompactionId ?? `compaction-${Date.now()}`;
+        this.activeCompactionId = null;
         this.callbacks.onOps([
           {
             op: "upsert",
             item: {
-              id: `compaction-end-${Date.now()}`,
-              kind: "notice",
-              text: event.aborted
-                ? "Compaction aborted."
-                : (event.errorMessage ?? "Context compacted."),
+              id,
+              kind: "compaction",
+              running: false,
+              reason: event.reason,
+              summary: event.result?.summary,
+              tokensBefore: event.result?.tokensBefore,
+              aborted: event.aborted,
+              error: event.errorMessage,
             },
           },
         ]);
@@ -186,9 +196,10 @@ export class PiSession {
   }
 
   listModels(): ModelInfo[] {
-    return this.session.modelRegistry
-      .getAvailable()
-      .map((m) => ({ provider: m.provider, id: m.id, name: m.name }));
+    const available = this.session.modelRegistry.getAvailable();
+    const enabled = this.session.settingsManager.getEnabledModels();
+    const scoped = enabled && enabled.length > 0 ? scopeModels(available, enabled) : available;
+    return scoped.map((m) => ({ provider: m.provider, id: m.id, name: m.name }));
   }
 
   async setModel(provider: string, modelId: string): Promise<void> {

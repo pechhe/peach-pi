@@ -14,7 +14,9 @@ export async function launchApp(): Promise<ElectronApplication> {
   if (!existsSync(packagedBinary)) {
     throw new Error(`Packaged app missing — run \`pnpm package\` first (${packagedBinary})`);
   }
-  const userData = mkdtempSync(path.join(tmpdir(), "peach-pi-test-"));
+  // Space in the dir name mirrors production ("~/Library/Application Support/
+  // Peach Pi") so path-quoting bugs surface in tests instead of only at runtime.
+  const userData = mkdtempSync(path.join(tmpdir(), "peach pi-test-"));
   return _electron.launch({
     executablePath: packagedBinary,
     args: [`--user-data-dir=${userData}`],

@@ -32,6 +32,28 @@ test("user prompt + streamed assistant text", () => {
   assert.deepEqual(r.transcript(), view);
 });
 
+test("user prompt carries image attachments", () => {
+  const r = new TranscriptRecorder();
+  const view = run(r, [
+    {
+      type: "message_start",
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "look" },
+          { type: "image", mimeType: "image/png", data: "AAAA" },
+        ],
+      },
+    },
+  ]);
+  assert.deepEqual(view[0], {
+    id: "u0",
+    kind: "user",
+    text: "look",
+    images: [{ mimeType: "image/png", data: "AAAA" }],
+  });
+});
+
 test("tool execution lifecycle", () => {
   const r = new TranscriptRecorder();
   const view = run(r, [

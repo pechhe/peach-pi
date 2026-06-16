@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { AppView } from "@peach-pi/shared-types";
+  import { consumeAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
   import { snapshot } from "../stores/snapshot.svelte";
   import { transcripts } from "../stores/transcripts.svelte";
@@ -11,6 +12,8 @@
   import { playDoneSound } from "../lib/sound/done-sound";
   import Sidebar from "./Sidebar.svelte";
   import ThreadView from "./ThreadView.svelte";
+  import TerminalPane from "./TerminalPane.svelte";
+  import { terminal } from "../stores/terminal.svelte";
   import TestingView from "./TestingView.svelte";
   import SearchOverlay from "./SearchOverlay.svelte";
   import SettingsView from "./SettingsView.svelte";
@@ -20,6 +23,7 @@
   import AgentsView from "./AgentsView.svelte";
   import GraphView from "./GraphView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
+  import ImageLightbox from "./ImageLightbox.svelte";
   import Toasts from "./Toasts.svelte";
   import { Agentation } from "sv-agentation";
   const agentationProps = import.meta.env.DEV
@@ -29,6 +33,38 @@
   let selectedThreadId = $state<string | null>(null);
   let view = $state<AppView>("thread");
   let searchOpen = $state(false);
+
+  // Sidebar width: seeded once from the persisted snapshot, then owned locally.
+  // (Re-syncing on every snapshot would revert the drag, since the persisted
+  //  value only catches up a tick after pointerup.)
+  let sidebarWidth = $state(280);
+  let resizing = $state(false);
+  let widthSeeded = false;
+  $effect(() => {
+    if (widthSeeded) return;
+    const w = snapshot.current?.ui.sidebarWidth;
+    if (typeof w === "number") {
+      sidebarWidth = w;
+      widthSeeded = true;
+    }
+  });
+  function startSidebarResize(e: PointerEvent) {
+    e.preventDefault();
+    resizing = true;
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const move = (ev: PointerEvent) => {
+      sidebarWidth = Math.min(560, Math.max(200, startW + (ev.clientX - startX)));
+    };
+    const up = () => {
+      resizing = false;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      void api.invoke("ui:setSidebarWidth", sidebarWidth);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
 
   const selectedThread = $derived(
     snapshot.current?.threads.find((t) => t.id === selectedThreadId) ?? null,
@@ -40,15 +76,53 @@
     const threads = snapshot.current?.threads ?? [];
     for (const t of threads) {
       const prev = lastStatuses.get(t.id);
-      if (prev === "running" && t.status === "idle") playDoneSound();
+      if (prev === "running" && t.status === "idle" && !consumeAborted(t.id)) playDoneSound();
       lastStatuses.set(t.id, t.status);
     }
   });
 
+  // ── Navigation history (⌘[ back · ⌘] forward) ───────────────────────
+  type NavEntry = { view: AppView; threadId: string | null };
+  let navHistory = $state<NavEntry[]>([]);
+  let navIndex = $state(-1);
+
+  function applyNav(entry: NavEntry) {
+    view = entry.view;
+    selectedThreadId = entry.threadId;
+    if (entry.threadId) void api.invoke("app:setSelectedThread", entry.threadId); // overlay prompt target
+  }
+  function pushNav(entry: NavEntry) {
+    const cur = navHistory[navIndex];
+    if (cur && cur.view === entry.view && cur.threadId === entry.threadId) return;
+    navHistory = [...navHistory.slice(0, navIndex + 1), entry];
+    navIndex = navHistory.length - 1;
+    applyNav(entry);
+  }
+  function goBack() {
+    if (navIndex <= 0) return;
+    navIndex -= 1;
+    applyNav(navHistory[navIndex]!);
+  }
+  function goForward() {
+    if (navIndex >= navHistory.length - 1) return;
+    navIndex += 1;
+    applyNav(navHistory[navIndex]!);
+  }
+
   function selectThread(id: string) {
-    selectedThreadId = id;
-    view = "thread";
-    void api.invoke("app:setSelectedThread", id); // overlay prompt target
+    pushNav({ view: "thread", threadId: id });
+  }
+  function openView(v: AppView) {
+    pushNav({ view: v, threadId: selectedThreadId });
+  }
+
+  // ⌘N starts a new thread in the current project (a new chat if none selected).
+  async function newThreadForCurrentProject() {
+    const projectId = selectedThread?.projectId ?? null;
+    const thread = projectId
+      ? await api.invoke("threads:create", projectId)
+      : await api.invoke("threads:createChat");
+    selectThread(thread.id);
   }
 
   // Notification click in main → jump to thread.
@@ -60,11 +134,40 @@
       searchOpen = !searchOpen;
       return;
     }
+    // ⌘, opens settings (macOS convention; preventDefault keeps the comma out of inputs).
+    if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+      e.preventDefault();
+      openView("settings");
+      return;
+    }
+    // ⌘[ / ⌘] navigate back / forward through visited views & threads.
+    if ((e.metaKey || e.ctrlKey) && e.key === "[") {
+      e.preventDefault();
+      goBack();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === "]") {
+      e.preventDefault();
+      goForward();
+      return;
+    }
+    // ⌘N starts a new thread in the current project (or a new chat if none).
+    if ((e.metaKey || e.ctrlKey) && e.key === "n") {
+      e.preventDefault();
+      void newThreadForCurrentProject();
+      return;
+    }
+    // ⌘J toggles the terminal pane for the selected thread.
+    if ((e.metaKey || e.ctrlKey) && e.key === "j") {
+      e.preventDefault();
+      terminal.toggle();
+      return;
+    }
     // Shift+digit shortcuts only outside inputs.
     const target = e.target as HTMLElement;
     if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") return;
     if (e.shiftKey && e.key === "^") {
-      view = "testing";
+      openView("testing");
     }
   }
 
@@ -80,19 +183,37 @@
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
-<div class="flex h-full">
+<div class="relative flex h-full">
   {#if snapshot.current}
     <Sidebar
+      width={sidebarWidth}
       projects={snapshot.current.projects}
       threads={snapshot.current.threads}
+      collapsedProjects={snapshot.current.ui.collapsedProjects}
       {selectedThreadId}
       activeView={view}
       onSelect={selectThread}
-      onOpenView={(v) => (view = v)}
+      onOpenView={openView}
       onOpenSearch={() => (searchOpen = true)}
     />
+    <!-- Drag handle straddling the sidebar/content seam (no layout footprint). -->
+    <div
+      class="group absolute inset-y-0 z-20 w-1.5 cursor-col-resize"
+      style="left: {sidebarWidth - 3}px"
+      onpointerdown={startSidebarResize}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+    >
+      <div
+        class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors {resizing
+          ? 'bg-border-focus'
+          : 'bg-transparent group-hover:bg-border-strong'}"
+      ></div>
+    </div>
+    <div class="flex min-w-0 flex-1 flex-col">
     {#key view === "thread" ? `thread:${selectedThreadId}` : view}
-    <div class="view-enter flex min-w-0 flex-1">
+    <div class="view-enter flex min-h-0 flex-1">
     {#if view === "settings"}
       <SettingsView />
     {:else if view === "skills"}
@@ -114,7 +235,7 @@
     {:else if view === "agents"}
       <AgentsView projects={snapshot.current.projects} />
     {:else if view === "graph"}
-      <GraphView projects={snapshot.current.projects} />
+      <GraphView projectId={selectedThread?.projectId ?? null} />
     {:else if view === "testing"}
       <TestingView
         projects={snapshot.current.projects}
@@ -122,7 +243,7 @@
         onSelect={selectThread}
       />
     {:else if selectedThread}
-      <ThreadView thread={selectedThread} />
+      <ThreadView thread={selectedThread} onOpenGraph={() => openView("graph")} />
     {:else}
       <main class="flex flex-1 items-center justify-center" data-testid="boot-ok">
         <div class="titlebar-drag absolute inset-x-0 top-0 h-12"></div>
@@ -134,6 +255,10 @@
     {/if}
     </div>
     {/key}
+    {#if terminal.visible && selectedThread}
+      <TerminalPane threadId={selectedThread.id} onClose={() => terminal.hide()} />
+    {/if}
+    </div>
     {#if searchOpen}
       <SearchOverlay
         projects={snapshot.current.projects}
@@ -151,6 +276,7 @@
   {#if extensionUi.dialogs[0]}
     <ExtensionDialog request={extensionUi.dialogs[0]} />
   {/if}
+  <ImageLightbox />
   <Toasts />
 </div>
 

@@ -38,6 +38,8 @@ export class ThreadService {
   private flushTimer: NodeJS.Timeout | null = null;
   /** Pending extension dialog resolvers keyed by requestId. */
   private pendingDialogs = new Map<string, (value: string | boolean | undefined) => void>();
+  /** Reads the persisted utility-model selection (titles/commits); null = defaults. */
+  private getUtilityModel: () => ModelInfo | null;
 
   constructor(
     db: AppDb,
@@ -45,6 +47,7 @@ export class ThreadService {
     onThreadsChanged: () => void,
     chatsDir: string,
     onRunIdle?: (thread: Thread) => void,
+    getUtilityModel?: () => ModelInfo | null,
   ) {
     this.threads = new ThreadRepo(db);
     this.projects = new ProjectRepo(db);
@@ -52,6 +55,7 @@ export class ThreadService {
     this.onThreadsChanged = onThreadsChanged;
     this.chatsDir = chatsDir;
     this.onRunIdle = onRunIdle;
+    this.getUtilityModel = getUtilityModel ?? (() => null);
   }
 
   async createThread(projectId: string, worktreeDir?: string): Promise<Thread> {
@@ -86,8 +90,11 @@ export class ThreadService {
     const session = await this.sessionFor(threadId);
     const thread = this.threads.get(threadId)!;
     if (thread.title === "New thread" || thread.title === "New chat") {
+      // Instant truncated placeholder so the UI feels snappy, then an async
+      // LLM title overwrites it (only if still a placeholder).
       this.threads.setTitle(threadId, text.length > 60 ? `${text.slice(0, 60)}…` : text);
       this.onThreadsChanged();
+      void this.generateTitle(threadId, text);
     }
     // Fire and forget: resolution = run complete; status flows via events.
     void session.prompt(text, images, toolMode).catch((err) => {
@@ -99,6 +106,21 @@ export class ThreadService {
       ]);
       this.setStatus(threadId, "failed");
     });
+  }
+
+  /** Async LLM title; overwrites the placeholder only if untouched since. */
+  private async generateTitle(threadId: string, firstPrompt: string): Promise<void> {
+    const placeholder = this.threads.get(threadId)?.title;
+    if (!placeholder) return;
+    const config = this.getUtilityModel();
+    const { generateThreadTitle } = await import("@peach-pi/pi-client");
+    const title = await generateThreadTitle(firstPrompt, config);
+    if (!title) return;
+    // Only overwrite if the user hasn't manually renamed in the meantime.
+    if (this.threads.get(threadId)?.title === placeholder) {
+      this.threads.setTitle(threadId, title);
+      this.onThreadsChanged();
+    }
   }
 
   async steer(threadId: string, text: string): Promise<void> {
@@ -235,7 +257,7 @@ export class ThreadService {
       cwd,
       {
         onOps: (ops) => this.queueOps(threadId, ops),
-        onRunningChange: (running) => this.setStatus(threadId, running ? "running" : "idle"),
+        onRunningChange: (running) => this.setStatus(threadId, running ? "running" : "completed"),
         onQueueChange: (steering, followUp) =>
           this.emit("event:queue", { threadId, steering, followUp }),
         onMetaChange: () => {
@@ -260,8 +282,15 @@ export class ThreadService {
               placeholder: req.placeholder,
             });
           }),
-        onExtensionNotify: (message, level) =>
-          this.emit("event:notice", { threadId, message, level }),
+        onExtensionNotify: (message, level) => {
+          // Cymbal nudges are agent-internal guidance (also injected as a
+          // hidden conversation message), so don't surface them as toasts.
+          if (message.startsWith("Cymbal suggests:")) return;
+          // Smart auto-compact status surfaces as an inline compaction card
+          // (driven by compaction_start/end), so suppress its toasts.
+          if (message.startsWith("Smart auto-compact")) return;
+          this.emit("event:notice", { threadId, message, level });
+        },
         onExtensionStatus: (key, text) =>
           this.emit("event:extensionStatus", { threadId, key, text }),
         onExtensionWidget: (key, lines) =>
@@ -279,7 +308,7 @@ export class ThreadService {
   private setStatus(threadId: string, status: Thread["status"]): void {
     this.threads.setStatus(threadId, status);
     this.onThreadsChanged();
-    if (status === "idle" && this.onRunIdle) {
+    if (status === "completed" && this.onRunIdle) {
       const thread = this.threads.get(threadId);
       if (thread) this.onRunIdle(thread);
     }

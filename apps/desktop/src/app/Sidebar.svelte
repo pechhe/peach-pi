@@ -1,14 +1,15 @@
 <script lang="ts">
   import type { AppView, Project, Thread } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
+  import { extensionUi } from "../stores/extension-ui.svelte";
   import { playButtonSecondary } from "../lib/sound/button-click-sound";
   import SnoozePicker from "./SnoozePicker.svelte";
+  import BrailleSpinner from "./BrailleSpinner.svelte";
   import Search from "@lucide/svelte/icons/search";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import Bot from "@lucide/svelte/icons/bot";
-  import Workflow from "@lucide/svelte/icons/workflow";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import Settings from "@lucide/svelte/icons/settings";
@@ -23,18 +24,22 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
   let {
+    width = 280,
     projects,
     threads,
     selectedThreadId,
     activeView,
+    collapsedProjects = [],
     onSelect,
     onOpenView,
     onOpenSearch,
   }: {
+    width?: number;
     projects: Project[];
     threads: Thread[];
     selectedThreadId: string | null;
     activeView: AppView;
+    collapsedProjects?: string[];
     onSelect: (threadId: string) => void;
     onOpenView: (view: AppView) => void;
     onOpenSearch: () => void;
@@ -42,6 +47,66 @@
 
   let expanded = $state<Record<string, boolean>>({});
   let snoozePickerFor = $state<string | null>(null);
+
+  // Sidebar drag-reorder of projects (native HTML5 DnD).
+  let draggedId = $state<string | null>(null);
+  let dragOverId = $state<string | null>(null);
+
+  function isCollapsed(projectId: string): boolean {
+    return collapsedProjects.includes(projectId);
+  }
+  function toggleCollapse(project: Project) {
+    api.invoke("projects:setCollapsed", project.id, !isCollapsed(project.id));
+  }
+  function onProjectDragStart(project: Project, e: DragEvent) {
+    draggedId = project.id;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", project.id);
+    }
+  }
+  function onProjectDragOver(project: Project, e: DragEvent) {
+    if (!draggedId || draggedId === project.id) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    dragOverId = project.id;
+  }
+  function onProjectDrop(project: Project, e: DragEvent) {
+    e.preventDefault();
+    if (draggedId && draggedId !== project.id) {
+      const ids = projects.map((p) => p.id);
+      const from = ids.indexOf(draggedId);
+      const to = ids.indexOf(project.id);
+      if (from !== -1 && to !== -1) {
+        const next = ids.slice();
+        next.splice(from, 1);
+        next.splice(to, 0, draggedId);
+        api.invoke("projects:reorder", next);
+      }
+    }
+    draggedId = null;
+    dragOverId = null;
+  }
+  function onProjectDragEnd() {
+    draggedId = null;
+    dragOverId = null;
+  }
+
+  // Re-tick so relative timestamps stay fresh without a reload.
+  let now = $state(Date.now());
+  $effect(() => {
+    const id = setInterval(() => (now = Date.now()), 30_000);
+    return () => clearInterval(id);
+  });
+
+  function relativeTime(iso: string, ref: number): string {
+    const m = Math.floor((ref - new Date(iso).getTime()) / 60_000);
+    if (m < 1) return "now";
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h`;
+    return `${Math.floor(h / 24)}d`;
+  }
 
   const toTestCount = $derived(threads.filter((t) => t.toTestAt && !t.archivedAt).length);
   const chats = $derived(threads.filter((t) => t.projectId === null));
@@ -76,6 +141,35 @@
     onSelect(thread.id);
   }
 
+  function removeProject(project: Project) {
+    // projects:remove cascades to all the project's threads (ON DELETE CASCADE).
+    if (!confirm(`Remove project "${project.name}" and all its threads?`)) return;
+    api.invoke("projects:remove", project.id);
+  }
+
+  // Reversible thread actions show an undo toast (inverse IPC channel).
+  function archiveThread(thread: Thread) {
+    void api.invoke("threads:archive", thread.id);
+    extensionUi.notify(`Archived “${thread.title || "Untitled"}”`, {
+      label: "Undo",
+      run: () => void api.invoke("threads:unarchive", thread.id),
+    });
+  }
+  function markThreadToTest(thread: Thread) {
+    void api.invoke("threads:markToTest", thread.id);
+    extensionUi.notify(`Moved “${thread.title || "Untitled"}” to testing`, {
+      label: "Undo",
+      run: () => void api.invoke("threads:unmarkToTest", thread.id),
+    });
+  }
+  function snoozeThread(thread: Thread, until: string) {
+    void api.invoke("threads:snooze", thread.id, until);
+    extensionUi.notify(`Snoozed “${thread.title || "Untitled"}”`, {
+      label: "Undo",
+      run: () => void api.invoke("threads:unsnooze", thread.id),
+    });
+  }
+
   function snoozeTimeLeft(until: string): string {
     const ms = new Date(until).getTime() - Date.now();
     if (ms <= 0) return "soon";
@@ -87,22 +181,29 @@
 {#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived")}
   <div class="group relative flex items-center">
     <button
-      class="flex w-full items-center gap-2 truncate rounded-md px-2 py-[5px] text-left text-[13px]
+      class="flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-1.5 text-left text-[13px]
         {selectedThreadId === thread.id
         ? 'bg-surface-2 text-fg shadow-sm shadow-black/20'
         : 'text-muted hover:bg-surface/80 hover:text-fg'}"
       onclick={() => onSelect(thread.id)}
     >
       {#if thread.status === "running"}
-        <span class="relative size-1.5 shrink-0 rounded-full bg-success">
-          <span class="absolute inset-0 animate-ping rounded-full bg-success/60"></span>
-        </span>
+        <BrailleSpinner class="session-spinner shrink-0" title="Thinking…" />
       {:else if thread.status === "failed"}
         <span class="size-1.5 shrink-0 rounded-full bg-danger"></span>
+      {:else if thread.status === "completed"}
+        <span class="size-1.5 shrink-0 rounded-full bg-accent" title="Finished"></span>
       {/if}
-      <span class="truncate {variant === 'archived' ? 'text-fainter' : ''}">{thread.title}</span>
+      <span
+        class="truncate {variant === 'archived'
+          ? 'text-fainter'
+          : thread.status === 'completed' && selectedThreadId !== thread.id
+            ? 'text-accent'
+            : ''}">{thread.title}</span>
       {#if variant === "snoozed" && thread.snoozedUntil}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{snoozeTimeLeft(thread.snoozedUntil)}</span>
+      {:else if variant === "active"}
+        <span class="ml-auto shrink-0 text-[10px] text-fainter">{relativeTime(thread.lastActivityAt, now)}</span>
       {/if}
     </button>
     <div class="absolute right-1 hidden items-center gap-0.5 rounded bg-surface group-hover:flex">
@@ -115,12 +216,12 @@
         <button
           class="rounded p-1 text-faint hover:text-fg"
           title="Mark to test"
-          onclick={() => api.invoke("threads:markToTest", thread.id)}
+          onclick={() => markThreadToTest(thread)}
         ><Eye size={14} /></button>
         <button
           class="rounded p-1 text-faint hover:text-fg"
           title="Archive"
-          onclick={() => api.invoke("threads:archive", thread.id)}
+          onclick={() => archiveThread(thread)}
         ><Archive size={14} /></button>
       {:else if variant === "snoozed"}
         <button
@@ -151,7 +252,7 @@
       <SnoozePicker
         onPick={(until) => {
           snoozePickerFor = null;
-          void api.invoke("threads:snooze", thread.id, until);
+          snoozeThread(thread, until);
         }}
         onClose={() => (snoozePickerFor = null)}
       />
@@ -176,79 +277,78 @@
   {/if}
 {/snippet}
 
-<aside class="flex h-full w-64 shrink-0 flex-col border-r border-border bg-bg/60">
+<aside
+  class="flex h-full shrink-0 flex-col rounded-r-xl bg-sidebar"
+  style="width: {width}px"
+>
   <div class="titlebar-drag h-10 shrink-0"></div>
 
-  <!-- Nav -->
-  <nav class="flex flex-col gap-0.5 px-2 pb-2">
+  <!-- Search: a distinct, input-like component raised above the nav. -->
+  <div class="px-3 pb-2">
     <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px] text-muted hover:bg-surface hover:text-fg"
+      class="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-2.5 py-2 text-[13px] text-muted shadow-sm shadow-black/5 hover:border-border-strong hover:text-fg"
       onclick={onOpenSearch}
       data-testid="nav-search"
     >
-      <span class="flex items-center gap-2"><Search size={15} /> Search</span><kbd class="text-[10px] text-fainter">⌘K</kbd>
+      <span class="flex items-center gap-2.5"><Search size={15} /> Search</span><kbd class="text-[10px] text-fainter">⌘K</kbd>
     </button>
+  </div>
+
+  <!-- Nav -->
+  <nav class="flex flex-col gap-0.5 px-3 pb-2">
     <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
+      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'testing' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
       onclick={() => onOpenView("testing")}
       data-testid="nav-testing"
     >
-      <span class="flex items-center gap-2"><Eye size={15} /> Testing {#if toTestCount > 0}<span class="ml-1 rounded-full bg-surface-2 px-1.5 text-[10px]">{toTestCount}</span>{/if}</span>
+      <span class="flex items-center gap-2.5"><Eye size={15} /> Testing {#if toTestCount > 0}<span class="ml-1 rounded-full bg-surface-2 px-1.5 text-[10px]">{toTestCount}</span>{/if}</span>
       <kbd class="text-[10px] text-fainter">⇧6</kbd>
     </button>
     <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
+      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'automations' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
       onclick={() => onOpenView("automations")}
       data-testid="nav-automations"
     >
-      <span class="flex items-center gap-2"><AlarmClock size={15} /> Automations</span>
+      <span class="flex items-center gap-2.5"><AlarmClock size={15} /> Automations</span>
     </button>
     <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
+      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'agents' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
       onclick={() => onOpenView("agents")}
       data-testid="nav-agents"
     >
-      <span class="flex items-center gap-2"><Bot size={15} /> Agents</span>
+      <span class="flex items-center gap-2.5"><Bot size={15} /> Agents</span>
     </button>
     <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
-        {activeView === 'graph' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
-      onclick={() => onOpenView("graph")}
-      data-testid="nav-graph"
-    >
-      <span class="flex items-center gap-2"><Workflow size={15} /> Graph</span>
-    </button>
-    <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
+      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'skills' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
       onclick={() => onOpenView("skills")}
       data-testid="nav-skills"
     >
-      <span class="flex items-center gap-2"><BookOpen size={15} /> Skills</span>
+      <span class="flex items-center gap-2.5"><BookOpen size={15} /> Skills</span>
     </button>
     <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
+      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'extensions' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
       onclick={() => onOpenView("extensions")}
       data-testid="nav-extensions"
     >
-      <span class="flex items-center gap-2"><Puzzle size={15} /> Extensions</span>
+      <span class="flex items-center gap-2.5"><Puzzle size={15} /> Extensions</span>
     </button>
     <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2 py-[3px] text-[13px]
+      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'settings' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
       onclick={() => onOpenView("settings")}
       data-testid="nav-settings"
     >
-      <span class="flex items-center gap-2"><Settings size={15} /> Settings</span>
+      <span class="flex items-center gap-2.5"><Settings size={15} /> Settings</span>
     </button>
   </nav>
 
   <!-- Projects -->
-  <div class="flex items-center justify-between px-3 pt-1 pb-1">
+  <div class="flex items-center justify-between px-4 pt-2 pb-1.5">
     <span class="text-xs font-semibold tracking-wide text-faint uppercase">Projects</span>
     <button
       class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
@@ -257,31 +357,75 @@
       title="Add project"><Plus size={15} /></button
     >
   </div>
-  <nav class="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+  <nav class="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
     {#each byProject as group (group.project.id)}
       <div class="mb-3">
-        <div class="group flex items-center justify-between px-1 py-0.5">
-          <span class="truncate text-sm font-medium text-fg-soft">{group.project.name}</span>
+        <div
+          class="group flex items-center justify-between rounded-md px-1 py-0.5
+            {draggedId === group.project.id ? 'opacity-40' : ''}
+            {dragOverId === group.project.id && draggedId && draggedId !== group.project.id
+              ? 'bg-surface-2 ring-1 ring-inset ring-accent/50'
+              : ''}"
+          draggable="true"
+          ondragstart={(e) => onProjectDragStart(group.project, e)}
+          ondragover={(e) => onProjectDragOver(group.project, e)}
+          ondrop={(e) => onProjectDrop(group.project, e)}
+          ondragend={onProjectDragEnd}
+          ondragleave={() => { if (dragOverId === group.project.id) dragOverId = null; }}
+          data-testid="project-row"
+        >
           <button
-            class="rounded p-1 text-faint opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-fg"
-            onclick={() => newThread(group.project.id)}
-            data-testid="new-thread"
-            title="Add thread"
-            aria-label="Add thread"><Plus size={14} /></button
+            class="flex min-w-0 flex-1 items-center gap-1 rounded p-0.5 text-left cursor-grab active:cursor-grabbing"
+            onclick={() => toggleCollapse(group.project)}
+            title={isCollapsed(group.project.id) ? "Expand" : "Collapse"}
+            aria-label={isCollapsed(group.project.id) ? "Expand project" : "Collapse project"}
+            aria-expanded={!isCollapsed(group.project.id)}
+            data-testid="toggle-project"
           >
-          <button
-            class="rounded p-1 text-faint opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-fg"
-            onclick={() => newThread(group.project.id, true)}
-            data-testid="new-worktree-thread"
-            title="New worktree thread (isolated checkout)"><GitBranchPlus size={14} /></button
-          >
+            {#if isCollapsed(group.project.id)}
+              <ChevronRight size={14} class="shrink-0 text-faint" />
+            {:else}
+              <ChevronDown size={14} class="shrink-0 text-faint" />
+            {/if}
+            <span class="truncate text-sm font-medium text-fg-soft">{group.project.name}</span>
+            {#if isCollapsed(group.project.id)}
+              {@const total = group.active.length + group.snoozed.length + group.toTest.length + group.archived.length}
+              {#if total > 0}
+                <span class="shrink-0 rounded-full bg-surface-2 px-1.5 text-[10px] text-fainter">{total}</span>
+              {/if}
+            {/if}
+          </button>
+          <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+            <button
+              class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
+              onclick={() => newThread(group.project.id)}
+              data-testid="new-thread"
+              title="Add thread"
+              aria-label="Add thread"><Plus size={14} /></button
+            >
+            <button
+              class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
+              onclick={() => newThread(group.project.id, true)}
+              data-testid="new-worktree-thread"
+              title="New worktree thread (isolated checkout)"><GitBranchPlus size={14} /></button
+            >
+            <button
+              class="rounded p-1 text-faint hover:bg-surface-2 hover:text-danger"
+              onclick={() => removeProject(group.project)}
+              data-testid="remove-project"
+              title="Remove project"
+              aria-label="Remove project"><Trash2 size={14} /></button
+            >
+          </div>
         </div>
-        {#each group.active as thread (thread.id)}
-          {@render threadRow(thread, "active")}
-        {/each}
-        {@render collapsible(`sn:${group.project.id}`, "Snoozed", group.snoozed, "snoozed")}
-        {@render collapsible(`tt:${group.project.id}`, "To test", group.toTest, "toTest")}
-        {@render collapsible(`ar:${group.project.id}`, "Past", group.archived, "archived")}
+        {#if !isCollapsed(group.project.id)}
+          {#each group.active as thread (thread.id)}
+            {@render threadRow(thread, "active")}
+          {/each}
+          {@render collapsible(`sn:${group.project.id}`, "Snoozed", group.snoozed, "snoozed")}
+          {@render collapsible(`tt:${group.project.id}`, "To test", group.toTest, "toTest")}
+          {@render collapsible(`ar:${group.project.id}`, "Past", group.archived, "archived")}
+        {/if}
       </div>
     {:else}
       <p class="px-2 text-xs text-fainter">No projects yet. Add one with +.</p>
@@ -289,8 +433,8 @@
   </nav>
 
   <!-- Chats -->
-  <div class="border-t border-border px-2 pt-2 pb-3">
-    <div class="flex items-center justify-between px-1 pb-1">
+  <div class="border-t border-border/60 px-3 pt-3 pb-3">
+    <div class="flex items-center justify-between px-1 pb-1.5">
       <span class="text-xs font-semibold tracking-wide text-faint uppercase">Chats</span>
       <button
         class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"

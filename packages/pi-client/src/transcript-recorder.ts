@@ -36,6 +36,17 @@ function blocksToText(content: unknown, type: "text" | "thinking"): string {
     .join("");
 }
 
+function blocksToImages(content: unknown): { mimeType: string; data: string }[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter(
+      (b): b is { type: string; data?: string; mimeType?: string } =>
+        !!b && typeof b === "object",
+    )
+    .filter((b) => b.type === "image" && typeof b.data === "string" && typeof b.mimeType === "string")
+    .map((b) => ({ mimeType: b.mimeType!, data: b.data! }));
+}
+
 function summarizeArgs(args: unknown): string {
   try {
     const s = JSON.stringify(args);
@@ -141,7 +152,13 @@ export class TranscriptRecorder {
   private messageToItem(m: MessageLike, streaming: boolean): TranscriptItem {
     const id = this.nextId(m.role === "user" ? "u" : m.role === "assistant" ? "a" : "n");
     if (m.role === "user") {
-      return { id, kind: "user", text: blocksToText(m.content, "text") };
+      const images = blocksToImages(m.content);
+      return {
+        id,
+        kind: "user",
+        text: blocksToText(m.content, "text"),
+        ...(images.length ? { images } : {}),
+      };
     }
     if (m.role === "assistant") {
       return {

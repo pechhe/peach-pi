@@ -104,6 +104,15 @@
     next[Math.max(0, Math.min(2, slot))] = key;
     pinnedKeys = next;
   }
+
+  // Imperative handles for composer keyboard shortcuts (⌘1–3 slots, ⌘4 menu).
+  export function selectSlot(index: number) {
+    const option = pinnedOptions[index];
+    if (option) selectModel(option);
+  }
+  export function openMenu() {
+    if (!open) toggleMenu();
+  }
 </script>
 
 <svelte:document

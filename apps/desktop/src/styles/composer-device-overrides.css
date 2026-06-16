@@ -26,10 +26,12 @@
   content: none;
 }
 
-/* Bring BUILD / PLAN text in closer to the knob. */
+/* Keep BUILD / PLAN text near the knob, but clear of the thumb so they
+   don't touch. Thumb near-stop sits ~21px from the button edge; at 8px the
+   label bottom (~15.5px) leaves a ~5px gap. */
 .composer-device .composer-mode__label:first-child {
-  top: 14px;
+  top: 8px;
 }
 .composer-device .composer-mode__label:last-child {
-  bottom: 14px;
+  bottom: 8px;
 }

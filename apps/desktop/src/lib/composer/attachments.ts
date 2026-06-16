@@ -49,7 +49,11 @@ function isImageFile(file: Pick<File, "name" | "type">): boolean {
 }
 
 function fileSignature(file: File): string {
-  return `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+  // Intentionally excludes lastModified: a single pasted image surfaces through
+  // both DataTransfer.items (getAsFile) and DataTransfer.files, and the browser
+  // often stamps those two File objects with different lastModified values.
+  // Including it here would let the same image dedupe through and be attached twice.
+  return `${file.name}:${file.type}:${file.size}`;
 }
 
 function dedupeFiles(files: readonly File[]): File[] {

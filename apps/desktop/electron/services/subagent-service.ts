@@ -13,6 +13,11 @@ import { ProjectRepo } from "../persistence/repositories.ts";
  * point PI_SUBAGENT_PI_COMMAND at a wrapper script that runs the bundled SDK
  * CLI via Electron-as-Node. Children inherit our process.env (the extension
  * spreads it), so this is the only env var we need to set.
+ *
+ * The extension parses PI_SUBAGENT_PI_COMMAND as a shell-style command string
+ * (word-split, quote-aware), so the wrapper path MUST be shell-quoted: on
+ * macOS it lives under "~/Library/Application Support/<App Name>/", which
+ * always contains spaces.
  */
 export function setupSubagentEnvironment(userDataDir: string): void {
   if (process.env.PI_SUBAGENT_PI_COMMAND) return; // user override wins
@@ -29,10 +34,19 @@ export function setupSubagentEnvironment(userDataDir: string): void {
       `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexec "${process.execPath}" "${cli}" "$@"\n`,
     );
     chmodSync(wrapper, 0o755);
-    process.env.PI_SUBAGENT_PI_COMMAND = wrapper;
+    process.env.PI_SUBAGENT_PI_COMMAND = shellQuote(wrapper);
   } catch (err) {
     console.error("subagent env setup failed:", err);
   }
+}
+
+/**
+ * POSIX single-quote escaping. Matches the pi-subagents extension's own
+ * shellEscape, so the value round-trips through both /bin/sh and the
+ * extension's parseCommandWords.
+ */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function findUp(fromDir: string, relPath: string): string | null {

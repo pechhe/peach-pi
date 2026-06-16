@@ -25,7 +25,7 @@
   .md :global(h4) {
     margin: 1em 0 0.4em;
     font-weight: 600;
-    color: #f4f4f5;
+    color: var(--color-fg);
     line-height: 1.3;
   }
   .md :global(h1) {
@@ -53,21 +53,21 @@
     margin: 0.15em 0;
   }
   .md :global(li::marker) {
-    color: #71717a;
+    color: var(--color-faint);
   }
   .md :global(code) {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.85em;
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--color-surface-2);
     border-radius: 4px;
     padding: 0.1em 0.35em;
-    color: #e4e4e7;
+    color: var(--color-fg);
   }
   .md :global(pre) {
     margin: 0.65em 0;
     padding: 0.75em 1em;
-    background: #18181b;
-    border: 1px solid #27272a;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 10px;
     overflow-x: auto;
   }
@@ -76,16 +76,16 @@
     padding: 0;
     font-size: 0.8rem;
     line-height: 1.6;
-    color: #d4d4d8;
+    color: var(--color-fg-soft);
   }
   .md :global(blockquote) {
     margin: 0.65em 0;
     padding: 0.1em 0 0.1em 0.9em;
-    border-left: 3px solid #3f3f46;
-    color: #a1a1aa;
+    border-left: 3px solid var(--color-border-strong);
+    color: var(--color-muted);
   }
   .md :global(a) {
-    color: #93c5fd;
+    color: var(--color-accent);
     text-decoration: none;
   }
   .md :global(a:hover) {
@@ -98,21 +98,21 @@
   }
   .md :global(th),
   .md :global(td) {
-    border: 1px solid #27272a;
+    border: 1px solid var(--color-border);
     padding: 0.3em 0.7em;
     text-align: left;
   }
   .md :global(th) {
-    background: #18181b;
+    background: var(--color-surface);
     font-weight: 600;
   }
   .md :global(hr) {
     margin: 1em 0;
     border: none;
-    border-top: 1px solid #27272a;
+    border-top: 1px solid var(--color-border);
   }
   .md :global(strong) {
-    color: #f4f4f5;
+    color: var(--color-fg);
     font-weight: 600;
   }
 </style>

@@ -24,13 +24,6 @@
   --cream-ink-muted: oklch(0.54 0.012 250);
   --cream-caret: oklch(0.7 0.17 52);
 
-  /* Orange metal (send dial active) */
-  --crt-orange-metal-bg:
-    linear-gradient(180deg, oklch(1 0.05 76 / 0.28) 0%, oklch(1 0.05 76 / 0.1) 8%, transparent 22%),
-    radial-gradient(ellipse 70% 42% at 15% 14%, oklch(1 0.08 76 / 0.14), transparent 58%),
-    radial-gradient(ellipse 85% 48% at 88% 82%, oklch(0.42 0.17 45 / 0.12), transparent 70%),
-    linear-gradient(145deg, oklch(0.82 0.19 61) 0%, oklch(0.75 0.21 58) 32%, oklch(0.66 0.22 55) 72%, oklch(0.55 0.2 50) 100%);
-
   /* Light machined keycap (used by .composer-mode thumb / .devbtn / slider) */
   --crt-key-bg:
     radial-gradient(ellipse 125% 100% at 50% 0%, oklch(1 0.002 250 / 0.5), transparent 58%),
@@ -561,8 +554,13 @@
   margin-right: 22px;
 }
 
-/* Stop state: orange-metal alarm cap. */
+/* Stop state: silver cap, orange stop symbol (mirrors ready send dial). */
 .composer-device .send-dial--stop {
-  background: var(--crt-orange-metal-bg);
-  color: oklch(0.18 0.05 50);
+  color: oklch(0.74 0.185 52);
+}
+.composer-device .send-dial--stop svg {
+  filter:
+    drop-shadow(0 1px 0 oklch(1 0.002 250 / 0.55))
+    drop-shadow(0 -0.5px 0.5px oklch(0.22 0.06 40 / 0.7))
+    drop-shadow(0 0 6px oklch(0.78 0.2 55 / 0.6));
 }

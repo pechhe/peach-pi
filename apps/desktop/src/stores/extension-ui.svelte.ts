@@ -2,9 +2,22 @@ import { SvelteMap } from "svelte/reactivity";
 import type { ExtensionUiRequest, NoticePayload } from "@peach-pi/shared-types";
 import { api } from "../lib/ipc";
 
+interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 interface Toast extends NoticePayload {
   id: number;
+  action?: ToastAction;
 }
+
+/**
+ * Status keys peach-pi renders with its own first-class UI, so the
+ * extension's setStatus() pill is suppressed in the thread header.
+ * Caveman has a dedicated toggle in the Composer.
+ */
+const HIDDEN_STATUS_KEYS = new Set(["caveman"]);
 
 /** Extension dialog queue + toast notifications + per-thread status text. */
 class ExtensionUiStore {
@@ -27,7 +40,7 @@ class ExtensionUiStore {
         map = new SvelteMap();
         this.statuses.set(threadId, map);
       }
-      if (text === null) map.delete(key);
+      if (text === null || text === "") map.delete(key);
       else map.set(key, text);
     });
     api.on("event:extensionWidget", ({ threadId, key, lines }) => {
@@ -44,13 +57,29 @@ class ExtensionUiStore {
   pushToast(notice: NoticePayload): void {
     const toast = { ...notice, id: ++this.toastSeq };
     this.toasts = [...this.toasts, toast];
-    setTimeout(() => {
-      this.toasts = this.toasts.filter((t) => t.id !== toast.id);
-    }, 5000);
+    setTimeout(() => this.dismiss(toast.id), 5000);
+  }
+
+  /** Renderer-originated toast, optionally with an action (e.g. Undo). */
+  notify(message: string, action?: ToastAction, level: NoticePayload["level"] = "info"): void {
+    const toast: Toast = { message, level, action, id: ++this.toastSeq };
+    this.toasts = [...this.toasts, toast];
+    setTimeout(() => this.dismiss(toast.id), 5000);
+  }
+
+  dismiss(id: number): void {
+    this.toasts = this.toasts.filter((t) => t.id !== id);
   }
 
   statusesFor(threadId: string): string[] {
-    return [...(this.statuses.get(threadId)?.values() ?? [])];
+    const map = this.statuses.get(threadId);
+    if (!map) return [];
+    const out: string[] = [];
+    for (const [key, text] of map) {
+      if (HIDDEN_STATUS_KEYS.has(key)) continue;
+      out.push(text);
+    }
+    return out;
   }
 
   widgetsFor(threadId: string): Array<{ key: string; lines: string[] }> {

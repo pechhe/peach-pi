@@ -55,6 +55,19 @@ test("project add/list/remove round-trip", () => {
   assert.equal(repo.all().length, 0);
 });
 
+test("project reorder persists ord and resorts all()", () => {
+  const repo = new ProjectRepo(memoryDb());
+  const a = repo.add("/tmp/a", "a", "folder");
+  const b = repo.add("/tmp/b", "b", "folder");
+  const c = repo.add("/tmp/c", "c", "folder");
+  assert.deepEqual(repo.all().map((p) => p.name), ["a", "b", "c"]);
+
+  // Move c to the front.
+  repo.reorder([c.id, a.id, b.id]);
+  assert.deepEqual(repo.all().map((p) => p.name), ["c", "a", "b"]);
+  assert.deepEqual(repo.all().map((p) => p.order), [0, 1, 2]);
+});
+
 test("expired snoozes auto-clear and are returned", () => {
   const db = memoryDb();
   const threads = new ThreadRepo(db);

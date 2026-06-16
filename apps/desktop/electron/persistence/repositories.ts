@@ -82,6 +82,20 @@ export class ProjectRepo {
   remove(id: string): void {
     this.db.prepare("DELETE FROM projects WHERE id = ?").run(id);
   }
+
+  /** Persist a full reordering. Writes the `ord` of each listed project to
+   *  its array index; projects not in the list keep their old ord. */
+  reorder(orderedIds: string[]): void {
+    const stmt = this.db.prepare("UPDATE projects SET ord = ? WHERE id = ?");
+    this.db.exec("BEGIN");
+    try {
+      orderedIds.forEach((id, index) => stmt.run(index, id));
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
 }
 
 export class ThreadRepo {
@@ -136,6 +150,14 @@ export class ThreadRepo {
     this.db
       .prepare("UPDATE threads SET status = ?, last_activity_at = ? WHERE id = ?")
       .run(status, new Date().toISOString(), id);
+  }
+
+  /** Clear the "finished, unseen" accent when a thread is opened. Leaves
+   *  last_activity_at untouched so opening doesn't reorder the list. */
+  markSeen(id: string): void {
+    this.db
+      .prepare("UPDATE threads SET status = 'idle' WHERE id = ? AND status = 'completed'")
+      .run(id);
   }
 
   setTitle(id: string, title: string): void {
@@ -312,4 +334,8 @@ export const defaultUiState: UiState = {
   sidebarCollapsed: false,
   activeView: "new-thread",
   selectedThreadId: null,
+  collapsedProjects: [],
 };
+
+/** KV key for the configured "utility" model (background LLM tasks: titles/commits). */
+export const UTILITY_MODEL_KV_KEY = "utility-model";

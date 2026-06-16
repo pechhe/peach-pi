@@ -1,8 +1,10 @@
 /** Renderer-facing transcript model. Main process maps pi SDK events into
  *  these ops; renderer applies them to a per-thread item list. */
 
+import type { ImagePayload } from "./entities.ts";
+
 export type TranscriptItem =
-  | { id: string; kind: "user"; text: string }
+  | { id: string; kind: "user"; text: string; images?: ImagePayload[] }
   | {
       id: string;
       kind: "assistant";
@@ -19,7 +21,17 @@ export type TranscriptItem =
       output: string;
       status: "running" | "done" | "error";
     }
-  | { id: string; kind: "notice"; text: string };
+  | { id: string; kind: "notice"; text: string }
+  | {
+      id: string;
+      kind: "compaction";
+      running: boolean;
+      reason: "manual" | "threshold" | "overflow";
+      summary?: string;
+      tokensBefore?: number;
+      aborted?: boolean;
+      error?: string;
+    };
 
 export type TranscriptOp =
   | { op: "reset"; items: TranscriptItem[] }

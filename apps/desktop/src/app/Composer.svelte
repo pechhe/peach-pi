@@ -13,8 +13,11 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import X from "@lucide/svelte/icons/x";
   import { drafts, queues } from "../stores/composer.svelte";
+  import { lightbox } from "../stores/lightbox.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { caveman } from "../stores/caveman.svelte";
+  import { extensionUi } from "../stores/extension-ui.svelte";
+  import { markAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSelector from "./composer/ModelSelector.svelte";
@@ -50,16 +53,21 @@
     return String(Math.round(n));
   };
 
-  async function cycleThinking() {
+  async function cycleThinking(direction: 1 | -1 = 1) {
     if (!meta) return;
     const levels = meta.availableThinkingLevels;
     if (levels.length === 0) return;
-    const next = levels[(levels.indexOf(meta.thinkingLevel) + 1) % levels.length]!;
+    const idx = levels.indexOf(meta.thinkingLevel);
+    const next = levels[(idx + direction + levels.length) % levels.length]!;
     playRotary();
     sessionMetas.set(await api.invoke("threads:setThinking", thread.id, next));
   }
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
+  // Imperative handle into ModelSelector for ⌘1–4 keyboard shortcuts.
+  let modelSelector = $state<{ selectSlot: (index: number) => void; openMenu: () => void } | null>(null);
+  // Esc-to-stop is a two-press confirm to avoid accidental aborts.
+  let abortArmed = $state(false);
   let dragActive = $state(false);
   let commands = $state<CommandInfo[]>([]);
   let commandsLoadedFor = $state<string | null>(null);
@@ -92,6 +100,13 @@
     drafts.update(thread.id, { text: `/${cmd.name} ` });
     textareaEl?.focus();
   }
+
+  // Focus the composer as soon as the textarea mounts. App.svelte keys the
+  // thread view by thread id, so switching/opening a thread remounts this
+  // component and this effect fires exactly then.
+  $effect(() => {
+    textareaEl?.focus();
+  });
 
   // ── Textarea auto-grow ────────────────────────────────────────────────
   function autoGrow() {
@@ -192,6 +207,38 @@
     drafts.update(thread.id, { mode: draft.mode === "build" ? "plan" : "build" });
   }
 
+  // Thread-wide shortcuts (work regardless of focus). All meta-keyed so they
+  // never interfere with literal typing in inputs.
+  function onShortcutKeydown(e: KeyboardEvent) {
+    if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+    // ⌘L focuses the composer textarea (browser/terminal "focus the input" convention).
+    if (e.key === "l" || e.key === "L") {
+      e.preventDefault();
+      textareaEl?.focus();
+      return;
+    }
+    if (e.key === "1" || e.key === "2" || e.key === "3") {
+      e.preventDefault();
+      modelSelector?.selectSlot(Number(e.key) - 1);
+      return;
+    }
+    if (e.key === "4") {
+      e.preventDefault();
+      modelSelector?.openMenu();
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      void cycleThinking(1);
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      void cycleThinking(-1);
+      return;
+    }
+  }
+
   function onKeydown(e: KeyboardEvent) {
     if (slashMatches.length > 0) {
       if (e.key === "ArrowDown") {
@@ -216,7 +263,15 @@
       return;
     }
     if (e.key === "Escape" && running) {
-      void api.invoke("threads:abort", thread.id);
+      if (abortArmed) {
+        abortArmed = false;
+        markAborted(thread.id);
+        void api.invoke("threads:abort", thread.id);
+      } else {
+        abortArmed = true;
+        extensionUi.notify("Press Esc again to stop the model");
+        setTimeout(() => (abortArmed = false), 5000);
+      }
       return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "p")) {
@@ -227,7 +282,9 @@
   }
 </script>
 
-<footer class="composer-device shrink-0 px-6 pb-12">
+<svelte:window onkeydown={onShortcutKeydown} />
+
+<footer class="composer-device shrink-0 px-6 pb-6">
   <div class="composer__frame relative">
     <!-- Slash menu -->
     {#if slashMatches.length > 0}
@@ -266,11 +323,18 @@
         {#each draft.attachments as att (att.id)}
           <div class="group relative">
             {#if att.kind === "image"}
-              <img
-                src={`data:${att.mimeType};base64,${att.data}`}
-                alt={att.name}
-                class="h-16 w-16 rounded-lg border border-border-strong object-cover"
-              />
+              <button
+                type="button"
+                class="block cursor-zoom-in"
+                onclick={() => lightbox.open(`data:${att.mimeType};base64,${att.data}`)}
+                title="Click to enlarge"
+              >
+                <img
+                  src={`data:${att.mimeType};base64,${att.data}`}
+                  alt={att.name}
+                  class="h-16 w-16 rounded-lg border border-border-strong object-cover"
+                />
+              </button>
             {:else}
               <div class="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg-soft">
                 <FileText size={13} />
@@ -308,7 +372,7 @@
               ? "enter queues a steer · ⌘enter steers · esc stops"
               : draft.mode === "plan"
                 ? "plan something…"
-                : " message the clanker"}
+                : "message the clanker"}
             value={draft.text}
             oninput={(e) => drafts.update(thread.id, { text: e.currentTarget.value })}
             onkeydown={onKeydown}
@@ -363,6 +427,7 @@
           </span>
 
           <ModelSelector
+            bind:this={modelSelector}
             model={meta?.model ?? null}
             models={sessionMetas.models}
             onPick={pickModel}

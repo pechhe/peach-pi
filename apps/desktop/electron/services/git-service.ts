@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import type { GitChangedFile, GitCommitPushResult, GitInfo } from "@peach-pi/shared-types";
+import type { GitChangedFile, GitCommitPushResult, GitInfo, ModelInfo } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
 
@@ -35,11 +35,14 @@ export class GitService {
   private threads: ThreadRepo;
   private projects: ProjectRepo;
   private worktreesDir: string;
+  /** Reads the persisted utility-model selection; null = defaults. */
+  private getUtilityModel: () => ModelInfo | null;
 
-  constructor(db: AppDb, worktreesDir: string) {
+  constructor(db: AppDb, worktreesDir: string, getUtilityModel?: () => ModelInfo | null) {
     this.threads = new ThreadRepo(db);
     this.projects = new ProjectRepo(db);
     this.worktreesDir = worktreesDir;
+    this.getUtilityModel = getUtilityModel ?? (() => null);
   }
 
   /** Working directory for a thread: worktree > project > chat workspace. */
@@ -161,7 +164,7 @@ export class GitService {
     if (!commitMessage) {
       const diff = await git(["diff", "--staged"], cwd);
       const { generateCommitMessage } = await import("@peach-pi/pi-client");
-      commitMessage = (await generateCommitMessage(diff)) ?? "chore: update";
+      commitMessage = (await generateCommitMessage(diff, this.getUtilityModel())) ?? "chore: update";
     }
     try {
       await git(["commit", "-m", commitMessage], cwd);
