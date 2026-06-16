@@ -73,7 +73,7 @@
 /* Scale the whole device down + size it to its contents so it neither
    dominates the window nor stretches too wide. */
 .composer-device .composer__frame {
-  width: 820px;
+  width: 1025px;
   max-width: 100%;
   margin-inline: auto;
   transform: scale(0.78);
@@ -161,6 +161,7 @@
   width: 100%;
   max-height: 400px;
   min-height: 24px;
+  padding: 0;
   border: 0;
   outline: none;
   resize: none;
@@ -555,6 +556,11 @@
   cursor: default;
   opacity: 1;
   filter: none;
+}
+
+/* Nudge the send cap slightly inboard from the chassis edge. */
+.composer-device .send-dial {
+  margin-right: 22px;
 }
 
 /* Stop state: orange-metal alarm cap. */

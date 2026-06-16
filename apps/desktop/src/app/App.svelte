@@ -21,6 +21,10 @@
   import GraphView from "./GraphView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import Toasts from "./Toasts.svelte";
+  import { Agentation } from "sv-agentation";
+  const agentationProps = import.meta.env.DEV
+    ? { workspaceRoot: null, includeComponentContext: true, includeComputedStyles: false }
+    : null;
 
   let selectedThreadId = $state<string | null>(null);
   let view = $state<AppView>("thread");
@@ -149,3 +153,7 @@
   {/if}
   <Toasts />
 </div>
+
+{#if agentationProps}
+  <Agentation {...agentationProps} />
+{/if}

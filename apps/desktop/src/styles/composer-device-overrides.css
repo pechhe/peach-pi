@@ -11,3 +11,25 @@
   filter: none;
   transform: none;
 }
+
+/* Reasoning dial only turns — it must not press. (Cancels the global
+   button:active scale in app.css.) */
+.composer-device .reasoning-dial:active:not(:disabled) {
+  transform: none;
+}
+
+/* Drop the engraved MODEL and REASONING section labels — not needed.
+   (Specificity matches the source rules so these later overrides win.) */
+.composer-device .model-selector__anchor:first-child::before,
+.composer-device .model-selector__anchor:last-child::before,
+.composer-device .reasoning-dial[data-label]::before {
+  content: none;
+}
+
+/* Bring BUILD / PLAN text in closer to the knob. */
+.composer-device .composer-mode__label:first-child {
+  top: 14px;
+}
+.composer-device .composer-mode__label:last-child {
+  bottom: 14px;
+}
