@@ -66,7 +66,6 @@
   --color-text-secondary: oklch(0.6 0.005 270);
 
   position: relative;
-  padding: 0;
   user-select: none;
 }
 
@@ -173,7 +172,6 @@
   font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
   font-size: 15px;
   line-height: 1.5;
-  letter-spacing: 0.02em;
 }
 
 .composer-device .composer__screen textarea::placeholder {

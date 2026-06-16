@@ -225,7 +225,7 @@
   }
 </script>
 
-<footer class="composer-device shrink-0 px-6 pb-14">
+<footer class="composer-device shrink-0 px-6 pb-12">
   <div class="composer__frame relative">
     <!-- Slash menu -->
     {#if slashMatches.length > 0}
