@@ -87,6 +87,13 @@ export interface ModelInfo {
 /** Plan mode runs read-only tools; build mode runs everything. */
 export type ToolMode = "all" | "readOnly";
 
+/** Caveman compression state, mirrored from the pi-caveman extension config. */
+export interface CavemanState {
+  enabled: boolean;
+  /** The level applied when enabled (e.g. "full", "ultra"). */
+  level: string;
+}
+
 /** Live per-session metadata published main → renderer. */
 export interface SessionMeta {
   threadId: ThreadId;

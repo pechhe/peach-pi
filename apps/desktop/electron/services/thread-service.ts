@@ -105,6 +105,19 @@ export class ThreadService {
     await (await this.sessionFor(threadId)).steer(text);
   }
 
+  /** Run an extension/slash command in the live session (executes immediately). */
+  async runCommand(threadId: string, command: string): Promise<void> {
+    const session = await this.sessionFor(threadId);
+    void session.prompt(command).catch((err) => {
+      this.queueOps(threadId, [
+        {
+          op: "upsert",
+          item: { id: `err-${Date.now()}`, kind: "notice", text: `Command failed: ${String(err)}` },
+        },
+      ]);
+    });
+  }
+
   async abort(threadId: string): Promise<void> {
     const session = this.sessions.get(threadId);
     if (session) await session.abort();

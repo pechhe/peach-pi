@@ -9,6 +9,7 @@ import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
 import { GraphifyService } from "./services/graphify-service.ts";
+import { getCavemanState, setCavemanEnabled } from "./services/caveman.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import { createOverlayWindow } from "./windows/overlay-window.ts";
 
@@ -77,6 +78,8 @@ async function boot(): Promise<void> {
     "app:getSnapshot": () => appService.snapshot(),
     "app:ping": () => ({ pong: true, version: app.getVersion() }),
     "app:setSelectedThread": (id) => appService.setSelectedThread(id),
+    "app:getCavemanState": () => getCavemanState(),
+    "app:setCavemanEnabled": (enabled) => setCavemanEnabled(enabled),
     "projects:add": (p) => appService.addProject(p),
     "projects:remove": (id) => appService.removeProject(id),
     "projects:pick": () => pickProject(),
@@ -87,6 +90,7 @@ async function boot(): Promise<void> {
     "threads:createChat": () => threadService.createChat(),
     "threads:prompt": (id, text, images, toolMode) =>
       threadService.prompt(id, text, images, toolMode),
+    "threads:runCommand": (id, command) => threadService.runCommand(id, command),
     "threads:listCommands": (id) => threadService.listCommands(id),
     "threads:listModels": (id) => threadService.listModels(id),
     "threads:setModel": (id, provider, modelId) => threadService.setModel(id, provider, modelId),

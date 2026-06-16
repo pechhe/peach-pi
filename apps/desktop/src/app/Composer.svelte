@@ -10,6 +10,7 @@
   import { playButtonClick, playKey, playRotary } from "../lib/sound/button-click-sound";
   import { drafts, queues } from "../stores/composer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
+  import { caveman } from "../stores/caveman.svelte";
   import { api } from "../lib/ipc";
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSlider from "./composer/ModelSlider.svelte";
@@ -24,6 +25,12 @@
   $effect(() => {
     sessionMetas.ensure(thread.id);
   });
+  void caveman.load();
+
+  function toggleCaveman() {
+    playKey("press");
+    void caveman.toggle(thread.id);
+  }
 
   async function pickModel(provider: string, id: string) {
     playRotary();
@@ -202,8 +209,8 @@
   }
 </script>
 
-<footer class="composer-device shrink-0 px-6 pb-5">
-  <div class="relative mx-auto max-w-3xl">
+<footer class="composer-device shrink-0 px-6 pb-8">
+  <div class="relative mx-auto max-w-5xl">
     <!-- Slash menu -->
     {#if slashMatches.length > 0}
       <div
@@ -321,16 +328,16 @@
       <!-- Controls strip -->
       <div class="composer__footer-row">
         <div class="composer__controls">
-          <!-- BUILD / PLAN mode switch -->
+          <!-- BUILD / PLAN vertical mode switch -->
           <button
             class="mode-switch {draft.mode === 'plan' ? 'mode-switch--plan' : ''}"
             onclick={toggleMode}
             data-testid="mode-toggle"
             title="⌘B build · ⌘P plan"
           >
-            <span class="mode-switch__label {draft.mode === 'build' ? 'mode-switch__label--active' : ''}">Build</span>
+            <span class="mode-switch__label mode-switch__label--build {draft.mode === 'build' ? 'mode-switch__label--active' : ''}">Build</span>
             <span class="mode-switch__track"><span class="mode-switch__thumb"></span></span>
-            <span class="mode-switch__label {draft.mode === 'plan' ? 'mode-switch__label--active' : ''}">Plan</span>
+            <span class="mode-switch__label mode-switch__label--plan {draft.mode === 'plan' ? 'mode-switch__label--active' : ''}">Plan</span>
           </button>
 
           <ModelSlider
@@ -347,6 +354,19 @@
               onCycle={cycleThinking}
             />
           {/if}
+
+          <!-- CAVEMAN: toggles pi-caveman compression -->
+          <div class="control-anchor control-anchor--key" data-label="Caveman">
+            <span class="device-led {caveman.enabled ? 'device-led--on' : ''}"></span>
+            <button
+              class="device-key-square"
+              aria-pressed={caveman.enabled}
+              onclick={toggleCaveman}
+              data-testid="caveman-toggle"
+              title={`Caveman compression ${caveman.enabled ? "on" : "off"} (click to toggle)`}
+              aria-label={`Caveman compression ${caveman.enabled ? "on" : "off"}`}
+            ></button>
+          </div>
         </div>
 
         <div class="composer__actions">

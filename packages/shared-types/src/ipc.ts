@@ -1,5 +1,6 @@
 import type {
   AppSnapshot,
+  CavemanState,
   CommandInfo,
   Automation,
   AutomationRun,
@@ -66,6 +67,10 @@ export const ipcContracts = {
   "app:ping": invoke<[], { pong: true; version: string }>(),
   /** Persist selection so the overlay window knows the prompt target. */
   "app:setSelectedThread": invoke<[threadId: ThreadId | null], void>(),
+  /** Read caveman compression state from ~/.pi/agent/caveman.json. */
+  "app:getCavemanState": invoke<[], CavemanState>(),
+  /** Enable/disable caveman compression for future sessions. */
+  "app:setCavemanEnabled": invoke<[enabled: boolean], CavemanState>(),
 
   // projects
   "projects:add": invoke<[path: string], Project>((path) =>
@@ -90,6 +95,11 @@ export const ipcContracts = {
     requireNonEmptyString(text, "text");
   }),
   "threads:steer": invoke<[threadId: ThreadId, text: string], void>(),
+  /** Execute an extension/slash command in the live session (e.g. "/caveman"). */
+  "threads:runCommand": invoke<[threadId: ThreadId, command: string], void>((id, cmd) => {
+    requireNonEmptyString(id, "threadId");
+    requireNonEmptyString(cmd, "command");
+  }),
   "threads:abort": invoke<[threadId: ThreadId], void>(),
   "threads:getTranscript": invoke<[threadId: ThreadId], TranscriptItem[]>(),
   "threads:listCommands": invoke<[threadId: ThreadId], CommandInfo[]>(),
