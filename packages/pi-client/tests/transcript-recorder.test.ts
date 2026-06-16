@@ -32,6 +32,36 @@ test("user prompt + streamed assistant text", () => {
   assert.deepEqual(r.transcript(), view);
 });
 
+test("authoritative message content prevents duplication on stream restart", () => {
+  // Real SDK puts the full accumulated message on every message_update. On a
+  // provider retry the partial resets and re-streams the same text from
+  // scratch; appending raw deltas would duplicate it. The recorder must track
+  // the authoritative `message` content instead.
+  const r = new TranscriptRecorder();
+  const view = run(r, [
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    {
+      type: "message_update",
+      message: { role: "assistant", content: [{ type: "text", text: "Now wire X." }] },
+      assistantMessageEvent: { type: "text_delta", delta: "Now wire X." },
+    },
+    // Retry: same partial re-emitted with a stale duplicate delta. Appending
+    // the delta would yield "Now wire X.Now wire X."; reconciling keeps it clean.
+    {
+      type: "message_update",
+      message: { role: "assistant", content: [{ type: "text", text: "Now wire X." }] },
+      assistantMessageEvent: { type: "text_delta", delta: "Now wire X." },
+    },
+    {
+      type: "message_update",
+      message: { role: "assistant", content: [{ type: "text", text: "Now wire X. Done." }] },
+      assistantMessageEvent: { type: "text_delta", delta: " Done." },
+    },
+  ]);
+  assert.equal((view[0] as { text: string }).text, "Now wire X. Done.");
+  assert.deepEqual(r.transcript(), view);
+});
+
 test("user prompt carries image attachments", () => {
   const r = new TranscriptRecorder();
   const view = run(r, [

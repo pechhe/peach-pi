@@ -5,6 +5,7 @@
   import GitWidget from "./GitWidget.svelte";
   import Workflow from "@lucide/svelte/icons/workflow";
   import Markdown from "./Markdown.svelte";
+  import StreamingText from "./StreamingText.svelte";
   import WorkingLabel from "./WorkingLabel.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
@@ -128,7 +129,7 @@
                 <div class="mt-1.5 border-l-2 border-border pl-3 leading-relaxed whitespace-pre-wrap text-faint">{item.thinking}</div>
               </details>
             {/if}
-            <Markdown text={item.text} />{#if item.streaming}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-fg-soft"></span>{/if}
+            <StreamingText text={item.text} streaming={item.streaming} />{#if item.streaming}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-fg-soft"></span>{/if}
             {#if item.error}
               <p class="mt-2 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-1.5 text-xs text-danger">{item.error}</p>
             {/if}

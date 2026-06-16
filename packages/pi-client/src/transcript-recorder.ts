@@ -91,9 +91,16 @@ export class TranscriptRecorder {
         return [this.upsertOp(item)];
       }
       case "message_update": {
-        const e = event.assistantMessageEvent;
         const id = this.activeAssistantId;
-        if (!e || !id || typeof e.delta !== "string") return [];
+        if (!id) return [];
+        // Prefer the authoritative accumulated message over raw deltas. On a
+        // provider stream retry the SDK resets `partial` and re-streams the
+        // same content from scratch, so blindly appending `delta` duplicates
+        // text. Reconcile against the full message content: append only the
+        // new suffix, or replace wholesale when it diverges (the retry case).
+        if (event.message?.role === "assistant") return this.reconcileAssistant(id, event.message);
+        const e = event.assistantMessageEvent;
+        if (!e || typeof e.delta !== "string") return [];
         if (e.type === "text_delta") return [this.appendOp(id, "text", e.delta)];
         if (e.type === "thinking_delta") return [this.appendOp(id, "thinking", e.delta)];
         return [];
@@ -181,6 +188,25 @@ export class TranscriptRecorder {
       };
     }
     return { id, kind: "notice", text: blocksToText(m.content, "text") };
+  }
+
+  /** Reconcile the active assistant item against the authoritative message. */
+  private reconcileAssistant(id: string, m: MessageLike): TranscriptOp[] {
+    const idx = this.items.findIndex((i) => i.id === id);
+    const prev = idx === -1 ? undefined : this.items[idx];
+    if (!prev || prev.kind !== "assistant") return [];
+    const text = blocksToText(m.content, "text");
+    const thinking = blocksToText(m.content, "thinking");
+    // Fast path: both fields only grew — emit minimal append deltas.
+    if (text.startsWith(prev.text) && thinking.startsWith(prev.thinking)) {
+      const ops: TranscriptOp[] = [];
+      if (text.length > prev.text.length) ops.push(this.appendOp(id, "text", text.slice(prev.text.length)));
+      if (thinking.length > prev.thinking.length)
+        ops.push(this.appendOp(id, "thinking", thinking.slice(prev.thinking.length)));
+      return ops;
+    }
+    // Divergence (stream restart re-emitted content): replace wholesale.
+    return [this.upsertOp({ ...prev, text, thinking, streaming: true })];
   }
 
   private nextId(prefix: string): string {

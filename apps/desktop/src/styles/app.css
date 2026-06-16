@@ -226,6 +226,160 @@ button:active:not(:disabled) {
   }
 }
 
+/* ---------- Markdown typography (shared by Markdown.svelte + StreamingText.svelte) ----------
+ * Promoted out of Markdown.svelte's scoped styles so the streaming renderer
+ * reuses the exact same look. */
+.md p {
+  margin: 0 0 0.65em;
+}
+.md p:last-child {
+  margin-bottom: 0;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 1em 0 0.4em;
+  font-weight: 600;
+  color: var(--color-fg);
+  line-height: 1.3;
+}
+.md h1 {
+  font-size: 1.25em;
+}
+.md h2 {
+  font-size: 1.1em;
+}
+.md h3,
+.md h4 {
+  font-size: 1em;
+}
+.md ul,
+.md ol {
+  margin: 0 0 0.65em;
+  padding-left: 1.4em;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin: 0.15em 0;
+}
+.md li::marker {
+  color: var(--color-faint);
+}
+.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--color-surface-2);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  color: var(--color-fg);
+}
+.md pre {
+  margin: 0.65em 0;
+  padding: 0.75em 1em;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--color-fg-soft);
+}
+.md blockquote {
+  margin: 0.65em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--color-border-strong);
+  color: var(--color-muted);
+}
+.md a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.md a:hover {
+  text-decoration: underline;
+}
+.md table {
+  margin: 0.65em 0;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+.md th,
+.md td {
+  border: 1px solid var(--color-border);
+  padding: 0.3em 0.7em;
+  text-align: left;
+}
+.md th {
+  background: var(--color-surface);
+  font-weight: 600;
+}
+.md hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+.md strong {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+/* ---------- Streaming per-word reveal (ported from peche-pi) ----------
+ * Each word of streamed text is wrapped in <span class="sw"> with an inline
+ * animation-delay; it animates once as it's revealed. The default look is
+ * blur-to-sharp on a fast-in / long-tail bezier. Every other effect is a
+ * no-op CSS var that a `data-stream-fx` token on <html> flips on, composed
+ * into ONE keyframe so looks can stack without fighting over `transform`.
+ * Tokens: plain | rise | warm | glow  (blur + bezier are the baseline). */
+.message-streaming .sw {
+  animation: stream-word-fx var(--sw-dur, 380ms) var(--sw-ease, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+@keyframes stream-word-fx {
+  from {
+    opacity: 0;
+    filter: blur(var(--sw-blur, 3px));
+    transform: translateY(var(--sw-rise, 0)) scale(var(--sw-scale, 1));
+    color: var(--sw-color-from, inherit);
+    text-shadow: var(--sw-glow, 0 0 0 transparent);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+    color: inherit;
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+/* Effect tokens (composable) — live on <html data-stream-fx>. */
+[data-stream-fx~="plain"] .sw {
+  --sw-blur: 0;
+}
+[data-stream-fx~="rise"] .sw {
+  --sw-rise: 4px;
+  display: inline-block;
+}
+[data-stream-fx~="warm"] .sw {
+  --sw-color-from: var(--color-accent);
+}
+[data-stream-fx~="glow"] .sw {
+  --sw-glow: 0 0 6px color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-streaming .sw {
+    animation: none;
+  }
+}
+
 /* Braille spinner + shimmer working label (ported from peche-pi). */
 .working-label {
   display: inline-flex;

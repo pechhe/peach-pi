@@ -4,6 +4,13 @@
   import { setSoundsMuted, soundsMuted } from "../lib/sound/sound-prefs";
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import { THEMES, theme } from "../lib/theme.svelte";
+  import {
+    STREAM_LOOKS,
+    STREAM_SPEEDS,
+    streamReveal,
+    type StreamLook,
+    type StreamSpeed,
+  } from "../lib/stream-reveal.svelte";
   import { api } from "../lib/ipc";
 
   let muted = $state(soundsMuted());
@@ -72,6 +79,39 @@
               <option value={t.id}>{t.label}</option>
             {/each}
           </select>
+        </div>
+      </section>
+
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-sm text-fg">Streaming text</h2>
+            <p class="text-xs text-faint">How assistant replies reveal as they stream in.</p>
+          </div>
+          <div class="flex flex-col items-end gap-2">
+            <select
+              class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+              value={streamReveal.look}
+              onchange={(e) => streamReveal.setLook((e.currentTarget as HTMLSelectElement).value as StreamLook)}
+              data-testid="stream-look-select"
+              aria-label="Reveal look"
+            >
+              {#each STREAM_LOOKS as l (l.id)}
+                <option value={l.id}>{l.label}</option>
+              {/each}
+            </select>
+            <select
+              class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+              value={streamReveal.speed}
+              onchange={(e) => streamReveal.setSpeed((e.currentTarget as HTMLSelectElement).value as StreamSpeed)}
+              data-testid="stream-speed-select"
+              aria-label="Reveal speed"
+            >
+              {#each STREAM_SPEEDS as s (s.id)}
+                <option value={s.id}>{s.label}</option>
+              {/each}
+            </select>
+          </div>
         </div>
       </section>
 

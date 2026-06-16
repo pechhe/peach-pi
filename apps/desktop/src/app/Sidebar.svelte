@@ -278,7 +278,7 @@
 {/snippet}
 
 <aside
-  class="flex h-full shrink-0 flex-col rounded-r-xl bg-sidebar"
+  class="flex h-full shrink-0 flex-col rounded-r-3xl bg-sidebar shadow-[inset_-5px_0_8px_-8px_rgba(0,0,0,0.1)]"
   style="width: {width}px"
 >
   <div class="titlebar-drag h-10 shrink-0"></div>

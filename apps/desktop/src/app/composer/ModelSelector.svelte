@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ModelInfo } from "@peach-pi/shared-types";
-  import { SvelteSet } from "svelte/reactivity";
+  import { modelPrefs } from "../../lib/model-prefs.svelte";
 
   let {
     model,
@@ -25,17 +25,12 @@
 
   let open = $state(false);
   let filter = $state("");
-  let pinnedKeys = $state<string[]>([]);
   let visualKey = $state<string | undefined>(undefined);
-  let hiddenKeys = new SvelteSet<string>();
   let showHidden = $state(false);
 
-  // Default the three pinned slots to the first three models.
-  $effect(() => {
-    if (pinnedKeys.length === 0 && models.length > 0) {
-      pinnedKeys = models.slice(0, 3).map((m) => keyOf(m.provider, m.id));
-    }
-  });
+  // Pinned slots and hidden models persist globally across threads/windows.
+  const pinnedKeys = $derived(modelPrefs.pinnedKeys);
+
   // Clear optimistic key once it matches the real selection.
   $effect(() => {
     if (visualKey && model && visualKey === keyOf(model.provider, model.id)) visualKey = undefined;
@@ -65,7 +60,9 @@
   const sliderPosition = $derived(activeSliderIndex >= 0 ? activeSliderIndex : 1);
 
   const visibleModels = $derived(
-    showHidden || hiddenKeys.size === 0 ? models : models.filter((m) => !hiddenKeys.has(keyOf(m.provider, m.id))),
+    showHidden || modelPrefs.hiddenKeys.length === 0
+      ? models
+      : models.filter((m) => !modelPrefs.hiddenKeys.includes(keyOf(m.provider, m.id))),
   );
   const filteredModels = $derived.by(() => {
     if (!filter) return visibleModels;
@@ -102,7 +99,7 @@
     if (pinnedKeys.includes(key)) return;
     const next = pinnedOptions.map((p) => keyOf(p.provider, p.id));
     next[Math.max(0, Math.min(2, slot))] = key;
-    pinnedKeys = next;
+    modelPrefs.setPinned(next);
   }
 
   // Imperative handles for composer keyboard shortcuts (⌘1–3 slots, ⌘4 menu).
@@ -223,7 +220,7 @@
                     type="button"
                     tabindex="-1"
                     title="Hide from model menu"
-                    onclick={() => hiddenKeys.add(keyOf(option.provider, option.id))}
+                    onclick={() => modelPrefs.hide(keyOf(option.provider, option.id))}
                   >hide</button>
                 </span>
               </div>
@@ -238,7 +235,7 @@
             type="button"
             onclick={() => {
               if (showHidden) {
-                hiddenKeys.clear();
+                modelPrefs.clearHidden();
                 showHidden = false;
               } else {
                 showHidden = true;

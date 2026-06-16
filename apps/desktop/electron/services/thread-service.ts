@@ -89,6 +89,11 @@ export class ThreadService {
   ): Promise<void> {
     const session = await this.sessionFor(threadId);
     const thread = this.threads.get(threadId)!;
+    if (thread.archivedAt) {
+      // Sending a message to an archived thread brings it back to the main list.
+      this.threads.setArchived(threadId, null);
+      this.onThreadsChanged();
+    }
     if (thread.title === "New thread" || thread.title === "New chat") {
       // Instant truncated placeholder so the UI feels snappy, then an async
       // LLM title overwrites it (only if still a placeholder).
