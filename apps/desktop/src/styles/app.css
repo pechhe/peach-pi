@@ -1,15 +1,97 @@
 @import "tailwindcss";
 
+/* ---------- semantic color tokens ---------- *
+ * Components reference these via utilities (bg-surface, text-muted, …).
+ * Each theme below just redefines the same tokens — no component changes. */
+@theme {
+  --color-bg: #101012; /* app background           */
+  --color-surface: #18181b; /* panels                   */
+  --color-surface-2: #27272a; /* raised / hover           */
+  --color-surface-3: #3f3f46; /* deepest raised           */
+  --color-border: #27272a; /* subtle borders           */
+  --color-border-strong: #3f3f46; /* visible borders          */
+  --color-border-focus: #71717a; /* focused input border     */
+  --color-fg: #e7e7ea; /* primary text             */
+  --color-fg-soft: #d4d4d8; /* secondary text           */
+  --color-muted: #a1a1aa; /* muted text               */
+  --color-faint: #71717a; /* faint text / icons       */
+  --color-fainter: #52525b; /* faintest text            */
+  --color-primary: #f4f4f5; /* inverted (primary) button bg */
+  --color-primary-fg: #18181b; /* text on primary button   */
+  --color-accent: #38bdf8; /* links / focus ring       */
+  --color-danger: #f87171; /* error text / icons       */
+  --color-danger-border: #7f1d1d; /* error borders            */
+  --color-danger-surface: #450a0a; /* error backgrounds        */
+  --color-success: #10b981; /* success / live indicator */
+  --color-warning: #fbbf24; /* warning text / icons     */
+  --color-warning-border: #b45309; /* warning borders          */
+  --color-warning-surface: #451a03; /* warning backgrounds      */
+}
+
 :root {
   color-scheme: dark;
+}
+
+/* Dracula (dark) */
+:root[data-theme="dracula"] {
+  color-scheme: dark;
+  --color-bg: #1e1f29;
+  --color-surface: #282a36;
+  --color-surface-2: #343746;
+  --color-surface-3: #44475a;
+  --color-border: #343746;
+  --color-border-strong: #44475a;
+  --color-border-focus: #6272a4;
+  --color-fg: #f8f8f2;
+  --color-fg-soft: #e0e0db;
+  --color-muted: #abb2cf;
+  --color-faint: #7884b0;
+  --color-fainter: #5d6589;
+  --color-primary: #bd93f9;
+  --color-primary-fg: #282a36;
+  --color-accent: #bd93f9;
+  --color-danger: #ff5555;
+  --color-danger-border: #66303f;
+  --color-danger-surface: #2c2230;
+  --color-success: #50fa7b;
+  --color-warning: #ffb86c;
+  --color-warning-border: #5e4a30;
+  --color-warning-surface: #2e2820;
+}
+
+/* Dracula Light (Alucard) */
+:root[data-theme="dracula-light"] {
+  color-scheme: light;
+  --color-bg: #fffbeb;
+  --color-surface: #f6f1de;
+  --color-surface-2: #ece6cf;
+  --color-surface-3: #ddd5b8;
+  --color-border: #e7e0c8;
+  --color-border-strong: #d3cbac;
+  --color-border-focus: #644ac9;
+  --color-fg: #1f1f1f;
+  --color-fg-soft: #34324a;
+  --color-muted: #57544a;
+  --color-faint: #6c664b;
+  --color-fainter: #8b856a;
+  --color-primary: #644ac9;
+  --color-primary-fg: #fffbeb;
+  --color-accent: #644ac9;
+  --color-danger: #cb3a2a;
+  --color-danger-border: #e3aaa0;
+  --color-danger-surface: #fbe6e2;
+  --color-success: #14710a;
+  --color-warning: #a34d14;
+  --color-warning-border: #e7cfa0;
+  --color-warning-surface: #f8eccd;
 }
 
 html,
 body {
   height: 100%;
   margin: 0;
-  background: #101012;
-  color: #e7e7ea;
+  background: var(--color-bg);
+  color: var(--color-fg);
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -38,13 +120,13 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--color-surface-3);
   border-radius: 99px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--color-faint);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -57,7 +139,7 @@ body {
   outline: none;
 }
 :focus-visible {
-  outline: 2px solid rgba(161, 161, 170, 0.5);
+  outline: 2px solid color-mix(in srgb, var(--color-muted) 50%, transparent);
   outline-offset: 1px;
   border-radius: 6px;
 }
@@ -117,8 +199,8 @@ button:active:not(:disabled) {
 .spinner {
   display: inline-block;
   border-radius: 9999px;
-  border: 1.5px solid #3f3f46;
-  border-top-color: #a1a1aa;
+  border: 1.5px solid var(--color-surface-3);
+  border-top-color: var(--color-muted);
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin {

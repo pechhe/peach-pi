@@ -82,6 +82,64 @@ export function extractImageFilesFromClipboardData(cd: DataTransfer | null | und
   return dedupeFiles([...itemFiles, ...clipboardFiles]);
 }
 
+/** Normalize one clipboard line into an absolute local path, or null. */
+function normalizeLocalPath(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#")) return null; // uri-list comment
+  let p = trimmed;
+  if (p.startsWith("file://")) {
+    try {
+      p = decodeURIComponent(new URL(p).pathname);
+    } catch {
+      return null;
+    }
+  }
+  return p.startsWith("/") ? p : null;
+}
+
+/**
+ * Extract local image file paths pasted as text (text/uri-list or text/plain).
+ * Clipboard managers (Raycast, screenshot history) often paste an image as a
+ * file-path string instead of a File blob; without this the raw path leaks
+ * into the composer as text.
+ */
+export function extractImageFilePathsFromClipboardData(
+  cd: DataTransfer | null | undefined,
+): string[] {
+  if (!cd) return [];
+  const blobs = [cd.getData?.("text/uri-list") ?? "", cd.getData?.("text/plain") ?? ""];
+  const paths = new Set<string>();
+  for (const blob of blobs) {
+    for (const line of blob.split(/[\r\n]+/)) {
+      const p = normalizeLocalPath(line);
+      if (p && isImageFile({ name: p, type: "" })) paths.add(p);
+    }
+  }
+  return Array.from(paths);
+}
+
+/** Read local image paths into image attachments via the main-process file reader. */
+export async function readImageAttachmentsFromPaths(
+  paths: readonly string[],
+): Promise<ComposerImageAttachment[]> {
+  const results = await Promise.all(paths.map(readImageAttachmentFromPath));
+  return results.filter((a): a is ComposerImageAttachment => Boolean(a));
+}
+
+async function readImageAttachmentFromPath(
+  filePath: string,
+): Promise<ComposerImageAttachment | null> {
+  const read = await window.peachPi.invoke("files:readImage", filePath).catch(() => null);
+  if (!read) return null;
+  return {
+    id: crypto.randomUUID(),
+    kind: "image",
+    name: filePath.split(/[/\\]+/).pop() || "pasted-image.png",
+    mimeType: read.mimeType,
+    data: read.data,
+  };
+}
+
 export function extractFilesFromDataTransfer(dt: DataTransfer | null | undefined): File[] {
   if (!dt) return [];
   const itemFiles = Array.from(dt.items ?? [])

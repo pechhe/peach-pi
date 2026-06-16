@@ -18,6 +18,30 @@ if (process.env.PEACH_PI_USER_DATA) {
   app.setPath("userData", process.env.PEACH_PI_USER_DATA);
 }
 
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+/** Read a local image file as base64. Returns null on unsupported ext or I/O error. */
+async function readImageFile(
+  filePath: string,
+): Promise<{ mimeType: string; data: string } | null> {
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  const mimeType = IMAGE_MIME_BY_EXT[ext];
+  if (!mimeType) return null;
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const buf = await readFile(filePath);
+    return { mimeType, data: buf.toString("base64") };
+  } catch {
+    return null;
+  }
+}
+
 // Boot sequence only. Feature logic lives in services.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -115,6 +139,7 @@ async function boot(): Promise<void> {
     "terminal:kill": (id) => terminalService.kill(id),
     "resources:inspect": (projectId) => threadService.inspectResources(projectId),
     "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
+    "files:readImage": (filePath) => readImageFile(filePath),
     "threads:archive": (id) => threadService.archive(id),
     "threads:unarchive": (id) => threadService.unarchive(id),
     "threads:delete": async (id) => {

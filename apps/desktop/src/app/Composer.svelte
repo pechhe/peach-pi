@@ -3,9 +3,11 @@
   import { composeOutgoingPrompt } from "../lib/composer/mode";
   import {
     extractFilesFromDataTransfer,
+    extractImageFilePathsFromClipboardData,
     extractImageFilesFromClipboardData,
     hasFilesInDataTransfer,
     readComposerAttachmentsFromFiles,
+    readImageAttachmentsFromPaths,
   } from "../lib/composer/attachments";
   import { playButtonClick, playKey, playRotary } from "../lib/sound/button-click-sound";
   import { drafts, queues } from "../stores/composer.svelte";
@@ -13,7 +15,7 @@
   import { caveman } from "../stores/caveman.svelte";
   import { api } from "../lib/ipc";
   import ReasoningDial from "./composer/ReasoningDial.svelte";
-  import ModelSlider from "./composer/ModelSlider.svelte";
+  import ModelSelector from "./composer/ModelSelector.svelte";
 
   let { thread }: { thread: Thread } = $props();
 
@@ -24,6 +26,7 @@
 
   $effect(() => {
     sessionMetas.ensure(thread.id);
+    void sessionMetas.loadModels(thread.id);
   });
   void caveman.load();
 
@@ -107,11 +110,22 @@
     }
   }
 
-  function onPaste(e: ClipboardEvent) {
+  async function onPaste(e: ClipboardEvent) {
     const images = extractImageFilesFromClipboardData(e.clipboardData);
     if (images.length > 0) {
       e.preventDefault();
       void addFiles(images);
+      return;
+    }
+    // Clipboard managers (Raycast, screenshot history) paste images as a
+    // file-path string. Intercept so the raw path never lands in the textarea.
+    const imagePaths = extractImageFilePathsFromClipboardData(e.clipboardData);
+    if (imagePaths.length > 0) {
+      e.preventDefault();
+      const added = await readImageAttachmentsFromPaths(imagePaths);
+      if (added.length > 0) {
+        drafts.update(thread.id, { attachments: [...draft.attachments, ...added] });
+      }
     }
   }
 
@@ -210,7 +224,7 @@
 </script>
 
 <footer class="composer-device shrink-0 px-6 pb-8">
-  <div class="relative mx-auto max-w-5xl">
+  <div class="composer__frame relative">
     <!-- Slash menu -->
     {#if slashMatches.length > 0}
       <div
@@ -328,19 +342,23 @@
       <!-- Controls strip -->
       <div class="composer__footer-row">
         <div class="composer__controls">
-          <!-- BUILD / PLAN vertical mode switch -->
-          <button
-            class="mode-switch {draft.mode === 'plan' ? 'mode-switch--plan' : ''}"
-            onclick={toggleMode}
-            data-testid="mode-toggle"
-            title="⌘B build · ⌘P plan"
-          >
-            <span class="mode-switch__label mode-switch__label--build {draft.mode === 'build' ? 'mode-switch__label--active' : ''}">Build</span>
-            <span class="mode-switch__track"><span class="mode-switch__thumb"></span></span>
-            <span class="mode-switch__label mode-switch__label--plan {draft.mode === 'plan' ? 'mode-switch__label--active' : ''}">Plan</span>
-          </button>
+          <!-- BUILD / PLAN switch (.composer-mode) -->
+          <span class="composer__key-mount composer__key-mount--mode">
+            <button
+              class="composer-mode {draft.mode === 'plan' ? 'composer-mode--plan' : ''}"
+              aria-pressed={draft.mode === 'plan'}
+              aria-label={`Composer mode: ${draft.mode === 'plan' ? 'Plan' : 'Build'}`}
+              onclick={toggleMode}
+              data-testid="mode-toggle"
+              title="⌘B build · ⌘P plan"
+            >
+              <span class="composer-mode__label {draft.mode !== 'plan' ? 'composer-mode__label--active' : ''}">Build</span>
+              <span class="composer-mode__track" aria-hidden="true"><span class="composer-mode__thumb"></span></span>
+              <span class="composer-mode__label {draft.mode === 'plan' ? 'composer-mode__label--active' : ''}">Plan</span>
+            </button>
+          </span>
 
-          <ModelSlider
+          <ModelSelector
             model={meta?.model ?? null}
             models={sessionMetas.models}
             onPick={pickModel}
@@ -355,18 +373,21 @@
             />
           {/if}
 
-          <!-- CAVEMAN: toggles pi-caveman compression -->
-          <div class="control-anchor control-anchor--key" data-label="Caveman">
-            <span class="device-led {caveman.enabled ? 'device-led--on' : ''}"></span>
+          <!-- CAVEMAN: toggles pi-caveman compression (.devbtn) -->
+          <span class="devbtn" data-section-label="Caveman">
             <button
-              class="device-key-square"
+              class="devbtn__switch {caveman.enabled ? 'devbtn__switch--on' : ''}"
               aria-pressed={caveman.enabled}
               onclick={toggleCaveman}
               data-testid="caveman-toggle"
               title={`Caveman compression ${caveman.enabled ? "on" : "off"} (click to toggle)`}
               aria-label={`Caveman compression ${caveman.enabled ? "on" : "off"}`}
-            ></button>
-          </div>
+            >
+              <span class="devbtn__led" aria-hidden="true"></span>
+              <span class="devbtn__cap" aria-hidden="true"></span>
+              <span class="devbtn__caption">Caveman</span>
+            </button>
+          </span>
         </div>
 
         <div class="composer__actions">

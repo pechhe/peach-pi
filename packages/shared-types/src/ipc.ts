@@ -169,6 +169,12 @@ export const ipcContracts = {
     requireNonEmptyString(p, "filePath");
     if (!p.endsWith(".md")) throw new Error("filePath must be a .md file");
   }),
+
+  // files
+  /** Read a local image file as base64; null if unreadable/unsupported. */
+  "files:readImage": invoke<[filePath: string], { mimeType: string; data: string } | null>((p) =>
+    requireNonEmptyString(p, "filePath"),
+  ),
   "threads:archive": invoke<[threadId: ThreadId], void>(),
   "threads:unarchive": invoke<[threadId: ThreadId], void>(),
   "threads:delete": invoke<[threadId: ThreadId], void>(),
