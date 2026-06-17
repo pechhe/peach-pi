@@ -5,13 +5,19 @@
   let {
     model,
     models,
+    allModels = [],
     onPick,
     onRequestModels,
+    onRequestAllModels,
+    onToggleScoped,
   }: {
     model: ModelInfo | null;
     models: ModelInfo[];
+    allModels?: ModelInfo[];
     onPick: (provider: string, id: string) => void;
     onRequestModels: () => void;
+    onRequestAllModels?: () => void;
+    onToggleScoped?: (provider: string, id: string, scoped: boolean) => void;
   } = $props();
 
   const keyOf = (provider: string, id: string) => `${provider}:${id}`;
@@ -27,6 +33,12 @@
   let filter = $state("");
   let visualKey = $state<string | undefined>(undefined);
   let showHidden = $state(false);
+  // Dropdown view: false = pi's scoped (enabledModels) set; true = all auth'd models.
+  let viewAll = $state(false);
+
+  // Keys of pi's scoped set, used to mark/toggle scope membership in the all view.
+  const scopedKeys = $derived(new Set(models.map((m) => keyOf(m.provider, m.id))));
+  const baseModels = $derived(viewAll ? allModels : models);
 
   // Pinned slots and hidden models persist globally across threads/windows.
   const pinnedKeys = $derived(modelPrefs.pinnedKeys);
@@ -61,8 +73,8 @@
 
   const visibleModels = $derived(
     showHidden || modelPrefs.hiddenKeys.length === 0
-      ? models
-      : models.filter((m) => !modelPrefs.hiddenKeys.includes(keyOf(m.provider, m.id))),
+      ? baseModels
+      : baseModels.filter((m) => !modelPrefs.hiddenKeys.includes(keyOf(m.provider, m.id))),
   );
   const filteredModels = $derived.by(() => {
     if (!filter) return visibleModels;
@@ -80,11 +92,15 @@
     }
     return [...groups.entries()].map(([provider, items]) => ({ provider, items }));
   });
-  const hiddenCount = $derived(models.length - visibleModels.length);
+  const hiddenCount = $derived(baseModels.length - visibleModels.length);
 
   function toggleMenu() {
     open = !open;
-    if (open) onRequestModels();
+    if (open) {
+      viewAll = false;
+      onRequestModels();
+      onRequestAllModels?.();
+    }
   }
 
   function selectModel(m: ModelInfo) {
@@ -117,7 +133,12 @@
     if (open && !(e.target as HTMLElement)?.closest?.(".model-selector")) open = false;
   }}
   onkeydown={(e) => {
-    if (open && e.key === "Escape") open = false;
+    if (!open) return;
+    if (e.key === "Escape") open = false;
+    else if (e.key === "Tab") {
+      e.preventDefault();
+      viewAll = !viewAll;
+    }
   }}
 />
 
@@ -186,6 +207,25 @@
             autofocus
           />
         </div>
+        {#if onToggleScoped}
+          <div class="model-selector__view-tabs" role="tablist">
+            <button
+              class="model-selector__view-tab{viewAll ? '' : ' is-active'}"
+              type="button"
+              role="tab"
+              aria-selected={!viewAll}
+              onclick={() => (viewAll = false)}
+            >Scoped</button>
+            <button
+              class="model-selector__view-tab{viewAll ? ' is-active' : ''}"
+              type="button"
+              role="tab"
+              aria-selected={viewAll}
+              onclick={() => (viewAll = true)}
+            >All</button>
+            <span class="model-selector__view-hint">Tab to switch</span>
+          </div>
+        {/if}
         {#each grouped as group (group.provider)}
           <div>
             <div class="model-selector__group-title">{group.provider}</div>
@@ -215,6 +255,16 @@
                       onclick={() => pinModelOut(option, slot)}
                     >{slot + 1}</button>
                   {/each}
+                  {#if onToggleScoped}
+                    {@const isScoped = scopedKeys.has(keyOf(option.provider, option.id))}
+                    <button
+                      class="model-selector__item-scope{isScoped ? ' is-scoped' : ''}"
+                      type="button"
+                      tabindex="-1"
+                      title={isScoped ? "Remove from scoped models" : "Add to scoped models"}
+                      onclick={() => onToggleScoped(option.provider, option.id, !isScoped)}
+                    >{isScoped ? "scoped ✓" : "+ scope"}</button>
+                  {/if}
                   <button
                     class="model-selector__item-hide"
                     type="button"
@@ -247,3 +297,47 @@
     {/if}
   </span>
 </span>
+
+<style>
+  .model-selector__view-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  }
+  .model-selector__view-tab {
+    border: none;
+    background: transparent;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 0.85em;
+    cursor: pointer;
+    opacity: 0.6;
+  }
+  .model-selector__view-tab.is-active {
+    background: var(--accent-soft, rgba(0, 0, 0, 0.08));
+    opacity: 1;
+    font-weight: 600;
+  }
+  .model-selector__view-hint {
+    margin-left: auto;
+    font-size: 0.72em;
+    opacity: 0.45;
+  }
+  .model-selector__item-scope {
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
+    background: transparent;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font: inherit;
+    font-size: 0.72em;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .model-selector__item-scope.is-scoped {
+    background: var(--accent-soft, rgba(0, 0, 0, 0.08));
+    font-weight: 600;
+  }
+</style>

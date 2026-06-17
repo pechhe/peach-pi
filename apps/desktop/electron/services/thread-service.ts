@@ -11,6 +11,7 @@ import type {
   SessionMeta,
   ThinkingLevel,
   Thread,
+  ThreadSearchHit,
   ToolMode,
   TranscriptItem,
   TranscriptOp,
@@ -21,6 +22,23 @@ import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
 
 const FLUSH_MS = 16;
+
+/** Final prompt sent when a thread is parked for testing. The assistant's
+ *  one-row markdown table reply is captured as the thread's test note and
+ *  rendered as Feature / How-to-test columns in the Testing view. */
+const PARK_FOR_TESTING_PROMPT =
+  "Reply with ONLY a markdown table, no preamble. Columns: | Feature | Test |. " +
+  "One row. Feature: what we built, one short sentence. Test: quickest way to " +
+  "check it, one short sentence.";
+
+/** Last assistant message text in a transcript, or undefined if none. */
+function lastAssistantText(items: TranscriptItem[]): string | undefined {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (item.kind === "assistant" && item.text.trim()) return item.text.trim();
+  }
+  return undefined;
+}
 
 /**
  * Owns live pi sessions keyed by thread id. Streams transcript ops to the
@@ -36,6 +54,8 @@ export class ThreadService {
   private onRunIdle?: (thread: Thread) => void;
   private sessions = new Map<string, PiSession>();
   private pendingOps = new Map<string, TranscriptOp[]>();
+  /** Threads with an in-flight compaction; their extension toasts are suppressed. */
+  private compacting = new Set<string>();
   private flushTimer: NodeJS.Timeout | null = null;
   /** Pending extension dialog resolvers keyed by requestId. */
   private pendingDialogs = new Map<string, (value: string | boolean | undefined) => void>();
@@ -94,9 +114,12 @@ export class ThreadService {
   ): Promise<void> {
     const session = await this.sessionFor(threadId);
     const thread = this.threads.get(threadId)!;
-    if (thread.archivedAt) {
-      // Sending a message to an archived thread brings it back to the main list.
-      this.threads.setArchived(threadId, null);
+    // Sending a message to a thread that's archived / snoozed / marked to test
+    // brings it back to the top-level active list.
+    if (thread.archivedAt || thread.snoozedUntil || thread.toTestAt) {
+      if (thread.archivedAt) this.threads.setArchived(threadId, null);
+      if (thread.snoozedUntil) this.threads.setSnoozedUntil(threadId, null);
+      if (thread.toTestAt) this.threads.setToTest(threadId, null, null);
       this.onThreadsChanged();
     }
     if (thread.title === "New thread" || thread.title === "New chat") {
@@ -118,6 +141,36 @@ export class ThreadService {
     });
   }
 
+  /** Park a thread for testing: flag it now (shows as pending in the Testing
+   *  view), then send one final prompt asking for a terse runthrough. The
+   *  captured assistant reply becomes the thread's test note. */
+  async markToTest(threadId: string): Promise<void> {
+    const thread = this.threads.get(threadId);
+    if (!thread) return;
+    // Flag immediately so the thread moves to the Testing view in a pending
+    // state while the runthrough generates.
+    const at = new Date().toISOString();
+    this.threads.setToTest(threadId, at, null);
+    this.onThreadsChanged();
+    // Send the prompt straight to the session (not this.prompt, which would
+    // clear the to-test flag), then capture the reply once the run settles.
+    const session = await this.sessionFor(threadId);
+    try {
+      await session.prompt(PARK_FOR_TESTING_PROMPT);
+    } catch {
+      // Delivery/run failure surfaces via run events; leave the note pending.
+      return;
+    }
+    // Skip capture if the user unmarked or re-prompted while we waited.
+    const current = this.threads.get(threadId);
+    if (!current?.toTestAt) return;
+    const note = lastAssistantText(session.transcript());
+    if (note) {
+      this.threads.setToTest(threadId, current.toTestAt, note);
+      this.onThreadsChanged();
+    }
+  }
+
   /** Async LLM title + tag (one call); overwrites the placeholder only if
    *  untouched since. Tag is always applied (set once at thread creation). */
   private async generateTitleAndTag(threadId: string, firstPrompt: string): Promise<void> {
@@ -137,6 +190,14 @@ export class ThreadService {
 
   async steer(threadId: string, text: string): Promise<void> {
     await (await this.sessionFor(threadId)).steer(text);
+  }
+
+  async promoteFollowUpToSteer(threadId: string, index: number): Promise<string | null> {
+    return (await this.sessionFor(threadId)).promoteFollowUpToSteer(index);
+  }
+
+  async popLastFollowUp(threadId: string): Promise<string | null> {
+    return (await this.sessionFor(threadId)).popLastFollowUp();
   }
 
   /** Run an extension/slash command in the live session (executes immediately). */
@@ -161,12 +222,69 @@ export class ThreadService {
     return (await this.sessionFor(threadId)).transcript();
   }
 
+  /** Full-text search across thread bodies (pi JSONL session files).
+   *  Matches titles too; body matches carry a snippet. Caps at 20 hits and
+   *  skips threads whose session file is missing or unreadable. */
+  async searchThreads(query: string): Promise<ThreadSearchHit[]> {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const { extractSessionText } = await import("@peach-pi/pi-client");
+    const projects = this.projects.all();
+    const projectName = (id: string | null) =>
+      id === null ? "" : (projects.find((p) => p.id === id)?.name ?? "");
+    const hits: ThreadSearchHit[] = [];
+    for (const t of this.threads.all()) {
+      if (t.archivedAt) continue;
+      if (hits.length >= 20) break;
+      const titleHit = t.title.toLowerCase().includes(q);
+      let bodyHit = false;
+      let snippet: string | undefined;
+      if (t.piSessionFile) {
+        let text = "";
+        try {
+          text = await extractSessionText(t.piSessionFile);
+        } catch {
+          text = "";
+        }
+        const lower = text.toLowerCase();
+        const idx = lower.indexOf(q);
+        if (idx !== -1) {
+          bodyHit = true;
+          const start = Math.max(0, idx - 40);
+          const end = Math.min(text.length, idx + q.length + 80);
+          snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
+          if (start > 0) snippet = `…${snippet}`;
+          if (end < text.length) snippet = `${snippet}…`;
+        }
+      }
+      if (titleHit || bodyHit) {
+        hits.push({ threadId: t.id, title: t.title, projectName: projectName(t.projectId), snippet });
+      }
+    }
+    return hits;
+  }
+
   async listCommands(threadId: string): Promise<CommandInfo[]> {
     return (await this.sessionFor(threadId)).commands();
   }
 
   async listModels(threadId: string): Promise<ModelInfo[]> {
     return (await this.sessionFor(threadId)).listModels();
+  }
+
+  async listAllModels(threadId: string): Promise<ModelInfo[]> {
+    return (await this.sessionFor(threadId)).listAllModels();
+  }
+
+  async setModelScoped(
+    threadId: string,
+    provider: string,
+    modelId: string,
+    scoped: boolean,
+  ): Promise<ModelInfo[]> {
+    const session = await this.sessionFor(threadId);
+    await session.setModelScoped(provider, modelId, scoped);
+    return session.listModels();
   }
 
   async setModel(threadId: string, provider: string, modelId: string): Promise<SessionMeta> {
@@ -298,11 +416,14 @@ export class ThreadService {
           // Cymbal nudges are agent-internal guidance (also injected as a
           // hidden conversation message), so don't surface them as toasts.
           if (message.startsWith("Cymbal suggests:")) return;
-          // Smart auto-compact status surfaces as an inline compaction card
-          // (driven by compaction_start/end), so suppress its toasts. Covers
-          // both the wrapper ("Smart auto-compact...") and the upstream
-          // pi-smart-compact pipeline ("EESV [...] Phase N/4...").
-          if (message.startsWith("Smart auto-compact") || message.startsWith("EESV [")) return;
+          // Smart auto-compact status surfaces as an inline compaction card,
+          // so suppress its toasts. The pipeline (pi-smart-compact) fires many
+          // notify strings between compaction_start/end — gate on the live
+          // compaction window rather than matching individual prefixes. The
+          // wrapper's threshold/completed/failed notices fire just outside that
+          // window, so keep the prefix filter for those.
+          if (this.compacting.has(threadId)) return;
+          if (message.startsWith("Smart auto-compact")) return;
           this.emit("event:notice", { threadId, message, level });
         },
         onExtensionStatus: (key, text) =>
@@ -330,6 +451,12 @@ export class ThreadService {
   }
 
   private queueOps(threadId: string, ops: TranscriptOp[]): void {
+    for (const op of ops) {
+      if (op.op === "upsert" && op.item.kind === "compaction") {
+        if (op.item.running) this.compacting.add(threadId);
+        else this.compacting.delete(threadId);
+      }
+    }
     const pending = this.pendingOps.get(threadId) ?? [];
     pending.push(...ops);
     this.pendingOps.set(threadId, pending);

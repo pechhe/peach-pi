@@ -5,6 +5,7 @@
     class: className = "",
     itemSelector,
     activeSelector,
+    previewSelector = "",
     children,
   }: {
     class?: string;
@@ -12,6 +13,10 @@
     itemSelector: string;
     /** CSS selector matching the currently-selected item. */
     activeSelector: string;
+    /** Optional CSS selector for a keyboard-previewed item (e.g. ⌘⇧↑/↓
+     *  traversal). When it matches an item here, the hover indicator glides
+     *  to it regardless of the pointer. */
+    previewSelector?: string;
     children: Snippet;
   } = $props();
 
@@ -88,6 +93,42 @@
       setHover(null);
     }
   }
+
+  /** Element currently targeted by keyboard preview (previewSelector),
+   *  tracked so pointer hover can take over again once the preview clears. */
+  let previewEl: HTMLElement | null = null;
+
+  // Drive the hover indicator from a keyboard preview. Only the MovingHighlight
+  // whose container actually contains the previewed item lights up; others
+  // match nothing and clear their preview state.
+  $effect(() => {
+    if (!container) return;
+    const sel = previewSelector;
+    // untrack: setHover reads+writes `hover`; depending on it here would
+    // re-run this effect on every pointer-driven hover change.
+    untrack(() => {
+      if (!sel) {
+        if (previewEl) {
+          previewEl = null;
+          hoveredItem = null;
+          setHover(null);
+        }
+        return;
+      }
+      const el = container!.querySelector<HTMLElement>(sel);
+      if (el && !el.matches(activeSelector)) {
+        previewEl = el;
+        hoveredItem = el;
+        setHover(el);
+      } else if (previewEl) {
+        // Preview points elsewhere (or at the already-active row): drop our
+        // preview claim so a sibling group can take it.
+        previewEl = null;
+        hoveredItem = null;
+        setHover(null);
+      }
+    });
+  });
 
   function itemFrom(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof Element)) return null;

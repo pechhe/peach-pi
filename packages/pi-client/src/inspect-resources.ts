@@ -41,6 +41,7 @@ export async function inspectResources(cwd: string): Promise<ResourceInspection>
     prompts: loader.getPrompts().prompts.map((p) => ({
       name: p.name,
       description: p.description ?? "",
+      kind: "prompt" as const,
     })),
   };
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { Project, Thread } from "@peach-pi/shared-types";
+  import type { Project, Thread, ThreadSearchHit } from "@peach-pi/shared-types";
+  import { api } from "../lib/ipc";
 
   let {
     projects,
@@ -9,31 +10,57 @@
   }: {
     projects: Project[];
     threads: Thread[];
-    onSelect: (threadId: string) => void;
+    /** `findQuery` is passed when a body match was clicked — ThreadView will
+     *  open its FindBar pre-filled with the original search term. */
+    onSelect: (threadId: string, findQuery?: string) => void;
     onClose: () => void;
   } = $props();
 
   let query = $state("");
   let index = $state(0);
   let inputEl = $state<HTMLInputElement | null>(null);
+  let loading = $state(false);
 
   const projectName = (id: string | null) =>
     id === null ? "Chat" : (projects.find((p) => p.id === id)?.name ?? "");
 
-  const matches = $derived.by(() => {
-    const q = query.trim().toLowerCase();
-    const pool = threads.filter((t) => !t.archivedAt);
-    if (!q) return pool.slice(0, 10);
-    return pool
-      .filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) || projectName(t.projectId).toLowerCase().includes(q),
-      )
-      .slice(0, 10);
+  /** Empty query → recent threads (title only). Typed query → full-text hits
+   *  from `threads:search` (titles + bodies, bodies carry a snippet). */
+  let hits = $state<ThreadSearchHit[]>([]);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  async function runSearch(q: string): Promise<void> {
+    const trimmed = q.trim();
+    if (!trimmed) {
+      // Recent threads: derive hits client-side, no snippet.
+      hits = threads
+        .filter((t) => !t.archivedAt)
+        .slice(0, 10)
+        .map((t) => ({ threadId: t.id, title: t.title, projectName: projectName(t.projectId) }));
+      loading = false;
+      return;
+    }
+    try {
+      hits = await api.invoke("threads:search", trimmed);
+    } catch {
+      hits = [];
+    } finally {
+      loading = false;
+    }
+  }
+
+  $effect(() => {
+    // Debounce so we don't scan every JSONL on each keystroke.
+    const q = query;
+    loading = q.trim().length > 0;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      void runSearch(q);
+    }, 200);
   });
 
   $effect(() => {
-    void matches;
+    void hits;
     index = 0;
   });
   $effect(() => {
@@ -44,15 +71,15 @@
     if (e.key === "Escape") onClose();
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      index = (index + 1) % Math.max(1, matches.length);
+      index = (index + 1) % Math.max(1, hits.length);
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      index = (index - 1 + matches.length) % Math.max(1, matches.length);
+      index = (index - 1 + hits.length) % Math.max(1, hits.length);
     }
-    const match = matches[index];
-    if (e.key === "Enter" && match) {
-      onSelect(match.id);
+    const hit = hits[index];
+    if (e.key === "Enter" && hit) {
+      onSelect(hit.threadId);
       onClose();
     }
   }
@@ -76,24 +103,31 @@
       bind:this={inputEl}
       bind:value={query}
       class="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none"
-      placeholder="Search threads…"
+      placeholder="Search threads and messages…"
       data-testid="search-input"
     />
     <div class="max-h-80 overflow-y-auto py-1">
-      {#each matches as thread, i (thread.id)}
+      {#each hits as hit, i (hit.threadId)}
         <button
-          class="flex w-full items-baseline gap-2 px-4 py-1.5 text-left text-sm
+          class="flex w-full flex-col gap-0.5 px-4 py-1.5 text-left text-sm
             {i === index ? 'bg-surface-2' : ''} hover:bg-surface-2"
           onclick={() => {
-            onSelect(thread.id);
+            onSelect(hit.threadId, hit.snippet ? query.trim() : undefined);
             onClose();
           }}
         >
-          <span class="truncate text-fg">{thread.title}</span>
-          <span class="ml-auto shrink-0 text-xs text-faint">{projectName(thread.projectId)}</span>
+          <div class="flex items-baseline gap-2">
+            <span class="truncate text-fg">{hit.title}</span>
+            <span class="ml-auto shrink-0 text-xs text-faint">{hit.projectName || "Chat"}</span>
+          </div>
+          {#if hit.snippet}
+            <span class="line-clamp-2 text-xs text-fainter">{hit.snippet}</span>
+          {/if}
         </button>
       {:else}
-        <p class="px-4 py-3 text-xs text-fainter">No matches.</p>
+        <p class="px-4 py-3 text-xs text-fainter">
+          {loading ? "Searching…" : "No matches."}
+        </p>
       {/each}
     </div>
   </div>

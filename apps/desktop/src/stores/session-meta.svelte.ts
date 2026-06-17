@@ -8,6 +8,8 @@ class SessionMetaStore {
   private requested = new Set<string>();
   /** Available models are session-independent in practice; cache once. */
   models = $state<ModelInfo[]>([]);
+  /** All auth-configured models (unscoped); cache once. */
+  allModels = $state<ModelInfo[]>([]);
 
   init(): void {
     api.on("event:sessionMeta", (meta) => this.byThread.set(meta.threadId, meta));
@@ -30,6 +32,21 @@ class SessionMetaStore {
   async loadModels(threadId: string): Promise<void> {
     if (this.models.length > 0) return;
     this.models = await api.invoke("threads:listModels", threadId);
+  }
+
+  async loadAllModels(threadId: string): Promise<void> {
+    if (this.allModels.length > 0) return;
+    this.allModels = await api.invoke("threads:listAllModels", threadId);
+  }
+
+  /** Toggle a model in the global scope; updates the cached scoped list. */
+  async setModelScoped(
+    threadId: string,
+    provider: string,
+    id: string,
+    scoped: boolean,
+  ): Promise<void> {
+    this.models = await api.invoke("threads:setModelScoped", threadId, provider, id, scoped);
   }
 
   set(meta: SessionMeta): void {

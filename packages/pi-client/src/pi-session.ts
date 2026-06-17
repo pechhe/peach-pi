@@ -18,7 +18,7 @@ import type {
 } from "@peach-pi/shared-types";
 import { TranscriptRecorder, type RecorderEvent } from "./transcript-recorder.ts";
 import { createUiBridge, type UiBridgeCallbacks } from "./extension-ui-bridge.ts";
-import { scopeModels } from "./scope-models.ts";
+import { scopeModels, stripThinkingSuffix } from "./scope-models.ts";
 
 export interface PiSessionCallbacks {
   onOps(ops: TranscriptOp[]): void;
@@ -63,8 +63,11 @@ export class PiSession {
   private extensionsResult: LoadExtensionsResult | null = null;
   private allToolNames: string[];
   private toolMode: ToolMode = "all";
-  /** Stable id of the in-flight compaction card, so start→end update one item. */
-  private activeCompactionId: string | null = null;
+  /** FIFO queue of in-flight compaction card ids. Multiple compactions can
+   *  overlap (app auto-compact, extension smart-compact, SDK builtin). Using
+   *  a queue ensures every start→end pair closes the correct card — a single
+   *  id was getting orphaned on overlap, leaving a permanent spinner. */
+  private activeCompactionIds: string[] = [];
 
   private constructor(
     session: AgentSession,
@@ -85,12 +88,31 @@ export class PiSession {
         this.maybeAutoCompact();
       }
       if (event.type === "compaction_start") {
-        this.activeCompactionId = `compaction-${Date.now()}`;
+        // Finalise any orphaned still-running card from a prior overlapping
+        // compaction so it doesn't spin forever.
+        while (this.activeCompactionIds.length > 0) {
+          const orphan = this.activeCompactionIds.shift()!;
+          this.callbacks.onOps([
+            {
+              op: "upsert",
+              item: {
+                id: orphan,
+                kind: "compaction",
+                running: false,
+                reason: event.reason,
+                aborted: true,
+                error: "Superseded by a newer compaction",
+              },
+            },
+          ]);
+        }
+        const id = `compaction-${Date.now()}`;
+        this.activeCompactionIds.push(id);
         this.callbacks.onOps([
           {
             op: "upsert",
             item: {
-              id: this.activeCompactionId,
+              id,
               kind: "compaction",
               running: true,
               reason: event.reason,
@@ -99,8 +121,10 @@ export class PiSession {
         ]);
       }
       if (event.type === "compaction_end") {
-        const id = this.activeCompactionId ?? `compaction-${Date.now()}`;
-        this.activeCompactionId = null;
+        // Pop the matching start id. If the queue is empty (unexpected end
+        // without a paired start), fabricate a card that still renders as
+        // completed rather than spinning forever.
+        const id = this.activeCompactionIds.shift() ?? `compaction-${Date.now()}`;
         this.callbacks.onOps([
           {
             op: "upsert",
@@ -205,6 +229,40 @@ export class PiSession {
     return scoped.map((m) => ({ provider: m.provider, id: m.id, name: m.name }));
   }
 
+  /** All auth-configured models, unscoped (for the selector's "all models" view). */
+  listAllModels(): ModelInfo[] {
+    return this.session.modelRegistry
+      .getAvailable()
+      .map((m) => ({ provider: m.provider, id: m.id, name: m.name }));
+  }
+
+  /**
+   * Toggle a model's membership in the global `enabledModels` scope
+   * (settings.json, shared with the pi TUI). Persists immediately.
+   */
+  async setModelScoped(provider: string, modelId: string, scoped: boolean): Promise<void> {
+    const sm = this.session.settingsManager;
+    const key = `${provider}/${modelId}`;
+    const current = sm.getEnabledModels();
+    let next: string[];
+    if (current && current.length > 0) {
+      if (scoped) {
+        next = current.includes(key) ? current : [...current, key];
+      } else {
+        next = current.filter((p) => stripThinkingSuffix(p) !== key);
+      }
+    } else {
+      // Empty scope means every model is implicitly scoped.
+      if (scoped) return;
+      next = this.listAllModels()
+        .map((m) => `${m.provider}/${m.id}`)
+        .filter((k) => k !== key);
+    }
+    sm.setEnabledModels(next);
+    await sm.flush();
+    this.callbacks.onMetaChange?.();
+  }
+
   async setModel(provider: string, modelId: string): Promise<void> {
     const model = this.session.modelRegistry.find(provider, modelId);
     if (!model) throw new Error(`Unknown model: ${provider}/${modelId}`);
@@ -217,22 +275,53 @@ export class PiSession {
     this.callbacks.onMetaChange?.();
   }
 
-  /** Slash-menu entries: prompt templates + extension-registered commands. */
+  /** Slash-menu entries: prompt templates, extension commands, and skills. */
   commands(): CommandInfo[] {
     const prompts = this.loader.getPrompts().prompts.map((p) => ({
       name: p.name,
       description: p.description ?? "",
+      kind: "prompt" as const,
     }));
     const extension = (this.extensionsResult?.extensions ?? []).flatMap((e) =>
-      [...e.commands.values()].map((c) => ({ name: c.name, description: c.description ?? "" })),
+      [...e.commands.values()].map((c) => ({
+        name: c.name,
+        description: c.description ?? "",
+        kind: "extension" as const,
+      })),
     );
+    // Skills surface under their friendly name; resolveSlashShorthand() rewrites
+    // `/name` to the `/skill:name` form the SDK expands at submit time.
+    const skills = this.loader.getSkills().skills.map((s) => ({
+      name: s.name,
+      description: s.description,
+      kind: "skill" as const,
+    }));
     const seen = new Set<string>();
-    return [...prompts, ...extension].filter((c) =>
+    return [...prompts, ...extension, ...skills].filter((c) =>
       seen.has(c.name) ? false : (seen.add(c.name), true),
     );
   }
 
+  /**
+   * Rewrite a leading `/<name>` to `/skill:<name>` when `<name>` is a skill not
+   * already shadowed by a prompt template or extension command (which the SDK
+   * resolves itself). Lets users type `/diagnose` instead of `/skill:diagnose`.
+   */
+  private resolveSlashShorthand(text: string): string {
+    const match = /^\/(\S+)/.exec(text);
+    if (!match) return text;
+    const token = match[1]!;
+    if (token.includes(":")) return text; // already namespaced, e.g. /skill:foo
+    const isSkill = this.loader.getSkills().skills.some((s) => s.name === token);
+    if (!isSkill) return text;
+    const isPrompt = this.loader.getPrompts().prompts.some((p) => p.name === token);
+    const isExtCmd = (this.extensionsResult?.extensions ?? []).some((e) => e.commands.has(token));
+    if (isPrompt || isExtCmd) return text; // SDK resolves these directly
+    return text.replace(/^\/\S+/, `/skill:${token}`);
+  }
+
   async prompt(text: string, images?: ImagePayload[], toolMode?: ToolMode): Promise<void> {
+    text = this.resolveSlashShorthand(text);
     if (toolMode && toolMode !== this.toolMode) {
       this.toolMode = toolMode;
       this.session.setActiveToolsByName(
@@ -248,14 +337,49 @@ export class PiSession {
     }));
     const options = imageContent?.length ? { images: imageContent } : {};
     if (this.session.isStreaming) {
-      await this.session.prompt(text, { ...options, streamingBehavior: "steer" });
+      await this.session.prompt(text, { ...options, streamingBehavior: "followUp" });
     } else {
       await this.session.prompt(text, options);
     }
   }
 
   async steer(text: string): Promise<void> {
-    await this.session.steer(text);
+    await this.session.steer(this.resolveSlashShorthand(text));
+  }
+
+  /** Promote a queued follow-up to a steer by index. Returns promoted text or null. */
+  async promoteFollowUpToSteer(index: number): Promise<string | null> {
+    const { steering, followUp } = this.session.clearQueue();
+    if (index < 0 || index >= followUp.length) {
+      // Restore everything — index out of bounds.
+      for (const s of steering) await this.session.steer(s);
+      for (const f of followUp) await this.session.followUp(f);
+      return null;
+    }
+    const target = followUp[index]!;
+    // Re-add existing steering messages.
+    for (const s of steering) await this.session.steer(s);
+    // Promote target to steer.
+    await this.session.steer(target);
+    // Re-add remaining follow-ups.
+    for (let i = 0; i < followUp.length; i++) {
+      if (i !== index) await this.session.followUp(followUp[i]!);
+    }
+    return target;
+  }
+
+  /** Pop the last queued follow-up message and return its text (for recall to composer). */
+  async popLastFollowUp(): Promise<string | null> {
+    const { steering, followUp } = this.session.clearQueue();
+    if (followUp.length === 0) {
+      for (const s of steering) await this.session.steer(s);
+      return null;
+    }
+    const last = followUp.pop()!;
+    // Restore everything except the popped item.
+    for (const s of steering) await this.session.steer(s);
+    for (const f of followUp) await this.session.followUp(f);
+    return last;
   }
 
   /** Manual compaction. Progress/result surface as notice transcript items. */

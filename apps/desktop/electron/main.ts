@@ -131,7 +131,11 @@ async function boot(): Promise<void> {
       threadService.prompt(id, text, images, toolMode),
     "threads:runCommand": (id, command) => threadService.runCommand(id, command),
     "threads:listCommands": (id) => threadService.listCommands(id),
+    "threads:search": (query) => threadService.searchThreads(query),
     "threads:listModels": (id) => threadService.listModels(id),
+    "threads:listAllModels": (id) => threadService.listAllModels(id),
+    "threads:setModelScoped": (id, provider, modelId, scoped) =>
+      threadService.setModelScoped(id, provider, modelId, scoped),
     "threads:setModel": (id, provider, modelId) => threadService.setModel(id, provider, modelId),
     "threads:setThinking": (id, level) => threadService.setThinking(id, level),
     "threads:getMeta": (id) => threadService.getMeta(id),
@@ -177,11 +181,13 @@ async function boot(): Promise<void> {
     "git:commitPush": (id, message) => gitService.commitPush(id, message),
     "git:createPr": (id) => gitService.createPr(id),
     "threads:steer": (id, text) => threadService.steer(id, text),
+    "threads:promoteFollowUpToSteer": (id, index) => threadService.promoteFollowUpToSteer(id, index),
+    "threads:popLastFollowUp": (id) => threadService.popLastFollowUp(id),
     "threads:abort": (id) => threadService.abort(id),
     "threads:getTranscript": (id) => threadService.getTranscript(id),
     "threads:snooze": (id, until) => appService.snoozeThread(id, until),
     "threads:unsnooze": (id) => appService.unsnoozeThread(id),
-    "threads:markToTest": (id, note) => appService.markToTest(id, note),
+    "threads:markToTest": (id) => threadService.markToTest(id),
     "threads:unmarkToTest": (id) => appService.unmarkToTest(id),
   });
 

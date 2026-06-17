@@ -65,6 +65,11 @@
   let expanded = $state<Record<string, boolean>>({});
   let snoozePickerFor = $state<string | null>(null);
 
+  // ⌘⇧↑/↓ traversal: while the modifiers are held the highlight "hovers"
+  // a thread without selecting it; releasing ⌘ or ⇧ "clicks" the previewed
+  // row. `previewThreadId` is the hovered (not yet committed) thread.
+  let previewThreadId = $state<string | null>(null);
+
   // Sidebar drag-reorder of projects (native HTML5 DnD).
   let draggedId = $state<string | null>(null);
   let dragOverId = $state<string | null>(null);
@@ -142,6 +147,55 @@
   );
   const chatGroups = $derived(partition(chats));
 
+  // Flat, top-to-bottom order of the rows ⌘⇧↑/↓ can land on: every visible
+  // active row (project threads first, then chats). Collapsed groups
+  // (snoozed/to-test/past) are intentionally excluded.
+  const previewOrder = $derived([
+    ...byProject.filter((g) => !isCollapsed(g.project.id)).flatMap((g) => g.active),
+    ...chatGroups.active,
+  ].map((t) => t.id));
+
+  const previewSelector = $derived(
+    previewThreadId ? `.session-row[data-thread-id="${previewThreadId}"]` : "",
+  );
+
+  function movePreview(dir: 1 | -1) {
+    const list = previewOrder;
+    if (list.length === 0) return;
+    const cur = previewThreadId ?? selectedThreadId;
+    let idx = cur ? list.indexOf(cur) : -1;
+    if (idx === -1) idx = dir === 1 ? -1 : 0;
+    idx = (idx + dir + list.length) % list.length;
+    previewThreadId = list[idx]!;
+    // Keep the previewed row on screen as the highlight travels.
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`.session-row[data-thread-id="${previewThreadId}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  function onPreviewKeydown(e: KeyboardEvent) {
+    if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      movePreview(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      movePreview(-1);
+    }
+  }
+
+  function onPreviewKeyup(e: KeyboardEvent) {
+    if (previewThreadId === null) return;
+    // Releasing either modifier commits the preview — "let go" = click.
+    if (e.key === "Meta" || e.key === "Control" || e.key === "Shift") {
+      const id = previewThreadId;
+      previewThreadId = null;
+      onSelect(id);
+    }
+  }
+
   function toggle(key: string) {
     expanded = { ...expanded, [key]: !expanded[key] };
   }
@@ -202,6 +256,7 @@
     <button
       class="session-row flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-1.5 text-left text-[13px]
         {isActive ? 'session-row--active text-fg' : 'text-muted hover:text-fg'}"
+      data-thread-id={thread.id}
       onclick={() => onSelect(thread.id)}
     >
       <Tag.icon
@@ -222,7 +277,7 @@
       {#if variant === "snoozed" && thread.snoozedUntil}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{snoozeTimeLeft(thread.snoozedUntil)}</span>
       {:else if thread.status === "running"}
-        <BrailleSpinner class="session-spinner ml-auto shrink-0" title="Thinking…" />
+        <BrailleSpinner class="session-spinner ml-auto mr-1 shrink-0" title="Thinking…" />
       {:else if variant === "active"}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{relativeTime(thread.lastActivityAt, now)}</span>
       {/if}
@@ -302,6 +357,12 @@
     {/if}
   {/if}
 {/snippet}
+
+<svelte:window
+  onkeydown={onPreviewKeydown}
+  onkeyup={onPreviewKeyup}
+  onblur={() => (previewThreadId = null)}
+/>
 
 <aside
   class="flex h-full shrink-0 flex-col rounded-r-3xl bg-sidebar shadow-[inset_-5px_0_8px_-8px_rgba(0,0,0,0.1)]"
@@ -451,7 +512,7 @@
           </div>
         </div>
         {#if !isCollapsed(group.project.id)}
-          <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
+          <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
             {#each group.active as thread (thread.id)}
               {@render threadRow(thread, "active")}
             {/each}
@@ -478,7 +539,7 @@
       >
     </div>
     <div class="max-h-48 overflow-y-auto">
-      <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
+      <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
         {#each chatGroups.active as thread (thread.id)}
           {@render threadRow(thread, "active")}
         {/each}

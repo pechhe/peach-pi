@@ -24,6 +24,7 @@ import type {
   ThinkingLevel,
   Thread,
   ThreadId,
+  ThreadSearchHit,
   ToolMode,
 } from "./entities.ts";
 import type { TranscriptDelta, TranscriptItem } from "./transcript.ts";
@@ -133,6 +134,10 @@ export const ipcContracts = {
     requireNonEmptyString(text, "text");
   }),
   "threads:steer": invoke<[threadId: ThreadId, text: string], void>(),
+  /** Promote a queued follow-up message to a steer by index. Returns promoted text or null. */
+  "threads:promoteFollowUpToSteer": invoke<[threadId: ThreadId, index: number], string | null>(),
+  /** Pop the last queued follow-up message and return its text (for recall to composer). */
+  "threads:popLastFollowUp": invoke<[threadId: ThreadId], string | null>(),
   /** Execute an extension/slash command in the live session (e.g. "/caveman"). */
   "threads:runCommand": invoke<[threadId: ThreadId, command: string], void>((id, cmd) => {
     requireNonEmptyString(id, "threadId");
@@ -140,8 +145,18 @@ export const ipcContracts = {
   }),
   "threads:abort": invoke<[threadId: ThreadId], void>(),
   "threads:getTranscript": invoke<[threadId: ThreadId], TranscriptItem[]>(),
+  /** Full-text search across thread bodies + titles. */
+  "threads:search": invoke<[query: string], ThreadSearchHit[]>((q) =>
+    requireNonEmptyString(q, "query"),
+  ),
   "threads:listCommands": invoke<[threadId: ThreadId], CommandInfo[]>(),
   "threads:listModels": invoke<[threadId: ThreadId], ModelInfo[]>(),
+  "threads:listAllModels": invoke<[threadId: ThreadId], ModelInfo[]>(),
+  /** Toggle a model in the global `enabledModels` scope; returns the new scoped list. */
+  "threads:setModelScoped": invoke<
+    [threadId: ThreadId, provider: string, modelId: string, scoped: boolean],
+    ModelInfo[]
+  >(),
   "threads:setModel": invoke<[threadId: ThreadId, provider: string, modelId: string], SessionMeta>(),
   "threads:setThinking": invoke<[threadId: ThreadId, level: ThinkingLevel], SessionMeta>(),
   "threads:getMeta": invoke<[threadId: ThreadId], SessionMeta>(),

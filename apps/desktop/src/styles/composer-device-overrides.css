@@ -38,17 +38,28 @@
 
 /* Model slider layout fix: symmetric mirrored slots, labels centered under
    each tick, and breathing room so the names clear the tick marks.
-   (.composer-device prefix => higher specificity than the source rules.) */
+   (.composer-device prefix => higher specificity than the source rules.)
+
+   The thumb/glow/ticks live inside .model-selector__slider, which is inset
+   +16px from the badge, while the labels are children of the badge. So the
+   slider-space detents must be (badge detent - 16) to line up with the
+   badge-space labels. Target detents (badge coords): 44 / 134.667 / 225.333
+   / 316 -- symmetric about the badge centre (180) and inside the track. */
+.composer-device .model-selector__badge--slider {
+  --model-slider-slot-start: 28px; /* 44 (badge) - 16 (slider inset) */
+  --model-slider-slot-step: 90.667px;
+}
+
 .composer-device .model-selector__badge--slider .model-selector__slider-ticks {
   left: 0;
   right: 0;
   top: 46px;
 }
 
-.composer-device .model-selector__badge--slider .model-selector__slider-tick--0 { left: 44px; }
-.composer-device .model-selector__badge--slider .model-selector__slider-tick--1 { left: 134.667px; }
-.composer-device .model-selector__badge--slider .model-selector__slider-tick--2 { left: 225.333px; }
-.composer-device .model-selector__badge--slider .model-selector__slider-tick--3 { left: 316px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--0 { left: 28px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--1 { left: 118.667px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--2 { left: 209.333px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--3 { left: 300px; }
 
 .composer-device .model-selector__badge--slider .model-selector__slider-label--slot,
 .composer-device .model-selector__badge--slider .model-selector__slider-label--menu {

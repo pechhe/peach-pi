@@ -540,3 +540,16 @@ details[open] > *:not(summary) {
     transform: translateX(-50%) translateY(0);
   }
 }
+
+/* In-thread find (⌘F) term highlights — painted via the CSS Custom Highlight
+   API over Range objects (see ThreadView.svelte), so they survive the
+   {@html}/per-word-span rebuilds in Markdown/StreamingText. */
+::highlight(thread-find) {
+  background: oklch(0.6 0.16 52 / 0.22);
+  border-radius: 2px;
+}
+::highlight(thread-find-current) {
+  background: oklch(0.6 0.16 52 / 0.5);
+  color: var(--color-fg, #fff);
+  border-radius: 2px;
+}

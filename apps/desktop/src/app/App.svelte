@@ -33,6 +33,7 @@
   let selectedThreadId = $state<string | null>(null);
   let view = $state<AppView>("thread");
   let searchOpen = $state(false);
+  let pendingFindQuery = $state<string | null>(null);
 
   // Sidebar width: seeded once from the persisted snapshot, then owned locally.
   // (Re-syncing on every snapshot would revert the drag, since the persisted
@@ -109,8 +110,9 @@
     applyNav(navHistory[navIndex]!);
   }
 
-  function selectThread(id: string) {
+  function selectThread(id: string, findQuery?: string) {
     pushNav({ view: "thread", threadId: id });
+    if (findQuery) pendingFindQuery = findQuery;
   }
   function openView(v: AppView) {
     pushNav({ view: v, threadId: selectedThreadId });
@@ -243,7 +245,7 @@
         onSelect={selectThread}
       />
     {:else if selectedThread}
-      <ThreadView thread={selectedThread} onOpenGraph={() => openView("graph")} />
+      <ThreadView thread={selectedThread} onOpenGraph={() => openView("graph")} pendingFind={pendingFindQuery} onFindConsumed={() => (pendingFindQuery = null)} />
     {:else}
       <main class="flex flex-1 items-center justify-center" data-testid="boot-ok">
         <div class="titlebar-drag absolute inset-x-0 top-0 h-12"></div>

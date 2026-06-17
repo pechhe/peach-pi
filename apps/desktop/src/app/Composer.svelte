@@ -116,6 +116,12 @@
     slashIndex = 0;
   });
 
+  const commandKindLabel: Record<CommandInfo["kind"], string> = {
+    skill: "skill",
+    extension: "extension",
+    prompt: "prompt",
+  };
+
   function pickSlash(cmd: CommandInfo) {
     drafts.update(thread.id, { text: `/${cmd.name} ` });
     textareaEl?.focus();
@@ -277,6 +283,14 @@
         return;
       }
     }
+    // Up arrow when composer is empty and queue has follow-ups → recall last queued message.
+    if (e.key === "ArrowUp" && !draft.text.trim() && queue.followUp.length > 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      void api.invoke("threads:popLastFollowUp", thread.id).then((text) => {
+        if (text) drafts.update(thread.id, { text });
+      });
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void submit(e.metaKey && running);
@@ -312,7 +326,7 @@
         class="absolute bottom-full mb-2 w-full overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
         data-testid="slash-menu"
       >
-        {#each slashMatches as cmd, i (cmd.name)}
+        {#each slashMatches as cmd, i (cmd.kind + ":" + cmd.name)}
           <button
             class="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-sm
               {i === slashIndex ? 'bg-surface-2' : ''} hover:bg-surface-2"
@@ -320,6 +334,7 @@
           >
             <span class="font-mono text-fg">/{cmd.name}</span>
             <span class="truncate text-xs text-faint">{cmd.description}</span>
+            <span class="ml-auto shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-faint">{commandKindLabel[cmd.kind]}</span>
           </button>
         {/each}
       </div>
@@ -328,10 +343,22 @@
     <!-- Queued messages shelf -->
     {#if queue.steering.length > 0 || queue.followUp.length > 0}
       <div class="mb-2 flex flex-col gap-1" data-testid="queued-shelf">
-        {#each [...queue.steering.map((t) => ({ t, k: "steer" })), ...queue.followUp.map((t) => ({ t, k: "follow-up" }))] as q, i (i)}
+        {#each queue.steering as t, i ("s-" + i)}
           <div class="flex items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs text-muted">
-            <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">{q.k}</span>
-            <span class="truncate">{q.t}</span>
+            <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">steer</span>
+            <span class="truncate">{t}</span>
+          </div>
+        {/each}
+        {#each queue.followUp as t, i ("f-" + i)}
+          <div class="flex items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs text-muted">
+            <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">queue</span>
+            <span class="truncate">{t}</span>
+            <button
+              class="ml-auto shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase hover:bg-accent hover:text-accent-fg"
+              onclick={() => api.invoke("threads:promoteFollowUpToSteer", thread.id, i)}
+              title="Steer now"
+              data-testid="promote-steer"
+            >steer</button>
           </div>
         {/each}
       </div>
@@ -400,7 +427,7 @@
             bind:this={textareaEl}
             onfocus={() => console.log("[composer] textarea FOCUSED")}
             placeholder={running
-              ? "enter queues a steer · ⌘enter steers · esc stops"
+              ? "enter queues · ⌘enter steers · esc stops"
               : draft.mode === "plan"
                 ? "plan something…"
                 : "message the clanker"}
@@ -468,8 +495,12 @@
             bind:this={modelSelector}
             model={meta?.model ?? null}
             models={sessionMetas.models}
+            allModels={sessionMetas.allModels}
             onPick={pickModel}
             onRequestModels={() => sessionMetas.loadModels(thread.id)}
+            onRequestAllModels={() => sessionMetas.loadAllModels(thread.id)}
+            onToggleScoped={(provider, id, scoped) =>
+              sessionMetas.setModelScoped(thread.id, provider, id, scoped)}
           />
 
           {#if meta && meta.availableThinkingLevels.length >= 1}

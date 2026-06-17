@@ -123,11 +123,6 @@ export class AppService {
     this.publish();
   }
 
-  markToTest(threadId: string, note?: string): void {
-    this.threads.setToTest(threadId, new Date().toISOString(), note ?? null);
-    this.publish();
-  }
-
   unmarkToTest(threadId: string): void {
     this.threads.setToTest(threadId, null, null);
     this.publish();

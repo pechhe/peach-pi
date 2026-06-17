@@ -11,7 +11,7 @@ const SYSTEM_PROMPT = [
   "You label chat threads for a coding agent. Given a user's first message,",
   "reply with ONE line of JSON only, no markdown, in this exact shape:",
   '{"title":"...","tag":"..."}',
-  "title: concise, 3-6 words, max 60 chars, sentence case, no trailing",
+  "title: very concise, 2-4 words, max 35 chars, sentence case, no trailing",
   "punctuation, no quotes.",
   `tag: one of ${THREAD_TAGS.join(", ")}.`,
   "feature = new functionality; bugfix = fixing broken behaviour;",
@@ -29,7 +29,7 @@ export interface ThreadTitleAndTag {
 const isTag = (v: unknown): v is ThreadTag =>
   typeof v === "string" && (THREAD_TAGS as readonly string[]).includes(v);
 
-const capTitle = (t: string): string => (t.length > 60 ? `${t.slice(0, 59)}…` : t);
+const capTitle = (t: string): string => (t.length > 35 ? `${t.slice(0, 34)}…` : t);
 
 /**
  * Generate a short title and category tag from the user's first message in a

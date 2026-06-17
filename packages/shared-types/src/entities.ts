@@ -80,10 +80,15 @@ export interface ImagePayload {
   data: string;
 }
 
-/** Slash-menu entry surfaced from pi prompt templates / extension commands. */
+/** Where a slash-menu entry originates, for categorising the menu. */
+export type CommandKind = "prompt" | "extension" | "skill";
+
+/** Slash-menu entry surfaced from pi prompt templates / extension commands / skills. */
 export interface CommandInfo {
+  /** Friendly name the user types/searches, e.g. "diagnose" (no "skill:" prefix). */
   name: string;
   description: string;
+  kind: CommandKind;
 }
 
 /** Queued messages for a running thread (steer + follow-up). */
@@ -263,6 +268,17 @@ export interface ExtensionStatusPayload {
   threadId: ThreadId;
   key: string;
   text: string | null;
+}
+
+/** One search hit from `threads:search`. Snippet is present when the
+ *  query matched inside the thread body (not just the title). */
+export interface ThreadSearchHit {
+  threadId: ThreadId;
+  title: string;
+  /** "" for chats (no project). */
+  projectName: string;
+  /** Surrounding-text excerpt around the first body match, if any. */
+  snippet?: string;
 }
 
 /** Snapshot published main → renderer. Grows with features. */
