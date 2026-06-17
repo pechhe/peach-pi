@@ -16,6 +16,7 @@
   import { lightbox } from "../stores/lightbox.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { caveman } from "../stores/caveman.svelte";
+  import { autoCompact } from "../stores/auto-compact.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { markAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
@@ -29,11 +30,29 @@
   const running = $derived(thread.status === "running");
   const meta = $derived(sessionMetas.for(thread.id));
 
+  /**
+   * Where auto-compaction fires on the context bar: the smaller of the percent
+   * threshold and the token threshold expressed as a percent of this model's
+   * context window (matches the "whichever is reached first" main-process rule).
+   */
+  const autoCompactPercent = $derived.by(() => {
+    const window = meta?.contextWindow;
+    const tokenPercent =
+      autoCompact.tokens != null && window ? (autoCompact.tokens / window) * 100 : Infinity;
+    return Math.min(100, autoCompact.percent, tokenPercent);
+  });
+
+  /** Effective trigger expressed in tokens, for the marker tooltip. */
+  const autoCompactTokens = $derived(
+    meta?.contextWindow ? Math.round((autoCompactPercent / 100) * meta.contextWindow) : null,
+  );
+
   $effect(() => {
     sessionMetas.ensure(thread.id);
     void sessionMetas.loadModels(thread.id);
   });
   void caveman.load();
+  void autoCompact.load();
 
   // Caveman shares the heavier "clanky" click with the send button.
   function toggleCaveman() {
@@ -365,7 +384,15 @@
       ondrop={onDrop}
     >
       <div class="composer__editor">
-        <div class="composer__screen {dragActive ? 'ring-2 ring-accent' : ''}">
+        <div
+          class="composer__screen {dragActive ? 'ring-2 ring-accent' : ''}"
+          onmousedown={(e) => {
+            const t = e.target as HTMLElement;
+            if (t.closest("textarea, button, .composer__context")) return;
+            e.preventDefault();
+            textareaEl?.focus();
+          }}
+        >
           <textarea
             bind:this={textareaEl}
             placeholder={running
@@ -385,6 +412,13 @@
             <div class="composer__context" data-testid="context-usage">
               <div class="composer__context-track">
                 <div class="composer__context-fill" style="width: {Math.min(100, meta.contextPercent)}%"></div>
+                <div
+                  class="composer__context-marker"
+                  style="left: {autoCompactPercent}%"
+                  title={autoCompactTokens != null
+                    ? `Auto-compacts at ${fmtTokens(autoCompactTokens)} tokens`
+                    : `Auto-compacts at ${Math.round(autoCompactPercent)}%`}
+                ></div>
               </div>
               <span class="composer__context-label">
                 {fmtTokens(meta.contextTokens)} / {fmtTokens(meta.contextWindow)}
@@ -393,7 +427,7 @@
                     class="composer__context-compact"
                     onclick={() => api.invoke("threads:compact", thread.id)}
                     data-testid="compact-button"
-                    title="Compact context (auto-compacts at 80%)"
+                    title="Compact context (auto-compacts at {Math.round(autoCompactPercent)}%)"
                   >Compact</button>
                 {/if}
               </span>

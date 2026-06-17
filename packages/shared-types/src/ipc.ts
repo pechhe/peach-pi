@@ -1,5 +1,6 @@
 import type {
   AppSnapshot,
+  AutoCompactSettings,
   CavemanState,
   CommandInfo,
   Automation,
@@ -77,6 +78,17 @@ export const ipcContracts = {
   "app:getUtilityModel": invoke<[], ModelInfo | null>(),
   /** Persist the "utility" model choice. Pass null to clear (fall back to defaults). */
   "app:setUtilityModel": invoke<[model: ModelInfo | null], ModelInfo | null>(),
+  /** Read the auto-compaction thresholds (percent + optional token cap). */
+  "app:getAutoCompact": invoke<[], AutoCompactSettings>(),
+  /** Persist the auto-compaction thresholds. */
+  "app:setAutoCompact": invoke<[settings: AutoCompactSettings], AutoCompactSettings>((s) => {
+    if (typeof s?.percent !== "number" || s.percent < 1 || s.percent > 100) {
+      throw new Error("percent must be a number between 1 and 100");
+    }
+    if (s.tokens != null && (typeof s.tokens !== "number" || s.tokens < 0)) {
+      throw new Error("tokens must be a non-negative number or null");
+    }
+  }),
   /** Persist the sidebar width (pixels). */
   "ui:setSidebarWidth": invoke<[width: number], void>((w) => {
     if (typeof w !== "number" || !Number.isFinite(w)) {

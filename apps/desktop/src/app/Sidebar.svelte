@@ -1,10 +1,11 @@
 <script lang="ts">
-  import type { AppView, Project, Thread } from "@peach-pi/shared-types";
+  import type { AppView, Project, Thread, ThreadTag } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { playButtonSecondary } from "../lib/sound/button-click-sound";
   import SnoozePicker from "./SnoozePicker.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
+  import MovingHighlight from "./MovingHighlight.svelte";
   import Search from "@lucide/svelte/icons/search";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
@@ -22,6 +23,21 @@
   import SquarePen from "@lucide/svelte/icons/square-pen";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Bug from "@lucide/svelte/icons/bug";
+  import Wrench from "@lucide/svelte/icons/wrench";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import Cog from "@lucide/svelte/icons/cog";
+  import Circle from "@lucide/svelte/icons/circle";
+
+  const TAG_META: Record<ThreadTag, { icon: typeof Sparkles; label: string }> = {
+    feature: { icon: Sparkles, label: "New feature" },
+    bugfix: { icon: Bug, label: "Bug fix" },
+    refactor: { icon: Wrench, label: "Refactor" },
+    docs: { icon: FileText, label: "Docs" },
+    chore: { icon: Cog, label: "Chore" },
+    other: { icon: Circle, label: "Other" },
+  };
 
   let {
     width = 280,
@@ -179,12 +195,11 @@
 </script>
 
 {#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived")}
+  {@const isActive = activeView === "thread" && selectedThreadId === thread.id}
   <div class="group relative flex items-center">
     <button
-      class="flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-1.5 text-left text-[13px]
-        {selectedThreadId === thread.id
-        ? 'bg-surface-2 text-fg shadow-sm shadow-black/20'
-        : 'text-muted hover:bg-surface/80 hover:text-fg'}"
+      class="session-row flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-1.5 text-left text-[13px]
+        {isActive ? 'session-row--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onSelect(thread.id)}
     >
       {#if thread.status === "running"}
@@ -193,11 +208,14 @@
         <span class="size-1.5 shrink-0 rounded-full bg-danger"></span>
       {:else if thread.status === "completed"}
         <span class="size-1.5 shrink-0 rounded-full bg-accent" title="Finished"></span>
+      {:else if thread.tag}
+        {@const Tag = TAG_META[thread.tag]}
+        <Tag.icon size={13} class="shrink-0 text-faint" title={Tag.label} />
       {/if}
       <span
         class="truncate {variant === 'archived'
           ? 'text-fainter'
-          : thread.status === 'completed' && selectedThreadId !== thread.id
+          : thread.status === 'completed' && !isActive
             ? 'text-accent'
             : ''}">{thread.title}</span>
       {#if variant === "snoozed" && thread.snoozedUntil}
@@ -270,9 +288,11 @@
       {label} · {list.length}
     </button>
     {#if expanded[key]}
-      {#each list as thread (thread.id)}
-        {@render threadRow(thread, variant)}
-      {/each}
+      <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
+        {#each list as thread (thread.id)}
+          {@render threadRow(thread, variant)}
+        {/each}
+      </MovingHighlight>
     {/if}
   {/if}
 {/snippet}
@@ -295,56 +315,62 @@
   </div>
 
   <!-- Nav -->
-  <nav class="flex flex-col gap-0.5 px-3 pb-2">
-    <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-        {activeView === 'testing' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
-      onclick={() => onOpenView("testing")}
-      data-testid="nav-testing"
+  <nav class="px-3 pb-2">
+    <MovingHighlight
+      class="flex flex-col gap-0.5"
+      itemSelector=".main-nav-item"
+      activeSelector=".main-nav-item--active"
     >
-      <span class="flex items-center gap-2.5"><Eye size={15} /> Testing {#if toTestCount > 0}<span class="ml-1 rounded-full bg-surface-2 px-1.5 text-[10px]">{toTestCount}</span>{/if}</span>
-      <kbd class="text-[10px] text-fainter">⇧6</kbd>
-    </button>
-    <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-        {activeView === 'automations' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
-      onclick={() => onOpenView("automations")}
-      data-testid="nav-automations"
-    >
-      <span class="flex items-center gap-2.5"><AlarmClock size={15} /> Automations</span>
-    </button>
-    <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-        {activeView === 'agents' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
-      onclick={() => onOpenView("agents")}
-      data-testid="nav-agents"
-    >
-      <span class="flex items-center gap-2.5"><Bot size={15} /> Agents</span>
-    </button>
-    <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-        {activeView === 'skills' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
-      onclick={() => onOpenView("skills")}
-      data-testid="nav-skills"
-    >
-      <span class="flex items-center gap-2.5"><BookOpen size={15} /> Skills</span>
-    </button>
-    <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-        {activeView === 'extensions' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
-      onclick={() => onOpenView("extensions")}
-      data-testid="nav-extensions"
-    >
-      <span class="flex items-center gap-2.5"><Puzzle size={15} /> Extensions</span>
-    </button>
-    <button
-      class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-        {activeView === 'settings' ? 'bg-surface-2 text-fg' : 'text-muted hover:bg-surface hover:text-fg'}"
-      onclick={() => onOpenView("settings")}
-      data-testid="nav-settings"
-    >
-      <span class="flex items-center gap-2.5"><Settings size={15} /> Settings</span>
-    </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'testing' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("testing")}
+        data-testid="nav-testing"
+      >
+        <span class="flex items-center gap-2.5"><Eye size={15} /> Testing {#if toTestCount > 0}<span class="ml-1 rounded-full bg-surface-2 px-1.5 text-[10px]">{toTestCount}</span>{/if}</span>
+        <kbd class="text-[10px] text-fainter">⇧6</kbd>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'automations' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("automations")}
+        data-testid="nav-automations"
+      >
+        <span class="flex items-center gap-2.5"><AlarmClock size={15} /> Automations</span>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'agents' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("agents")}
+        data-testid="nav-agents"
+      >
+        <span class="flex items-center gap-2.5"><Bot size={15} /> Agents</span>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'skills' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("skills")}
+        data-testid="nav-skills"
+      >
+        <span class="flex items-center gap-2.5"><BookOpen size={15} /> Skills</span>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'extensions' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("extensions")}
+        data-testid="nav-extensions"
+      >
+        <span class="flex items-center gap-2.5"><Puzzle size={15} /> Extensions</span>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'settings' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("settings")}
+        data-testid="nav-settings"
+      >
+        <span class="flex items-center gap-2.5"><Settings size={15} /> Settings</span>
+      </button>
+    </MovingHighlight>
   </nav>
 
   <!-- Projects -->
@@ -419,9 +445,11 @@
           </div>
         </div>
         {#if !isCollapsed(group.project.id)}
-          {#each group.active as thread (thread.id)}
-            {@render threadRow(thread, "active")}
-          {/each}
+          <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
+            {#each group.active as thread (thread.id)}
+              {@render threadRow(thread, "active")}
+            {/each}
+          </MovingHighlight>
           {@render collapsible(`sn:${group.project.id}`, "Snoozed", group.snoozed, "snoozed")}
           {@render collapsible(`tt:${group.project.id}`, "To test", group.toTest, "toTest")}
           {@render collapsible(`ar:${group.project.id}`, "Past", group.archived, "archived")}
@@ -444,9 +472,11 @@
       >
     </div>
     <div class="max-h-48 overflow-y-auto">
-      {#each chatGroups.active as thread (thread.id)}
-        {@render threadRow(thread, "active")}
-      {/each}
+      <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
+        {#each chatGroups.active as thread (thread.id)}
+          {@render threadRow(thread, "active")}
+        {/each}
+      </MovingHighlight>
       {@render collapsible("chats:past", "Past", chatGroups.archived, "archived")}
     </div>
   </div>

@@ -2,7 +2,7 @@ export { PiSession, type PiSessionCallbacks, type PiSessionMeta } from "./pi-ses
 export { TranscriptRecorder, type RecorderEvent } from "./transcript-recorder.ts";
 export { inspectResources } from "./inspect-resources.ts";
 export { generateCommitMessage } from "./commit-message.ts";
-export { generateThreadTitle } from "./thread-title.ts";
+export { generateTitleAndTag, type ThreadTitleAndTag } from "./thread-title.ts";
 export { resolveUtilityModel, completeUtility, listAvailableModels, type UtilityModelConfig, type UtilityCompletionOptions } from "./utility-model.ts";
 export { scopeModels, THINKING_SUFFIXES } from "./scope-models.ts";
 export { createUiBridge, type UiBridgeCallbacks } from "./extension-ui-bridge.ts";

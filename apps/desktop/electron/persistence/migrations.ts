@@ -78,4 +78,11 @@ export const migrations: Migration[] = [
       db.exec("ALTER TABLE threads ADD COLUMN worktree_dir TEXT");
     },
   },
+  {
+    version: 4,
+    up: (db) => {
+      // Auto-classified category, set alongside the auto-generated title.
+      db.exec("ALTER TABLE threads ADD COLUMN tag TEXT");
+    },
+  },
 ];

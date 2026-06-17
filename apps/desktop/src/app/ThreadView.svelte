@@ -4,6 +4,7 @@
   import Composer from "./Composer.svelte";
   import GitWidget from "./GitWidget.svelte";
   import Workflow from "@lucide/svelte/icons/workflow";
+  import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import Markdown from "./Markdown.svelte";
   import StreamingText from "./StreamingText.svelte";
   import WorkingLabel from "./WorkingLabel.svelte";
@@ -24,8 +25,24 @@
 
   let scrollEl = $state<HTMLElement | null>(null);
   let didInitialScroll = $state(false);
+  // True when the user has scrolled away from the bottom of the transcript.
+  let scrolledUp = $state(false);
 
   const items = $derived(transcripts.itemsFor(thread.id));
+
+  const BOTTOM_THRESHOLD = 200;
+
+  function onScroll() {
+    const el = scrollEl;
+    if (!el) return;
+    scrolledUp = el.scrollHeight - el.scrollTop - el.clientHeight > BOTTOM_THRESHOLD;
+  }
+
+  function scrollToBottom() {
+    const el = scrollEl;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }
 
   $effect(() => {
     void transcripts.ensure(thread.id);
@@ -46,7 +63,7 @@
       });
       return;
     }
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD) {
       requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight;
       });
@@ -84,7 +101,13 @@
     </div>
   </header>
 
-  <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-5" data-testid="transcript">
+  <div class="relative min-h-0 flex-1">
+    <div
+      bind:this={scrollEl}
+      class="h-full overflow-y-auto px-6 py-5"
+      data-testid="transcript"
+      onscroll={onScroll}
+    >
     <div class="mx-auto flex h-full max-w-3xl flex-col gap-5">
       {#if items.length === 0}
         <div class="flex flex-1 flex-col items-center justify-center gap-1 text-center">
@@ -126,7 +149,9 @@
                 <summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">
                   <span class="mr-1 inline-block transition-transform group-open:rotate-90">›</span>Thinking
                 </summary>
-                <div class="mt-1.5 border-l-2 border-border pl-3 leading-relaxed whitespace-pre-wrap text-faint">{item.thinking}</div>
+                <div class="mt-1.5 border-l-2 border-border pl-3 leading-relaxed text-faint">
+                  <StreamingText text={item.thinking} streaming={item.streaming} plain />
+                </div>
               </details>
             {/if}
             <StreamingText text={item.text} streaming={item.streaming} />{#if item.streaming}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-fg-soft"></span>{/if}
@@ -162,10 +187,19 @@
               <p class="mt-1 text-xs text-faint italic">Summarising the conversation to free up context…</p>
             </div>
           {:else}
+            {@const compacted = !item.error && !item.aborted}
             <details class="item-enter group mx-auto w-full max-w-2xl">
-              <summary class="flex cursor-pointer items-center gap-2 rounded-lg border border-border-strong/30 bg-surface/60 px-3 py-1.5 text-xs text-muted transition-colors select-none hover:bg-surface">
-                <span class="shrink-0 opacity-70">⌘</span>
-                <span class="font-medium {item.error ? 'text-danger' : ''}">
+              <summary
+                class="flex cursor-pointer items-center gap-2 rounded-lg border bg-surface/60 px-3 py-1.5 text-xs text-muted transition-colors select-none hover:bg-surface {compacted
+                  ? ''
+                  : 'border-border-strong/30'}"
+                style={compacted ? "border-color: oklch(0.6 0.16 52 / 0.45)" : ""}
+              >
+                <span class="shrink-0 opacity-70" style={compacted ? "color: oklch(0.6 0.16 52)" : ""}>⌘</span>
+                <span
+                  class="font-medium {item.error ? 'text-danger' : ''}"
+                  style={compacted ? "color: oklch(0.6 0.16 52)" : ""}
+                >
                   {item.aborted
                     ? "Compaction aborted"
                     : item.error
@@ -200,6 +234,18 @@
         </div>
       {/if}
     </div>
+    </div>
+    {#if scrolledUp && didInitialScroll}
+      <button
+        type="button"
+        class="absolute bottom-2 left-1/2 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border-strong bg-surface text-muted shadow-lg transition-colors hover:bg-surface-2 hover:text-fg-soft"
+        onclick={scrollToBottom}
+        title="Scroll to bottom"
+        data-testid="scroll-to-bottom"
+      >
+        <ArrowDownToDot size={18} />
+      </button>
+    {/if}
   </div>
 
   {#each extensionUi.widgetsFor(thread.id) as widget (widget.key)}

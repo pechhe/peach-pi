@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { randomUUID as uuid } from "node:crypto";
 import type {
+  AutoCompactSettings,
   CommandInfo,
   ImagePayload,
   ModelInfo,
@@ -40,6 +41,8 @@ export class ThreadService {
   private pendingDialogs = new Map<string, (value: string | boolean | undefined) => void>();
   /** Reads the persisted utility-model selection (titles/commits); null = defaults. */
   private getUtilityModel: () => ModelInfo | null;
+  /** Reads the persisted auto-compaction thresholds. */
+  private getAutoCompact: () => AutoCompactSettings;
 
   constructor(
     db: AppDb,
@@ -48,6 +51,7 @@ export class ThreadService {
     chatsDir: string,
     onRunIdle?: (thread: Thread) => void,
     getUtilityModel?: () => ModelInfo | null,
+    getAutoCompact?: () => AutoCompactSettings,
   ) {
     this.threads = new ThreadRepo(db);
     this.projects = new ProjectRepo(db);
@@ -56,6 +60,7 @@ export class ThreadService {
     this.chatsDir = chatsDir;
     this.onRunIdle = onRunIdle;
     this.getUtilityModel = getUtilityModel ?? (() => null);
+    this.getAutoCompact = getAutoCompact ?? (() => ({ percent: 80, tokens: null }));
   }
 
   async createThread(projectId: string, worktreeDir?: string): Promise<Thread> {
@@ -99,7 +104,7 @@ export class ThreadService {
       // LLM title overwrites it (only if still a placeholder).
       this.threads.setTitle(threadId, text.length > 60 ? `${text.slice(0, 60)}…` : text);
       this.onThreadsChanged();
-      void this.generateTitle(threadId, text);
+      void this.generateTitleAndTag(threadId, text);
     }
     // Fire and forget: resolution = run complete; status flows via events.
     void session.prompt(text, images, toolMode).catch((err) => {
@@ -113,19 +118,21 @@ export class ThreadService {
     });
   }
 
-  /** Async LLM title; overwrites the placeholder only if untouched since. */
-  private async generateTitle(threadId: string, firstPrompt: string): Promise<void> {
+  /** Async LLM title + tag (one call); overwrites the placeholder only if
+   *  untouched since. Tag is always applied (set once at thread creation). */
+  private async generateTitleAndTag(threadId: string, firstPrompt: string): Promise<void> {
     const placeholder = this.threads.get(threadId)?.title;
     if (!placeholder) return;
     const config = this.getUtilityModel();
-    const { generateThreadTitle } = await import("@peach-pi/pi-client");
-    const title = await generateThreadTitle(firstPrompt, config);
-    if (!title) return;
-    // Only overwrite if the user hasn't manually renamed in the meantime.
+    const { generateTitleAndTag } = await import("@peach-pi/pi-client");
+    const result = await generateTitleAndTag(firstPrompt, config);
+    if (!result) return;
+    this.threads.setTag(threadId, result.tag);
+    // Only overwrite the title if the user hasn't manually renamed meanwhile.
     if (this.threads.get(threadId)?.title === placeholder) {
-      this.threads.setTitle(threadId, title);
-      this.onThreadsChanged();
+      this.threads.setTitle(threadId, result.title);
     }
+    this.onThreadsChanged();
   }
 
   async steer(threadId: string, text: string): Promise<void> {
@@ -292,14 +299,17 @@ export class ThreadService {
           // hidden conversation message), so don't surface them as toasts.
           if (message.startsWith("Cymbal suggests:")) return;
           // Smart auto-compact status surfaces as an inline compaction card
-          // (driven by compaction_start/end), so suppress its toasts.
-          if (message.startsWith("Smart auto-compact")) return;
+          // (driven by compaction_start/end), so suppress its toasts. Covers
+          // both the wrapper ("Smart auto-compact...") and the upstream
+          // pi-smart-compact pipeline ("EESV [...] Phase N/4...").
+          if (message.startsWith("Smart auto-compact") || message.startsWith("EESV [")) return;
           this.emit("event:notice", { threadId, message, level });
         },
         onExtensionStatus: (key, text) =>
           this.emit("event:extensionStatus", { threadId, key, text }),
         onExtensionWidget: (key, lines) =>
           this.emit("event:extensionWidget", { threadId, key, lines }),
+        getAutoCompact: () => this.getAutoCompact(),
       },
       sessionFile ?? undefined,
     );

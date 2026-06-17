@@ -81,6 +81,7 @@ async function boot(): Promise<void> {
       note.show();
     },
     () => appService.getUtilityModel(),
+    () => appService.getAutoCompact(),
   );
   const automationService = new AutomationService(db, threadService, () =>
     emit("event:snapshot", appService.snapshot()),
@@ -112,6 +113,8 @@ async function boot(): Promise<void> {
     "app:listModels": () => appService.listModels(),
     "app:getUtilityModel": () => appService.getUtilityModel(),
     "app:setUtilityModel": (model) => appService.setUtilityModel(model),
+    "app:getAutoCompact": () => appService.getAutoCompact(),
+    "app:setAutoCompact": (settings) => appService.setAutoCompact(settings),
     "ui:setSidebarWidth": (width) => appService.setSidebarWidth(width),
     "projects:add": (p) => appService.addProject(p),
     "projects:remove": (id) => appService.removeProject(id),

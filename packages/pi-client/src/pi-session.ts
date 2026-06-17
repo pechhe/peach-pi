@@ -7,6 +7,7 @@ import type {
   LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 import type {
+  AutoCompactSettings,
   CommandInfo,
   ImagePayload,
   ModelInfo,
@@ -30,6 +31,8 @@ export interface PiSessionCallbacks {
   onExtensionNotify?(message: string, level: "info" | "warning" | "error"): void;
   onExtensionStatus?(key: string, text: string | null): void;
   onExtensionWidget?(key: string, lines: string[] | null): void;
+  /** Current auto-compaction thresholds; read after each run ends. */
+  getAutoCompact?(): AutoCompactSettings;
 }
 
 export interface PiSessionMeta {
@@ -44,8 +47,8 @@ export interface PiSessionMeta {
 /** Tools allowed while plan mode runs. Mutating tools stay disabled. */
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 
-/** Auto-compact after a run ends past this context usage. */
-const AUTO_COMPACT_PERCENT = 80;
+/** Fallback thresholds when no config provider is supplied. */
+const DEFAULT_AUTO_COMPACT: AutoCompactSettings = { percent: 80, tokens: null };
 
 /**
  * One live pi session bound to a thread. Owns the SDK session, the
@@ -272,9 +275,14 @@ export class PiSession {
     );
   }
 
+  /** Compact when usage crosses either threshold — whichever is reached first. */
   private maybeAutoCompact(): void {
-    const percent = this.session.getContextUsage()?.percent;
-    if (percent != null && percent >= AUTO_COMPACT_PERCENT) this.compact();
+    const usage = this.session.getContextUsage();
+    if (!usage) return;
+    const { percent, tokens } = this.callbacks.getAutoCompact?.() ?? DEFAULT_AUTO_COMPACT;
+    const hitPercent = usage.percent != null && usage.percent >= percent;
+    const hitTokens = tokens != null && usage.tokens != null && usage.tokens >= tokens;
+    if (hitPercent || hitTokens) this.compact();
   }
 
   async abort(): Promise<void> {

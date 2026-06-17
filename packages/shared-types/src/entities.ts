@@ -17,6 +17,19 @@ export interface Project {
 
 export type ThreadStatus = "idle" | "running" | "failed" | "completed";
 
+/** Auto-classified thread category (utility model picks one of these). */
+export type ThreadTag = "feature" | "bugfix" | "refactor" | "docs" | "chore" | "other";
+
+/** Allowlist used to validate the utility model's tag output. */
+export const THREAD_TAGS: readonly ThreadTag[] = [
+  "feature",
+  "bugfix",
+  "refactor",
+  "docs",
+  "chore",
+  "other",
+];
+
 export interface Thread {
   id: ThreadId;
   /** Null for custom chats (not tied to a repo). */
@@ -28,6 +41,8 @@ export interface Thread {
   /** For worktree threads: the isolated git worktree this thread works in. */
   worktreeDir?: string;
   title: string;
+  /** Auto-classified category; null until the title/tag pass runs. */
+  tag?: ThreadTag;
   status: ThreadStatus;
   snoozedUntil?: string;
   toTestAt?: string;
@@ -88,6 +103,17 @@ export interface ModelInfo {
 
 /** Plan mode runs read-only tools; build mode runs everything. */
 export type ToolMode = "all" | "readOnly";
+
+/**
+ * Auto-compaction trigger thresholds. A run that ends past EITHER threshold
+ * triggers compaction — whichever is reached first (the smaller of the two).
+ */
+export interface AutoCompactSettings {
+  /** Percentage of the model's context window (1–100). */
+  percent: number;
+  /** Absolute token count. Null = no token-based trigger. */
+  tokens: number | null;
+}
 
 /** Caveman compression state, mirrored from the pi-caveman extension config. */
 export interface CavemanState {

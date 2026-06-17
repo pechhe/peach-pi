@@ -12,6 +12,7 @@
     type StreamSpeed,
   } from "../lib/stream-reveal.svelte";
   import { api } from "../lib/ipc";
+  import { autoCompact } from "../stores/auto-compact.svelte";
 
   let muted = $state(soundsMuted());
   let version = $state("");
@@ -39,7 +40,20 @@
       api.invoke("app:getUtilityModel"),
     ]);
     selectedKey = utilityModel ? keyOf(utilityModel) : "";
+    await autoCompact.load();
   });
+
+  function saveAutoCompactPercent(e: Event) {
+    const value = Number((e.currentTarget as HTMLInputElement).value);
+    const percent = Math.min(100, Math.max(1, Math.round(value)));
+    void autoCompact.set({ percent, tokens: autoCompact.tokens });
+  }
+
+  function saveAutoCompactTokens(e: Event) {
+    const raw = (e.currentTarget as HTMLInputElement).value.trim();
+    const tokens = raw === "" ? null : Math.max(0, Math.round(Number(raw)));
+    void autoCompact.set({ percent: autoCompact.percent, tokens });
+  }
 
   function toggleSounds() {
     muted = !muted;
@@ -135,6 +149,46 @@
                 : 'translate-x-[1.1rem]'}"
             ></span>
           </button>
+        </div>
+      </section>
+
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div>
+          <h2 class="text-sm text-fg">Auto-compaction</h2>
+          <p class="text-xs text-faint">
+            Conversations compact automatically once context usage crosses either
+            threshold — whichever is reached first. Leave the token cap blank to
+            trigger on percentage alone.
+          </p>
+        </div>
+        <div class="mt-3 flex flex-col gap-3">
+          <label class="flex items-center justify-between gap-4">
+            <span class="text-xs text-fg">Context used (%)</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={autoCompact.percent}
+              onchange={saveAutoCompactPercent}
+              class="w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+              data-testid="auto-compact-percent"
+              aria-label="Auto-compact percentage"
+            />
+          </label>
+          <label class="flex items-center justify-between gap-4">
+            <span class="text-xs text-fg">Token count</span>
+            <input
+              type="number"
+              min="0"
+              step="1000"
+              placeholder="none"
+              value={autoCompact.tokens ?? ""}
+              onchange={saveAutoCompactTokens}
+              class="w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+              data-testid="auto-compact-tokens"
+              aria-label="Auto-compact token count"
+            />
+          </label>
         </div>
       </section>
 

@@ -133,6 +133,7 @@
   padding: 14px 16px;
   isolation: isolate;
   overflow: hidden;
+  cursor: text;
   background:
     radial-gradient(ellipse 120% 100% at 50% 0%, var(--cream-bg-hi), transparent 62%),
     linear-gradient(180deg, var(--cream-bg) 0%, var(--cream-bg-lo) 100%);
@@ -205,6 +206,16 @@
     transparent var(--crt-seg) calc(var(--crt-seg) + var(--crt-seg-gap))
   );
   transition: width 160ms ease;
+}
+
+.composer-device .composer__context-marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  transform: translateX(-50%);
+  background: oklch(0.6 0.16 52);
+  cursor: help;
 }
 
 .composer-device .composer__context-label {

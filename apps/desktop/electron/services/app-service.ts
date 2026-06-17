@@ -1,8 +1,15 @@
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
-import type { AppSnapshot, ModelInfo, Project, UiState } from "@peach-pi/shared-types";
+import type {
+  AppSnapshot,
+  AutoCompactSettings,
+  ModelInfo,
+  Project,
+  UiState,
+} from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import {
+  AUTO_COMPACT_KV_KEY,
   AutomationRepo,
   UTILITY_MODEL_KV_KEY,
   defaultUiState,
@@ -13,6 +20,9 @@ import {
 import type { Emit } from "../ipc/registry.ts";
 
 const UI_STATE_KEY = "ui-state";
+
+/** Default auto-compaction thresholds (matches the historical 80% behaviour). */
+const DEFAULT_AUTO_COMPACT: AutoCompactSettings = { percent: 80, tokens: null };
 
 /** Owns app state; publishes snapshots after every mutation. */
 export class AppService {
@@ -137,6 +147,15 @@ export class AppService {
     if (model) this.kv.set(UTILITY_MODEL_KV_KEY, model);
     else this.kv.set(UTILITY_MODEL_KV_KEY, null);
     return this.getUtilityModel();
+  }
+
+  getAutoCompact(): AutoCompactSettings {
+    return this.kv.get<AutoCompactSettings>(AUTO_COMPACT_KV_KEY) ?? DEFAULT_AUTO_COMPACT;
+  }
+
+  setAutoCompact(settings: AutoCompactSettings): AutoCompactSettings {
+    this.kv.set(AUTO_COMPACT_KV_KEY, settings);
+    return this.getAutoCompact();
   }
 
   private wakeExpiredSnoozes(): void {

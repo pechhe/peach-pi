@@ -35,3 +35,36 @@
 .composer-device .composer-mode__label:last-child {
   bottom: 8px;
 }
+
+/* Model slider layout fix: symmetric mirrored slots, labels centered under
+   each tick, and breathing room so the names clear the tick marks.
+   (.composer-device prefix => higher specificity than the source rules.) */
+.composer-device .model-selector__badge--slider .model-selector__slider-ticks {
+  left: 0;
+  right: 0;
+  top: 46px;
+}
+
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--0 { left: 44px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--1 { left: 134.667px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--2 { left: 225.333px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--3 { left: 316px; }
+
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot,
+.composer-device .model-selector__badge--slider .model-selector__slider-label--menu {
+  top: 22px;
+  height: 58px;
+  padding-top: 40px;
+  width: 80px;
+  max-width: 80px;
+  right: auto;
+  transform: none;
+  text-align: center;
+  justify-content: center;
+}
+
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-0 { left: 4px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-1 { left: 94.667px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-2 { left: 185.333px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-3,
+.composer-device .model-selector__badge--slider .model-selector__slider-label--menu { left: 276px; }

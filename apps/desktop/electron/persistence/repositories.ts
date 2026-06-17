@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Automation, AutomationRun, Project, Thread, UiState } from "@peach-pi/shared-types";
+import type { Automation, AutomationRun, Project, Thread, ThreadTag, UiState } from "@peach-pi/shared-types";
 import type { AppDb } from "./db.ts";
 
 interface ProjectRow {
@@ -19,6 +19,7 @@ interface ThreadRow {
   chat_workspace_dir: string | null;
   worktree_dir: string | null;
   title: string;
+  tag: string | null;
   status: string;
   snoozed_until: string | null;
   to_test_at: string | null;
@@ -45,6 +46,7 @@ const toThread = (r: ThreadRow): Thread => ({
   chatWorkspaceDir: r.chat_workspace_dir ?? undefined,
   worktreeDir: r.worktree_dir ?? undefined,
   title: r.title,
+  tag: (r.tag as ThreadTag | null) ?? undefined,
   status: r.status as Thread["status"],
   snoozedUntil: r.snoozed_until ?? undefined,
   toTestAt: r.to_test_at ?? undefined,
@@ -162,6 +164,10 @@ export class ThreadRepo {
 
   setTitle(id: string, title: string): void {
     this.db.prepare("UPDATE threads SET title = ? WHERE id = ?").run(title, id);
+  }
+
+  setTag(id: string, tag: ThreadTag): void {
+    this.db.prepare("UPDATE threads SET tag = ? WHERE id = ?").run(tag, id);
   }
 
   setSessionFile(id: string, file: string): void {
@@ -339,3 +345,6 @@ export const defaultUiState: UiState = {
 
 /** KV key for the configured "utility" model (background LLM tasks: titles/commits). */
 export const UTILITY_MODEL_KV_KEY = "utility-model";
+
+/** KV key for the auto-compaction thresholds. */
+export const AUTO_COMPACT_KV_KEY = "auto-compact";

@@ -9,6 +9,7 @@
   --color-surface: #18181b; /* panels                   */
   --color-surface-2: #27272a; /* raised / hover           */
   --color-surface-3: #3f3f46; /* deepest raised           */
+  --color-selected: #2f2f35; /* selected sidebar row     */
   --color-border: #27272a; /* subtle borders           */
   --color-border-strong: #3f3f46; /* visible borders          */
   --color-border-focus: #71717a; /* focused input border     */
@@ -41,6 +42,7 @@
   --color-surface: #ffffff;
   --color-surface-2: #e9e9ed;
   --color-surface-3: #dcdce1;
+  --color-selected: #ffffff;
   --color-border: #e6e6ea;
   --color-border-strong: #d6d6dc;
   --color-border-focus: #6d5ef0;
@@ -69,6 +71,7 @@
   --color-surface: #282a36;
   --color-surface-2: #343746;
   --color-surface-3: #44475a;
+  --color-selected: #3c4053;
   --color-border: #343746;
   --color-border-strong: #44475a;
   --color-border-focus: #6272a4;
@@ -97,6 +100,7 @@
   --color-surface: #f6f1de;
   --color-surface-2: #ece6cf;
   --color-surface-3: #ddd5b8;
+  --color-selected: #fffdf5;
   --color-border: #e7e0c8;
   --color-border-strong: #d3cbac;
   --color-border-focus: #644ac9;
@@ -342,6 +346,10 @@ button:active:not(:disabled) {
 .message-streaming .sw {
   animation: stream-word-fx var(--sw-dur, 380ms) var(--sw-ease, cubic-bezier(0.2, 0, 0, 1)) both;
 }
+/* Plain (non-markdown) streamed text — e.g. thinking blocks — keeps whitespace. */
+.message-streaming--plain {
+  white-space: pre-wrap;
+}
 @keyframes stream-word-fx {
   from {
     opacity: 0;
@@ -455,4 +463,42 @@ button:active:not(:disabled) {
 /* Smooth detail expansion (height jumps still snap, but content fades). */
 details[open] > *:not(summary) {
   animation: item-enter 0.15s ease-out;
+}
+
+/* ---------- moving sidebar highlight ---------- *
+ * A single grey box glides under the hovered item, and a separate "selected"
+ * box glides to whichever item is active — ported from peche-pi. Items render
+ * above the indicators; their own backgrounds stay transparent. */
+.sidebar-moving-highlight {
+  position: relative;
+  isolation: isolate;
+}
+
+.sidebar-moving-highlight__indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 8px;
+  will-change: transform, width, height, opacity;
+}
+
+.sidebar-moving-highlight__indicator--hover {
+  background: color-mix(in srgb, var(--color-fg) 8%, transparent);
+}
+
+.sidebar-moving-highlight__indicator--active {
+  background: var(--color-selected);
+}
+
+.sidebar-moving-highlight > :not(.sidebar-moving-highlight__indicator) {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-moving-highlight__indicator {
+    transition: opacity 150ms ease !important;
+  }
 }
