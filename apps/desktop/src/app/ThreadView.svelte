@@ -101,14 +101,14 @@
     </div>
   </header>
 
-  <div class="relative min-h-0 flex-1">
+  <div class="relative flex min-h-0 flex-1 flex-col">
     <div
       bind:this={scrollEl}
-      class="h-full overflow-y-auto px-6 py-5"
+      class="flex flex-1 flex-col overflow-y-auto px-6 py-5"
       data-testid="transcript"
       onscroll={onScroll}
     >
-    <div class="mx-auto flex h-full max-w-3xl flex-col gap-5">
+    <div class="mx-auto flex max-w-3xl flex-1 flex-col justify-end gap-5">
       {#if items.length === 0}
         <div class="flex flex-1 flex-col items-center justify-center gap-1 text-center">
           <p class="text-[15px] font-medium text-muted">What are we building?</p>

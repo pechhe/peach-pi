@@ -9,6 +9,7 @@ import type {
   GitChangedFile,
   GitCommitPushResult,
   GitInfo,
+  GitPrResult,
   GraphifyStatus,
   SubagentAgentInfo,
   ExtensionStatusPayload,
@@ -186,6 +187,7 @@ export const ipcContracts = {
   "git:changedFiles": invoke<[threadId: ThreadId], GitChangedFile[]>(),
   "git:fileDiff": invoke<[threadId: ThreadId, filePath: string], string>(),
   "git:commitPush": invoke<[threadId: ThreadId, message?: string], GitCommitPushResult>(),
+  "git:createPr": invoke<[threadId: ThreadId], GitPrResult>((id) => requireNonEmptyString(id, "threadId")),
 
   // integrated terminal (one PTY per thread, lives in main)
   "terminal:open": invoke<[threadId: ThreadId], { buffer: string }>((id) =>

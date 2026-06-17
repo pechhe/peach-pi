@@ -6,6 +6,7 @@
   import SnoozePicker from "./SnoozePicker.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import MovingHighlight from "./MovingHighlight.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import Search from "@lucide/svelte/icons/search";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
@@ -196,22 +197,22 @@
 
 {#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived")}
   {@const isActive = activeView === "thread" && selectedThreadId === thread.id}
+  {@const Tag = TAG_META[thread.tag ?? "other"]}
   <div class="group relative flex items-center">
     <button
       class="session-row flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-1.5 text-left text-[13px]
         {isActive ? 'session-row--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onSelect(thread.id)}
     >
-      {#if thread.status === "running"}
-        <BrailleSpinner class="session-spinner shrink-0" title="Thinking…" />
-      {:else if thread.status === "failed"}
-        <span class="size-1.5 shrink-0 rounded-full bg-danger"></span>
-      {:else if thread.status === "completed"}
-        <span class="size-1.5 shrink-0 rounded-full bg-accent" title="Finished"></span>
-      {:else if thread.tag}
-        {@const Tag = TAG_META[thread.tag]}
-        <Tag.icon size={13} class="shrink-0 text-faint" title={Tag.label} />
-      {/if}
+      <Tag.icon
+        size={13}
+        class="shrink-0 {thread.status === 'completed'
+          ? 'text-accent'
+          : thread.status === 'failed'
+            ? 'text-danger'
+            : 'text-faint'}"
+        title={thread.status === "failed" ? "Failed" : Tag.label}
+      />
       <span
         class="truncate {variant === 'archived'
           ? 'text-fainter'
@@ -220,27 +221,32 @@
             : ''}">{thread.title}</span>
       {#if variant === "snoozed" && thread.snoozedUntil}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{snoozeTimeLeft(thread.snoozedUntil)}</span>
+      {:else if thread.status === "running"}
+        <BrailleSpinner class="session-spinner ml-auto shrink-0" title="Thinking…" />
       {:else if variant === "active"}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{relativeTime(thread.lastActivityAt, now)}</span>
       {/if}
     </button>
     <div class="absolute right-1 hidden items-center gap-0.5 rounded bg-surface group-hover:flex">
       {#if variant === "active"}
-        <button
-          class="rounded p-1 text-faint hover:text-fg"
-          title="Snooze"
-          onclick={() => (snoozePickerFor = snoozePickerFor === thread.id ? null : thread.id)}
-        ><Clock size={14} /></button>
-        <button
-          class="rounded p-1 text-faint hover:text-fg"
-          title="Mark to test"
-          onclick={() => markThreadToTest(thread)}
-        ><Eye size={14} /></button>
-        <button
-          class="rounded p-1 text-faint hover:text-fg"
-          title="Archive"
-          onclick={() => archiveThread(thread)}
-        ><Archive size={14} /></button>
+        <Tooltip text="Snooze">
+          <button
+            class="rounded p-1 text-faint hover:text-fg"
+            onclick={() => (snoozePickerFor = snoozePickerFor === thread.id ? null : thread.id)}
+          ><Clock size={14} /></button>
+        </Tooltip>
+        <Tooltip text="Mark to test">
+          <button
+            class="rounded p-1 text-faint hover:text-fg"
+            onclick={() => markThreadToTest(thread)}
+          ><Eye size={14} /></button>
+        </Tooltip>
+        <Tooltip text="Done">
+          <button
+            class="rounded p-1 text-faint hover:text-fg"
+            onclick={() => archiveThread(thread)}
+          ><Archive size={14} /></button>
+        </Tooltip>
       {:else if variant === "snoozed"}
         <button
           class="rounded p-1 text-faint hover:text-fg"

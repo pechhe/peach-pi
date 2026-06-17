@@ -175,6 +175,7 @@ async function boot(): Promise<void> {
     "git:changedFiles": (id) => gitService.changedFiles(id),
     "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),
     "git:commitPush": (id, message) => gitService.commitPush(id, message),
+    "git:createPr": (id) => gitService.createPr(id),
     "threads:steer": (id, text) => threadService.steer(id, text),
     "threads:abort": (id) => threadService.abort(id),
     "threads:getTranscript": (id) => threadService.getTranscript(id),

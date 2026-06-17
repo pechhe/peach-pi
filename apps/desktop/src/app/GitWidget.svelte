@@ -10,8 +10,14 @@
   let selectedFile = $state<string | null>(null);
   let diff = $state("");
   let committing = $state(false);
+  let creatingPr = $state(false);
   let commitMessage = $state("");
   let lastResult = $state("");
+
+  // PR only makes sense on a feature branch (not the repo default branch).
+  const canPr = $derived(
+    !!info?.branch && !!info?.defaultBranch && info.branch !== info.defaultBranch,
+  );
 
   async function refresh() {
     info = await api.invoke("git:info", thread.id);
@@ -56,6 +62,18 @@
       files = await api.invoke("git:changedFiles", thread.id);
     } finally {
       committing = false;
+    }
+  }
+
+  async function createPr() {
+    if (creatingPr) return;
+    creatingPr = true;
+    lastResult = "";
+    try {
+      const result = await api.invoke("git:createPr", thread.id);
+      lastResult = result.ok ? `✓ Opened PR page` : `✕ ${result.error}`;
+    } finally {
+      creatingPr = false;
     }
   }
 
@@ -109,6 +127,17 @@
           >
             {committing ? "Committing…" : "Commit & Push"}
           </button>
+          {#if canPr}
+            <button
+              class="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-fg-soft transition-opacity hover:bg-surface disabled:opacity-40"
+              onclick={createPr}
+              disabled={creatingPr}
+              data-testid="create-pr"
+              title="Open a pull request on GitHub"
+            >
+              {creatingPr ? "Opening…" : "Create PR"}
+            </button>
+          {/if}
         </div>
         {#if lastResult}
           <p class="border-b border-border/80 px-3 py-1.5 text-[11px] {lastResult.startsWith('✓') ? 'text-success' : 'text-danger'}">

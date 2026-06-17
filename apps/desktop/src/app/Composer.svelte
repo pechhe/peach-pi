@@ -12,6 +12,7 @@
   import { playButtonClick, playClick, playRotary } from "../lib/sound/button-click-sound";
   import FileText from "@lucide/svelte/icons/file-text";
   import X from "@lucide/svelte/icons/x";
+  import Tooltip from "./Tooltip.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
   import { lightbox } from "../stores/lightbox.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
@@ -388,13 +389,16 @@
           class="composer__screen {dragActive ? 'ring-2 ring-accent' : ''}"
           onmousedown={(e) => {
             const t = e.target as HTMLElement;
+            console.log("[composer] mousedown target:", t.tagName, t.className);
             if (t.closest("textarea, button, .composer__context")) return;
             e.preventDefault();
             textareaEl?.focus();
+            console.log("[composer] focus called, textareaEl:", !!textareaEl);
           }}
         >
           <textarea
             bind:this={textareaEl}
+            onfocus={() => console.log("[composer] textarea FOCUSED")}
             placeholder={running
               ? "enter queues a steer · ⌘enter steers · esc stops"
               : draft.mode === "plan"
@@ -412,13 +416,13 @@
             <div class="composer__context" data-testid="context-usage">
               <div class="composer__context-track">
                 <div class="composer__context-fill" style="width: {Math.min(100, meta.contextPercent)}%"></div>
-                <div
+                <Tooltip
                   class="composer__context-marker"
                   style="left: {autoCompactPercent}%"
-                  title={autoCompactTokens != null
+                  text={autoCompactTokens != null
                     ? `Auto-compacts at ${fmtTokens(autoCompactTokens)} tokens`
                     : `Auto-compacts at ${Math.round(autoCompactPercent)}%`}
-                ></div>
+                />
               </div>
               <span class="composer__context-label">
                 {fmtTokens(meta.contextTokens)} / {fmtTokens(meta.contextWindow)}

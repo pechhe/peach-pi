@@ -138,6 +138,8 @@ export interface GitInfo {
   isRepo: boolean;
   /** Current branch; null while on a detached HEAD (worktree pre-commit). */
   branch: string | null;
+  /** Repo default branch (origin/HEAD); null if undetermined. PR target. */
+  defaultBranch: string | null;
   changedCount: number;
   insertions: number;
   deletions: number;
@@ -154,6 +156,10 @@ export interface GitChangedFile {
 
 export type GitCommitPushResult =
   | { ok: true; branch: string; message: string; pushed: boolean }
+  | { ok: false; error: string };
+
+export type GitPrResult =
+  | { ok: true; url: string }
   | { ok: false; error: string };
 
 /** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */

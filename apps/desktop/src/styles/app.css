@@ -502,3 +502,41 @@ details[open] > *:not(summary) {
     transition: opacity 150ms ease !important;
   }
 }
+
+/* ---------- shadcn-style tooltip ---------- */
+.pp-tooltip {
+  position: relative;
+  display: inline-flex;
+}
+
+.pp-tooltip__pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  white-space: nowrap;
+  pointer-events: none;
+  border-radius: 6px;
+  background: var(--color-fg);
+  color: var(--color-bg);
+  padding: 4px 8px;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: normal;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  animation: pp-tooltip-in 120ms ease;
+}
+
+@keyframes pp-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

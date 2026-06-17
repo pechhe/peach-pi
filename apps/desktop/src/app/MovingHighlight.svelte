@@ -138,11 +138,14 @@
     ro.observe(container);
     for (const item of container.querySelectorAll<HTMLElement>(itemSelector)) ro.observe(item);
     // DOM mutations fire on every snapshot (running spinners, fresh timestamps,
-    // generated titles). Only re-measure when the *selected* element actually
-    // changed — otherwise the highlight can't have moved, so skip the layout read.
-    const mo = new MutationObserver(() => {
+    // generated titles). For attribute churn, only re-measure when the *selected*
+    // element actually changed. But childList mutations mean rows were added,
+    // removed, or reordered (e.g. sending a message bumps a thread to the top):
+    // the active element keeps its identity yet moves, so always re-measure.
+    const mo = new MutationObserver((records) => {
+      const structural = records.some((r) => r.type === "childList");
       const el = container?.querySelector<HTMLElement>(activeSelector) ?? null;
-      if (el !== lastActiveEl) scheduleRemeasure();
+      if (structural || el !== lastActiveEl) scheduleRemeasure();
     });
     mo.observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
     return () => {

@@ -3,7 +3,14 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import type { GitChangedFile, GitCommitPushResult, GitInfo, ModelInfo } from "@peach-pi/shared-types";
+import { shell } from "electron";
+import type {
+  GitChangedFile,
+  GitCommitPushResult,
+  GitInfo,
+  GitPrResult,
+  ModelInfo,
+} from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
 
@@ -22,6 +29,15 @@ async function gitOk(args: string[], cwd: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Normalize a git remote (ssh or https) to its https web base, sans .git. */
+function toHttpsRepoUrl(remote: string): string | null {
+  const ssh = /^git@([^:]+):(.+?)(?:\.git)?$/.exec(remote);
+  if (ssh) return `https://${ssh[1]}/${ssh[2]}`;
+  const https = /^https?:\/\/(?:[^@]+@)?(.+?)(?:\.git)?$/.exec(remote);
+  if (https) return `https://${https[1]}`;
+  return null;
 }
 
 const slug = (text: string): string =>
@@ -61,6 +77,7 @@ export class GitService {
     const empty: GitInfo = {
       isRepo: false,
       branch: null,
+      defaultBranch: null,
       changedCount: 0,
       insertions: 0,
       deletions: 0,
@@ -96,7 +113,19 @@ export class GitService {
       // No upstream — zeros.
     }
 
-    return { ...empty, isRepo: true, branch, changedCount, insertions, deletions, ahead, behind };
+    const defaultBranch = await this.defaultBranch(cwd);
+
+    return { ...empty, isRepo: true, branch, defaultBranch, changedCount, insertions, deletions, ahead, behind };
+  }
+
+  /** Repo default branch from origin/HEAD; null when undetermined. */
+  private async defaultBranch(cwd: string): Promise<string | null> {
+    try {
+      const ref = (await git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd)).trim();
+      return ref.replace(/^origin\//, "") || null;
+    } catch {
+      return null;
+    }
   }
 
   async changedFiles(threadId: string): Promise<GitChangedFile[]> {
@@ -188,6 +217,35 @@ export class GitService {
     } catch {
       return { ok: true, branch, message: commitMessage, pushed: false };
     }
+  }
+
+  /**
+   * Open the GitHub "create PR" (compare) page for the current branch against
+   * the repo default branch. No PR when on the default branch.
+   */
+  async createPr(threadId: string): Promise<GitPrResult> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd) return { ok: false, error: "No working directory" };
+    if (!(await gitOk(["rev-parse", "--git-dir"], cwd))) return { ok: false, error: "Not a git repository" };
+
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    if (branch === "HEAD") return { ok: false, error: "Detached HEAD — commit first" };
+    const base = await this.defaultBranch(cwd);
+    if (!base) return { ok: false, error: "No default branch (origin/HEAD)" };
+    if (branch === base) return { ok: false, error: `On ${base} — switch to a feature branch first` };
+
+    let remoteUrl: string;
+    try {
+      remoteUrl = (await git(["remote", "get-url", "origin"], cwd)).trim();
+    } catch {
+      return { ok: false, error: "No 'origin' remote" };
+    }
+    const repoUrl = toHttpsRepoUrl(remoteUrl);
+    if (!repoUrl) return { ok: false, error: `Unsupported remote URL: ${remoteUrl}` };
+
+    const url = `${repoUrl}/compare/${encodeURIComponent(base)}...${encodeURIComponent(branch)}?expand=1`;
+    await shell.openExternal(url);
+    return { ok: true, url };
   }
 
   /** Detached-HEAD worktree under the managed dir (ADR-0003). */

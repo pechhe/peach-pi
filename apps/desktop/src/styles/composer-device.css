@@ -218,6 +218,13 @@
   cursor: help;
 }
 
+/* Widen the pointer hit-area beyond the 2px line so the tooltip is easy to hit. */
+.composer-device .composer__context-marker::before {
+  content: "";
+  position: absolute;
+  inset: -4px -5px;
+}
+
 .composer-device .composer__context-label {
   display: inline-flex;
   align-items: center;
