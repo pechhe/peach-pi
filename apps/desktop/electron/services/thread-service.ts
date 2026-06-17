@@ -367,6 +367,22 @@ export class ThreadService {
     this.onThreadsChanged();
   }
 
+  /** Detach a worktree thread from its worktree, keeping the conversation:
+   *  clear worktreeDir and resume the same pi session in the project dir.
+   *  Caller removes the now-orphaned worktree dir. */
+  async bringWorktreeToLocal(threadId: string): Promise<void> {
+    const thread = this.threads.get(threadId);
+    if (!thread?.worktreeDir) return;
+    this.disposeSession(threadId);
+    this.threads.setWorktreeDir(threadId, null);
+    const project = thread.projectId
+      ? this.projects.all().find((p) => p.id === thread.projectId)
+      : null;
+    const cwd = project?.path ?? thread.chatWorkspaceDir ?? process.cwd();
+    await this.ensureSession(threadId, cwd, thread.piSessionFile);
+    this.onThreadsChanged();
+  }
+
   private disposeSession(threadId: string): void {
     const session = this.sessions.get(threadId);
     if (session) {

@@ -1,3 +1,4 @@
+import type { Component } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 import type { ExtensionUiRequest, NoticePayload } from "@peach-pi/shared-types";
 import { api } from "../lib/ipc";
@@ -10,6 +11,9 @@ interface ToastAction {
 interface Toast extends NoticePayload {
   id: number;
   action?: ToastAction;
+  /** Optional leading icon (e.g. a thread's tag icon) shown before the text. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  icon?: Component<any>;
 }
 
 /**
@@ -60,9 +64,16 @@ class ExtensionUiStore {
     setTimeout(() => this.dismiss(toast.id), 5000);
   }
 
-  /** Renderer-originated toast, optionally with an action (e.g. Undo). */
-  notify(message: string, action?: ToastAction, level: NoticePayload["level"] = "info"): void {
-    const toast: Toast = { message, level, action, id: ++this.toastSeq };
+  /** Renderer-originated toast, optionally with an action (e.g. Undo) and a
+   *  leading icon. */
+  notify(
+    message: string,
+    action?: ToastAction,
+    level: NoticePayload["level"] = "info",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    icon?: Component<any>,
+  ): void {
+    const toast: Toast = { message, level, action, icon, id: ++this.toastSeq };
     this.toasts = [...this.toasts, toast];
     setTimeout(() => this.dismiss(toast.id), 5000);
   }

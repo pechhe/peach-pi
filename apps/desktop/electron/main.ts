@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, Notification } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, Notification, shell } from "electron";
 import path from "node:path";
 import { openDb } from "./persistence/db.ts";
 import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
@@ -123,6 +123,14 @@ async function boot(): Promise<void> {
     "app:getPiSettings": () => getPiSettings(),
     "app:setPiSettings": (patch) => setPiSettings(patch),
     "app:getPiHealth": () => computePiHealth(__dirname),
+    "app:openFolder": async (threadId) => {
+      const dir = gitService.cwdFor(threadId);
+      console.log('[openFolder]', threadId, dir);
+      if (dir) {
+        const err = await shell.openPath(dir);
+        if (err) console.error('[openFolder]', err);
+      }
+    },
     "ui:setSidebarWidth": (width) => appService.setSidebarWidth(width),
     "projects:add": (p) => appService.addProject(p),
     "projects:remove": (id) => appService.removeProject(id),
@@ -177,6 +185,14 @@ async function boot(): Promise<void> {
         if (project) await gitService.removeWorktree(project.path, thread.worktreeDir);
       }
     },
+    "threads:bringToLocal": async (id) => {
+      const thread = appService.snapshot().threads.find((t) => t.id === id);
+      await threadService.bringWorktreeToLocal(id);
+      if (thread?.worktreeDir && thread.projectId) {
+        const project = appService.snapshot().projects.find((p) => p.id === thread.projectId);
+        if (project) await gitService.removeWorktree(project.path, thread.worktreeDir);
+      }
+    },
     "threads:setEnvironment": async (threadId, worktree) => {
       const before = appService.snapshot().threads.find((t) => t.id === threadId);
       if (!before?.projectId) return;
@@ -201,6 +217,8 @@ async function boot(): Promise<void> {
     "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),
     "git:commitPush": (id, message) => gitService.commitPush(id, message),
     "git:createPr": (id) => gitService.createPr(id),
+    "git:mergeToLocal": (id) => gitService.mergeToLocal(id),
+    "git:pushLocal": (id) => gitService.pushLocal(id),
     "threads:steer": (id, text) => threadService.steer(id, text),
     "threads:promoteFollowUpToSteer": (id, index) => threadService.promoteFollowUpToSteer(id, index),
     "threads:popLastFollowUp": (id) => threadService.popLastFollowUp(id),

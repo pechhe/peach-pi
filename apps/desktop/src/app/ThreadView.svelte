@@ -14,6 +14,7 @@
   import Workflow from "@lucide/svelte/icons/workflow";
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import BookOpen from "@lucide/svelte/icons/book-open";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
   import { parseSkillInvocation } from "../lib/composer/skill-message";
   import { skillViewer } from "../stores/skill-viewer.svelte";
   import Markdown from "./Markdown.svelte";
@@ -31,7 +32,7 @@
   let { thread, onSetEnvironment, onOpenGraph, pendingFind, onFindConsumed }: {
     thread: Thread;
     /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
-    onSetEnvironment?: (threadId: string, worktree: boolean) => void;
+    onSetEnvironment?: (threadId: string, worktree: boolean) => void | Promise<void>;
     onOpenGraph: () => void;
     /** Set when the search overlay passes a body-match query through. ThreadView
      *  opens its FindBar pre-filled and calls `onFindConsumed` once applied. */
@@ -39,6 +40,37 @@
     onFindConsumed?: () => void;
   } = $props();
 
+
+  // ── Environment toggle (Local ⇄ Worktree) ──────────────────────────
+  // The real flip (git worktree add/remove + session respawn) takes a beat,
+  // and the button label only reflects `thread.worktreeDir` after the snapshot
+  // refreshes. Optimistically flip the label on click, keyed to this thread id,
+  // and let the snapshot catch up — reverting if the IPC call rejects.
+  let envOverride = $state<{ id: string; worktree: boolean } | null>(null);
+  const isWorktree = $derived(
+    envOverride && envOverride.id === thread.id
+      ? envOverride.worktree
+      : thread.worktreeDir != null,
+  );
+  $effect(() => {
+    if (
+      envOverride &&
+      envOverride.id === thread.id &&
+      (thread.worktreeDir != null) === envOverride.worktree
+    ) {
+      envOverride = null;
+    }
+  });
+  async function toggleEnvironment() {
+    const target = !isWorktree;
+    envOverride = { id: thread.id, worktree: target };
+    playClick("down");
+    try {
+      await onSetEnvironment?.(thread.id, target);
+    } catch {
+      envOverride = null; // revert label on failure
+    }
+  }
 
   // ── In-thread find (⌘F) ─────────────────────────────────────────────
   let findOpen = $state(false);
@@ -314,19 +346,29 @@
     return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(" · ");
   }
 
-  const BOTTOM_THRESHOLD = 200;
+  // Distance from the bottom we still treat as "following". Small: only a
+  // genuine return to the bottom re-arms the pin.
+  const NEAR_BOTTOM = 24;
+  let lastScrollTop = 0;
 
+  // Detect intent by DIRECTION, not distance-to-bottom. A distance test can't
+  // tell "user nudged up 80px" from "near bottom", and streaming token growth
+  // never moves scrollTop — so direction is unambiguous:
+  //   • scrollTop decreased  → user scrolled up   → stop following.
+  //   • within NEAR_BOTTOM    → at the bottom      → resume following.
+  // Programmatic pins only ever increase scrollTop to the bottom, so they
+  // land in the second case and never falsely trip scrolledUp.
   function onScroll() {
     const el = scrollEl;
     if (!el) return;
-    scrolledUp = el.scrollHeight - el.scrollTop - el.clientHeight > BOTTOM_THRESHOLD;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (gap <= NEAR_BOTTOM) scrolledUp = false;
+    else if (el.scrollTop < lastScrollTop) scrolledUp = true;
+    lastScrollTop = el.scrollTop;
   }
 
-  // During streaming, the programmatic bottom-pin resets scrollTop on every
-  // token, so onScroll never sees the user's up-scroll cross BOTTOM_THRESHOLD
-  // — leaving scrolledUp false and the pin yanking them back. Catch the
-  // upward gesture directly so reading history works mid-stream; it re-arms
-  // when the user scrolls back to bottom (onScroll) or hits the button.
+  // Trackpad/wheel up is intent even before the scroll lands; set immediately
+  // so a pin queued for this frame can't beat the user to it.
   function onWheel(e: WheelEvent) {
     if (e.deltaY < 0) scrolledUp = true;
   }
@@ -359,7 +401,10 @@
     }
     if (!scrolledUp) {
       requestAnimationFrame(() => {
-        el.scrollTop = el.scrollHeight;
+        // Re-check at fire time: the user may have scrolled up between the
+        // effect run (which queued this frame) and now. Without this, a token
+        // mid-scroll yanks them back to the bottom.
+        if (!scrolledUp) el.scrollTop = el.scrollHeight;
       });
     }
   });
@@ -418,6 +463,13 @@
           data-testid="graph-toggle"><Workflow size={14} /></button
         >
       {/if}
+      <button
+        class="rounded px-2 py-0.5 text-faint hover:bg-surface hover:text-fg-soft"
+        onclick={() => api.invoke('app:openFolder', thread.id)}
+        title="Open folder in Finder"
+        data-testid="open-folder"
+      ><FolderOpen size={14} /></button
+      >
       <button
         class="rounded px-2 py-0.5 font-mono text-[11px] {terminal.visible
           ? 'bg-surface-2 text-fg'
@@ -651,17 +703,14 @@
         <button
           type="button"
           class="new-thread__environment"
-          aria-pressed={thread.worktreeDir != null}
-          onclick={() => {
-            playClick("down");
-            onSetEnvironment?.(thread.id, thread.worktreeDir == null);
-          }}
+          aria-pressed={isWorktree}
+          onclick={toggleEnvironment}
           data-testid="environment-toggle"
-          title={thread.worktreeDir != null
+          title={isWorktree
             ? "Working in an isolated git worktree"
             : "Working in the project directory"}
         >
-          {thread.worktreeDir != null ? "⎇ Worktree" : "◈ Local"}
+          {isWorktree ? "⎇ Worktree" : "◈ Local"}
         </button>
       </div>
     {/if}

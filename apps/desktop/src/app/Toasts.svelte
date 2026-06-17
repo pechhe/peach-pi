@@ -1,6 +1,9 @@
 <script lang="ts">
   import { extensionUi } from "../stores/extension-ui.svelte";
 
+  // Centre over the content area (right of the sidebar), not the whole window.
+  let { sidebarWidth = 0 }: { sidebarWidth?: number } = $props();
+
   const colors = {
     info: "border-border-strong bg-surface text-fg",
     warning: "border-warning-border bg-warning-surface text-warning",
@@ -9,7 +12,11 @@
 </script>
 
 {#if extensionUi.toasts.length > 0}
-  <div class="fixed right-4 bottom-4 z-50 flex w-80 flex-col gap-2" data-testid="toasts">
+  <div
+    class="fixed top-3 z-50 flex w-80 -translate-x-1/2 flex-col gap-2"
+    style="left: calc((100vw + {sidebarWidth}px) / 2)"
+    data-testid="toasts"
+  >
     {#each extensionUi.toasts as toast (toast.id)}
       <div
         class="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs shadow-xl {colors[toast.level]}"
@@ -19,6 +26,10 @@
         onclick={toast.action ? () => { toast.action?.run(); extensionUi.dismiss(toast.id); } : undefined}
         onkeydown={toast.action ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toast.action?.run(); extensionUi.dismiss(toast.id); } } : undefined}
       >
+        {#if toast.icon}
+          {@const Icon = toast.icon}
+          <Icon class="size-4 shrink-0 opacity-80" />
+        {/if}
         <span class="flex-1">{toast.message}</span>
         {#if toast.action}
           <button

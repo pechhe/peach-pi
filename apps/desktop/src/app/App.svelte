@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { AppView, Thread } from "@peach-pi/shared-types";
   import { consumeAborted } from "../lib/composer/abort-signal.svelte";
+  import { TAG_META } from "../lib/tag-meta";
   import { api } from "../lib/ipc";
   import { snapshot } from "../stores/snapshot.svelte";
   import { transcripts } from "../stores/transcripts.svelte";
@@ -103,10 +104,12 @@
       const prev = lastStatuses.get(t.id);
       if (prev === "running" && t.status === "completed" && !consumeAborted(t.id)) {
         playDoneSound();
-        extensionUi.notify(`✅ ${t.title || "Thread"} finished`, {
-          label: "View",
-          run: () => selectThread(t.id),
-        });
+        extensionUi.notify(
+          `${t.title || "Thread"} finished`,
+          { label: "View", run: () => selectThread(t.id) },
+          "info",
+          TAG_META[t.tag ?? "other"].icon,
+        );
       }
       lastStatuses.set(t.id, t.status);
     }
@@ -231,7 +234,6 @@
       {selectedThreadId}
       activeView={view}
       onSelect={selectThread}
-      onNewThread={startNewThread}
       onNewChat={() => startNewThread(null)}
       onOpenView={openView}
       onNewThread={newThreadInProject}
@@ -325,7 +327,7 @@
   {/if}
   <ImageLightbox />
   <SkillDialog />
-  <Toasts />
+  <Toasts {sidebarWidth} />
   <PiHealthBanner />
 </div>
 

@@ -9,7 +9,9 @@ import type {
   GitChangedFile,
   GitCommitPushResult,
   GitInfo,
+  GitMergeResult,
   GitPrResult,
+  GitPushLocalResult,
   GraphifyStatus,
   SubagentAgentInfo,
   ExtensionStatusPayload,
@@ -95,6 +97,10 @@ export const ipcContracts = {
   }),
   /** Read the pi settings subset exposed in the GUI. */
   "app:getPiSettings": invoke<[], PiSettings>(),
+  /** Open the working directory for a thread in Finder. */
+  "app:openFolder": invoke<[threadId: ThreadId], void>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
   /** Startup compatibility report: bundled pi SDK vs loaded extensions. */
   "app:getPiHealth": invoke<[], PiHealth>(),
   /** Write pi settings (partial merge into ~/.pi/agent/settings.json). */
@@ -212,6 +218,12 @@ export const ipcContracts = {
   "git:fileDiff": invoke<[threadId: ThreadId, filePath: string], string>(),
   "git:commitPush": invoke<[threadId: ThreadId, message?: string], GitCommitPushResult>(),
   "git:createPr": invoke<[threadId: ThreadId], GitPrResult>((id) => requireNonEmptyString(id, "threadId")),
+  "git:mergeToLocal": invoke<[threadId: ThreadId], GitMergeResult>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
+  "git:pushLocal": invoke<[threadId: ThreadId], GitPushLocalResult>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
 
   // integrated terminal (one PTY per thread, lives in main)
   "terminal:open": invoke<[threadId: ThreadId], { buffer: string }>((id) =>
@@ -242,6 +254,9 @@ export const ipcContracts = {
   "threads:unarchive": invoke<[threadId: ThreadId], void>(),
   "threads:delete": invoke<[threadId: ThreadId], void>(),
   "threads:setEnvironment": invoke<[threadId: ThreadId, worktree: boolean], void>(),
+  "threads:bringToLocal": invoke<[threadId: ThreadId], void>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
   "threads:snooze": invoke<[threadId: ThreadId, until: string], void>(),
   "threads:unsnooze": invoke<[threadId: ThreadId], void>(),
   "threads:markToTest": invoke<[threadId: ThreadId, note?: string], void>(),

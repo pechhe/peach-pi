@@ -178,6 +178,9 @@ export interface GitInfo {
   ahead: number;
   behind: number;
   isWorktree: boolean;
+  /** Worktree HEAD is an ancestor of the local project's current branch
+   *  (i.e. this worktree's committed work is already merged back to local). */
+  mergedToLocal: boolean;
 }
 
 export interface GitChangedFile {
@@ -192,6 +195,16 @@ export type GitCommitPushResult =
 
 export type GitPrResult =
   | { ok: true; url: string }
+  | { ok: false; error: string };
+
+/** Merge a worktree's branch (--no-ff) into the local project's current branch. */
+export type GitMergeResult =
+  | { ok: true; target: string; branch: string; hasRemote: boolean; warning?: string }
+  | { ok: false; error: string };
+
+/** Push the local project repo's current branch after a merge-to-local. */
+export type GitPushLocalResult =
+  | { ok: true; branch: string }
   | { ok: false; error: string };
 
 /** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */

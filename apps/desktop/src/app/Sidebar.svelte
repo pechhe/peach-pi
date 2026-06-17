@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AppView, Project, Thread, ThreadTag } from "@peach-pi/shared-types";
+  import type { AppView, Project, Thread } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { playButtonSecondary } from "../lib/sound/button-click-sound";
@@ -26,21 +26,7 @@
   import SquarePen from "@lucide/svelte/icons/square-pen";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
-  import Sparkles from "@lucide/svelte/icons/sparkles";
-  import Bug from "@lucide/svelte/icons/bug";
-  import Wrench from "@lucide/svelte/icons/wrench";
-  import FileText from "@lucide/svelte/icons/file-text";
-  import Cog from "@lucide/svelte/icons/cog";
-  import Circle from "@lucide/svelte/icons/circle";
-
-  const TAG_META: Record<ThreadTag, { icon: typeof Sparkles; label: string }> = {
-    feature: { icon: Sparkles, label: "New feature" },
-    bugfix: { icon: Bug, label: "Bug fix" },
-    refactor: { icon: Wrench, label: "Refactor" },
-    docs: { icon: FileText, label: "Docs" },
-    chore: { icon: Cog, label: "Chore" },
-    other: { icon: Circle, label: "Other" },
-  };
+  import { TAG_META } from "../lib/tag-meta";
 
   let {
     width = 280,

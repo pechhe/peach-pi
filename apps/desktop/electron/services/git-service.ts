@@ -8,7 +8,9 @@ import type {
   GitChangedFile,
   GitCommitPushResult,
   GitInfo,
+  GitMergeResult,
   GitPrResult,
+  GitPushLocalResult,
   ModelInfo,
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
@@ -84,6 +86,7 @@ export class GitService {
       ahead: 0,
       behind: 0,
       isWorktree: Boolean(this.threads.get(threadId)?.worktreeDir),
+      mergedToLocal: false,
     };
     if (!cwd || !(await gitOk(["rev-parse", "--git-dir"], cwd))) return empty;
 
@@ -114,8 +117,30 @@ export class GitService {
     }
 
     const defaultBranch = await this.defaultBranch(cwd);
+    const mergedToLocal = branch ? await this.isMergedToLocal(threadId, cwd) : false;
 
-    return { ...empty, isRepo: true, branch, defaultBranch, changedCount, insertions, deletions, ahead, behind };
+    return { ...empty, isRepo: true, branch, defaultBranch, changedCount, insertions, deletions, ahead, behind, mergedToLocal };
+  }
+
+  /** Local project repo path for a worktree thread; null otherwise. */
+  private projectPathFor(threadId: string): string | null {
+    const thread = this.threads.get(threadId);
+    if (!thread?.worktreeDir || !thread.projectId) return null;
+    return this.projects.all().find((p) => p.id === thread.projectId)?.path ?? null;
+  }
+
+  /** True when the worktree's HEAD is already an ancestor of the local
+   *  project's current branch (work merged back). */
+  private async isMergedToLocal(threadId: string, cwd: string): Promise<boolean> {
+    const projectPath = this.projectPathFor(threadId);
+    if (!projectPath) return false;
+    try {
+      const wtHead = (await git(["rev-parse", "HEAD"], cwd)).trim();
+      const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
+      return await gitOk(["merge-base", "--is-ancestor", wtHead, target], projectPath);
+    } catch {
+      return false;
+    }
   }
 
   /** Repo default branch from origin/HEAD; null when undetermined. */
@@ -248,13 +273,94 @@ export class GitService {
     return { ok: true, url };
   }
 
+  /**
+   * Merge this worktree's branch into the local project repo's current branch
+   * with --no-ff (keeps a thread-boundary merge commit). Local only — no push.
+   * Aborts cleanly on conflict.
+   */
+  async mergeToLocal(threadId: string): Promise<GitMergeResult> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd) return { ok: false, error: "No working directory" };
+    const thread = this.threads.get(threadId);
+    if (!thread?.worktreeDir) return { ok: false, error: "Not a worktree thread" };
+    if (!(await gitOk(["rev-parse", "--git-dir"], cwd))) return { ok: false, error: "Not a git repository" };
+    if ((await git(["status", "--porcelain"], cwd)).trim()) return { ok: false, error: "Commit changes first" };
+
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    if (branch === "HEAD") return { ok: false, error: "Nothing committed yet" };
+
+    const projectPath = this.projectPathFor(threadId);
+    if (!projectPath) return { ok: false, error: "No local project repo" };
+    const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
+    if (target === branch) return { ok: false, error: `Local repo is on ${branch}` };
+
+    // Stash any uncommitted local work so the --no-ff merge has a clean tree,
+    // then restore it on top of the merge (the "integrate while dirty" pattern).
+    const localDirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
+    if (localDirty) await git(["stash", "push", "-u", "-m", "peach-pi merge-to-local"], projectPath);
+
+    try {
+      await git(["merge", "--no-ff", branch], projectPath);
+    } catch {
+      await git(["merge", "--abort"], projectPath).catch(() => undefined);
+      if (localDirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
+      return { ok: false, error: `Merge conflict on ${target} — aborted` };
+    }
+
+    const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);
+    if (localDirty) {
+      // pop succeeds silently; on conflict it leaves markers + keeps the stash.
+      const restored = await gitOk(["stash", "pop"], projectPath);
+      if (!restored) {
+        return {
+          ok: true,
+          target,
+          branch,
+          hasRemote,
+          warning: "local changes conflict with the merge — resolve in working tree (stash kept)",
+        };
+      }
+    }
+    return { ok: true, target, branch, hasRemote };
+  }
+
+  /** Push the local project repo's current branch (post merge-to-local). */
+  async pushLocal(threadId: string): Promise<GitPushLocalResult> {
+    const projectPath = this.projectPathFor(threadId);
+    if (!projectPath) return { ok: false, error: "No local project repo" };
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
+    const hasUpstream = await gitOk(["rev-parse", "--abbrev-ref", "@{u}"], projectPath);
+    try {
+      await git(hasUpstream ? ["push"] : ["push", "-u", "origin", branch], projectPath);
+      return { ok: true, branch };
+    } catch (err) {
+      return { ok: false, error: `Push failed: ${String(err)}` };
+    }
+  }
+
   /** Detached-HEAD worktree under the managed dir (ADR-0003). */
   async createWorktree(projectId: string): Promise<string> {
     const project = this.projects.all().find((p) => p.id === projectId);
     if (!project) throw new Error(`Unknown project: ${projectId}`);
     mkdirSync(this.worktreesDir, { recursive: true });
+
+    // Seed the worktree from the local working state: move (not copy) any
+    // uncommitted local work into it via the shared stash, leaving local clean.
+    const dirty = Boolean((await git(["status", "--porcelain"], project.path)).trim());
+    let seed: string | null = null;
+    if (dirty) {
+      await git(["stash", "push", "-u", "-m", "peach-pi worktree seed"], project.path);
+      seed = (await git(["rev-parse", "stash@{0}"], project.path)).trim();
+    }
+
     const dir = path.join(this.worktreesDir, randomUUID());
     await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
+
+    if (seed) {
+      // Worktree is fresh at the same HEAD, so the stash applies cleanly.
+      await git(["stash", "apply", seed], dir);
+      await git(["stash", "drop", seed], project.path).catch(() => undefined);
+    }
     return dir;
   }
 

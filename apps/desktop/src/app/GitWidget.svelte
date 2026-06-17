@@ -11,12 +11,25 @@
   let diff = $state("");
   let committing = $state(false);
   let creatingPr = $state(false);
+  let merging = $state(false);
+  let pushingLocal = $state(false);
+  let cleaningUp = $state(false);
   let commitMessage = $state("");
   let lastResult = $state("");
+  // After a successful merge-to-local: prompt to push <target> to origin.
+  let pushPrompt = $state<string | null>(null);
 
   // PR only makes sense on a feature branch (not the repo default branch).
   const canPr = $derived(
     !!info?.branch && !!info?.defaultBranch && info.branch !== info.defaultBranch,
+  );
+  // Worktree, fully committed, branch exists, not yet merged back to local.
+  const canMergeLocal = $derived(
+    !!info?.isWorktree && info.changedCount === 0 && !!info.branch && !info.mergedToLocal,
+  );
+  // Worktree work already merged to local: offer cleanup / rejoin.
+  const mergedClean = $derived(
+    !!info?.isWorktree && info.changedCount === 0 && !!info.mergedToLocal,
   );
 
   async function refresh() {
@@ -74,6 +87,51 @@
       lastResult = result.ok ? `✓ Opened PR page` : `✕ ${result.error}`;
     } finally {
       creatingPr = false;
+    }
+  }
+
+  async function mergeToLocal() {
+    if (merging) return;
+    merging = true;
+    lastResult = "";
+    pushPrompt = null;
+    try {
+      const result = await api.invoke("git:mergeToLocal", thread.id);
+      if (result.ok) {
+        lastResult = result.warning
+          ? `⚠ Merged ${result.branch} → ${result.target}; ${result.warning}`
+          : `✓ Merged ${result.branch} → ${result.target}`;
+        if (result.hasRemote && !result.warning) pushPrompt = result.target;
+      } else {
+        lastResult = `✕ ${result.error}`;
+      }
+      await refresh();
+    } finally {
+      merging = false;
+    }
+  }
+
+  async function pushLocal() {
+    if (pushingLocal) return;
+    pushingLocal = true;
+    try {
+      const result = await api.invoke("git:pushLocal", thread.id);
+      lastResult = result.ok ? `✓ Pushed ${result.branch}` : `✕ ${result.error}`;
+    } finally {
+      pushingLocal = false;
+      pushPrompt = null;
+    }
+  }
+
+  // Cleanup, post-merge. mode "delete" removes worktree + thread; mode "local"
+  // keeps the thread (rejoins it to the local project repo).
+  async function cleanup(mode: "delete" | "local") {
+    if (cleaningUp) return;
+    cleaningUp = true;
+    try {
+      await api.invoke(mode === "delete" ? "threads:delete" : "threads:bringToLocal", thread.id);
+    } finally {
+      cleaningUp = false;
     }
   }
 
@@ -138,7 +196,56 @@
               {creatingPr ? "Opening…" : "Create PR"}
             </button>
           {/if}
+          {#if canMergeLocal}
+            <button
+              class="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-fg transition-opacity disabled:opacity-40"
+              onclick={mergeToLocal}
+              disabled={merging}
+              data-testid="merge-to-local"
+              title="Merge this worktree's branch into the local repo (--no-ff)"
+            >
+              {merging ? "Merging…" : "Merge to local"}
+            </button>
+          {:else if mergedClean}
+            <button
+              class="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-fg-soft transition-opacity hover:bg-surface disabled:opacity-40"
+              onclick={() => cleanup("local")}
+              disabled={cleaningUp}
+              data-testid="merge-thread-local"
+              title="Keep this thread, move it back to the local repo, and remove the worktree"
+            >
+              Move thread to local
+            </button>
+            <button
+              class="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-danger transition-opacity hover:bg-surface disabled:opacity-40"
+              onclick={() => cleanup("delete")}
+              disabled={cleaningUp}
+              data-testid="cleanup-delete"
+              title="Delete this thread and remove the worktree"
+            >
+              Delete
+            </button>
+          {/if}
         </div>
+        {#if pushPrompt}
+          <div class="flex items-center gap-2 border-b border-border/80 px-3 py-1.5 text-[11px] text-fg-soft">
+            <span class="flex-1">Push <span class="font-mono">{pushPrompt}</span> to origin?</span>
+            <button
+              class="shrink-0 rounded-md bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-fg disabled:opacity-40"
+              onclick={pushLocal}
+              disabled={pushingLocal}
+              data-testid="push-local"
+            >
+              {pushingLocal ? "Pushing…" : "Push"}
+            </button>
+            <button
+              class="shrink-0 rounded-md border border-border px-2 py-0.5 text-[11px] text-faint hover:bg-surface"
+              onclick={() => (pushPrompt = null)}
+            >
+              Skip
+            </button>
+          </div>
+        {/if}
         {#if lastResult}
           <p class="border-b border-border/80 px-3 py-1.5 text-[11px] {lastResult.startsWith('✓') ? 'text-success' : 'text-danger'}">
             {lastResult}
