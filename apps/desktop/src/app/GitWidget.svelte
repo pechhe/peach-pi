@@ -16,8 +16,10 @@
   let cleaningUp = $state(false);
   let commitMessage = $state("");
   let lastResult = $state("");
-  // After a successful merge-to-local: prompt to push <target> to origin.
+  // After a successful merge-to-local: open a dialog to commit (already done by
+  // the merge) and optionally push <target> to origin. null = dialog closed.
   let pushPrompt = $state<string | null>(null);
+  let pushChecked = $state(true);
 
   // PR only makes sense on a feature branch (not the repo default branch).
   const canPr = $derived(
@@ -101,7 +103,10 @@
         lastResult = result.warning
           ? `⚠ Merged ${result.branch} → ${result.target}; ${result.warning}`
           : `✓ Merged ${result.branch} → ${result.target}`;
-        if (result.hasRemote && !result.warning) pushPrompt = result.target;
+        if (result.hasRemote && !result.warning) {
+          pushChecked = true;
+          pushPrompt = result.target;
+        }
       } else {
         lastResult = `✕ ${result.error}`;
       }
@@ -111,8 +116,13 @@
     }
   }
 
-  async function pushLocal() {
+  // Dialog confirm: merge already committed locally; push only when ticked.
+  async function confirmPush() {
     if (pushingLocal) return;
+    if (!pushChecked) {
+      pushPrompt = null;
+      return;
+    }
     pushingLocal = true;
     try {
       const result = await api.invoke("git:pushLocal", thread.id);
@@ -227,25 +237,7 @@
             </button>
           {/if}
         </div>
-        {#if pushPrompt}
-          <div class="flex items-center gap-2 border-b border-border/80 px-3 py-1.5 text-[11px] text-fg-soft">
-            <span class="flex-1">Push <span class="font-mono">{pushPrompt}</span> to origin?</span>
-            <button
-              class="shrink-0 rounded-md bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-fg disabled:opacity-40"
-              onclick={pushLocal}
-              disabled={pushingLocal}
-              data-testid="push-local"
-            >
-              {pushingLocal ? "Pushing…" : "Push"}
-            </button>
-            <button
-              class="shrink-0 rounded-md border border-border px-2 py-0.5 text-[11px] text-faint hover:bg-surface"
-              onclick={() => (pushPrompt = null)}
-            >
-              Skip
-            </button>
-          </div>
-        {/if}
+
         {#if lastResult}
           <p class="border-b border-border/80 px-3 py-1.5 text-[11px] {lastResult.startsWith('✓') ? 'text-success' : 'text-danger'}">
             {lastResult}
@@ -271,5 +263,39 @@
         </div>
       </div>
     {/if}
+  </div>
+{/if}
+
+{#if pushPrompt}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+    data-testid="merge-push-dialog"
+  >
+    <div class="w-96 rounded-xl border border-border-strong bg-surface p-4 shadow-2xl">
+      <h2 class="text-sm font-medium text-fg">Merged to local</h2>
+      <p class="mt-1 text-xs text-muted">
+        Committed the merge into <span class="font-mono text-fg-soft">{pushPrompt}</span>.
+      </p>
+      <label class="mt-3 flex items-center gap-2 text-xs text-fg-soft">
+        <input type="checkbox" bind:checked={pushChecked} data-testid="merge-push-checkbox" />
+        Push <span class="font-mono">{pushPrompt}</span> to origin
+      </label>
+      <div class="mt-4 flex justify-end gap-2">
+        <button
+          class="rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-surface-2"
+          onclick={() => (pushPrompt = null)}
+        >
+          Cancel
+        </button>
+        <button
+          class="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg disabled:opacity-40"
+          onclick={confirmPush}
+          disabled={pushingLocal}
+          data-testid="merge-push-confirm"
+        >
+          {pushingLocal ? "Pushing…" : pushChecked ? "Commit & push" : "Commit only"}
+        </button>
+      </div>
+    </div>
   </div>
 {/if}
