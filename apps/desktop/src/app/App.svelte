@@ -94,13 +94,20 @@
     snapshot.current?.threads.find((t) => t.id === selectedThreadId) ?? null,
   );
 
-  // Done sound: any thread transitioning running → idle chimes once.
+  // Done sound + toast: any thread transitioning running → idle chimes once
+  // and surfaces a toast; clicking it jumps to the thread.
   let lastStatuses = new Map<string, string>();
   $effect(() => {
     const threads = snapshot.current?.threads ?? [];
     for (const t of threads) {
       const prev = lastStatuses.get(t.id);
-      if (prev === "running" && t.status === "idle" && !consumeAborted(t.id)) playDoneSound();
+      if (prev === "running" && t.status === "completed" && !consumeAborted(t.id)) {
+        playDoneSound();
+        extensionUi.notify(`✅ ${t.title || "Thread"} finished`, {
+          label: "View",
+          run: () => selectThread(t.id),
+        });
+      }
       lastStatuses.set(t.id, t.status);
     }
   });
@@ -144,6 +151,16 @@
   // ⌘N starts a new thread in the current project (a new chat if none selected).
   function newThreadForCurrentProject() {
     startNewThread(selectedThread?.projectId ?? null);
+  }
+
+  // Sidebar new-thread button: explicit project (+ optional worktree).
+  async function newThreadInProject(projectId: string, worktree = false) {
+    const thread = await api.invoke(
+      "threads:create",
+      projectId,
+      worktree ? { worktree: true } : undefined,
+    );
+    selectThread(thread.id);
   }
 
   // Notification click in main → jump to thread.
@@ -217,6 +234,7 @@
       onNewThread={startNewThread}
       onNewChat={() => startNewThread(null)}
       onOpenView={openView}
+      onNewThread={newThreadInProject}
       onOpenSearch={() => (searchOpen = true)}
     />
     <!-- Drag handle straddling the sidebar/content seam (no layout footprint). -->
