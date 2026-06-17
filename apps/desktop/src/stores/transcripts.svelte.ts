@@ -6,8 +6,14 @@ import { api } from "../lib/ipc";
 class TranscriptStore {
   private byThread = new SvelteMap<string, TranscriptItem[]>();
   private loaded = new Set<string>();
+  private started = false;
 
   init(): void {
+    // Idempotent: the preload `on` forwards to ipcRenderer.on (additive), so a
+    // second registration (e.g. HMR remounting App) would apply every append
+    // delta twice — duplicating streamed text ("DoneDone…").
+    if (this.started) return;
+    this.started = true;
     api.on("event:transcript", ({ threadId, ops }) => {
       this.byThread.set(threadId, applyTranscriptOps(this.byThread.get(threadId) ?? [], ops));
     });

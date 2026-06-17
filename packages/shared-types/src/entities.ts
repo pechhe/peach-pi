@@ -54,6 +54,14 @@ export interface Thread {
 
 export type ThreadKind = "thread" | "chat";
 
+/** Placeholder titles assigned at creation and overwritten on first prompt.
+ *  Used to detect genuinely-new threads (vs an existing thread whose history
+ *  is still loading asynchronously). Keep in sync with thread-service. */
+export const NEW_THREAD_TITLES = ["New thread", "New chat"] as const;
+export function isNewThread(title: string): boolean {
+  return (NEW_THREAD_TITLES as readonly string[]).includes(title);
+}
+
 export interface UiState {
   sidebarWidth: number;
   sidebarCollapsed: boolean;
@@ -125,6 +133,25 @@ export interface CavemanState {
   enabled: boolean;
   /** The level applied when enabled (e.g. "full", "ultra"). */
   level: string;
+}
+
+/** Retry settings from ~/.pi/agent/settings.json. */
+export interface RetrySettings {
+  enabled: boolean;
+  maxRetries: number;
+  baseDelayMs: number;
+  provider: {
+    timeoutMs: number | null;
+    maxRetries: number;
+    maxRetryDelayMs: number;
+  };
+}
+
+/** Subset of pi settings exposed in the GUI. */
+export interface PiSettings {
+  retry: RetrySettings;
+  steeringMode: "all" | "one-at-a-time";
+  followUpMode: "all" | "one-at-a-time";
 }
 
 /** Live per-session metadata published main → renderer. */
@@ -257,6 +284,29 @@ export interface ExtensionUiRequest {
 }
 
 /** Toast-style notification (extension notify or app notices). */
+/** Compatibility verdict for one loaded pi extension vs the bundled pi SDK. */
+export interface PiExtensionHealth {
+  /** Package id as declared in pi settings (e.g. `git:github.com/edxeth/pi-subagents`). */
+  id: string;
+  /** pi SDK version the extension was resolved/built against, if discoverable. */
+  resolvedSdk: string | null;
+  /** Declared peerDependency range on the pi SDK, if any. */
+  peerRange: string | null;
+  /** `peer-violation` (hard error) | `version-drift` (likely-incompatible) | null. */
+  issue: "peer-violation" | "version-drift" | null;
+  level: "error" | "warning" | null;
+}
+
+/** Startup compatibility report: the bundled pi vs the user's loaded extensions. */
+export interface PiHealth {
+  /** pi SDK version the app actually loads, or null if it couldn't be found. */
+  hostVersion: string | null;
+  status: "ok" | "warning" | "error";
+  extensions: PiExtensionHealth[];
+  /** Human-readable lines for the banner. Empty when status is `ok`. */
+  problems: string[];
+}
+
 export interface NoticePayload {
   threadId?: ThreadId;
   message: string;

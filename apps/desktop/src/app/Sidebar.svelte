@@ -16,8 +16,10 @@
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import Settings from "@lucide/svelte/icons/settings";
   import Clock from "@lucide/svelte/icons/clock";
-  import Archive from "@lucide/svelte/icons/archive";
+  import Check from "@lucide/svelte/icons/check";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
+  import DoneBurst from "./DoneBurst.svelte";
+  import { doneAnim } from "../lib/done-anim.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Plus from "@lucide/svelte/icons/plus";
   import GitBranchPlus from "@lucide/svelte/icons/git-branch-plus";
@@ -48,6 +50,8 @@
     activeView,
     collapsedProjects = [],
     onSelect,
+    onNewThread,
+    onNewChat,
     onOpenView,
     onOpenSearch,
   }: {
@@ -58,12 +62,15 @@
     activeView: AppView;
     collapsedProjects?: string[];
     onSelect: (threadId: string) => void;
+    onNewThread: (projectId: string, worktree?: boolean) => void;
+    onNewChat: () => void;
     onOpenView: (view: AppView) => void;
     onOpenSearch: () => void;
   } = $props();
 
   let expanded = $state<Record<string, boolean>>({});
   let snoozePickerFor = $state<string | null>(null);
+  let doneAnimFor = $state<string | null>(null);
 
   // ⌘⇧↑/↓ traversal: while the modifiers are held the highlight "hovers"
   // a thread without selecting it; releasing ⌘ or ⇧ "clicks" the previewed
@@ -200,16 +207,14 @@
     expanded = { ...expanded, [key]: !expanded[key] };
   }
 
-  async function newThread(projectId: string, worktree = false) {
+  function newThread(projectId: string, worktree = false) {
     playButtonSecondary("click");
-    const thread = await api.invoke("threads:create", projectId, { worktree });
-    onSelect(thread.id);
+    onNewThread(projectId, worktree);
   }
 
-  async function newChat() {
+  function newChat() {
     playButtonSecondary("click");
-    const thread = await api.invoke("threads:createChat");
-    onSelect(thread.id);
+    onNewChat();
   }
 
   function removeProject(project: Project) {
@@ -219,8 +224,19 @@
   }
 
   // Reversible thread actions show an undo toast (inverse IPC channel).
+  // Marking Done plays the burst first; finishArchive runs the real archive
+  // once the animation reports back so the row survives the effect.
   function archiveThread(thread: Thread) {
+    doneAnimFor = thread.id;
+  }
+  function finishArchive(thread: Thread) {
+    if (doneAnimFor === thread.id) doneAnimFor = null;
+    // Pick the next thread below before this one leaves the list, so the
+    // view advances instead of landing on nothing.
+    const idx = previewOrder.indexOf(thread.id);
+    const nextId = idx !== -1 ? (previewOrder[idx + 1] ?? previewOrder[idx - 1] ?? null) : null;
     void api.invoke("threads:archive", thread.id);
+    if (nextId && thread.id === selectedThreadId) onSelect(nextId);
     extensionUi.notify(`Archived “${thread.title || "Untitled"}”`, {
       label: "Undo",
       run: () => void api.invoke("threads:unarchive", thread.id),
@@ -253,9 +269,18 @@
   {@const isActive = activeView === "thread" && selectedThreadId === thread.id}
   {@const Tag = TAG_META[thread.tag ?? "other"]}
   <div class="group relative flex items-center">
+    {#if doneAnimFor === thread.id}
+      <DoneBurst ondone={() => finishArchive(thread)} />
+    {/if}
     <button
       class="session-row flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-1.5 text-left text-[13px]
         {isActive ? 'session-row--active text-fg' : 'text-muted hover:text-fg'}"
+      class:done-pop={doneAnimFor === thread.id}
+      class:done-pop--popSpark={doneAnimFor === thread.id && doneAnim.current === "popSpark"}
+      class:done-pop--stamp={doneAnimFor === thread.id && doneAnim.current === "stamp"}
+      class:done-pop--confetti={doneAnimFor === thread.id && doneAnim.current === "confetti"}
+      class:done-pop--twos={doneAnimFor === thread.id && doneAnim.current === "twos"}
+      class:done-pop--spring={doneAnimFor === thread.id && doneAnim.current === "spring"}
       data-thread-id={thread.id}
       onclick={() => onSelect(thread.id)}
     >
@@ -300,7 +325,7 @@
           <button
             class="rounded p-1 text-faint hover:text-fg"
             onclick={() => archiveThread(thread)}
-          ><Archive size={14} /></button>
+          ><Check size={14} /></button>
         </Tooltip>
       {:else if variant === "snoozed"}
         <button
@@ -519,7 +544,7 @@
           </MovingHighlight>
           {@render collapsible(`sn:${group.project.id}`, "Snoozed", group.snoozed, "snoozed")}
           {@render collapsible(`tt:${group.project.id}`, "To test", group.toTest, "toTest")}
-          {@render collapsible(`ar:${group.project.id}`, "Past", group.archived, "archived")}
+          {@render collapsible(`ar:${group.project.id}`, "Done", group.archived, "archived")}
         {/if}
       </div>
     {:else}
@@ -544,7 +569,59 @@
           {@render threadRow(thread, "active")}
         {/each}
       </MovingHighlight>
-      {@render collapsible("chats:past", "Past", chatGroups.archived, "archived")}
+      {@render collapsible("chats:past", "Done", chatGroups.archived, "archived")}
     </div>
   </div>
 </aside>
+
+<style>
+  /* ── per-variant card pop (hero motion) ────────────────────────── */
+  :global(.session-row.done-pop) { transform-origin: center; }
+
+  /* v1 Pop & sparkle — on-twos stepped, anticipation -> stretch -> settle */
+  :global(.session-row.done-pop--popSpark) { animation: pop-spark 420ms steps(1, jump-end); }
+  @keyframes pop-spark {
+    0%   { transform: scale(1)    rotate(0);     }
+    15%  { transform: scale(0.92) rotate(0);     }
+    35%  { transform: scale(1.08) rotate(-2deg); }
+    55%  { transform: scale(0.97) rotate(1.5deg);}
+    75%  { transform: scale(1.03) rotate(-0.5deg);}
+    100% { transform: scale(1)    rotate(0);     }
+  }
+
+  /* v2 Approval stamp — hard slam in, stepped */
+  :global(.session-row.done-pop--stamp) { animation: pop-stamp 380ms steps(1, jump-end); }
+  @keyframes pop-stamp {
+    0%   { transform: scale(1.3) rotate(-4deg); }
+    35%  { transform: scale(0.9) rotate(1deg);   }
+    60%  { transform: scale(1.06) rotate(-1deg); }
+    100% { transform: scale(1)    rotate(0);     }
+  }
+
+  /* v3 Confetti — bouncy smooth back-ease overshoot */
+  :global(.session-row.done-pop--confetti) { animation: pop-confetti 460ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+  @keyframes pop-confetti {
+    0%   { transform: scale(1);    }
+    40%  { transform: scale(1.12); }
+    70%  { transform: scale(0.97); }
+    100% { transform: scale(1);    }
+  }
+
+  /* v4 Full on-twos — same stepped pop as v1 (burst itself is also stepped) */
+  :global(.session-row.done-pop--twos) { animation: pop-spark 420ms steps(1, jump-end); }
+
+  /* v5 Springy ring — smooth multi-overshoot spring */
+  :global(.session-row.done-pop--spring) { animation: pop-spring 620ms cubic-bezier(0.5, 1.4, 0.5, 1); }
+  @keyframes pop-spring {
+    0%   { transform: scale(1);    }
+    25%  { transform: scale(1.1);  }
+    45%  { transform: scale(0.96); }
+    65%  { transform: scale(1.04); }
+    82%  { transform: scale(0.99); }
+    100% { transform: scale(1);    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.session-row.done-pop) { animation: none !important; }
+  }
+</style>

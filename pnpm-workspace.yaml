@@ -2,6 +2,13 @@ packages:
   - apps/*
   - packages/*
 
+# Single source of truth for the embedded pi SDK version. Every workspace
+# package references it via `"@earendil-works/pi-coding-agent": "catalog:"`,
+# so the host pi the app ships can never drift between apps/desktop and the
+# pi-client/shared packages. Bump here only (one PR), then `pnpm install`.
+catalog:
+  "@earendil-works/pi-coding-agent": 0.79.6
+
 onlyBuiltDependencies:
   - electron
   - esbuild

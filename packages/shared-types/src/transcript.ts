@@ -3,6 +3,25 @@
 
 import type { ImagePayload } from "./entities.ts";
 
+export type SubagentStatus =
+  | "started"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "batch";
+
+/** One launched agent within a subagent tool call (batch-aware). */
+export interface SubagentRow {
+  name: string;
+  agent?: string;
+  title?: string;
+  task?: string;
+  summary?: string;
+  status: SubagentStatus;
+  elapsed?: number;
+}
+
 export type TranscriptItem =
   | { id: string; kind: "user"; text: string; images?: ImagePayload[] }
   | {
@@ -20,6 +39,13 @@ export type TranscriptItem =
       argsSummary: string;
       output: string;
       status: "running" | "done" | "error";
+    }
+  | {
+      id: string;
+      kind: "subagent";
+      verb: "spawn" | "resume";
+      createdAt: string;
+      rows: SubagentRow[];
     }
   | { id: string; kind: "notice"; text: string }
   | {

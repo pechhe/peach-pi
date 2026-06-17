@@ -1,5 +1,5 @@
 import { SvelteMap } from "svelte/reactivity";
-import type { QueueState } from "@peach-pi/shared-types";
+import type { CommandKind, QueueState } from "@peach-pi/shared-types";
 import type { ComposerMode } from "../lib/composer/mode";
 import type { ComposerAttachment } from "../lib/composer/attachments";
 import { api } from "../lib/ipc";
@@ -8,6 +8,8 @@ export interface ComposerDraft {
   text: string;
   attachments: ComposerAttachment[];
   mode: ComposerMode;
+  /** Selected slash command (skill/prompt/extension), shown as a chip and prepended on send. */
+  command: { name: string; kind: CommandKind } | null;
   /** Plan-mode full instructions already sent once in this thread. */
   planPromptSent: boolean;
 }
@@ -16,6 +18,7 @@ const emptyDraft = (): ComposerDraft => ({
   text: "",
   attachments: [],
   mode: "build",
+  command: null,
   planPromptSent: false,
 });
 
@@ -33,7 +36,7 @@ class DraftStore {
   }
 
   clearText(threadId: string): void {
-    this.update(threadId, { text: "", attachments: [] });
+    this.update(threadId, { text: "", attachments: [], command: null });
   }
 }
 

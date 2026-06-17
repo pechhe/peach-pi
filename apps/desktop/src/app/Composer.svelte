@@ -11,6 +11,9 @@
   } from "../lib/composer/attachments";
   import { playButtonClick, playClick, playRotary } from "../lib/sound/button-click-sound";
   import FileText from "@lucide/svelte/icons/file-text";
+  import BookOpen from "@lucide/svelte/icons/book-open";
+  import Puzzle from "@lucide/svelte/icons/puzzle";
+  import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import X from "@lucide/svelte/icons/x";
   import Tooltip from "./Tooltip.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
@@ -24,7 +27,9 @@
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSelector from "./composer/ModelSelector.svelte";
 
-  let { thread }: { thread: Thread } = $props();
+  let { thread }: {
+    thread: Thread;
+  } = $props();
 
   const draft = $derived(drafts.for(thread.id));
   const queue = $derived(queues.for(thread.id));
@@ -84,6 +89,14 @@
   }
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
+  // The inline command chip overlays the textarea's first line; its measured
+  // width feeds the textarea's text-indent so typed text flows after it.
+  let chipEl = $state<HTMLElement | null>(null);
+  let chipWidth = $state(0);
+  $effect(() => {
+    void draft.command;
+    chipWidth = chipEl?.offsetWidth ?? 0;
+  });
   // Imperative handle into ModelSelector for ⌘1–4 keyboard shortcuts.
   let modelSelector = $state<{ selectSlot: (index: number) => void; openMenu: () => void } | null>(null);
   // Esc-to-stop is a two-press confirm to avoid accidental aborts.
@@ -92,13 +105,28 @@
   let commands = $state<CommandInfo[]>([]);
   let commandsLoadedFor = $state<string | null>(null);
   let slashIndex = $state(0);
+  // Caret position, tracked so the slash menu can trigger anywhere (not just
+  // at the start of the message).
+  let cursor = $state(0);
+
+  function syncCursor() {
+    cursor = textareaEl?.selectionStart ?? 0;
+  }
 
   // ── Slash menu ─────────────────────────────────────────────────────────
-  const slashQuery = $derived.by(() => {
-    const text = draft.text;
-    if (!text.startsWith("/") || /\s/.test(text)) return null;
-    return text.slice(1).toLowerCase();
+  // The active `/token` immediately left of the caret: must start the line or
+  // follow whitespace, and contain no whitespace itself.
+  const slashContext = $derived.by(() => {
+    void draft.text; // re-evaluate as the text changes
+    const before = draft.text.slice(0, cursor);
+    const slash = before.lastIndexOf("/");
+    if (slash === -1) return null;
+    if (slash > 0 && !/\s/.test(before[slash - 1]!)) return null;
+    const token = before.slice(slash + 1);
+    if (/\s/.test(token)) return null;
+    return { start: slash, query: token.toLowerCase() };
   });
+  const slashQuery = $derived(slashContext?.query ?? null);
   const slashMatches = $derived(
     slashQuery === null
       ? []
@@ -122,10 +150,36 @@
     prompt: "prompt",
   };
 
+  const commandIcon = { skill: BookOpen, extension: Puzzle, prompt: MessageSquareText };
+
+  // A slash command collapses into a chip; the `/token` is removed from the text.
   function pickSlash(cmd: CommandInfo) {
-    drafts.update(thread.id, { text: `/${cmd.name} ` });
+    const ctx = slashContext;
+    const text = draft.text;
+    const stripped = ctx ? text.slice(0, ctx.start) + text.slice(cursor) : "";
+    drafts.update(thread.id, { command: { name: cmd.name, kind: cmd.kind }, text: stripped });
+    textareaEl?.focus();
+    requestAnimationFrame(syncCursor);
+  }
+
+  function removeCommand() {
+    drafts.update(thread.id, { command: null });
     textareaEl?.focus();
   }
+
+  // Typing a full `/<name> ` (known command, leading) also collapses into a chip.
+  $effect(() => {
+    if (draft.command) return;
+    const m = /^\/(\S+)\s/.exec(draft.text);
+    if (!m) return;
+    const name = m[1]!;
+    const cmd = commands.find((c) => c.name === name);
+    if (!cmd) return;
+    drafts.update(thread.id, {
+      command: { name: cmd.name, kind: cmd.kind },
+      text: draft.text.slice(m[0].length),
+    });
+  });
 
   // Focus the composer as soon as the textarea mounts. App.svelte keys the
   // thread view by thread id, so switching/opening a thread remounts this
@@ -144,6 +198,19 @@
     void draft.text;
     autoGrow();
   });
+
+  // Reveal the scrollbar thumb only while actively scrolling. Below
+  // max-height there is no overflow so no scrollbar ever shows; once the
+  // textarea is pinned at max-height, this class flashes the thumb for
+  // ~700ms after each scroll event (macOS overlay-scrollbar feel).
+  let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+  function onTextareaScroll() {
+    const el = textareaEl;
+    if (!el) return;
+    el.classList.add("is-scrolling");
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => el.classList.remove("is-scrolling"), 700);
+  }
 
   // ── Attachments ───────────────────────────────────────────────────────
   async function addFiles(files: File[]) {
@@ -186,7 +253,7 @@
   // ── Submit / steer / abort ────────────────────────────────────────────
   async function submit(asSteer = false) {
     const raw = draft.text.trim();
-    if (!raw && draft.attachments.length === 0) return;
+    if (!raw && draft.attachments.length === 0 && !draft.command) return;
     playButtonClick("click");
 
     const fileRefs = draft.attachments
@@ -197,18 +264,21 @@
       .map((a) => (a.kind === "image" ? { mimeType: a.mimeType, data: a.data } : null!))
       .filter(Boolean);
 
-    const isSlashCommand = raw.startsWith("/");
+    const isSlashCommand = !!draft.command || raw.startsWith("/");
     const body = [raw, ...fileRefs].filter(Boolean).join("\n\n");
-    const outgoing = isSlashCommand
-      ? body
-      : composeOutgoingPrompt(body, {
-          mode: draft.mode,
-          isFirst: !draft.planPromptSent,
-        });
+    const outgoing = draft.command
+      ? [`/${draft.command.name}`, body].filter(Boolean).join(" ")
+      : isSlashCommand
+        ? body
+        : composeOutgoingPrompt(body, {
+            mode: draft.mode,
+            isFirst: !draft.planPromptSent,
+          });
     const toolMode = draft.mode === "plan" && !isSlashCommand ? "readOnly" : "all";
 
     const snapshotText = draft.text;
     const snapshotAttachments = draft.attachments;
+    const snapshotCommand = draft.command;
     drafts.clearText(thread.id);
     if (draft.mode === "plan" && !isSlashCommand) {
       drafts.update(thread.id, { planPromptSent: true });
@@ -222,7 +292,11 @@
       }
     } catch (err) {
       // Restore draft on failure.
-      drafts.update(thread.id, { text: snapshotText, attachments: snapshotAttachments });
+      drafts.update(thread.id, {
+        text: snapshotText,
+        attachments: snapshotAttachments,
+        command: snapshotCommand,
+      });
       console.error("submit failed", err);
     }
   }
@@ -266,6 +340,17 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // Backspace at the very start of an empty composer removes the skill chip.
+    if (
+      e.key === "Backspace" &&
+      draft.command &&
+      !draft.text &&
+      textareaEl?.selectionStart === 0
+    ) {
+      e.preventDefault();
+      removeCommand();
+      return;
+    }
     if (slashMatches.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -423,17 +508,43 @@
             console.log("[composer] focus called, textareaEl:", !!textareaEl);
           }}
         >
+          {#if draft.command}
+            {@const Icon = commandIcon[draft.command.kind]}
+            <span
+              bind:this={chipEl}
+              class="skill-chip skill-chip--composer composer__cmd-chip"
+              data-testid="composer-command-chip"
+            >
+              <Icon size={12} />
+              <span>{draft.command.name}</span>
+              <button
+                type="button"
+                class="skill-chip__remove"
+                onclick={removeCommand}
+                title="Remove {draft.command.kind}"
+                aria-label="Remove {draft.command.kind}"><X size={10} /></button
+              >
+            </span>
+          {/if}
           <textarea
             bind:this={textareaEl}
+            style:text-indent={draft.command ? `${chipWidth + 8}px` : null}
             onfocus={() => console.log("[composer] textarea FOCUSED")}
+            onscroll={onTextareaScroll}
             placeholder={running
               ? "enter queues · ⌘enter steers · esc stops"
               : draft.mode === "plan"
                 ? "plan something…"
                 : "message the clanker"}
             value={draft.text}
-            oninput={(e) => drafts.update(thread.id, { text: e.currentTarget.value })}
+            oninput={(e) => {
+              drafts.update(thread.id, { text: e.currentTarget.value });
+              syncCursor();
+            }}
             onkeydown={onKeydown}
+            onkeyup={syncCursor}
+            onclick={syncCursor}
+            onselect={syncCursor}
             onpaste={onPaste}
             data-testid="composer-input"
             rows="1"

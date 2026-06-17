@@ -141,6 +141,14 @@ export class PiSession {
           },
         ]);
         this.callbacks.onMetaChange?.();
+        // Reconcile the run flag against the real streaming state. A standalone
+        // compaction (manual / threshold after a finished turn) can leave the
+        // app's running flag stuck true with no paired `agent_end`, leaving the
+        // "Working…" spinner spinning forever. If the run won't continue and the
+        // agent isn't actually streaming, force the flag back to idle.
+        if (!event.willRetry && !this.session.isStreaming) {
+          this.callbacks.onRunningChange(false);
+        }
       }
       if (event.type === "thinking_level_changed") this.callbacks.onMetaChange?.();
       if (event.type === "queue_update") {

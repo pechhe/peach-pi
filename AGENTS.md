@@ -25,6 +25,11 @@ Local-first macOS GUI for the pi coding agent. Rewrite of `peche-pi`
 - Files < 1000 LOC hard cap, target < 300.
 - No TS parameter properties (Node strip-types).
 - CJS main/preload bundles: `__dirname`, never `import.meta.dirname`.
+- Svelte 5 runes: declare every `$derived` before any `$effect` /
+  `$effect.pre` that reads it. Runes compile to real `const` bindings, so
+  reading a later-declared derived inside an effect throws
+  `ReferenceError: Cannot access 'X' before initialization` (TDZ) at
+  runtime — `tsc` won't catch it.
 
 ## Commands
 

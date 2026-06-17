@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { AppView } from "@peach-pi/shared-types";
+  import type { AppView, Thread } from "@peach-pi/shared-types";
   import { consumeAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
   import { snapshot } from "../stores/snapshot.svelte";
@@ -24,7 +24,9 @@
   import GraphView from "./GraphView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
+  import SkillDialog from "./SkillDialog.svelte";
   import Toasts from "./Toasts.svelte";
+  import PiHealthBanner from "./PiHealthBanner.svelte";
   import { Agentation } from "sv-agentation";
   const agentationProps = import.meta.env.DEV
     ? { workspaceRoot: null, includeComponentContext: true, includeComputedStyles: false }
@@ -32,6 +34,27 @@
 
   let selectedThreadId = $state<string | null>(null);
   let view = $state<AppView>("thread");
+
+  // ── New thread ───────────────────────────────────────────────────────
+  // Threads are created eagerly: clicking "new thread" makes a real thread (and
+  // session) immediately and selects it. The composer is full from the start;
+  // ThreadView centres it while the thread has no messages yet.
+  async function startNewThread(projectId: string | null, worktree = false) {
+    const thread =
+      worktree && projectId
+        ? await api.invoke("threads:create", projectId, { worktree: true })
+        : projectId
+          ? await api.invoke("threads:create", projectId)
+          : await api.invoke("threads:createChat");
+    selectThread(thread.id);
+  }
+
+  // Flip a not-yet-used thread between its project dir and an isolated worktree.
+  // Done in place on the same thread id (no delete/recreate) so ThreadView
+  // stays mounted and the composer draft survives — no flash.
+  async function setThreadEnvironment(threadId: string, worktree: boolean) {
+    await api.invoke("threads:setEnvironment", threadId, worktree);
+  }
   let searchOpen = $state(false);
   let pendingFindQuery = $state<string | null>(null);
 
@@ -119,12 +142,8 @@
   }
 
   // ⌘N starts a new thread in the current project (a new chat if none selected).
-  async function newThreadForCurrentProject() {
-    const projectId = selectedThread?.projectId ?? null;
-    const thread = projectId
-      ? await api.invoke("threads:create", projectId)
-      : await api.invoke("threads:createChat");
-    selectThread(thread.id);
+  function newThreadForCurrentProject() {
+    startNewThread(selectedThread?.projectId ?? null);
   }
 
   // Notification click in main → jump to thread.
@@ -156,7 +175,7 @@
     // ⌘N starts a new thread in the current project (or a new chat if none).
     if ((e.metaKey || e.ctrlKey) && e.key === "n") {
       e.preventDefault();
-      void newThreadForCurrentProject();
+      newThreadForCurrentProject();
       return;
     }
     // ⌘J toggles the terminal pane for the selected thread.
@@ -195,6 +214,8 @@
       {selectedThreadId}
       activeView={view}
       onSelect={selectThread}
+      onNewThread={startNewThread}
+      onNewChat={() => startNewThread(null)}
       onOpenView={openView}
       onOpenSearch={() => (searchOpen = true)}
     />
@@ -245,7 +266,13 @@
         onSelect={selectThread}
       />
     {:else if selectedThread}
-      <ThreadView thread={selectedThread} onOpenGraph={() => openView("graph")} pendingFind={pendingFindQuery} onFindConsumed={() => (pendingFindQuery = null)} />
+      <ThreadView
+        thread={selectedThread}
+        onSetEnvironment={setThreadEnvironment}
+        onOpenGraph={() => openView("graph")}
+        pendingFind={pendingFindQuery}
+        onFindConsumed={() => (pendingFindQuery = null)}
+      />
     {:else}
       <main class="flex flex-1 items-center justify-center" data-testid="boot-ok">
         <div class="titlebar-drag absolute inset-x-0 top-0 h-12"></div>
@@ -279,7 +306,9 @@
     <ExtensionDialog request={extensionUi.dialogs[0]} />
   {/if}
   <ImageLightbox />
+  <SkillDialog />
   <Toasts />
+  <PiHealthBanner />
 </div>
 
 {#if agentationProps}

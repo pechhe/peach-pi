@@ -13,8 +13,9 @@
     "test:e2e": "playwright test tests/core"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.79.1",
+    "@earendil-works/pi-coding-agent": "catalog:",
     "@lucide/svelte": "^1.18.0",
+    "semver": "^7.8.4",
     "@peach-pi/automation-core": "workspace:*",
     "@peach-pi/pi-client": "workspace:*",
     "@peach-pi/shared-types": "workspace:*",
@@ -35,6 +36,7 @@
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^24.13.1",
+    "@types/semver": "^7.7.0",
     "electron": "^42.3.3",
     "svelte": "^5.45.0",
     "svelte-check": "^4.3.4",

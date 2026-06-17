@@ -172,6 +172,39 @@
   color: var(--cream-ink-muted);
 }
 
+/* Composer scrollbar: hidden while the textarea can still grow (content
+   below max-height → no overflow). Once it hits max-height and overflows,
+   reveal the thumb only while scrolling or hovering — never parked/static. */
+.composer-device .composer__screen textarea::-webkit-scrollbar {
+  width: 8px;
+}
+.composer-device .composer__screen textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.composer-device .composer__screen textarea::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.composer-device .composer__screen textarea:hover::-webkit-scrollbar-thumb,
+.composer-device .composer__screen textarea.is-scrolling::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3);
+}
+.composer-device .composer__screen textarea:hover::-webkit-scrollbar-thumb:hover,
+.composer-device .composer__screen textarea.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background: var(--color-faint);
+}
+
+/* Inline command chip — overlays the textarea's first line (top-left of the
+   screen content box). The textarea's text-indent reserves space for it. */
+.composer-device .composer__screen .composer__cmd-chip {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 3;
+}
+
 /* ---------------- Context readout (in screen) ---------------- */
 .composer-device .composer__context {
   display: grid;

@@ -69,6 +69,7 @@ const config: ForgeConfig = {
   rebuildConfig: { onlyModules: [] },
   packagerConfig: {
     appBundleId: "com.peach-pi.desktop",
+    icon: path.join(__dirname, "build/icon"), // .icns appended per-platform by packager
     // Native N-API prebuilds (clipboard, pi-tui) must live outside the asar.
     // node-pty's prebuilds dir also holds the spawn-helper executable.
     asar: { unpack: "{**/*.node,**/node-pty/prebuilds/**}" },

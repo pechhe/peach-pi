@@ -8,6 +8,7 @@ import "./styles/app.css";
 import "./styles/composer-device.css";
 import "./styles/composer-device-parts.css";
 import "./styles/composer-device-overrides.css";
+import "./styles/composer-device-dark.css";
 
 // Apply the persisted theme before mount so there's no flash of the default.
 theme.init();

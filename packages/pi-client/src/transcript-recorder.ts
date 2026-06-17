@@ -1,4 +1,9 @@
-import type { TranscriptItem, TranscriptOp } from "@peach-pi/shared-types";
+import type {
+  SubagentRow,
+  SubagentStatus,
+  TranscriptItem,
+  TranscriptOp,
+} from "@peach-pi/shared-types";
 
 /**
  * Maps pi SDK events / messages into transcript ops.
@@ -64,6 +69,101 @@ function resultToText(result: unknown): string {
   return "";
 }
 
+// ── Subagent tool calls ───────────────────────────────────────────────────
+// `subagent` / `subagent_resume` calls render as a dedicated card. We extract
+// the structured launch input and the result `details` (status, elapsed,
+// summary, per-child rows) the generic tool path would otherwise drop.
+
+function isSubagentTool(toolName: string | undefined): boolean {
+  return toolName === "subagent" || toolName === "subagent_resume";
+}
+
+interface SubagentChildInput {
+  name?: string;
+  agent?: string;
+  title?: string;
+  task?: string;
+}
+interface SubagentInput extends SubagentChildInput {
+  children?: SubagentChildInput[];
+}
+interface SubagentDetails {
+  status?: string;
+  name?: string;
+  agent?: string;
+  title?: string;
+  task?: string;
+  summary?: string;
+  elapsed?: number;
+  exitCode?: number;
+  errorMessage?: string;
+  children?: SubagentDetails[];
+}
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function resultDetails(result: unknown): SubagentDetails | undefined {
+  const obj = asObject(result);
+  return obj ? asObject(obj.details) : undefined;
+}
+
+function normaliseStatus(
+  raw: string | undefined,
+  exitCode: number | undefined,
+  errorMessage: string | undefined,
+): SubagentStatus {
+  if (
+    raw === "started" ||
+    raw === "batch" ||
+    raw === "completed" ||
+    raw === "failed" ||
+    raw === "cancelled" ||
+    raw === "running"
+  ) {
+    return raw;
+  }
+  if (errorMessage) return "failed";
+  if (typeof exitCode === "number") return exitCode === 0 ? "completed" : "failed";
+  return "running";
+}
+
+function rowFrom(
+  details: SubagentDetails | undefined,
+  fallback: SubagentChildInput | undefined,
+): SubagentRow {
+  return {
+    name: details?.name ?? fallback?.name ?? "subagent",
+    agent: details?.agent ?? fallback?.agent,
+    title: details?.title ?? fallback?.title,
+    task: details?.task ?? fallback?.task,
+    summary: details?.summary ?? details?.errorMessage,
+    status: normaliseStatus(details?.status, details?.exitCode, details?.errorMessage),
+    elapsed: details?.elapsed,
+  };
+}
+
+/** One row per agent launched by a tool call (batch-aware). `running` true
+ *  while the call is in flight and no result details have arrived yet. */
+function subagentRows(args: unknown, result: unknown, running: boolean): SubagentRow[] {
+  const input = (asObject(args) ?? {}) as SubagentInput;
+  const details = resultDetails(result);
+
+  if (details?.children?.length) {
+    const childInputs = Array.isArray(input.children) ? input.children : [];
+    return details.children.map((child, i) => rowFrom(child, childInputs[i]));
+  }
+  if (Array.isArray(input.children) && input.children.length) {
+    return input.children.map((child) => rowFrom(undefined, child));
+  }
+  const row = rowFrom(details, input);
+  if (!details && running) return [{ ...row, status: "running" }];
+  return [row];
+}
+
 export class TranscriptRecorder {
   private items: TranscriptItem[] = [];
   private seq = 0;
@@ -126,6 +226,17 @@ export class TranscriptRecorder {
       }
       case "tool_execution_start": {
         if (!event.toolCallId) return [];
+        if (isSubagentTool(event.toolName)) {
+          return [
+            this.upsertOp({
+              id: event.toolCallId,
+              kind: "subagent",
+              verb: event.toolName === "subagent_resume" ? "resume" : "spawn",
+              createdAt: new Date().toISOString(),
+              rows: subagentRows(event.args, undefined, true),
+            }),
+          ];
+        }
         return [
           this.upsertOp({
             id: event.toolCallId,
@@ -140,6 +251,20 @@ export class TranscriptRecorder {
       case "tool_execution_end": {
         if (!event.toolCallId) return [];
         const existing = this.items.find((i) => i.id === event.toolCallId);
+        if (isSubagentTool(event.toolName)) {
+          return [
+            this.upsertOp({
+              id: event.toolCallId,
+              kind: "subagent",
+              verb: event.toolName === "subagent_resume" ? "resume" : "spawn",
+              createdAt:
+                existing?.kind === "subagent"
+                  ? existing.createdAt
+                  : new Date().toISOString(),
+              rows: subagentRows(event.args, event.result, false),
+            }),
+          ];
+        }
         return [
           this.upsertOp({
             id: event.toolCallId,

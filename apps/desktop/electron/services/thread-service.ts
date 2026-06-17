@@ -16,6 +16,7 @@ import type {
   TranscriptItem,
   TranscriptOp,
 } from "@peach-pi/shared-types";
+import { isNewThread } from "@peach-pi/shared-types";
 import type { PiSession } from "@peach-pi/pi-client";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
@@ -122,7 +123,7 @@ export class ThreadService {
       if (thread.toTestAt) this.threads.setToTest(threadId, null, null);
       this.onThreadsChanged();
     }
-    if (thread.title === "New thread" || thread.title === "New chat") {
+    if (isNewThread(thread.title)) {
       // Instant truncated placeholder so the UI feels snappy, then an async
       // LLM title overwrites it (only if still a placeholder).
       this.threads.setTitle(threadId, text.length > 60 ? `${text.slice(0, 60)}…` : text);
@@ -345,6 +346,24 @@ export class ThreadService {
   delete(threadId: string): void {
     this.disposeSession(threadId);
     this.threads.delete(threadId);
+    this.onThreadsChanged();
+  }
+
+  /** Flip an empty (never-prompted) thread between its project dir and an
+   *  isolated worktree, keeping the same thread id so the renderer's
+   *  ThreadView stays mounted (no flash). The caller resolves the git
+   *  worktree dir; we only own the session swap + row mutation. */
+  async setEnvironment(threadId: string, worktreeDir: string | undefined): Promise<void> {
+    this.disposeSession(threadId);
+    this.threads.setWorktreeDir(threadId, worktreeDir ?? null);
+    const thread = this.threads.get(threadId);
+    if (thread) {
+      const project = thread.projectId
+        ? this.projects.all().find((p) => p.id === thread.projectId)
+        : null;
+      const cwd = worktreeDir ?? project?.path ?? thread.chatWorkspaceDir ?? process.cwd();
+      await this.ensureSession(threadId, cwd, null);
+    }
     this.onThreadsChanged();
   }
 

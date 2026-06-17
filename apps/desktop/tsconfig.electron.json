@@ -3,7 +3,8 @@
   "compilerOptions": {
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["electron/**/*.ts", "tests/unit/**/*.ts"]
+  "include": ["electron/**/*.ts", "tests/unit/**/*.ts", "src/global.d.ts"]
 }

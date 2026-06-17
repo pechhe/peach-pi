@@ -174,6 +174,10 @@ export class ThreadRepo {
     this.db.prepare("UPDATE threads SET pi_session_file = ? WHERE id = ?").run(file, id);
   }
 
+  setWorktreeDir(id: string, dir: string | null): void {
+    this.db.prepare("UPDATE threads SET worktree_dir = ? WHERE id = ?").run(dir, id);
+  }
+
   get(id: string): Thread | null {
     const row = this.db.prepare("SELECT * FROM threads WHERE id = ?").get(id) as
       | ThreadRow

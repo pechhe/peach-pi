@@ -1,8 +1,9 @@
 /* ── "Done" sound design ───────────────────────────────────────────────────
  *
  * A small palette of celebratory cues played when a thread is marked done.
- * All are synthesized with WebAudio (no asset files). To switch the active
- * sound, change DONE_SOUND_VARIANT below — that's the single knob.
+ * All are synthesized with WebAudio (no asset files). The active variant is
+ * chosen in Settings → Sounds (persisted to localStorage) and replayed from
+ * the playground there.
  *
  * Variants:
  *  - "arpeggio"  Bright ascending major arpeggio (E5→G♯5→B5→E6). Triangle.
@@ -13,12 +14,25 @@
  *  - "chord"     A full major chord struck together with a soft swell.
  */
 
-import { soundsMuted } from "./sound-prefs";
+import { getDoneSoundVariant, soundsMuted } from "./sound-prefs";
 
 export type DoneSoundVariant = "arpeggio" | "marimba" | "bell" | "pop" | "coin" | "chord";
 
-// 🔊 Change this to audition a different cue.
-const DONE_SOUND_VARIANT: DoneSoundVariant = "arpeggio";
+/** Selectable cues surfaced in Settings → Sounds. */
+export const DONE_SOUND_OPTIONS: ReadonlyArray<{
+  id: DoneSoundVariant;
+  label: string;
+  description: string;
+}> = [
+  { id: "arpeggio", label: "Arpeggio", description: "Bright ascending major arpeggio (E5→G♯5→B5→E6). Triangle." },
+  { id: "marimba", label: "Marimba", description: "Two warm, woody plucks. Soft and understated." },
+  { id: "bell", label: "Bell", description: "A single shimmering bell with a long, glassy tail." },
+  { id: "pop", label: "Pop", description: "A quick upward pitch blip. Playful and snappy." },
+  { id: "coin", label: "Coin", description: "Classic two-note game \"pickup\". Square waves, retro." },
+  { id: "chord", label: "Chord", description: "A full major chord struck together with a soft swell." },
+];
+
+const DEFAULT_VARIANT: DoneSoundVariant = "arpeggio";
 
 let sharedAudioContext: AudioContext | null = null;
 
@@ -145,12 +159,18 @@ const VARIANTS: Record<DoneSoundVariant, (ctx: AudioContext, now: number) => voi
   chord: playChord,
 };
 
-export function playDoneSound(variant: DoneSoundVariant = DONE_SOUND_VARIANT): void {
+function resolveVariant(variant?: DoneSoundVariant): DoneSoundVariant {
+  if (variant) return variant;
+  const stored = getDoneSoundVariant() as DoneSoundVariant;
+  return DONE_SOUND_OPTIONS.some((o) => o.id === stored) ? stored : DEFAULT_VARIANT;
+}
+
+export function playDoneSound(variant?: DoneSoundVariant): void {
   if (soundsMuted()) return;
   const ctx = getAudioContext();
   if (!ctx) return;
   if (ctx.state === "suspended") {
     void ctx.resume();
   }
-  VARIANTS[variant](ctx, ctx.currentTime);
+  VARIANTS[resolveVariant(variant)](ctx, ctx.currentTime);
 }

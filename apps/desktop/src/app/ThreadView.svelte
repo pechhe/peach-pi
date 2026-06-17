@@ -1,28 +1,44 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import type { Thread } from "@peach-pi/shared-types";
+  import { isNewThread, type Thread, type TranscriptItem } from "@peach-pi/shared-types";
+  import { api } from "../lib/ipc";
+
+  type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
+  type Row =
+    | { type: "item"; item: TranscriptItem }
+    | { type: "group"; id: string; items: ToolItem[] };
   import { transcripts } from "../stores/transcripts.svelte";
+  import { playClick } from "../lib/sound/button-click-sound";
   import Composer from "./Composer.svelte";
   import GitWidget from "./GitWidget.svelte";
   import Workflow from "@lucide/svelte/icons/workflow";
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
+  import BookOpen from "@lucide/svelte/icons/book-open";
+  import { parseSkillInvocation } from "../lib/composer/skill-message";
+  import { skillViewer } from "../stores/skill-viewer.svelte";
   import Markdown from "./Markdown.svelte";
   import StreamingText from "./StreamingText.svelte";
   import WorkingLabel from "./WorkingLabel.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
+  import SubagentCard from "./SubagentCard.svelte";
+  import { collectAgents } from "../lib/subagent/journey.svelte";
+  import { FLEET_WIDGET_KEY, parseFleet, type FleetAgent } from "../lib/subagent/fleet";
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { lightbox } from "../stores/lightbox.svelte";
   import { terminal } from "../stores/terminal.svelte";
   import FindBar from "./FindBar.svelte";
 
-  let { thread, onOpenGraph, pendingFind, onFindConsumed }: {
+  let { thread, onSetEnvironment, onOpenGraph, pendingFind, onFindConsumed }: {
     thread: Thread;
+    /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
+    onSetEnvironment?: (threadId: string, worktree: boolean) => void;
     onOpenGraph: () => void;
     /** Set when the search overlay passes a body-match query through. ThreadView
      *  opens its FindBar pre-filled and calls `onFindConsumed` once applied. */
     pendingFind?: string | null;
     onFindConsumed?: () => void;
   } = $props();
+
 
   // ── In-thread find (⌘F) ─────────────────────────────────────────────
   let findOpen = $state(false);
@@ -116,6 +132,12 @@
     if (!el) return;
     if (el instanceof HTMLDetailsElement) el.open = true;
     el.querySelectorAll("details").forEach((d) => (d.open = true));
+    // Reveal collapsed ancestors too (e.g. a folded tool-call group).
+    let p = el.parentElement;
+    while (p && p !== scrollEl) {
+      if (p instanceof HTMLDetailsElement) p.open = true;
+      p = p.parentElement;
+    }
     el.scrollIntoView({ block: "center", behavior: "smooth" });
   });
 
@@ -191,10 +213,106 @@
 
   let scrollEl = $state<HTMLElement | null>(null);
   let didInitialScroll = $state(false);
+
+  const items = $derived(transcripts.itemsFor(thread.id));
+  // The composer centres (and the transcript hides) until the first message.
+  // Title-based check distinguishes a genuinely-new thread from an existing
+  // thread whose history is still loading asynchronously (items briefly []):
+  // a resumed thread has a real title from frame 1, so it never centres/flips
+  // and never triggers the dock animation.
+  const isEmpty = $derived(items.length === 0 && isNewThread(thread.title));
+
+  // ── Composer docking (FLIP) ─────────────────────────────────────────
+  // The composer node is shared between the centred new-thread state and the
+  // bottom-docked state. When the first message promotes the thread, FLIP the
+  // composer from its old (centred) box down to its new (docked) box so it
+  // glides into place: fast off the line, easing exponentially as it docks.
+  let dockEl = $state<HTMLElement | null>(null);
+  let dockFirstTop = 0;
+  // undefined until the first observation. Only a genuinely-new thread (still
+  // placeholder title) can trip isEmpty true→false, so resumed threads never
+  // animate — and a real first message on a new thread animates exactly once.
+  let prevEmpty: boolean | undefined;
+  $effect.pre(() => {
+    const empty = isEmpty;
+    if (prevEmpty === true && !empty && dockEl) {
+      dockFirstTop = dockEl.getBoundingClientRect().top;
+    }
+  });
+  $effect(() => {
+    const empty = isEmpty;
+    if (prevEmpty === true && !empty && dockEl) {
+      const dy = dockFirstTop - dockEl.getBoundingClientRect().top;
+      if (dy !== 0) {
+        dockEl.animate(
+          [{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }],
+          // Sharp launch, extended decaying tail — composer drifts to rest.
+          { duration: 1600, easing: "cubic-bezier(0.04, 0.9, 0.02, 1)" },
+        );
+      }
+    }
+    prevEmpty = empty;
+  });
   // True when the user has scrolled away from the bottom of the transcript.
   let scrolledUp = $state(false);
 
-  const items = $derived(transcripts.itemsFor(thread.id));
+  // ── Copy session info on title click ────────────────────────────────
+  let copiedToast = $state(false);
+  function copySessionInfo() {
+    if (!thread?.piSessionFile) return;
+    const sessionId = thread.piSessionFile.replace(/^.*\//, '').replace(/\.jsonl$/, '');
+    const text = `Session: ${sessionId}\nPath: ${thread.piSessionFile}`;
+    void navigator.clipboard.writeText(text).then(() => {
+      copiedToast = true;
+      setTimeout(() => { copiedToast = false; }, 1500);
+    });
+  }
+
+  // Subagent cards: group every subagent launch in the transcript into one
+  // persistent entity per agent name; the introducing call renders it.
+  const agentTimeline = $derived(collectAgents(items));
+  // Live progress, parsed from the pi-subagents "subagent-status" widget feed.
+  const fleet = $derived.by(() => {
+    const w = extensionUi.widgetsFor(thread.id).find((x) => x.key === FLEET_WIDGET_KEY);
+    const parsed = w ? parseFleet(w.lines) : null;
+    const map = new Map<string, FleetAgent>();
+    for (const a of parsed?.agents ?? []) map.set(a.name, a);
+    return map;
+  });
+
+  // Collapse runs of successful ("done") tool calls into a single foldable
+  // group row. Running/error tools — and lone successes — stay as their own
+  // rows so anything that needs eyes is never hidden.
+  const rows = $derived.by(() => {
+    const out: Row[] = [];
+    let group: ToolItem[] = [];
+    const flush = () => {
+      if (group.length === 0) return;
+      if (group.length === 1) out.push({ type: "item", item: group[0]! });
+      else out.push({ type: "group", id: `toolgroup-${group[0]!.id}`, items: group });
+      group = [];
+    };
+    for (const it of items) {
+      if (it.kind === "tool" && it.status === "done") {
+        group.push(it);
+      } else {
+        flush();
+        out.push({ type: "item", item: it });
+      }
+    }
+    flush();
+    return out;
+  });
+
+  // "bash ×4 · read ×2" — ordered by first appearance.
+  function toolBreakdown(group: ToolItem[]): string {
+    const counts = new Map<string, number>();
+    for (const it of group) {
+      const name = it.toolName || "tool";
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(" · ");
+  }
 
   const BOTTOM_THRESHOLD = 200;
 
@@ -204,9 +322,19 @@
     scrolledUp = el.scrollHeight - el.scrollTop - el.clientHeight > BOTTOM_THRESHOLD;
   }
 
+  // During streaming, the programmatic bottom-pin resets scrollTop on every
+  // token, so onScroll never sees the user's up-scroll cross BOTTOM_THRESHOLD
+  // — leaving scrolledUp false and the pin yanking them back. Catch the
+  // upward gesture directly so reading history works mid-stream; it re-arms
+  // when the user scrolls back to bottom (onScroll) or hits the button.
+  function onWheel(e: WheelEvent) {
+    if (e.deltaY < 0) scrolledUp = true;
+  }
+
   function scrollToBottom() {
     const el = scrollEl;
     if (!el) return;
+    scrolledUp = false;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }
 
@@ -229,24 +357,29 @@
       });
       return;
     }
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD) {
+    if (!scrolledUp) {
       requestAnimationFrame(() => {
         el.scrollTop = el.scrollHeight;
       });
     }
   });
 
-  // Re-pin to the bottom when the scroll area resizes (e.g. the composer
-  // grows after attaching an image), unless the user has scrolled up.
+  // Keep the bottom pinned whenever content height changes (streaming text,
+  // tool output, the working indicator) or the scroll area itself resizes
+  // (e.g. the composer grows after attaching an image). The transcript's
+  // box size stays fixed while messages stream, so we must observe the inner
+  // content wrapper, whose height grows. Re-pin only if the user hasn't
+  // scrolled up to read history.
   $effect(() => {
     const el = scrollEl;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      if (el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD) {
-        el.scrollTop = el.scrollHeight;
-      }
-    });
+    if (!el || !didInitialScroll) return;
+    const content = el.firstElementChild;
+    const pin = () => {
+      if (!scrolledUp) el.scrollTop = el.scrollHeight;
+    };
+    const ro = new ResizeObserver(pin);
     ro.observe(el);
+    if (content) ro.observe(content);
     return () => ro.disconnect();
   });
 
@@ -254,7 +387,22 @@
 
 <div class="flex h-full flex-1 flex-col">
   <header class="titlebar-drag flex h-12 shrink-0 items-center gap-2 px-4">
-    <h1 class="truncate text-sm font-medium text-fg-soft">{thread.title}</h1>
+    {#if isEmpty}
+      <span class="truncate text-sm font-medium text-fg-soft">{thread.title}</span>
+    {:else}
+    <button
+      type="button"
+      class="truncate text-sm font-medium text-fg-soft cursor-pointer hover:text-accent transition-colors"
+      onclick={copySessionInfo}
+      title={thread.piSessionFile ? 'Click to copy session ID and path' : thread.title}
+    >
+      {thread.title}
+    </button>
+    {#if copiedToast}
+      <span class="shrink-0 rounded-full border border-border-strong bg-surface px-2 py-0.5 text-[10px] text-muted animate-fade-in">
+        Copied!
+      </span>
+    {/if}
     {#each extensionUi.statusesFor(thread.id) as status (status)}
       <span class="shrink-0 rounded-full border border-border-strong bg-surface px-2 py-0.5 text-[10px] text-muted">
         {status}
@@ -279,8 +427,10 @@
         data-testid="terminal-toggle">&gt;_</button
       >
     </div>
+    {/if}
   </header>
 
+  {#if !isEmpty}
   <div class="relative flex min-h-0 flex-1 flex-col">
     {#if findOpen}
       <FindBar
@@ -298,16 +448,52 @@
       class="flex flex-1 flex-col overflow-y-auto px-6 py-5"
       data-testid="transcript"
       onscroll={onScroll}
+      onwheel={onWheel}
     >
-    <div class="mx-auto flex max-w-3xl flex-1 flex-col justify-end gap-5">
+    <div class="mx-auto flex max-w-3xl flex-1 flex-col gap-3">
       {#if items.length === 0}
         <div class="flex flex-1 flex-col items-center justify-center gap-1 text-center">
           <p class="text-[15px] font-medium text-muted">What are we building?</p>
           <p class="text-xs text-fainter">Enter to send · / for commands · ⌘P plan mode · ⌃` terminal</p>
         </div>
       {/if}
-      {#each items as item (item.id)}
-        {#if item.kind === "user"}
+      {#snippet toolRow(item: ToolItem)}
+        <details class="item-enter group -my-1.5 text-xs" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
+          <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
+            {#if item.status === "running"}
+              <BrailleSpinner class="working-label__spinner shrink-0" />
+            {:else if item.status === "error"}
+              <span class="shrink-0 text-danger">✕</span>
+            {:else}
+              <span class="shrink-0 text-fainter">✓</span>
+            {/if}
+            <span class="shrink-0 font-mono font-medium text-muted">{item.toolName}</span>
+            <span class="truncate font-mono text-fainter">{item.argsSummary}</span>
+            <span class="ml-auto shrink-0 text-fainter transition-transform group-open:rotate-90">›</span>
+          </summary>
+          {#if item.output}
+            <pre class="mx-2 mt-1 max-h-64 overflow-auto rounded-lg border border-border/80 bg-surface/60 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted select-text">{item.output}</pre>
+          {/if}
+        </details>
+      {/snippet}
+      {#each rows as row (row.type === "group" ? row.id : row.item.id)}
+        {#if row.type === "group"}
+          <details class="item-enter group/tools -my-1.5 text-xs" data-item-id={row.id}>
+            <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
+              <span class="shrink-0 text-fainter">✓</span>
+              <span class="shrink-0 font-mono font-medium text-muted">{row.items.length} tool calls</span>
+              <span class="truncate font-mono text-fainter">{toolBreakdown(row.items)}</span>
+              <span class="ml-auto shrink-0 text-fainter transition-transform group-open/tools:rotate-90">›</span>
+            </summary>
+            <div class="mt-1 flex flex-col border-l-2 border-border pl-1.5">
+              {#each row.items as it (it.id)}
+                {@render toolRow(it)}
+              {/each}
+            </div>
+          </details>
+        {:else}
+          {@const item = row.item}
+          {#if item.kind === "user"}
           <div class="item-enter flex max-w-[85%] flex-col gap-2 self-end" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
             {#if item.images && item.images.length > 0}
               <div class="flex flex-wrap justify-end gap-2">
@@ -328,15 +514,34 @@
               </div>
             {/if}
             {#if item.text}
-              <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg select-text">
-                {item.text}
-              </div>
+              {@const skill = parseSkillInvocation(item.text)}
+              {#if skill}
+                <button
+                  type="button"
+                  class="skill-chip self-end"
+                  onclick={() => skillViewer.open(skill)}
+                  title="View skill"
+                  data-testid="skill-chip"
+                >
+                  <BookOpen size={12} />
+                  <span>{skill.name}</span>
+                </button>
+                {#if skill.args}
+                  <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg select-text">
+                    {skill.args}
+                  </div>
+                {/if}
+              {:else}
+                <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg select-text">
+                  {item.text}
+                </div>
+              {/if}
             {/if}
           </div>
         {:else if item.kind === "assistant"}
           <div class="item-enter text-[13.5px] leading-relaxed text-fg select-text" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
             {#if item.thinking}
-              <details class="group mb-2 text-xs text-faint" open={item.streaming && !item.text}>
+              <details class="group mb-1 text-xs text-faint" open={item.streaming && !item.text}>
                 <summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">
                   <span class="mr-1 inline-block transition-transform group-open:rotate-90">›</span>Thinking
                 </summary>
@@ -351,23 +556,16 @@
             {/if}
           </div>
         {:else if item.kind === "tool"}
-          <details class="item-enter group -my-1.5 text-xs" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
-            <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-colors select-none hover:bg-surface">
-              {#if item.status === "running"}
-                <BrailleSpinner class="working-label__spinner shrink-0" />
-              {:else if item.status === "error"}
-                <span class="shrink-0 text-danger">✕</span>
-              {:else}
-                <span class="shrink-0 text-fainter">✓</span>
-              {/if}
-              <span class="shrink-0 font-mono font-medium text-muted">{item.toolName}</span>
-              <span class="truncate font-mono text-fainter">{item.argsSummary}</span>
-              <span class="ml-auto shrink-0 text-fainter transition-transform group-open:rotate-90">›</span>
-            </summary>
-            {#if item.output}
-              <pre class="mx-2 mt-1 max-h-64 overflow-auto rounded-lg border border-border/80 bg-surface/60 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted select-text">{item.output}</pre>
+          {@render toolRow(item)}
+        {:else if item.kind === "subagent"}
+          {#each agentTimeline.primaryNamesByCall.get(item.id) ?? [] as name (name)}
+            {@const entity = agentTimeline.entities.get(name)}
+            {#if entity}
+              <div class="item-enter" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
+                <SubagentCard {entity} live={fleet.get(name)} />
+              </div>
             {/if}
-          </details>
+          {/each}
         {:else if item.kind === "compaction"}
           {#if item.running}
             <div class="item-enter mx-auto w-full max-w-2xl rounded-2xl border border-border-strong/40 bg-surface-2/40 px-4 py-3" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
@@ -415,8 +613,9 @@
               {/if}
             </details>
           {/if}
-        {:else}
-          <p class="item-enter text-center text-xs text-faint italic" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>{item.text}</p>
+          {:else}
+            <p class="item-enter text-center text-xs text-faint italic" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>{item.text}</p>
+          {/if}
         {/if}
       {/each}
       {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming)}
@@ -444,15 +643,62 @@
       <pre class="overflow-x-auto font-mono text-[10px] leading-relaxed text-muted">{widget.lines.join("\n")}</pre>
     </div>
   {/each}
-  <Composer {thread} />
+  {/if}
+
+  <div bind:this={dockEl} class="composer-dock" class:composer-dock--centered={isEmpty}>
+    {#if isEmpty && thread.projectId}
+      <div class="composer-device new-thread__bar">
+        <button
+          type="button"
+          class="new-thread__environment"
+          aria-pressed={thread.worktreeDir != null}
+          onclick={() => {
+            playClick("down");
+            onSetEnvironment?.(thread.id, thread.worktreeDir == null);
+          }}
+          data-testid="environment-toggle"
+          title={thread.worktreeDir != null
+            ? "Working in an isolated git worktree"
+            : "Working in the project directory"}
+        >
+          {thread.worktreeDir != null ? "⎇ Worktree" : "◈ Local"}
+        </button>
+      </div>
+    {/if}
+    <Composer {thread} />
+  </div>
 </div>
 
 <svelte:window onkeydown={onKeydown} />
 
 <style>
+  /* The composer normally sits at the bottom of the column. While composing a
+     brand-new thread the transcript is hidden, so margin-block:auto centres
+     the composer (and its environment toggle) vertically. The draft→real
+     promotion keeps this same node, so the FLIP transform docks it down. */
+  .composer-dock {
+    flex-shrink: 0;
+    will-change: transform;
+  }
+  .composer-dock--centered {
+    margin-block: auto;
+  }
+  .new-thread__bar {
+    display: flex;
+    justify-content: center;
+    padding-bottom: 0.75rem;
+  }
+
   :global(.thread-find-hit) {
     outline: 2px solid oklch(0.6 0.16 52 / 0.7);
     outline-offset: 3px;
     border-radius: 0.5rem;
+  }
+  .animate-fade-in {
+    animation: fadeIn 0.15s ease-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-2px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 </style>

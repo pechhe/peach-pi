@@ -10,8 +10,13 @@ import { GitService } from "./services/git-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
 import { GraphifyService } from "./services/graphify-service.ts";
 import { getCavemanState, setCavemanEnabled } from "./services/caveman.ts";
+import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
+import { computePiHealth } from "./services/pi-health.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import { createOverlayWindow } from "./windows/overlay-window.ts";
+
+// TEMP DEBUG: enable CDP for renderer layout inspection.
+app.commandLine.appendSwitch("remote-debugging-port", "9222");
 
 // Test isolation: override userData before any path use.
 if (process.env.PEACH_PI_USER_DATA) {
@@ -115,6 +120,9 @@ async function boot(): Promise<void> {
     "app:setUtilityModel": (model) => appService.setUtilityModel(model),
     "app:getAutoCompact": () => appService.getAutoCompact(),
     "app:setAutoCompact": (settings) => appService.setAutoCompact(settings),
+    "app:getPiSettings": () => getPiSettings(),
+    "app:setPiSettings": (patch) => setPiSettings(patch),
+    "app:getPiHealth": () => computePiHealth(__dirname),
     "ui:setSidebarWidth": (width) => appService.setSidebarWidth(width),
     "projects:add": (p) => appService.addProject(p),
     "projects:remove": (id) => appService.removeProject(id),
@@ -169,6 +177,19 @@ async function boot(): Promise<void> {
         if (project) await gitService.removeWorktree(project.path, thread.worktreeDir);
       }
     },
+    "threads:setEnvironment": async (threadId, worktree) => {
+      const before = appService.snapshot().threads.find((t) => t.id === threadId);
+      if (!before?.projectId) return;
+      if ((before.worktreeDir != null) === worktree) return;
+      // Resolve the new worktree dir before disposing anything.
+      const newDir = worktree ? await gitService.createWorktree(before.projectId) : undefined;
+      await threadService.setEnvironment(threadId, newDir);
+      // Tear down the old worktree when switching back to the project dir.
+      if (before.worktreeDir && !worktree) {
+        const project = appService.snapshot().projects.find((p) => p.id === before.projectId);
+        if (project) await gitService.removeWorktree(project.path, before.worktreeDir);
+      }
+    },
     "subagents:listAgents": (projectId) => subagentService.listAgents(projectId),
     "graphify:status": (id) => graphifyService.status(id),
     "graphify:build": (id) => graphifyService.build(id),
@@ -205,6 +226,14 @@ async function boot(): Promise<void> {
       overlayWindow.focus();
     }
   }
+  // Startup compatibility check: surface bundled-pi ↔ extension drift early so
+  // it shows up in logs even before the renderer queries it for the banner.
+  void computePiHealth(__dirname).then((health) => {
+    if (health.status === "ok") return;
+    console.warn(`[pi-health] ${health.status}: app bundles pi ${health.hostVersion}`);
+    for (const problem of health.problems) console.warn(`[pi-health]  - ${problem}`);
+  });
+
   appService.start();
   automationService.start();
   mainWindow = createMainWindow();

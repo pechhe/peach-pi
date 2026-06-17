@@ -17,6 +17,8 @@ import type {
   ImagePayload,
   ModelInfo,
   NoticePayload,
+  PiHealth,
+  PiSettings,
   Project,
   QueueState,
   ResourceInspection,
@@ -91,6 +93,13 @@ export const ipcContracts = {
       throw new Error("tokens must be a non-negative number or null");
     }
   }),
+  /** Read the pi settings subset exposed in the GUI. */
+  "app:getPiSettings": invoke<[], PiSettings>(),
+  /** Startup compatibility report: bundled pi SDK vs loaded extensions. */
+  "app:getPiHealth": invoke<[], PiHealth>(),
+  /** Write pi settings (partial merge into ~/.pi/agent/settings.json). */
+  "app:setPiSettings": invoke<[patch: Partial<PiSettings>], PiSettings>(),
+
   /** Persist the sidebar width (pixels). */
   "ui:setSidebarWidth": invoke<[width: number], void>((w) => {
     if (typeof w !== "number" || !Number.isFinite(w)) {
@@ -232,6 +241,7 @@ export const ipcContracts = {
   "threads:archive": invoke<[threadId: ThreadId], void>(),
   "threads:unarchive": invoke<[threadId: ThreadId], void>(),
   "threads:delete": invoke<[threadId: ThreadId], void>(),
+  "threads:setEnvironment": invoke<[threadId: ThreadId, worktree: boolean], void>(),
   "threads:snooze": invoke<[threadId: ThreadId, until: string], void>(),
   "threads:unsnooze": invoke<[threadId: ThreadId], void>(),
   "threads:markToTest": invoke<[threadId: ThreadId, note?: string], void>(),

@@ -123,7 +123,10 @@
     const raw = plain
       ? escapeHtml(displayed)
       : DOMPurify.sanitize(marked.parse(displayed, { async: false, breaks: true }) as string);
-    if (reduceMotion) return raw;
+    // Historical messages (streaming=false) skip per-word animation spans.
+    // The `.message-streaming` CSS only animates `.sw` elements, so returning
+    // raw HTML here avoids the mount-time blur/fade on thread load.
+    if (reduceMotion || !streaming) return raw;
     const doc = new DOMParser().parseFromString(raw, "text/html");
     const now = performance.now();
     let wordIndex = 0;

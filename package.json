@@ -10,6 +10,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "package": "pnpm --filter @peach-pi/desktop package",
+    "build:app": "bash scripts/build-app.sh",
     "make": "pnpm --filter @peach-pi/desktop make",
     "e2e": "pnpm --filter @peach-pi/desktop test:e2e"
   },
@@ -20,5 +21,8 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "catalog:"
   }
 }
