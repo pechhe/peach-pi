@@ -24,7 +24,27 @@ export interface UiBridgeCallbacks {
  * extensions awaiting `custom()` get `undefined` back immediately.
  */
 export function createUiBridge(callbacks: UiBridgeCallbacks): ExtensionUIContext {
+  // Plain-text passthrough Theme. Extensions (e.g. pi-subagents' fleet widget)
+  // call ui.theme.fg()/bold() to build widget lines; the GUI parses those as
+  // plain text (see lib/subagent/fleet.ts), so every styling method returns its
+  // text unchanged (no ANSI). Required by the ExtensionUIContext contract —
+  // omitting it crashes any extension that reads ui.theme.
+  const passthroughTheme = {
+    fg: (_tone: string, text: string) => text,
+    bg: (_tone: string, text: string) => text,
+    bold: (text: string) => text,
+    italic: (text: string) => text,
+    underline: (text: string) => text,
+    inverse: (text: string) => text,
+    strikethrough: (text: string) => text,
+    getFgAnsi: () => "",
+    getBgAnsi: () => "",
+    getColorMode: () => "truecolor" as const,
+    getThinkingBorderColor: () => (s: string) => s,
+    getBashModeBorderColor: () => (s: string) => s,
+  };
   const bridge = {
+    theme: passthroughTheme,
     async select(title: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }) {
       const v = await callbacks.onDialog({ kind: "select", title, options, ...opts });
       return typeof v === "string" ? v : undefined;

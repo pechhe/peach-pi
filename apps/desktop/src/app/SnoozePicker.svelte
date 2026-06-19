@@ -1,6 +1,20 @@
 <script lang="ts">
   let { onPick, onClose }: { onPick: (untilIso: string) => void; onClose: () => void } = $props();
 
+  let pickerEl: HTMLDivElement | null = $state(null);
+
+  // Click-away close. The listener attaches after mount, so the opening click
+  // (on the snooze toggle) has already finished propagating and won't close.
+  // Skip clicks on other snooze toggles so they can open/toggle cleanly.
+  function onWindowClick(e: MouseEvent) {
+    if (!pickerEl) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    if (pickerEl.contains(target)) return;
+    if (target.closest("[data-snooze-toggle]")) return;
+    onClose();
+  }
+
   const options = [
     { label: "1 hour", ms: 3_600_000 },
     { label: "3 hours", ms: 3 * 3_600_000 },
@@ -14,9 +28,10 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
+<svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} onclick={onWindowClick} />
 
 <div
+  bind:this={pickerEl}
   class="absolute top-full right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
   data-testid="snooze-picker"
 >

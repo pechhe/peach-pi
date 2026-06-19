@@ -14,7 +14,7 @@ test("migrations are idempotent", () => {
   const db = memoryDb();
   migrate(db); // second run = no-op
   const v = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  assert.equal(v.user_version, 3);
+  assert.equal(v.user_version, 6);
 });
 
 test("automation lifecycle: insert, due, fire, runs, disable", () => {
@@ -84,6 +84,11 @@ test("expired snoozes auto-clear and are returned", () => {
   assert.equal(woken[0]!.id, "t1");
   assert.equal(threads.get("t1")!.snoozedUntil, undefined);
   assert.equal(threads.get("t2")!.snoozedUntil, "2999-01-01T00:00:00.000Z");
+  // Woken thread is tagged so the UI can highlight it; opening clears the tag.
+  assert.equal(woken[0]!.wokeFromSnoozeAt, now);
+  assert.equal(threads.get("t1")!.wokeFromSnoozeAt, now);
+  threads.markSeen("t1");
+  assert.equal(threads.get("t1")!.wokeFromSnoozeAt, undefined);
 });
 
 test("kv json round-trip", () => {

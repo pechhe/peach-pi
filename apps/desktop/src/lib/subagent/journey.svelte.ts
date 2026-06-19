@@ -173,8 +173,11 @@ export function buildNodes(
       nodes.push({ id: `${ev.callId}-${eventSeen}`, tone: "done", title, subtitle, at: relAt(u.t) });
       prevCompleted = ev.status === "completed";
     } else {
+      // Skip generic placeholders from pi-subagents — they aren't useful steps.
+      const title = u.a.activity;
+      if (/^(?:thinking|working)[.……]$/i.test(title)) continue;
       lastActivityIdx = nodes.length;
-      nodes.push({ id: `act-${u.t}`, tone: "done", title: u.a.activity, at: relAt(u.t) });
+      nodes.push({ id: `act-${u.t}`, tone: "done", title, at: relAt(u.t) });
     }
   }
 

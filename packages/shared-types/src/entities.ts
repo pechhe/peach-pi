@@ -45,6 +45,9 @@ export interface Thread {
   tag?: ThreadTag;
   status: ThreadStatus;
   snoozedUntil?: string;
+  /** Set when a snooze timer expired and the thread auto-returned to active.
+   *  Cleared once the thread is opened. Drives the "woke from snooze" highlight. */
+  wokeFromSnoozeAt?: string;
   toTestAt?: string;
   toTestNote?: string;
   archivedAt?: string;
@@ -80,6 +83,7 @@ export interface UiState {
 export type AppView =
   | "new-thread"
   | "thread"
+  | "testing"
   | "settings"
   | "skills"
   | "extensions"

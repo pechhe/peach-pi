@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ModelInfo } from "@peach-pi/shared-types";
-  import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../components/ui/sheet";
+  import { fly } from "svelte/transition";
   import { sideChat } from "../stores/side-chat.svelte";
   import { api } from "../lib/ipc";
   import Markdown from "./Markdown.svelte";
@@ -8,6 +8,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import History from "@lucide/svelte/icons/history";
   import CornerDownLeft from "@lucide/svelte/icons/corner-down-left";
+  import X from "@lucide/svelte/icons/x";
 
   let input = $state("");
   let showHistory = $state(false);
@@ -16,8 +17,7 @@
 
   const conv = $derived(sideChat.active);
 
-  // Load the model list (for the override picker) once per thread the panel
-  // points at.
+  // Load the model list (override picker) once per thread the panel points at.
   $effect(() => {
     const threadId = sideChat.threadId;
     if (sideChat.open && threadId && modelsLoadedFor !== threadId) {
@@ -25,10 +25,6 @@
       void api.invoke("threads:listAllModels", threadId).then((m) => (models = m));
     }
   });
-
-  function setOpen(open: boolean) {
-    sideChat.open = open;
-  }
 
   async function send() {
     const q = input.trim();
@@ -51,47 +47,63 @@
   }
 </script>
 
-<Sheet open={sideChat.open} onOpenChange={setOpen}>
-  <SheetContent side="right" class="w-[26rem] sm:max-w-[26rem]">
-    <SheetHeader class="pr-10">
-      <div class="flex items-center gap-2">
-        <span
-          class="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-accent uppercase"
-        >
-          btw
-        </span>
-        <SheetTitle>Side conversation</SheetTitle>
+{#if sideChat.open}
+  <aside
+    class="flex h-full w-[24rem] shrink-0 flex-col border-l border-border-strong bg-surface"
+    transition:fly={{ x: 384, duration: 180 }}
+  >
+    <!-- Header -->
+    <div class="flex items-start gap-2 border-b border-border px-4 py-3">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <span
+            class="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-accent uppercase"
+          >
+            btw
+          </span>
+          <span class="text-sm font-semibold text-fg">Side conversation</span>
+        </div>
+        <p class="mt-0.5 text-xs text-faint">
+          Context-aware, never added to the main task.
+        </p>
       </div>
-      <p class="text-xs text-faint">
-        Isolated from the main task — context-aware, never added to its history.
-      </p>
-      <div class="mt-2 flex items-center gap-2">
-        <button
-          class="flex items-center gap-1 rounded border border-border-strong px-2 py-1 text-xs text-muted hover:bg-surface-2"
-          onclick={() => sideChat.startNew()}
-        >
-          <Plus class="size-3" /> New
-        </button>
-        <button
-          class="flex items-center gap-1 rounded border border-border-strong px-2 py-1 text-xs text-muted hover:bg-surface-2"
-          class:bg-surface-2={showHistory}
-          onclick={() => (showHistory = !showHistory)}
-        >
-          <History class="size-3" /> History
-        </button>
-        <select
-          class="ml-auto max-w-[10rem] truncate rounded border border-border-strong bg-surface px-1.5 py-1 text-xs text-muted"
-          value={conv?.model ? `${conv.model.provider}/${conv.model.id}` : ""}
-          onchange={onPickModel}
-          title="Model for this side chat"
-        >
-          {#if !conv?.model}<option value="">default model</option>{/if}
-          {#each models as m (m.provider + "/" + m.id)}
-            <option value={`${m.provider}/${m.id}`}>{m.name}</option>
-          {/each}
-        </select>
-      </div>
-    </SheetHeader>
+      <button
+        class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
+        onclick={() => sideChat.close()}
+        title="Close"
+        aria-label="Close side conversation"
+      >
+        <X class="size-4" />
+      </button>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="flex items-center gap-2 border-b border-border px-3 py-2">
+      <button
+        class="flex items-center gap-1 rounded border border-border-strong px-2 py-1 text-xs text-muted hover:bg-surface-2"
+        onclick={() => sideChat.startNew()}
+      >
+        <Plus class="size-3" /> New
+      </button>
+      <button
+        class="flex items-center gap-1 rounded border border-border-strong px-2 py-1 text-xs text-muted hover:bg-surface-2"
+        class:bg-surface-2={showHistory}
+        onclick={() => (showHistory = !showHistory)}
+      >
+        <History class="size-3" /> History
+      </button>
+      <select
+        class="ml-auto max-w-[9.5rem] truncate rounded border border-border-strong bg-surface px-1.5 py-1 text-xs text-muted"
+        value={conv?.model ? `${conv.model.provider}/${conv.model.id}` : ""}
+        onchange={onPickModel}
+        title="Model for this side chat"
+      >
+        {#if !conv?.model}<option value="">default model</option>{/if}
+        {#each models as m (m.provider + "/" + m.id)}
+          <option value={`${m.provider}/${m.id}`}>{m.name}</option>
+        {/each}
+      </select>
+    </div>
 
     {#if showHistory}
       <div class="border-b border-border bg-bg/40 px-3 py-2">
@@ -127,6 +139,7 @@
       </div>
     {/if}
 
+    <!-- Messages -->
     <div class="flex-1 overflow-y-auto px-4 py-3">
       {#if conv && conv.messages.length === 0 && !sideChat.streaming}
         <p class="text-sm text-fainter">
@@ -165,6 +178,7 @@
       {/if}
     </div>
 
+    <!-- Input -->
     <div class="border-t border-border p-3">
       <div class="flex items-end gap-2 rounded-lg border border-border-strong bg-surface px-2 py-1.5">
         <textarea
@@ -184,5 +198,5 @@
         </button>
       </div>
     </div>
-  </SheetContent>
-</Sheet>
+  </aside>
+{/if}

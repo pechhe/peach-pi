@@ -69,6 +69,7 @@
 /* so they read as one family of turned/brushed black-metal pieces.   */
 /* ================================================================ */
 :root[data-composer="dark"] .composer-device .send-dial,
+:root[data-composer="dark"] .composer-device .btw-btn,
 :root[data-composer="dark"] .composer-device .reasoning-dial__knob,
 :root[data-composer="dark"] .composer-device .composer-mode__thumb,
 :root[data-composer="dark"] .composer-device .model-selector__slider-thumb {
@@ -175,10 +176,12 @@
 /* ---------------- Send dial icon ---------------- */
 /* Idle arrow is near-black in the light recipe; lift it so it reads on the
    anodized cap, and flip the engraved drop-shadow dark-over-light. */
-:root[data-composer="dark"] .composer-device .send-dial {
+:root[data-composer="dark"] .composer-device .send-dial,
+:root[data-composer="dark"] .composer-device .btw-btn {
   color: oklch(0.82 0.004 265);
 }
-:root[data-composer="dark"] .composer-device .send-dial svg {
+:root[data-composer="dark"] .composer-device .send-dial svg,
+:root[data-composer="dark"] .composer-device .btw-btn svg {
   filter:
     drop-shadow(0 1px 0 oklch(0 0 0 / 0.6))
     drop-shadow(0 -0.5px 0.5px oklch(0.7 0.004 265 / 0.5));

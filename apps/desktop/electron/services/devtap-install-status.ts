@@ -11,9 +11,12 @@ import type { DevTapProjectStatus } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo } from "../persistence/repositories.ts";
 
+// A file counts as a tap if it defines the Node/Electron tap (emitDevTapEvent)
+// or wires the browser/SPA Vite plugin (devtapVite / virtual:devtap-client).
+const TAP_MARKER = /emitDevTapEvent|devtapVite|virtual:devtap-client/;
 function isTapModule(file: string): boolean {
   try {
-    return readFileSync(file, "utf8").includes("emitDevTapEvent");
+    return TAP_MARKER.test(readFileSync(file, "utf8"));
   } catch {
     return false;
   }
@@ -34,16 +37,18 @@ export class DevTapInstallService {
 
   status(projectId: string): DevTapProjectStatus {
     const root = this.projectPath(projectId);
-    const candidates = [
-      join(root, "electron", "services", "devtap.ts"),
-      join(root, "src", "devtap.ts"),
+    const names = ["devtap.ts", "devtap-vite.ts"];
+    const dirs = ["", "electron/services", "src"];
+    // Vite/SvelteKit configs that may register the browser plugin.
+    const configs = ["vite.config.ts", "vite.config.js", "vite.config.mts", "svelte.config.js"];
+    const at = (base: string) => [
+      ...dirs.flatMap((d) => names.map((n) => join(base, d, n))),
+      ...configs.map((c) => join(base, c)),
     ];
-    // Monorepo: <root>/apps/*/{electron/services,src}/devtap.ts
+    const candidates = at(root);
+    // Monorepo: also scan each <root>/apps/* package.
     try {
-      for (const app of readdirSync(join(root, "apps"))) {
-        candidates.push(join(root, "apps", app, "electron", "services", "devtap.ts"));
-        candidates.push(join(root, "apps", app, "src", "devtap.ts"));
-      }
+      for (const app of readdirSync(join(root, "apps"))) candidates.push(...at(join(root, "apps", app)));
     } catch {
       /* no apps/ dir */
     }

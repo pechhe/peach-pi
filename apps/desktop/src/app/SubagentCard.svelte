@@ -80,7 +80,6 @@
       </div>
       <div class="agent-entity__sub">
         <span class="agent-entity__state agent-entity__state--{state}">
-          {#if live_}<BrailleSpinner class="agent-entity__spinner" />{/if}
           {stateLabel}
         </span>
         {#if stats.length > 0}<span class="agent-entity__stats">{stats.join(" · ")}</span>{/if}
@@ -93,7 +92,7 @@
       <li class="agent-entity__node agent-entity__node--{node.tone}">
         <span class="agent-entity__time">{node.at}</span>
         <span class="agent-entity__marker agent-entity__marker--{node.tone}" aria-hidden="true">
-          {#if node.tone === "done"}<Check size={12} />{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={12} />{/if}
+          {#if node.tone === "active"}<BrailleSpinner class="agent-entity__node-spinner" />{:else if node.tone === "done"}<Check size={12} />{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={12} />{/if}
         </span>
         <div class="agent-entity__body">
           <span class="agent-entity__node-title">{node.title}</span>
@@ -219,57 +218,64 @@
     grid-column: 1;
     text-align: right;
     font-size: 11px;
-    line-height: 22px;
+    line-height: 20px;
     color: var(--color-muted);
     white-space: nowrap;
   }
 
   .agent-entity__marker {
     grid-column: 2;
+    justify-self: center;
     z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border-radius: 999px;
-    border: 2px solid var(--color-border);
+    border: 1.5px solid color-mix(in srgb, var(--color-border) 80%, transparent);
     background: var(--color-surface);
-    color: var(--color-surface);
+    color: transparent;
   }
   .agent-entity__marker--done {
-    border-color: var(--color-success);
-    background: var(--color-success);
-    color: #fff;
+    border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+    background: color-mix(in srgb, var(--color-success) 13%, var(--color-surface));
+    color: var(--color-success);
   }
   .agent-entity__marker--active {
-    border-color: var(--ae-accent);
-    background: var(--ae-accent);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ae-accent) 22%, transparent);
-    animation: agent-node-pulse 1.6s ease-in-out infinite;
+    border-color: color-mix(in srgb, var(--ae-accent) 45%, transparent);
+    background: color-mix(in srgb, var(--ae-accent) 14%, var(--color-surface));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ae-accent) 12%, transparent);
+    animation: agent-node-pulse 1.8s ease-in-out infinite;
   }
   @keyframes agent-node-pulse {
-    0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ae-accent) 26%, transparent); }
-    50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ae-accent) 10%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ae-accent) 14%, transparent); }
+    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--ae-accent) 5%, transparent); }
   }
   .agent-entity__marker--blocked {
-    border-color: #f08c2e;
-    background: var(--color-surface);
+    border-color: color-mix(in srgb, #f08c2e 42%, transparent);
+    background: color-mix(in srgb, #f08c2e 13%, var(--color-surface));
     color: #f08c2e;
   }
-  .agent-entity__marker--blocked::after { content: "!"; font-size: 12px; font-weight: 700; }
+  .agent-entity__marker--blocked::after { content: "!"; font-size: 11px; font-weight: 700; }
   .agent-entity__marker--failed,
   .agent-entity__marker--cancelled {
-    border-color: var(--color-danger);
-    background: var(--color-danger);
-    color: #fff;
+    border-color: color-mix(in srgb, var(--color-danger) 32%, transparent);
+    background: color-mix(in srgb, var(--color-danger) 13%, var(--color-surface));
+    color: var(--color-danger);
   }
 
-  .agent-entity__body { grid-column: 3; min-width: 0; padding-top: 1px; }
+  :global(.agent-entity__node-spinner) {
+    width: 14px;
+    height: 14px;
+    color: var(--ae-accent);
+  }
+
+  .agent-entity__body { grid-column: 3; min-width: 0; }
   .agent-entity__node-title {
     font-size: 13px;
     font-weight: 600;
-    line-height: 1.5;
+    line-height: 20px;
     color: var(--color-fg);
   }
   .agent-entity__node--blocked .agent-entity__node-title { color: #c2691a; }

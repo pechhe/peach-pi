@@ -601,6 +601,70 @@
   margin-right: 22px;
 }
 
+/* Side-conversation (/btw) cap: a smaller machined sibling of the send dial,
+   seated just inboard of it. Neutral metal, no orange accent. */
+.composer-device .btw-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  overflow: hidden;
+  color: oklch(0.2 0.004 250);
+  background:
+    radial-gradient(circle at 50% 46%, oklch(1 0.002 250 / 0.5), transparent 46%),
+    conic-gradient(
+      from 0deg,
+      oklch(0.78 0.004 250) 0deg, oklch(0.6 0.004 250) 45deg,
+      oklch(0.8 0.004 250) 90deg, oklch(0.97 0.002 250) 135deg,
+      oklch(0.8 0.004 250) 180deg, oklch(0.6 0.004 250) 225deg,
+      oklch(0.8 0.004 250) 270deg, oklch(0.97 0.002 250) 315deg,
+      oklch(0.78 0.004 250) 360deg
+    ),
+    radial-gradient(circle at 50% 50%, oklch(0.82 0.004 250) 0 100%);
+  box-shadow:
+    inset 0 1.5px 0 oklch(1 0.002 250 / 0.9),
+    inset 0 -1.5px 1px oklch(0.42 0.004 250 / 0.55),
+    inset 0 0 0 1px oklch(0.6 0.004 250 / 0.4),
+    0 0 0 1px oklch(0.34 0.004 250 / 0.6),
+    0 2px 2px oklch(0 0 0 / 0.3),
+    0 5px 9px -2px oklch(0 0 0 / 0.32);
+  transition: transform 80ms ease, box-shadow 80ms ease, filter 120ms ease;
+  margin-right: 12px;
+}
+
+/* Floating variant: seated at the bottom-right of the chassis, outside it. */
+.composer-device .btw-btn--floating {
+  position: absolute;
+  right: 24px;
+  bottom: 30px;
+  margin: 0;
+  z-index: 5;
+}
+.composer-device .btw-btn svg {
+  position: relative;
+  z-index: 2;
+  width: 19px;
+  height: 19px;
+  filter:
+    drop-shadow(0 1px 0 oklch(1 0.002 250 / 0.55))
+    drop-shadow(0 -0.5px 0.5px oklch(0.22 0.005 250 / 0.7));
+}
+.composer-device .btw-btn:is(:active, .is-pressed) {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 2px 5px oklch(0 0 0 / 0.4),
+    inset 0 1px 0 oklch(0.42 0.004 250 / 0.5),
+    inset 0 0 0 1px oklch(0.55 0.004 250 / 0.5),
+    0 1px 2px oklch(0 0 0 / 0.4);
+}
+
 /* Stop state: silver cap, orange stop symbol (mirrors ready send dial). */
 .composer-device .send-dial--stop {
   color: oklch(0.74 0.185 52);

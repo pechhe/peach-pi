@@ -20,7 +20,56 @@
   import { piSettings } from "../stores/pi-settings.svelte";
   import { snapshot } from "../stores/snapshot.svelte";
 
+  let { initialQuery = "" }: { initialQuery?: string } = $props();
+
   const hudAutoReveal = $derived(snapshot.current?.ui.hudAutoRevealOnFinish ?? false);
+
+  /** Searchable keywords per section (title + description), lowercased. */
+  const SECTION_KEYWORDS = {
+    theme: "theme appearance applies to every window colors",
+    composer: "composer light silver dark anodized chassis auto follows your theme",
+    caveman: "caveman intensity level composer toggle",
+    hud: "hud auto-reveal expand chat thread finishes",
+    doneAnimation: "done animation mark done card animation preview play",
+    streaming: "streaming text assistant replies reveal stream",
+    sounds: "sounds button clicks done chime mute",
+    doneChime: "done chime celebration cue thread finishes preview",
+    autoCompact: "auto-compaction compact context usage threshold tokens percentage",
+    retry: "retry on error network drop transient exponential backoff wait doubles",
+    messageDelivery: "message delivery steering mode follow-up mode",
+    about: "about peach-pi version",
+    utilityModel: "utility model background tasks thread titles commit messages fast inexpensive",
+  } as const;
+
+  let query = $state(initialQuery);
+  let searchInput = $state<HTMLInputElement | null>(null);
+  // Follow palette deep-links ("Settings: Theme") that arrive after mount.
+  $effect(() => {
+    query = initialQuery;
+  });
+  const q = $derived(query.trim().toLowerCase());
+
+  /** Typing anywhere in Settings starts the search without clicking the box first. */
+  function onWindowKeydown(e: KeyboardEvent) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      searchInput?.focus();
+      searchInput?.select();
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key.length !== 1) return; // printable chars only
+    const t = e.target as HTMLElement | null;
+    if (t === searchInput) return;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    query += e.key;
+    searchInput?.focus();
+    e.preventDefault();
+  }
+  function hit(key: keyof typeof SECTION_KEYWORDS): boolean {
+    return q === "" || SECTION_KEYWORDS[key].includes(q);
+  }
+  const anyMatch = $derived(q === "" || Object.values(SECTION_KEYWORDS).some((k) => k.includes(q)));
 
   let muted = $state(soundsMuted());
   let doneVariant = $state(getDoneSoundVariant() as DoneSoundVariant);
@@ -132,12 +181,29 @@
   }
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 <main class="flex h-full flex-1 flex-col" data-testid="settings-view">
-  <header class="titlebar-drag flex h-12 shrink-0 items-center px-6">
+  <header class="titlebar-drag flex h-12 shrink-0 items-center gap-3 px-6">
     <h1 class="text-sm font-medium text-fg-soft">Settings</h1>
+    <input
+      type="search"
+      bind:value={query}
+      placeholder="Search settings…"
+      class="ml-auto w-48 rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg outline-none focus:border-border-focus"
+      data-testid="settings-search"
+      aria-label="Search settings"
+      bind:this={searchInput}
+    />
   </header>
   <div class="flex-1 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex max-w-xl flex-col gap-4">
+      {#if !anyMatch}
+        <p class="text-center text-xs text-fainter" data-testid="settings-search-empty">
+          No settings match “{query.trim()}”.
+        </p>
+      {/if}
+      {#if hit("theme")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div class="flex items-center justify-between gap-4">
           <div>
@@ -154,7 +220,9 @@
           />
         </div>
       </section>
+      {/if}
 
+      {#if hit("composer")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div class="flex items-center justify-between gap-4">
           <div>
@@ -171,7 +239,9 @@
           />
         </div>
       </section>
+      {/if}
 
+      {#if hit("caveman")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div class="flex items-center justify-between gap-4">
           <div>
@@ -191,7 +261,9 @@
           />
         </div>
       </section>
+      {/if}
 
+      {#if hit("hud")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div class="flex items-center justify-between gap-4">
           <div>
@@ -206,7 +278,9 @@
           />
         </div>
       </section>
+      {/if}
 
+      {#if hit("doneAnimation")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div class="mb-3">
           <h2 class="text-sm text-fg">Done animation</h2>
@@ -214,7 +288,9 @@
         </div>
         <DoneBurstPlayground />
       </section>
+      {/if}
 
+      {#if hit("streaming")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div class="flex items-center justify-between gap-4">
           <div>
@@ -241,7 +317,9 @@
           </div>
         </div>
       </section>
+      {/if}
 
+      {#if hit("sounds")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div class="flex items-center justify-between">
           <div>
@@ -264,7 +342,9 @@
           </button>
         </div>
       </section>
+      {/if}
 
+      {#if hit("doneChime")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div class="flex items-center justify-between gap-4">
           <div>
@@ -292,7 +372,9 @@
           {DONE_SOUND_OPTIONS.find((o) => o.id === doneVariant)?.description}
         </p>
       </section>
+      {/if}
 
+      {#if hit("autoCompact")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div>
           <h2 class="text-sm text-fg">Auto-compaction</h2>
@@ -332,7 +414,9 @@
           </label>
         </div>
       </section>
+      {/if}
 
+      {#if hit("retry")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div>
           <h2 class="text-sm text-fg">Retry on error</h2>
@@ -397,7 +481,9 @@
           {/if}
         </div>
       </section>
+      {/if}
 
+      {#if hit("messageDelivery")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div>
           <h2 class="text-sm text-fg">Message delivery</h2>
@@ -434,12 +520,16 @@
           </label>
         </div>
       </section>
+      {/if}
 
+      {#if hit("about")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <h2 class="text-sm text-fg">About</h2>
         <p class="mt-1 text-xs text-faint">peach-pi {version}</p>
       </section>
+      {/if}
 
+      {#if hit("utilityModel")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <div>
           <h2 class="text-sm text-fg">Utility model</h2>
@@ -463,6 +553,7 @@
           aria-label="Utility model"
         />
       </section>
+      {/if}
     </div>
   </div>
 </main>

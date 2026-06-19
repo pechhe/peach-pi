@@ -32,6 +32,7 @@ interface ThreadRow {
   tag: string | null;
   status: string;
   snoozed_until: string | null;
+  woke_from_snooze_at: string | null;
   to_test_at: string | null;
   to_test_note: string | null;
   archived_at: string | null;
@@ -59,6 +60,7 @@ const toThread = (r: ThreadRow): Thread => ({
   tag: (r.tag as ThreadTag | null) ?? undefined,
   status: r.status as Thread["status"],
   snoozedUntil: r.snoozed_until ?? undefined,
+  wokeFromSnoozeAt: r.woke_from_snooze_at ?? undefined,
   toTestAt: r.to_test_at ?? undefined,
   toTestNote: r.to_test_note ?? undefined,
   archivedAt: r.archived_at ?? undefined,
@@ -170,6 +172,10 @@ export class ThreadRepo {
     this.db
       .prepare("UPDATE threads SET status = 'idle' WHERE id = ? AND status = 'completed'")
       .run(id);
+    // Opening a woken thread clears the "woke from snooze" highlight.
+    this.db
+      .prepare("UPDATE threads SET woke_from_snooze_at = NULL WHERE id = ?")
+      .run(id);
   }
 
   setTitle(id: string, title: string): void {
@@ -196,7 +202,10 @@ export class ThreadRepo {
   }
 
   setSnoozedUntil(id: string, until: string | null): void {
-    this.db.prepare("UPDATE threads SET snoozed_until = ? WHERE id = ?").run(until, id);
+    // Re-snoozing (or manual unsnooze) clears any prior wake highlight.
+    this.db
+      .prepare("UPDATE threads SET snoozed_until = ?, woke_from_snooze_at = NULL WHERE id = ?")
+      .run(until, id);
   }
 
   setToTest(id: string, at: string | null, note: string | null): void {
@@ -209,9 +218,9 @@ export class ThreadRepo {
       .prepare("SELECT * FROM threads WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?")
       .all(now) as unknown as ThreadRow[];
     this.db
-      .prepare("UPDATE threads SET snoozed_until = NULL WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?")
-      .run(now);
-    return rows.map((r) => toThread({ ...r, snoozed_until: null }));
+      .prepare("UPDATE threads SET snoozed_until = NULL, woke_from_snooze_at = ? WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?")
+      .run(now, now);
+    return rows.map((r) => toThread({ ...r, snoozed_until: null, woke_from_snooze_at: now }));
   }
 }
 

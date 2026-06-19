@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { AppView, Project, Thread } from "@peach-pi/shared-types";
+  import { isNewThread } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { extensionUi } from "../stores/extension-ui.svelte";
-  import { playButtonSecondary } from "../lib/sound/button-click-sound";
+  import { playButtonSecondary, playRotary } from "../lib/sound/button-click-sound";
   import SnoozePicker from "./SnoozePicker.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import MovingHighlight from "./MovingHighlight.svelte";
@@ -11,6 +12,7 @@
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
+  import BellRing from "@lucide/svelte/icons/bell-ring";
   import Bot from "@lucide/svelte/icons/bot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
@@ -39,6 +41,7 @@
     onNewThread,
     onNewChat,
     onOpenView,
+    onOpenTesting,
     onOpenSearch,
   }: {
     width?: number;
@@ -51,6 +54,7 @@
     onNewThread: (projectId: string, worktree?: boolean) => void;
     onNewChat: () => void;
     onOpenView: (view: AppView) => void;
+    onOpenTesting: (projectId: string) => void;
     onOpenSearch: () => void;
   } = $props();
 
@@ -123,7 +127,6 @@
     return `${Math.floor(h / 24)}d`;
   }
 
-  const toTestCount = $derived(threads.filter((t) => t.toTestAt && !t.archivedAt).length);
   const chats = $derived(threads.filter((t) => t.projectId === null));
 
   function partition(list: Thread[]) {
@@ -185,8 +188,13 @@
     if (e.key === "Meta" || e.key === "Control" || e.key === "Shift") {
       const id = previewThreadId;
       previewThreadId = null;
-      onSelect(id);
+      selectThread(id);
     }
+  }
+
+  function selectThread(id: string) {
+    playRotary();
+    onSelect(id);
   }
 
   function toggle(key: string) {
@@ -212,7 +220,16 @@
   // Reversible thread actions show an undo toast (inverse IPC channel).
   // Marking Done plays the burst first; finishArchive runs the real archive
   // once the animation reports back so the row survives the effect.
+  // An empty (never-prompted) thread is destroyed instead — the done area
+  // must never hold empty rows, and there's nothing to archive anyway.
   function archiveThread(thread: Thread) {
+    if (isNewThread(thread.title)) {
+      const idx = previewOrder.indexOf(thread.id);
+      const nextId = idx !== -1 ? (previewOrder[idx + 1] ?? previewOrder[idx - 1] ?? null) : null;
+      void api.invoke("threads:delete", thread.id);
+      if (nextId && thread.id === selectedThreadId) onSelect(nextId);
+      return;
+    }
     doneAnimFor = thread.id;
   }
   function finishArchive(thread: Thread) {
@@ -254,7 +271,11 @@
 {#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived")}
   {@const isActive = activeView === "thread" && selectedThreadId === thread.id}
   {@const Tag = TAG_META[thread.tag ?? "other"]}
-  <div class="group relative flex items-center">
+  {@const woke = variant === "active" && !!thread.wokeFromSnoozeAt}
+  <div
+    class="group relative flex items-center"
+    style:z-index={snoozePickerFor === thread.id ? 30 : undefined}
+  >
     {#if doneAnimFor === thread.id}
       <DoneBurst ondone={() => finishArchive(thread)} />
     {/if}
@@ -268,23 +289,34 @@
       class:done-pop--twos={doneAnimFor === thread.id && doneAnim.current === "twos"}
       class:done-pop--spring={doneAnimFor === thread.id && doneAnim.current === "spring"}
       data-thread-id={thread.id}
-      onclick={() => onSelect(thread.id)}
+      onclick={() => selectThread(thread.id)}
     >
-      <Tag.icon
-        size={13}
-        class="shrink-0 {thread.status === 'completed'
-          ? 'text-accent'
-          : thread.status === 'failed'
-            ? 'text-danger'
-            : 'text-faint'}"
-        title={thread.status === "failed" ? "Failed" : Tag.label}
-      />
+      {#if woke}
+        <BellRing
+          size={13}
+          class="shrink-0 text-warning"
+          title="Woke from snooze"
+          data-testid="woke-from-snooze-icon"
+        />
+      {:else}
+        <Tag.icon
+          size={13}
+          class="shrink-0 {thread.status === 'completed'
+            ? 'text-accent'
+            : thread.status === 'failed'
+              ? 'text-danger'
+              : 'text-faint'}"
+          title={thread.status === "failed" ? "Failed" : Tag.label}
+        />
+      {/if}
       <span
         class="truncate {variant === 'archived'
           ? 'text-fainter'
-          : thread.status === 'completed' && !isActive
-            ? 'text-accent'
-            : ''}">{thread.title}</span>
+          : woke
+            ? 'text-warning'
+            : thread.status === 'completed' && !isActive
+              ? 'text-accent'
+              : ''}">{thread.title}</span>
       {#if variant === "snoozed" && thread.snoozedUntil}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{snoozeTimeLeft(thread.snoozedUntil)}</span>
       {:else if thread.status === "running"}
@@ -298,6 +330,7 @@
         <Tooltip text="Snooze">
           <button
             class="rounded p-1 text-faint hover:text-fg"
+            data-snooze-toggle
             onclick={() => (snoozePickerFor = snoozePickerFor === thread.id ? null : thread.id)}
           ><Clock size={14} /></button>
         </Tooltip>
@@ -401,15 +434,6 @@
     >
       <button
         class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-          {activeView === 'testing' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-        onclick={() => onOpenView("testing")}
-        data-testid="nav-testing"
-      >
-        <span class="flex items-center gap-2.5"><Eye size={15} /> Testing {#if toTestCount > 0}<span class="ml-1 rounded-full bg-surface-2 px-1.5 text-[10px]">{toTestCount}</span>{/if}</span>
-        <kbd class="text-[10px] text-fainter">⇧6</kbd>
-      </button>
-      <button
-        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
           {activeView === 'automations' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
         onclick={() => onOpenView("automations")}
         data-testid="nav-automations"
@@ -499,6 +523,16 @@
               {/if}
             {/if}
           </button>
+          {#if group.toTest.length > 0 && !isCollapsed(group.project.id)}
+            <button
+              class="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px]
+                {activeView === 'testing' ? 'text-accent' : 'text-faint hover:text-fg'}"
+              onclick={() => onOpenTesting(group.project.id)}
+              data-testid="project-to-test"
+              title="Open testing area"
+              aria-label="Open testing area"><Eye size={14} /><span>{group.toTest.length}</span></button
+            >
+          {/if}
           <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
             <button
               class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
@@ -529,7 +563,6 @@
             {/each}
           </MovingHighlight>
           {@render collapsible(`sn:${group.project.id}`, "Snoozed", group.snoozed, "snoozed")}
-          {@render collapsible(`tt:${group.project.id}`, "To test", group.toTest, "toTest")}
           {@render collapsible(`ar:${group.project.id}`, "Done", group.archived, "archived")}
         {/if}
       </div>

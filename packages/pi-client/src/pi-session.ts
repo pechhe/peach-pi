@@ -135,6 +135,11 @@ export class PiSession {
               reason: event.reason,
               summary: event.result?.summary,
               tokensBefore: event.result?.tokensBefore,
+              // The summary is what the summarised region was compressed to;
+              // ~4 chars/token is a good-enough estimate for display.
+              tokensAfter: event.result?.summary
+                ? Math.ceil(event.result.summary.length / 4)
+                : undefined,
               aborted: event.aborted,
               error: event.errorMessage,
             },

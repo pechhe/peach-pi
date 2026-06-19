@@ -52,7 +52,8 @@ export async function streamSideChat(
     {
       apiKey: resolved.apiKey,
       headers: resolved.headers,
-      temperature: 0.4,
+      // No temperature: newer models (e.g. reasoning Anthropic models) reject it
+      // with "`temperature` is deprecated for this model."
       maxTokens: req.maxTokens ?? 1200,
     },
   );

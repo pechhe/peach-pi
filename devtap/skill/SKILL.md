@@ -32,8 +32,13 @@ Then `/reload` pi. The `devtap` tool and `/devtap` command become available.
 - **Electron** if `electron` is in `package.json` deps and there's a main entry
   (`main.ts` / `main.js`) using `app`/`BrowserWindow`. Look for a central IPC
   seam (a single place calling `ipcMain.handle`).
+- **Browser / SPA** if it's a Vite-based web app (React, Svelte, SvelteKit, Vue):
+  `vite` in deps + a `vite.config.*` (SvelteKit: also `svelte.config.js`).
 - **Node service** if it's a plain Node process (no Electron, no browser).
-- If neither fits cleanly, stop and ask the user.
+- These combine. A **SvelteKit** app has a Node dev/SSR process *and* a browser:
+  install the **vite-plugin** for client events, and optionally the
+  **node-service** adapter for server events.
+- If none fits cleanly, stop and ask the user.
 
 ## 2. Copy the adapter
 
@@ -43,6 +48,7 @@ project):
 
 - Electron → copy `<skill dir>/adapters/electron.ts` to `<app>/electron/services/devtap.ts`.
 - Node service → copy `<skill dir>/adapters/node-service.ts` to `<app>/src/devtap.ts`.
+- Browser / SPA (Vite) → copy `<skill dir>/adapters/vite-plugin.ts` to `<app>/devtap-vite.ts`.
 
 ## 3. Wire the entry point (minimal, dev-only)
 
@@ -53,6 +59,11 @@ Follow the header comment inside the copied adapter.
 - **Electron**: call `initDevTapMain()` early in boot and emit `app.ready`;
   wrap the central `ipcMain.handle` seam (snippet is in the adapter header);
   optionally forward renderer `window` errors over the existing IPC bridge.
+- **Browser / SPA (Vite)**: add the plugin to `vite.config.*`:
+  `import { devtapVite } from "./devtap-vite.ts";` then `plugins: [ ...framework, devtapVite() ]`.
+  No client code to import — the plugin injects a dev-only browser tap that
+  captures client errors, unhandled rejections, `console.error`, failed
+  fetches, and SPA route changes. Screenshots are NOT covered (use agent-browser).
 
 Keep every change guarded so production behavior is unchanged when `DEV_TAP`
 is unset. Do NOT add an `uncaughtException` listener unconditionally — the
@@ -86,5 +97,6 @@ appears; errors are captured.
 
 ## Scope
 
-v1 ships Electron + Node adapters only. Other frameworks (Vite SPA, etc.) are
-future work — do not invent adapters not present in this skill's `adapters/`.
+Adapters available: **Electron**, **Node service**, **browser/SPA (Vite)** — in
+this skill's `adapters/`. Do not invent adapters not present there. Visual
+capture (screenshots) is intentionally out of scope for SPAs — use agent-browser.

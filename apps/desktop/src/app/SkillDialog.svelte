@@ -17,6 +17,7 @@
 {#if skillViewer.skill}
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-8"
+    style="padding-left: var(--content-left, 0px)"
     role="button"
     tabindex="0"
     aria-label="Close skill"

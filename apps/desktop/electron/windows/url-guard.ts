@@ -5,5 +5,5 @@
  * in-app navigation and blocked by the window's own guard.
  */
 export function isExternalUrl(url: string): boolean {
-  return /^https?:$/i.test(url) || /^mailto:/i.test(url);
+  return /^(https?|mailto):/i.test(url);
 }

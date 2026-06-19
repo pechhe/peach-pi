@@ -32,7 +32,10 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+<div
+  class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+  style="padding-left: var(--content-left, 0px)"
+>
   <div
     class="w-96 rounded-xl border border-border-strong bg-surface p-4 shadow-2xl"
     data-testid="extension-dialog"

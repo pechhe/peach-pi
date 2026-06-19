@@ -108,4 +108,12 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    up: (db) => {
+      // Timestamp set when a snooze timer expires and the thread auto-returns
+      // to active. Drives the "woke from snooze" highlight; cleared on open.
+      db.exec("ALTER TABLE threads ADD COLUMN woke_from_snooze_at TEXT");
+    },
+  },
 ];

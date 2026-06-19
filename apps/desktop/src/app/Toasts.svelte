@@ -14,7 +14,7 @@
 {#if extensionUi.toasts.length > 0}
   <div
     class="fixed top-3 z-50 flex w-80 -translate-x-1/2 flex-col gap-2"
-    style="left: calc((100vw + {sidebarWidth}px) / 2)"
+    style="left: calc((100vw + {sidebarWidth}px) / 2); -webkit-app-region: no-drag"
     data-testid="toasts"
   >
     {#each extensionUi.toasts as toast (toast.id)}

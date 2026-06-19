@@ -14,6 +14,7 @@
 {#if lightbox.src}
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8"
+    style="padding-left: var(--content-left, 0px)"
     role="button"
     tabindex="0"
     aria-label="Close enlarged image"

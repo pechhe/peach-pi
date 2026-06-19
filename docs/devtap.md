@@ -109,9 +109,26 @@ switch and status change, so it flips once an install finishes.
   the right adapter from `devtap/adapters/` (Electron or Node), wiring the
   entry point + `.gitignore`. Run it via `/skill:devtap-install`.
 
+## Browser / SPA event capture (Vite plugin)
+
+For web SPAs (React, Svelte, SvelteKit, Vue) the Node tap only sees the dev/SSR
+process. The **vite-plugin** adapter adds a dev-only browser tap (injected via a
+virtual module) that captures client-side runtime events into the same stream:
+
+- `window.error` + `unhandledrejection` (client crashes, hydration errors)
+- `console.error`
+- failed/slow `fetch` (`fetch.error` / `fetch.fail`)
+- SPA route changes (`route.pushState` / `replaceState` / `popstate`)
+- client lifecycle (`devtap.client.init`)
+
+Events are batched and POSTed to a `/__devtap` dev-server endpoint, which appends
+them to `.pi/devtap.jsonl`. Inert unless `DEV_TAP=1`. **Screenshots/visual state
+are not provided** — that's agent-browser's job.
+
 ## Intentionally NOT included
 
-- No multi-framework adapters beyond Electron + Node service.
+- No multi-framework adapters beyond Electron + Node service + browser/Vite.
+- No browser-side screenshots/visual capture (use agent-browser).
 - No OpenTelemetry, no dashboard, no sockets/websockets.
 - No continuous/auto screenshots (on-demand only).
 - No heavy dependencies.
@@ -128,5 +145,5 @@ switch and status change, so it flips once an install finishes.
 | `packages/shared-types/src/ipc.ts` | `devtap:report` contract |
 | `scripts/devtap.mjs` | shell reader (`pnpm devtap`) |
 | `devtap/extension/index.ts` | pi DevTap extension (`devtap` tool + `/devtap`) |
-| `devtap/adapters/{electron,node-service}.ts` | tap templates for the installer |
+| `devtap/skill/adapters/{electron,node-service,vite-plugin}.ts` | tap templates for the installer (Electron / Node / browser-SPA) |
 | `devtap/skill/SKILL.md` | `devtap-install` skill |

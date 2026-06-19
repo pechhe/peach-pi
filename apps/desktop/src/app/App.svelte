@@ -16,7 +16,6 @@
   import ThreadView from "./ThreadView.svelte";
   import TerminalPane from "./TerminalPane.svelte";
   import { terminal } from "../stores/terminal.svelte";
-  import TestingView from "./TestingView.svelte";
   import SearchOverlay from "./SearchOverlay.svelte";
   import SettingsView from "./SettingsView.svelte";
   import SkillsView from "./SkillsView.svelte";
@@ -24,6 +23,7 @@
   import AutomationsView from "./AutomationsView.svelte";
   import AgentsView from "./AgentsView.svelte";
   import GraphView from "./GraphView.svelte";
+  import TestingView from "./TestingView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
   import SkillDialog from "./SkillDialog.svelte";
@@ -37,6 +37,8 @@
 
   let selectedThreadId = $state<string | null>(null);
   let view = $state<AppView>("thread");
+  // Per-project scope for views that are scoped to one project (Testing).
+  let testingProjectId = $state<string | null>(null);
 
   // ── New thread ───────────────────────────────────────────────────────
   // Threads are created eagerly: clicking "new thread" makes a real thread (and
@@ -60,6 +62,8 @@
   }
   let searchOpen = $state(false);
   let pendingFindQuery = $state<string | null>(null);
+  // Settings search term handed in by the command palette ("Settings: Theme").
+  let settingsQuery = $state("");
 
   // Sidebar width: seeded once from the persisted snapshot, then owned locally.
   // (Re-syncing on every snapshot would revert the drag, since the persisted
@@ -74,6 +78,11 @@
       sidebarWidth = w;
       widthSeeded = true;
     }
+  });
+  // Expose the content area's left edge so overlays (including portaled
+  // dialogs) can centre over the page content rather than the whole window.
+  $effect(() => {
+    document.documentElement.style.setProperty("--content-left", `${sidebarWidth}px`);
   });
   function startSidebarResize(e: PointerEvent) {
     e.preventDefault();
@@ -118,18 +127,25 @@
   });
 
   // ── Navigation history (⌘[ back · ⌘] forward) ───────────────────────
-  type NavEntry = { view: AppView; threadId: string | null };
+  type NavEntry = { view: AppView; threadId: string | null; projectId?: string | null };
   let navHistory = $state<NavEntry[]>([]);
   let navIndex = $state(-1);
 
   function applyNav(entry: NavEntry) {
     view = entry.view;
     selectedThreadId = entry.threadId;
+    if (entry.view === "testing") testingProjectId = entry.projectId ?? null;
     if (entry.threadId) void api.invoke("app:setSelectedThread", entry.threadId); // overlay prompt target
   }
   function pushNav(entry: NavEntry) {
     const cur = navHistory[navIndex];
-    if (cur && cur.view === entry.view && cur.threadId === entry.threadId) return;
+    if (
+      cur &&
+      cur.view === entry.view &&
+      cur.threadId === entry.threadId &&
+      (cur.projectId ?? null) === (entry.projectId ?? null)
+    )
+      return;
     navHistory = [...navHistory.slice(0, navIndex + 1), entry];
     navIndex = navHistory.length - 1;
     applyNav(entry);
@@ -151,6 +167,13 @@
   }
   function openView(v: AppView) {
     pushNav({ view: v, threadId: selectedThreadId });
+  }
+  function openTesting(projectId: string) {
+    pushNav({ view: "testing", threadId: null, projectId });
+  }
+  function openSettings(query = "") {
+    settingsQuery = query;
+    openView("settings");
   }
 
   // ⌘N starts a new thread in the current project (a new chat if none selected).
@@ -206,12 +229,6 @@
       terminal.toggle();
       return;
     }
-    // Shift+digit shortcuts only outside inputs.
-    const target = e.target as HTMLElement;
-    if (target.tagName === "TEXTAREA" || target.tagName === "INPUT") return;
-    if (e.shiftKey && e.key === "^") {
-      openView("testing");
-    }
   }
 
   onMount(() => {
@@ -239,6 +256,7 @@
       onSelect={selectThread}
       onNewChat={() => startNewThread(null)}
       onOpenView={openView}
+      onOpenTesting={openTesting}
       onNewThread={newThreadInProject}
       onOpenSearch={() => (searchOpen = true)}
     />
@@ -258,10 +276,10 @@
       ></div>
     </div>
     <div class="flex min-w-0 flex-1 flex-col">
-    {#key view === "thread" ? `thread:${selectedThreadId}` : view}
+    {#key view === "thread" ? `thread:${selectedThreadId}` : view === "testing" ? `testing:${testingProjectId}` : view}
     <div class="view-enter flex min-h-0 flex-1">
     {#if view === "settings"}
-      <SettingsView />
+      <SettingsView initialQuery={settingsQuery} />
     {:else if view === "skills"}
       <SkillsView
         projects={snapshot.current.projects}
@@ -286,7 +304,8 @@
       <TestingView
         projects={snapshot.current.projects}
         threads={snapshot.current.threads}
-        onSelect={selectThread}
+        projectId={testingProjectId}
+        onSelectThread={selectThread}
       />
     {:else if selectedThread}
       <ThreadView
@@ -312,12 +331,17 @@
       <TerminalPane threadId={selectedThread.id} onClose={() => terminal.hide()} />
     {/if}
     </div>
+    <SidePanel />
     {#if searchOpen}
       <SearchOverlay
         projects={snapshot.current.projects}
         threads={snapshot.current.threads}
         onSelect={selectThread}
         onClose={() => (searchOpen = false)}
+        onNewThread={newThreadForCurrentProject}
+        onNewChat={() => startNewThread(null)}
+        onOpenView={openView}
+        onOpenSettings={openSettings}
       />
     {/if}
   {:else}
@@ -332,7 +356,6 @@
   <ImageLightbox />
   <SkillDialog />
   <Toasts {sidebarWidth} />
-  <SidePanel />
   <PiHealthBanner />
 </div>
 

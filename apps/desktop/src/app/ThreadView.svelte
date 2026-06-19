@@ -24,6 +24,7 @@
   import Markdown from "./Markdown.svelte";
   import StreamingText from "./StreamingText.svelte";
   import CopyButton from "./CopyButton.svelte";
+  import RewindDialog from "./RewindDialog.svelte";
   import { codeCopy } from "../lib/code-copy";
   import WorkingLabel from "./WorkingLabel.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
@@ -127,12 +128,26 @@
   }
 
   // Text of a transcript item, flattened across its searchable fields.
+  /** Compact token count for the compaction card: 1234 → "1k", 950 → "950". */
+  function fmtTokens(n: number): string {
+    return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
+  }
+
   function itemText(it: unknown): string {
     const i = it as Record<string, unknown>;
     return [i.text, i.thinking, i.output, i.summary, i.argsSummary]
       .filter((v): v is string => typeof v === "string")
       .join(" ")
       .toLowerCase();
+  }
+
+  // pi-subagents injects a completion steer message into the parent
+  // conversation when a child finishes. These contain session paths and
+  // resume commands that are noise in the GUI — the SubagentCard already
+  // shows the result in its journey timeline. Detect and suppress them.
+  const STEER_RE = /^Sub-agent ".+?" completed/;
+  function isSteerMessage(item: { kind: string; text?: string }): boolean {
+    return item.kind === "assistant" && typeof item.text === "string" && STEER_RE.test(item.text);
   }
 
   const findMatches = $derived.by(() => {
@@ -351,12 +366,26 @@
   // the rewound turns can also be reverted (destructive — see confirm copy).
   let turns = $state<{ entryId: string; text: string }[]>([]);
   // Greyed-out preview of the turns just rewound past, scoped to this thread.
-  let rewound = $state<{ threadId: string; keepCount: number; tail: TranscriptItem[] } | null>(null);
+  // Captured from the pre-rewind transcript; the dropped tail is derived once
+  // the live transcript actually shrinks (the reset lands a tick after the
+  // rewind call resolves), so the preview never flashes or vanishes early.
+  let rewound = $state<{
+    threadId: string;
+    before: TranscriptItem[];
+    beforeLen: number;
+    settledLen: number | null;
+  } | null>(null);
   // Two-click arm so a stray click can't silently drop a turn.
-  let confirmEntryId = $state<string | null>(null);
   // Revert file changes too (only offered on git-backed threads). Default on.
   let revertFiles = $state(true);
   const canRevert = $derived(thread.worktreeDir != null || thread.projectId != null);
+  // Confirmation dialog state. pendingRewind holds the armed target.
+  let rewindDialogOpen = $state(false);
+  let pendingRewind = $state<{
+    entryId: string;
+    promptPreview: string;
+    turnCount: number;
+  } | null>(null);
 
   // Refetch the turn list (entry ids) whenever the conversation settles.
   $effect(() => {
@@ -376,15 +405,43 @@
   // (a new message extended the thread, or we switched threads).
   $effect(() => {
     const r = rewound;
-    if (r && (r.threadId !== thread.id || items.length !== r.keepCount)) rewound = null;
+    if (!r) return;
+    if (r.threadId !== thread.id) {
+      rewound = null;
+    } else if (r.settledLen === null) {
+      // The reset has landed once the transcript drops below its pre-rewind length.
+      if (items.length < r.beforeLen) rewound = { ...r, settledLen: items.length };
+    } else if (items.length !== r.settledLen) {
+      // Thread moved on (new message) or switched away — drop the preview.
+      rewound = null;
+    }
   });
 
-  async function doRewind(entryId: string, keepCount: number, revert: boolean) {
-    confirmEntryId = null;
-    const tail = items.slice(keepCount);
+  // Arm the confirmation dialog for the turn that starts at `entryId`.
+  function openRewindDialog(entryId: string): void {
+    const turnIndex = turns.findIndex((t) => t.entryId === entryId);
+    if (turnIndex < 0) return;
+    pendingRewind = {
+      entryId,
+      promptPreview: turns[turnIndex]!.text,
+      turnCount: turns.length - turnIndex,
+    };
+    rewindDialogOpen = true;
+  }
+
+  function confirmRewind(): void {
+    const p = pendingRewind;
+    if (!p) return;
+    pendingRewind = null;
+    rewindDialogOpen = false;
+    void doRewind(p.entryId, canRevert && revertFiles);
+  }
+
+  async function doRewind(entryId: string, revert: boolean) {
+    const before = items.slice();
     try {
       const { editorText } = await api.invoke("threads:rewind", thread.id, entryId, revert);
-      rewound = { threadId: thread.id, keepCount, tail };
+      rewound = { threadId: thread.id, before, beforeLen: before.length, settledLen: null };
       if (editorText) drafts.update(thread.id, { text: editorText });
     } catch (err) {
       console.error("rewind failed", err);
@@ -397,12 +454,7 @@
     if (turns.length === 0) return;
     const target = turns[Math.max(0, turns.length - Math.max(1, n))];
     const keepCount = target ? turnMap.keepByEntry.get(target.entryId) : undefined;
-    if (target && keepCount != null) void doRewind(target.entryId, keepCount, canRevert);
-  }
-
-  // The last contained item id of a row (where its rewind button hangs).
-  function rowLastItemId(row: Row): string {
-    return row.type === "group" ? row.items[row.items.length - 1]!.id : row.item.id;
+    if (target && keepCount != null) openRewindDialog(target.entryId);
   }
 
   // "bash ×4 · read ×2" — ordered by first appearance.
@@ -577,7 +629,7 @@
       onscroll={onScroll}
       onwheel={onWheel}
     >
-    <div class="mx-auto flex max-w-3xl flex-1 flex-col gap-3">
+    <div class="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3">
       {#if items.length === 0}
         <div class="flex flex-1 flex-col items-center justify-center gap-1 text-center">
           <p class="text-[15px] font-medium text-muted">What are we building?</p>
@@ -654,18 +706,18 @@
                   <span>{skill.name}</span>
                 </button>
                 {#if skill.args}
-                  <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg select-text">
+                  <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">
                     {skill.args}
                   </div>
                 {/if}
               {:else}
-                <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg select-text">
+                <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">
                   {item.text}
                 </div>
               {/if}
             {/if}
           </div>
-        {:else if item.kind === "assistant"}
+        {:else if item.kind === "assistant" && !isSteerMessage(item)}
           <!-- Guard against a stuck cursor: a dropped/late message_end leaves
                item.streaming true forever. The thread can only have one open
                assistant message, so once the thread is no longer running no
@@ -694,6 +746,18 @@
             {#if !isStreaming && item.text}
               <div class="assistant-actions">
                 <CopyButton text={item.text} />
+                {#if thread.status !== "running" && turnMap.endById.has(item.id)}
+                  {@const t = turnMap.endById.get(item.id)!}
+                  <button
+                    type="button"
+                    class="copy-btn"
+                    onclick={() => openRewindDialog(t.entryId)}
+                    title="Rewind the conversation to before this turn"
+                    data-testid="rewind-turn"
+                  >
+                    <Undo2 size={13} /> <span>Rewind</span>
+                  </button>
+                {/if}
               </div>
             {/if}
           </div>
@@ -710,7 +774,7 @@
           {/each}
         {:else if item.kind === "compaction"}
           {#if item.running}
-            <div class="item-enter mx-auto w-full max-w-2xl rounded-2xl border border-border-strong/40 bg-surface-2/40 px-4 py-3" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
+            <div class="item-enter w-full rounded-2xl border border-border-strong/40 bg-surface-2/40 px-4 py-3" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
               <div class="flex items-center gap-2 text-[11px] font-semibold tracking-wider text-muted uppercase">
                 <BrailleSpinner class="working-label__spinner shrink-0" />
                 {item.reason === "manual" ? "Compacting…" : "Auto-compacting…"}
@@ -719,16 +783,16 @@
             </div>
           {:else}
             {@const compacted = !item.error && !item.aborted}
-            <details class="item-enter group mx-auto w-full max-w-2xl" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
+            <details class="item-enter group w-full" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
               <summary
-                class="flex cursor-pointer items-center gap-2 rounded-lg border bg-surface/60 px-3 py-1.5 text-xs text-muted transition-colors select-none hover:bg-surface {compacted
+                class="flex cursor-pointer items-center gap-2 rounded-lg border bg-surface/60 px-3 py-2 text-xs font-semibold text-muted transition-colors select-none hover:bg-surface {compacted
                   ? ''
                   : 'border-border-strong/30'}"
                 style={compacted ? "border-color: oklch(0.6 0.16 52 / 0.45)" : ""}
               >
                 <span class="shrink-0 opacity-70" style={compacted ? "color: oklch(0.6 0.16 52)" : ""}>⌘</span>
                 <span
-                  class="font-medium {item.error ? 'text-danger' : ''}"
+                  class="font-semibold {item.error ? 'text-danger' : ''}"
                   style={compacted ? "color: oklch(0.6 0.16 52)" : ""}
                 >
                   {item.aborted
@@ -739,8 +803,10 @@
                         ? "Context compacted"
                         : "Context compacted automatically"}
                 </span>
-                {#if item.tokensBefore}
-                  <span class="text-fainter">· {Math.round(item.tokensBefore / 1000)}k summarised</span>
+                {#if item.tokensBefore && item.tokensAfter}
+                  <span class="font-medium text-faint">· {fmtTokens(item.tokensBefore)} → {fmtTokens(item.tokensAfter)} tokens</span>
+                {:else if item.tokensBefore}
+                  <span class="font-medium text-faint">· {fmtTokens(item.tokensBefore)} summarised</span>
                 {/if}
                 {#if item.summary || item.error}
                   <span class="ml-auto shrink-0 text-fainter transition-transform group-open:rotate-90">›</span>
@@ -755,60 +821,25 @@
               {/if}
             </details>
           {/if}
+          {:else if isSteerMessage(item)}
+            <!-- steer messages already surfaced in SubagentCard journey — skip -->
           {:else}
             <p class="item-enter text-center text-xs text-faint italic" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>{item.text}</p>
           {/if}
         {/if}
-        {#if thread.status !== "running"}
-          {@const turnEnd = turnMap.endById.get(rowLastItemId(row))}
-          {#if turnEnd}
-            <div class="rewind-row">
-              {#if confirmEntryId === turnEnd.entryId}
-                {#if canRevert}
-                  <label
-                    class="rewind-revert"
-                    title="Reverts the working tree to its pre-turn state — discards changes made during this turn, including new files (cannot be undone)"
-                  >
-                    <input type="checkbox" bind:checked={revertFiles} data-testid="rewind-revert" />
-                    revert files
-                  </label>
-                {/if}
-                <button
-                  type="button"
-                  class="rewind-btn rewind-btn--confirm"
-                  onclick={() => doRewind(turnEnd.entryId, turnEnd.keepCount, canRevert && revertFiles)}
-                  data-testid="rewind-confirm"
-                  title={canRevert && revertFiles
-                    ? "Conversation rewinds and files revert — cannot be undone"
-                    : "Conversation rewinds; files on disk are left as-is"}
-                >
-                  <Undo2 size={12} /> Rewind this turn
-                </button>
-                <button type="button" class="rewind-btn rewind-btn--ghost" onclick={() => (confirmEntryId = null)}>Cancel</button>
-              {:else}
-                <button
-                  type="button"
-                  class="rewind-btn"
-                  onclick={() => (confirmEntryId = turnEnd.entryId)}
-                  title="Rewind the conversation to before this turn"
-                  data-testid="rewind-turn"
-                >
-                  <Undo2 size={12} /> Rewind
-                </button>
-              {/if}
-            </div>
-          {/if}
-        {/if}
       {/each}
-      {#if rewound && rewound.threadId === thread.id && rewound.tail.length > 0}
-        <div class="rewound-divider"><span>Rewound · {rewound.tail.length} item{rewound.tail.length === 1 ? "" : "s"} dropped from context</span></div>
-        <div class="rewound-tail" aria-hidden="true">
-          {#each rewound.tail as it (it.id)}
-            <div class="rewound-item">{itemText(it).slice(0, 280) || "(…)"}</div>
-          {/each}
-        </div>
+      {#if rewound && rewound.settledLen !== null && rewound.threadId === thread.id}
+        {@const tail = rewound.before.slice(rewound.settledLen)}
+        {#if tail.length > 0}
+          <div class="rewound-divider"><span>Rewound · {tail.length} item{tail.length === 1 ? "" : "s"} dropped from context</span></div>
+          <div class="rewound-tail" aria-hidden="true">
+            {#each tail as it (it.id)}
+              <div class="rewound-item">{itemText(it).slice(0, 280) || "(…)"}</div>
+            {/each}
+          </div>
+        {/if}
       {/if}
-      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming) && !agentTimeline.primaryNamesByCall.size}
+      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming)}
         <div class="item-enter text-[13px]">
           <WorkingLabel label="Working…" />
         </div>
@@ -855,6 +886,14 @@
     {/if}
     <Composer {thread} onRewind={rewindFromEnd} />
   </div>
+  <RewindDialog
+    bind:open={rewindDialogOpen}
+    bind:revertFiles
+    {canRevert}
+    turnCount={pendingRewind?.turnCount ?? 1}
+    promptPreview={pendingRewind?.promptPreview ?? ""}
+    onConfirm={confirmRewind}
+  />
 </div>
 
 <svelte:window onkeydown={onKeydown} />
@@ -882,48 +921,6 @@
     outline-offset: 3px;
     border-radius: 0.5rem;
   }
-  /* Per-turn rewind affordance: faint, only firm on hover/confirm. */
-  .rewind-row {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.375rem;
-    margin-top: -0.25rem;
-    opacity: 0;
-    transition: opacity 0.12s ease-out;
-  }
-  .rewind-row:hover,
-  .rewind-row:focus-within {
-    opacity: 1;
-  }
-  .rewind-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    border-radius: 0.5rem;
-    padding: 0.125rem 0.5rem;
-    font-size: 11px;
-    color: var(--color-fainter, oklch(0.6 0 0));
-    transition: background-color 0.12s, color 0.12s;
-  }
-  .rewind-btn:hover {
-    background: var(--color-surface, oklch(0.2 0 0 / 0.4));
-    color: var(--color-fg-soft, inherit);
-  }
-  .rewind-btn--confirm {
-    color: oklch(0.6 0.16 52);
-  }
-  .rewind-revert {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 11px;
-    color: var(--color-fainter, oklch(0.6 0 0));
-    cursor: pointer;
-  }
-  .rewind-revert input {
-    accent-color: oklch(0.6 0.16 52);
-  }
-  .rewind-divider,
   .rewound-divider {
     display: flex;
     align-items: center;

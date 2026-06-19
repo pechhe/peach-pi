@@ -55,6 +55,8 @@ export type TranscriptItem =
       reason: "manual" | "threshold" | "overflow";
       summary?: string;
       tokensBefore?: number;
+      /** Approx tokens the summarised region was compressed *to* (summary size). */
+      tokensAfter?: number;
       aborted?: boolean;
       error?: string;
     };
