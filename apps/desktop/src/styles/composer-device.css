@@ -65,7 +65,7 @@
 /* Scale the whole device down + size it to its contents so it neither
    dominates the window nor stretches too wide. */
 .composer-device .composer__frame {
-  width: 1025px;
+  width: 950px;
   max-width: 100%;
   margin-inline: auto;
   transform: scale(0.78);
@@ -174,7 +174,7 @@
 
 /* Composer scrollbar: hidden while the textarea can still grow (content
    below max-height → no overflow). Once it hits max-height and overflows,
-   reveal the thumb only while scrolling or hovering — never parked/static. */
+   reveal the thumb only while actively scrolling — never parked/static. */
 .composer-device .composer__screen textarea::-webkit-scrollbar {
   width: 8px;
 }
@@ -187,11 +187,9 @@
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-.composer-device .composer__screen textarea:hover::-webkit-scrollbar-thumb,
 .composer-device .composer__screen textarea.is-scrolling::-webkit-scrollbar-thumb {
   background: var(--color-surface-3);
 }
-.composer-device .composer__screen textarea:hover::-webkit-scrollbar-thumb:hover,
 .composer-device .composer__screen textarea.is-scrolling::-webkit-scrollbar-thumb:hover {
   background: var(--color-faint);
 }
@@ -279,28 +277,26 @@
 }
 
 /* ---------------- Controls strip ---------------- */
+/* All tools spread with equal margins between each other and the chassis edges. */
 .composer-device .composer__footer-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 18px;
-  min-height: 66px;
-  padding: 10px 10px 4px;
-}
-
-.composer-device .composer__controls {
-  grid-column: 1;
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.composer-device .composer__actions {
-  grid-column: 3;
-  justify-self: end;
   display: flex;
   align-items: center;
+  justify-content: space-evenly;
+  min-height: 66px;
+  padding: 10px 12px 4px;
+}
+
+/* Unwrap the clusters so every tool is an equally-spaced flex item. */
+.composer-device .composer__controls,
+.composer-device .composer__actions {
+  display: contents;
+}
+
+/* Keep Caveman + the placeholder slot grouped tightly as one item. */
+.composer-device .composer__btn-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
 }
 
 /* Engraved section labels above clusters. */

@@ -12,7 +12,8 @@
     "package": "pnpm --filter @peach-pi/desktop package",
     "build:app": "bash scripts/build-app.sh",
     "make": "pnpm --filter @peach-pi/desktop make",
-    "e2e": "pnpm --filter @peach-pi/desktop test:e2e"
+    "e2e": "pnpm --filter @peach-pi/desktop test:e2e",
+    "devtap": "node scripts/devtap.mjs"
   },
   "pnpm": {
     "overrides": {

@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { SubagentAgentInfo } from "@peach-pi/shared-types";
+import type { SubagentAgentInfo, SubagentAgentPatch } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo } from "../persistence/repositories.ts";
 
@@ -60,6 +60,45 @@ function findUp(fromDir: string, relPath: string): string | null {
   }
 }
 
+/** Writes a patch back to an agent file's YAML frontmatter, preserving body + other keys. */
+function writeAgentPatch(filePath: string, patch: SubagentAgentPatch, scope: "global" | "project"): SubagentAgentInfo {
+  const raw = readFileSync(filePath, "utf8");
+  const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(raw);
+  if (!match) throw new Error(`agent file has no frontmatter: ${filePath}`);
+  const lines = match[1]!.split("\n");
+  const body = match[2]!;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of lines) {
+    const kv = /^([A-Za-z-]+):\s*(.*)$/.exec(line.trim());
+    if (!kv) {
+      out.push(line);
+      continue;
+    }
+    const key = kv[1]!.toLowerCase();
+    seen.add(key);
+    if (key === "model") {
+      if (patch.model !== undefined) {
+        if (patch.model) out.push(`model: ${patch.model}`);
+      } else out.push(line);
+    } else if (key === "thinking") {
+      if (patch.thinking !== undefined) {
+        if (patch.thinking) out.push(`thinking: ${patch.thinking}`);
+      } else out.push(line);
+    } else {
+      out.push(line);
+    }
+  }
+  // Keys absent from file but provided in patch get appended (preserving file order).
+  if (patch.model && !seen.has("model")) out.push(`model: ${patch.model}`);
+  if (patch.thinking && !seen.has("thinking")) out.push(`thinking: ${patch.thinking}`);
+  const nextRaw = `---\n${out.join("\n")}\n---\n${body}`;
+  writeFileSync(filePath, nextRaw);
+  const reparsed = parseAgentFile(filePath, scope);
+  if (!reparsed) throw new Error(`failed to reparse agent file after patch: ${filePath}`);
+  return reparsed;
+}
+
 /** Minimal YAML-frontmatter parse — same fields peche-pi's roster shows. */
 function parseAgentFile(filePath: string, scope: "global" | "project"): SubagentAgentInfo | null {
   try {
@@ -110,5 +149,14 @@ export class SubagentService {
     const projectAgents = project ? agentsIn(path.join(project.path, ".pi", "agents"), "project") : [];
     const names = new Set(projectAgents.map((a) => a.name));
     return [...projectAgents, ...globalAgents.filter((a) => !names.has(a.name))];
+  }
+
+  /** Apply a model/thinking patch to an agent file and return the updated info. */
+  updateAgent(filePath: string, patch: SubagentAgentPatch): SubagentAgentInfo {
+    if (!existsSync(filePath)) throw new Error(`agent file not found: ${filePath}`);
+    const scope: "global" | "project" = filePath.startsWith(path.join(homedir(), ".pi", "agent", "agents"))
+      ? "global"
+      : "project";
+    return writeAgentPatch(filePath, patch, scope);
   }
 }

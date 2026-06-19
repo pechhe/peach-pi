@@ -15,9 +15,11 @@ import type {
   ToolMode,
   TranscriptItem,
   TranscriptOp,
+  TranscriptSnapshot,
 } from "@peach-pi/shared-types";
 import { isNewThread } from "@peach-pi/shared-types";
 import type { PiSession } from "@peach-pi/pi-client";
+import type { GitService } from "./git-service.ts";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
@@ -58,12 +60,19 @@ export class ThreadService {
   /** Threads with an in-flight compaction; their extension toasts are suppressed. */
   private compacting = new Set<string>();
   private flushTimer: NodeJS.Timeout | null = null;
+  /** Monotonic counter stamped on each emitted transcript flush; the boundary
+   *  `getTranscript` reports so backfilling renderers can dedupe live deltas. */
+  private transcriptSeq = 0;
   /** Pending extension dialog resolvers keyed by requestId. */
   private pendingDialogs = new Map<string, (value: string | boolean | undefined) => void>();
   /** Reads the persisted utility-model selection (titles/commits); null = defaults. */
   private getUtilityModel: () => ModelInfo | null;
   /** Reads the persisted auto-compaction thresholds. */
   private getAutoCompact: () => AutoCompactSettings;
+  /** Git boundary for rewind file snapshots; injected post-construction. */
+  private gitService: GitService | null = null;
+  /** In-memory rewind snapshots: threadId → (prior-turn entryId | "root") → sha. */
+  private rewindSnapshots = new Map<string, Map<string, string>>();
 
   constructor(
     db: AppDb,
@@ -82,6 +91,30 @@ export class ThreadService {
     this.onRunIdle = onRunIdle;
     this.getUtilityModel = getUtilityModel ?? (() => null);
     this.getAutoCompact = getAutoCompact ?? (() => ({ percent: 80, tokens: null }));
+  }
+
+  /** Wire the git boundary after construction (resolves service ordering). */
+  setGitService(gitService: GitService): void {
+    this.gitService = gitService;
+  }
+
+  /** Snapshot the working tree before a turn runs, keyed by the prior turn's
+   *  entry id ("root" for the first). Awaited so the snapshot precedes any
+   *  file edits the turn makes. No-op for non-repo chats. */
+  private async captureRewindSnapshot(threadId: string, session: PiSession): Promise<void> {
+    if (!this.gitService) return;
+    const key = session.listTurns().at(-1)?.entryId ?? "root";
+    const sha = await this.gitService.snapshot(threadId);
+    if (!sha) return;
+    const map = this.rewindSnapshots.get(threadId) ?? new Map<string, string>();
+    map.set(key, sha); // last write from this leaf wins (freshest pre-turn state)
+    this.rewindSnapshots.set(threadId, map);
+  }
+
+  private dropRewindSnapshots(threadId: string): void {
+    // In-memory only; the dangling snapshot commits are left to git's normal
+    // prune window (no refs written, so nothing leaks into the repo).
+    this.rewindSnapshots.delete(threadId);
   }
 
   async createThread(projectId: string, worktreeDir?: string): Promise<Thread> {
@@ -130,6 +163,8 @@ export class ThreadService {
       this.onThreadsChanged();
       void this.generateTitleAndTag(threadId, text);
     }
+    // Snapshot the working tree before the run touches any files.
+    await this.captureRewindSnapshot(threadId, session);
     // Fire and forget: resolution = run complete; status flows via events.
     void session.prompt(text, images, toolMode).catch((err) => {
       this.queueOps(threadId, [
@@ -201,6 +236,14 @@ export class ThreadService {
     return (await this.sessionFor(threadId)).popLastFollowUp();
   }
 
+  async deleteFollowUp(threadId: string, index: number): Promise<void> {
+    await (await this.sessionFor(threadId)).deleteFollowUp(index);
+  }
+
+  async deleteSteer(threadId: string, index: number): Promise<void> {
+    await (await this.sessionFor(threadId)).deleteSteer(index);
+  }
+
   /** Run an extension/slash command in the live session (executes immediately). */
   async runCommand(threadId: string, command: string): Promise<void> {
     const session = await this.sessionFor(threadId);
@@ -219,8 +262,13 @@ export class ThreadService {
     if (session) await session.abort();
   }
 
-  async getTranscript(threadId: string): Promise<TranscriptItem[]> {
-    return (await this.sessionFor(threadId)).transcript();
+  async getTranscript(threadId: string): Promise<TranscriptSnapshot> {
+    const session = await this.sessionFor(threadId);
+    // Flush pending ops first so the snapshot sits exactly on a flush boundary:
+    // every delta the renderer buffers during this round-trip then carries a
+    // strictly greater seq, so dedupe is exact (no dropped or doubled ops).
+    this.flush();
+    return { items: session.transcript(), seq: this.transcriptSeq };
   }
 
   /** Full-text search across thread bodies (pi JSONL session files).
@@ -312,6 +360,33 @@ export class ThreadService {
     (await this.sessionFor(threadId)).compact();
   }
 
+  /** User turns available as rewind targets, in branch order. */
+  async listTurns(threadId: string): Promise<{ entryId: string; text: string }[]> {
+    return (await this.sessionFor(threadId)).listTurns();
+  }
+
+  /** Rewind the conversation to before a turn. Emits a transcript reset + meta
+   *  update via the session callbacks; returns the rewound prompt text. */
+  async rewind(
+    threadId: string,
+    entryId: string,
+    revertFiles = false,
+  ): Promise<{ editorText?: string }> {
+    const session = await this.sessionFor(threadId);
+    if (revertFiles && this.gitService) {
+      // Restore to the state *before* this turn ran = snapshot keyed by the
+      // predecessor turn (or "root" when rewinding the first turn).
+      const turns = session.listTurns();
+      const idx = turns.findIndex((t) => t.entryId === entryId);
+      const key = idx > 0 ? turns[idx - 1]!.entryId : "root";
+      const sha = this.rewindSnapshots.get(threadId)?.get(key);
+      if (sha) await this.gitService.restoreSnapshot(threadId, sha);
+    }
+    const result = await session.rewind(entryId);
+    this.onThreadsChanged();
+    return result;
+  }
+
   respondExtensionUi(requestId: string, value: string | boolean | undefined): void {
     const resolve = this.pendingDialogs.get(requestId);
     if (resolve) {
@@ -384,6 +459,7 @@ export class ThreadService {
   }
 
   private disposeSession(threadId: string): void {
+    this.dropRewindSnapshots(threadId);
     const session = this.sessions.get(threadId);
     if (session) {
       session.dispose();
@@ -503,7 +579,7 @@ export class ThreadService {
   private flush(): void {
     this.flushTimer = null;
     for (const [threadId, ops] of this.pendingOps) {
-      this.emit("event:transcript", { threadId, ops });
+      this.emit("event:transcript", { threadId, ops, seq: ++this.transcriptSeq });
     }
     this.pendingOps.clear();
   }

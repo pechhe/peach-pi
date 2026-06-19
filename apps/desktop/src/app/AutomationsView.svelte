@@ -3,6 +3,7 @@
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import { Select } from "../components/ui/select";
 
   let {
     projects,
@@ -92,29 +93,21 @@
             bind:value={name}
           />
           <div class="flex gap-2">
-            <select
-              class="rounded-lg border border-border-strong bg-bg px-2 py-1.5 text-sm outline-none"
-              onchange={(e) => e.currentTarget.value && (cron = e.currentTarget.value)}
-            >
-              <option value="">Preset…</option>
-              {#each PRESETS as p (p.expression)}
-                <option value={p.expression}>{p.label}</option>
-              {/each}
-            </select>
+            <Select
+              placeholder="Preset…"
+              items={PRESETS.map((p) => ({ value: p.expression, label: p.label }))}
+              onValueChange={(v) => v && (cron = v)}
+            />
             <input
               class="flex-1 rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm outline-none focus:border-border-focus"
               placeholder="cron (m h dom mon dow)"
               bind:value={cron}
             />
-            <select
-              class="rounded-lg border border-border-strong bg-bg px-2 py-1.5 text-sm outline-none"
+            <Select
+              placeholder="New chat"
               bind:value={projectId}
-            >
-              <option value="">New chat</option>
-              {#each projects as p (p.id)}
-                <option value={p.id}>{p.name}</option>
-              {/each}
-            </select>
+              items={[{ value: "", label: "New chat" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+            />
           </div>
           <textarea
             class="min-h-20 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"

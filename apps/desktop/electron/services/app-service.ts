@@ -8,6 +8,7 @@ import type {
   UiState,
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
+import { seedHudThreadId } from "@peach-pi/shared-types";
 import {
   AUTO_COMPACT_KV_KEY,
   AutomationRepo,
@@ -110,6 +111,46 @@ export class AppService {
   setSelectedThread(threadId: string | null): void {
     this.saveUiState({ selectedThreadId: threadId });
     if (threadId) this.threads.markSeen(threadId);
+    this.publish();
+  }
+
+  /** Read the HUD's active thread (independent of `selectedThreadId`). */
+  getHudThreadId(): string | null {
+    return this.loadUiState().hudThreadId;
+  }
+
+  /** Point the HUD at a thread. Does NOT touch the Main Window selection. */
+  setHudThread(threadId: string | null): void {
+    this.saveUiState({ hudThreadId: threadId });
+    this.publish();
+  }
+
+  /**
+   * Seed the HUD thread from the Main Window selection on open, preserving any
+   * thread the HUD is already tracking. Returns the resolved id.
+   */
+  seedHudThread(): string | null {
+    const ui = this.loadUiState();
+    const seeded = seedHudThreadId(ui.hudThreadId, ui.selectedThreadId);
+    if (seeded !== ui.hudThreadId) this.setHudThread(seeded);
+    return seeded;
+  }
+
+  getHudPosition(): { x: number; y: number } | null {
+    return this.loadUiState().hudPosition;
+  }
+
+  setHudPosition(x: number, y: number): void {
+    this.saveUiState({ hudPosition: { x: Math.round(x), y: Math.round(y) } });
+    // No publish: window geometry is not renderer state.
+  }
+
+  getHudAutoReveal(): boolean {
+    return this.loadUiState().hudAutoRevealOnFinish;
+  }
+
+  setHudAutoReveal(on: boolean): void {
+    this.saveUiState({ hudAutoRevealOnFinish: on });
     this.publish();
   }
 

@@ -1,3 +1,20 @@
+<script module lang="ts">
+  // Reveal progress must survive the component remount a thread switch causes:
+  // App.svelte wraps ThreadView in {#key thread:id}, so switching away and back
+  // destroys + recreates every StreamingText. Keyed by a stable per-message id,
+  // returning to a thread resumes the wave instead of replaying it from char 0.
+  type RevealMemory = { revealed: number; times: Map<number, number> };
+  const revealMemory = new Map<string, RevealMemory>();
+  function memoryFor(key: string): RevealMemory {
+    let m = revealMemory.get(key);
+    if (!m) {
+      m = { revealed: 0, times: new Map() };
+      revealMemory.set(key, m);
+    }
+    return m;
+  }
+</script>
+
 <script lang="ts">
   import { marked } from "marked";
   import DOMPurify from "dompurify";
@@ -27,7 +44,8 @@
     text,
     streaming = true,
     plain = false,
-  }: { text: string; streaming?: boolean; plain?: boolean } = $props();
+    revealKey,
+  }: { text: string; streaming?: boolean; plain?: boolean; revealKey?: string } = $props();
 
   function escapeHtml(s: string): string {
     return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
@@ -73,13 +91,25 @@
     return ticks % 2 === 1 ? `${s}\`` : s;
   }
 
+  // Reveal progress persists across remounts when a stable revealKey is given
+  // (see <script module>); without one (or for historical text) it stays local.
+  const mem: RevealMemory = untrack(() =>
+    revealKey ? memoryFor(revealKey) : { revealed: 0, times: new Map() },
+  );
   // Historical (non-streaming) messages mount fully revealed — no replay.
-  // untrack: deliberately snapshot the mount-time prop values only.
-  let revealed = $state(untrack(() => (streaming && !reduceMotion ? 0 : text.length)));
+  // untrack: snapshot the mount-time prop values only; resume from the stored
+  // index so a thread switch mid-stream continues instead of restarting.
+  let revealed = $state(untrack(() => (streaming && !reduceMotion ? mem.revealed : text.length)));
   const rate = resolveRate();
   let frame = 0;
   // word index → first time (performance.now) we saw it. Drives per-word delay.
-  const revealTimes = new Map<number, number>();
+  const revealTimes = mem.times;
+
+  // Free the shared memory once the message is done streaming — at that point
+  // the reveal slice is unused (the `!streaming` branch below returns raw HTML).
+  $effect(() => {
+    if (!streaming && revealKey) revealMemory.delete(revealKey);
+  });
 
   $effect(() => {
     if (reduceMotion) {
@@ -103,6 +133,7 @@
           next = revealed + Math.min(rate.step, backlog);
         }
         revealed = next;
+        mem.revealed = next;
       }
       if (revealed < target.length) raf = requestAnimationFrame(tick);
     };

@@ -69,6 +69,12 @@ export interface UiState {
   selectedThreadId: ThreadId | null;
   /** Project IDs the user has collapsed in the sidebar. */
   collapsedProjects: string[];
+  /** The HUD's own active thread, independent of `selectedThreadId`. */
+  hudThreadId: ThreadId | null;
+  /** Persisted HUD window position; null = default bottom-centre. */
+  hudPosition: { x: number; y: number } | null;
+  /** Opt-in: expand the HUD chat when the HUD's own thread finishes. */
+  hudAutoRevealOnFinish: boolean;
 }
 
 export type AppView =
@@ -247,6 +253,12 @@ export interface SubagentAgentInfo {
   body: string;
 }
 
+/** Editable fields of a subagent definition (null clears the frontmatter key). */
+export interface SubagentAgentPatch {
+  model?: string | null;
+  thinking?: string | null;
+}
+
 /** Knowledge-graph state for a project (graphify CLI, graphify-out/). */
 export interface GraphifyStatus {
   /** graphify binary found on this machine. */
@@ -256,6 +268,16 @@ export interface GraphifyStatus {
   edgeCount: number;
   builtAt: string | null;
   building: boolean;
+}
+
+/** Whether the DevTap runtime tap is installed in a project. */
+export interface DevTapProjectStatus {
+  /** A tap adapter module was found in the project. */
+  installed: boolean;
+  /** Path of the detected tap module, if any. */
+  tapPath: string | null;
+  /** The global DevTap reader extension exists (~/.pi/agent/extensions/devtap). */
+  extensionInstalled: boolean;
 }
 
 /** A skill discovered by pi's resource loader. */
@@ -342,6 +364,40 @@ export interface ThreadSearchHit {
   projectName: string;
   /** Surrounding-text excerpt around the first body match, if any. */
   snippet?: string;
+}
+
+/** One message in a `/btw` side conversation (ephemeral re: main history). */
+export interface SideMessage {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/** A `/btw` side conversation: a cheap, isolated mini-chat attached to a
+ *  thread. Reads the main conversation as context but never writes to it.
+ *  Persisted per thread so prior side chats form a browsable history. */
+export interface SideConversation {
+  id: string;
+  threadId: ThreadId;
+  title: string;
+  /** Model used to answer (defaults to the thread's current session model). */
+  model: ModelInfo | null;
+  messages: SideMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Streaming text fragment for an in-flight side-chat answer. */
+export interface SideDeltaPayload {
+  convId: string;
+  threadId: ThreadId;
+  text: string;
+}
+
+/** A side-chat answer finished (or failed). */
+export interface SideDonePayload {
+  convId: string;
+  threadId: ThreadId;
+  error?: string;
 }
 
 /** Snapshot published main → renderer. Grows with features. */

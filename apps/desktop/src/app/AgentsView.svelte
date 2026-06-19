@@ -1,12 +1,16 @@
 <script lang="ts">
-  import type { Project, SubagentAgentInfo } from "@peach-pi/shared-types";
+  import type { ModelInfo, Project, SubagentAgentInfo } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
+  import { Select } from "../components/ui/select";
 
   let { projects }: { projects: Project[] } = $props();
 
   let projectId = $state<string>("");
   let agents = $state<SubagentAgentInfo[]>([]);
   let selected = $state<SubagentAgentInfo | null>(null);
+  let models = $state<ModelInfo[]>([]);
+
+  const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
   $effect(() => {
     const id = projectId || null;
@@ -15,20 +19,33 @@
       if (selected && !list.some((a) => a.filePath === selected!.filePath)) selected = null;
     });
   });
+
+  // Load scoped models once for the model picker.
+  $effect(() => {
+    if (models.length === 0) void api.invoke("app:listModels").then((m) => (models = m));
+  });
+
+  async function patchAgent(field: "model" | "thinking", value: string) {
+    if (!selected) return;
+    const filePath = selected.filePath;
+    try {
+      const updated = await api.invoke("subagents:updateAgent", filePath, { [field]: value || null });
+      agents = agents.map((a) => (a.filePath === filePath ? updated : a));
+      selected = updated;
+    } catch (err) {
+      console.error("updateAgent failed:", err);
+    }
+  }
 </script>
 
 <main class="flex h-full flex-1 flex-col" data-testid="agents-view">
   <header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-6">
     <h1 class="text-sm font-medium text-fg-soft">Agents</h1>
-    <select
-      class="rounded-lg border border-border-strong bg-surface px-2 py-1 text-xs text-fg-soft outline-none"
+    <Select
+      class="bg-surface px-2 py-1 text-xs"
       bind:value={projectId}
-    >
-      <option value="">Global only</option>
-      {#each projects as p (p.id)}
-        <option value={p.id}>{p.name}</option>
-      {/each}
-    </select>
+      items={[{ value: "", label: "Global only" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+    />
   </header>
 
   <div class="flex min-h-0 flex-1">
@@ -59,11 +76,33 @@
       {#if selected}
         <h2 class="text-base font-medium text-fg">{selected.name}</h2>
         <p class="mt-1 font-mono text-[11px] text-fainter">{selected.filePath}</p>
-        <div class="mt-3 flex flex-wrap gap-2">
-          {#if selected.model}<span class="rounded-full border border-border-strong px-2 py-0.5 text-[10px] text-muted">model: {selected.model}</span>{/if}
-          {#if selected.thinking}<span class="rounded-full border border-border-strong px-2 py-0.5 text-[10px] text-muted">thinking: {selected.thinking}</span>{/if}
-          {#if selected.mode}<span class="rounded-full border border-border-strong px-2 py-0.5 text-[10px] text-muted">mode: {selected.mode}</span>{/if}
+        <div class="mt-4 grid max-w-md gap-3">
+          <label class="grid gap-1">
+            <span class="text-[10px] uppercase tracking-wide text-faint">Model</span>
+            <Select
+              class="bg-surface px-2 py-1.5 text-xs"
+              value={selected.model ?? ""}
+              onValueChange={(v) => patchAgent("model", v)}
+              items={[
+                { value: "", label: "inherit (unset)" },
+                ...models.map((m) => ({ value: `${m.provider}/${m.id}`, label: `${m.name} · ${m.provider}` })),
+              ]}
+            />
+          </label>
+          <label class="grid gap-1">
+            <span class="text-[10px] uppercase tracking-wide text-faint">Reasoning</span>
+            <Select
+              class="bg-surface px-2 py-1.5 text-xs"
+              value={selected.thinking ?? ""}
+              onValueChange={(v) => patchAgent("thinking", v)}
+              items={[
+                { value: "", label: "inherit (unset)" },
+                ...THINKING_LEVELS.map((lvl) => ({ value: lvl, label: lvl })),
+              ]}
+            />
+          </label>
         </div>
+        {#if selected.mode}<p class="mt-3 text-[10px] text-fainter">mode: {selected.mode}</p>{/if}
         <pre class="mt-4 rounded-xl border border-border bg-surface/50 p-4 text-xs leading-relaxed whitespace-pre-wrap text-fg-soft">{selected.body}</pre>
       {:else}
         <p class="mt-12 text-center text-sm text-fainter">

@@ -1,0 +1,188 @@
+<script lang="ts">
+  import type { ModelInfo } from "@peach-pi/shared-types";
+  import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../components/ui/sheet";
+  import { sideChat } from "../stores/side-chat.svelte";
+  import { api } from "../lib/ipc";
+  import Markdown from "./Markdown.svelte";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import History from "@lucide/svelte/icons/history";
+  import CornerDownLeft from "@lucide/svelte/icons/corner-down-left";
+
+  let input = $state("");
+  let showHistory = $state(false);
+  let models = $state<ModelInfo[]>([]);
+  let modelsLoadedFor: string | null = null;
+
+  const conv = $derived(sideChat.active);
+
+  // Load the model list (for the override picker) once per thread the panel
+  // points at.
+  $effect(() => {
+    const threadId = sideChat.threadId;
+    if (sideChat.open && threadId && modelsLoadedFor !== threadId) {
+      modelsLoadedFor = threadId;
+      void api.invoke("threads:listAllModels", threadId).then((m) => (models = m));
+    }
+  });
+
+  function setOpen(open: boolean) {
+    sideChat.open = open;
+  }
+
+  async function send() {
+    const q = input.trim();
+    if (!q) return;
+    input = "";
+    await sideChat.ask(q);
+  }
+
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+    }
+  }
+
+  async function onPickModel(e: Event) {
+    const value = (e.currentTarget as HTMLSelectElement).value;
+    const model = models.find((m) => `${m.provider}/${m.id}` === value) ?? null;
+    await sideChat.startNew(model);
+  }
+</script>
+
+<Sheet open={sideChat.open} onOpenChange={setOpen}>
+  <SheetContent side="right" class="w-[26rem] sm:max-w-[26rem]">
+    <SheetHeader class="pr-10">
+      <div class="flex items-center gap-2">
+        <span
+          class="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-accent uppercase"
+        >
+          btw
+        </span>
+        <SheetTitle>Side conversation</SheetTitle>
+      </div>
+      <p class="text-xs text-faint">
+        Isolated from the main task — context-aware, never added to its history.
+      </p>
+      <div class="mt-2 flex items-center gap-2">
+        <button
+          class="flex items-center gap-1 rounded border border-border-strong px-2 py-1 text-xs text-muted hover:bg-surface-2"
+          onclick={() => sideChat.startNew()}
+        >
+          <Plus class="size-3" /> New
+        </button>
+        <button
+          class="flex items-center gap-1 rounded border border-border-strong px-2 py-1 text-xs text-muted hover:bg-surface-2"
+          class:bg-surface-2={showHistory}
+          onclick={() => (showHistory = !showHistory)}
+        >
+          <History class="size-3" /> History
+        </button>
+        <select
+          class="ml-auto max-w-[10rem] truncate rounded border border-border-strong bg-surface px-1.5 py-1 text-xs text-muted"
+          value={conv?.model ? `${conv.model.provider}/${conv.model.id}` : ""}
+          onchange={onPickModel}
+          title="Model for this side chat"
+        >
+          {#if !conv?.model}<option value="">default model</option>{/if}
+          {#each models as m (m.provider + "/" + m.id)}
+            <option value={`${m.provider}/${m.id}`}>{m.name}</option>
+          {/each}
+        </select>
+      </div>
+    </SheetHeader>
+
+    {#if showHistory}
+      <div class="border-b border-border bg-bg/40 px-3 py-2">
+        <p class="mb-1 text-[10px] font-semibold tracking-wide text-fainter uppercase">
+          btw history
+        </p>
+        {#if sideChat.history.length === 0}
+          <p class="text-xs text-fainter">No past side chats for this thread.</p>
+        {:else}
+          <ul class="flex flex-col gap-0.5">
+            {#each sideChat.history as h (h.id)}
+              <li class="group flex items-center gap-1">
+                <button
+                  class="min-w-0 flex-1 truncate rounded px-1.5 py-1 text-left text-xs hover:bg-surface-2 {conv?.id ===
+                  h.id
+                    ? 'text-fg'
+                    : 'text-muted'}"
+                  onclick={() => sideChat.openConv(h.id)}
+                >
+                  {h.title || "Untitled"}
+                </button>
+                <button
+                  class="rounded p-1 text-fainter opacity-0 group-hover:opacity-100 hover:text-danger"
+                  onclick={() => sideChat.deleteConv(h.id)}
+                  title="Delete"
+                >
+                  <Trash2 class="size-3" />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+
+    <div class="flex-1 overflow-y-auto px-4 py-3">
+      {#if conv && conv.messages.length === 0 && !sideChat.streaming}
+        <p class="text-sm text-fainter">
+          Ask a quick question about the current code or which direction to take —
+          it won't touch your main conversation.
+        </p>
+      {/if}
+      {#if conv}
+        <div class="flex flex-col gap-3">
+          {#each conv.messages as m, i (i)}
+            {#if m.role === "user"}
+              <div class="self-end rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg-soft">
+                {m.text}
+              </div>
+            {:else}
+              <div class="border-l-2 border-accent/40 pl-3 text-sm text-fg-soft">
+                <Markdown text={m.text} />
+              </div>
+            {/if}
+          {/each}
+          {#if sideChat.streaming}
+            <div class="border-l-2 border-accent/40 pl-3 text-sm text-fg-soft">
+              {#if sideChat.buffer}
+                <Markdown text={sideChat.buffer} />
+              {:else}
+                <span class="text-fainter">thinking…</span>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+      {#if sideChat.error}
+        <p class="mt-3 rounded border border-danger-border bg-danger-surface px-2 py-1.5 text-xs text-danger">
+          {sideChat.error}
+        </p>
+      {/if}
+    </div>
+
+    <div class="border-t border-border p-3">
+      <div class="flex items-end gap-2 rounded-lg border border-border-strong bg-surface px-2 py-1.5">
+        <textarea
+          bind:value={input}
+          onkeydown={onKeydown}
+          rows="1"
+          placeholder="Ask a side question…"
+          class="max-h-32 flex-1 resize-none bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
+        ></textarea>
+        <button
+          class="rounded p-1 text-muted hover:bg-surface-2 disabled:opacity-40"
+          disabled={!input.trim() || sideChat.streaming}
+          onclick={() => send()}
+          title="Send (Enter)"
+        >
+          <CornerDownLeft class="size-4" />
+        </button>
+      </div>
+    </div>
+  </SheetContent>
+</Sheet>

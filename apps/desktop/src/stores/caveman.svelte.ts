@@ -27,6 +27,13 @@ class CavemanStore {
     // Apply to the live session immediately.
     await api.invoke("threads:runCommand", threadId, next ? `/caveman ${state.level}` : "/caveman off");
   }
+
+  /** Persist the on-level the composer toggle maps to. */
+  async setLevel(level: string): Promise<void> {
+    const state = await api.invoke("app:setCavemanLevel", level);
+    this.enabled = state.enabled;
+    this.level = state.level;
+  }
 }
 
 export const caveman = new CavemanStore();

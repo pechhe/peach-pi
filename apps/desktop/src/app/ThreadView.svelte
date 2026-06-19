@@ -8,9 +8,13 @@
     | { type: "item"; item: TranscriptItem }
     | { type: "group"; id: string; items: ToolItem[] };
   import { transcripts } from "../stores/transcripts.svelte";
+  import { drafts } from "../stores/composer.svelte";
+  import { mapTurns } from "../lib/transcript/turns";
   import { playClick } from "../lib/sound/button-click-sound";
+  import Undo2 from "@lucide/svelte/icons/undo-2";
   import Composer from "./Composer.svelte";
   import GitWidget from "./GitWidget.svelte";
+  import DevTapWidget from "./DevTapWidget.svelte";
   import Workflow from "@lucide/svelte/icons/workflow";
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import BookOpen from "@lucide/svelte/icons/book-open";
@@ -19,6 +23,8 @@
   import { skillViewer } from "../stores/skill-viewer.svelte";
   import Markdown from "./Markdown.svelte";
   import StreamingText from "./StreamingText.svelte";
+  import CopyButton from "./CopyButton.svelte";
+  import { codeCopy } from "../lib/code-copy";
   import WorkingLabel from "./WorkingLabel.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import SubagentCard from "./SubagentCard.svelte";
@@ -29,11 +35,13 @@
   import { terminal } from "../stores/terminal.svelte";
   import FindBar from "./FindBar.svelte";
 
-  let { thread, onSetEnvironment, onOpenGraph, pendingFind, onFindConsumed }: {
+  let { thread, onSetEnvironment, onOpenGraph, onSelectThread, pendingFind, onFindConsumed }: {
     thread: Thread;
     /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
     onSetEnvironment?: (threadId: string, worktree: boolean) => void | Promise<void>;
     onOpenGraph: () => void;
+    /** Navigate to a thread (used by the DevTap install action). */
+    onSelectThread?: (threadId: string) => void;
     /** Set when the search overlay passes a body-match query through. ThreadView
      *  opens its FindBar pre-filled and calls `onFindConsumed` once applied. */
     pendingFind?: string | null;
@@ -336,6 +344,67 @@
     return out;
   });
 
+  // ── Rewind (pi session tree + git file revert) ──────────────────────
+  // pi keeps every turn as an append-only tree; rewinding moves the leaf to
+  // before a turn (the abandoned turns stay in the file, but drop out of the
+  // active branch). When the thread is git-backed, file changes made during
+  // the rewound turns can also be reverted (destructive — see confirm copy).
+  let turns = $state<{ entryId: string; text: string }[]>([]);
+  // Greyed-out preview of the turns just rewound past, scoped to this thread.
+  let rewound = $state<{ threadId: string; keepCount: number; tail: TranscriptItem[] } | null>(null);
+  // Two-click arm so a stray click can't silently drop a turn.
+  let confirmEntryId = $state<string | null>(null);
+  // Revert file changes too (only offered on git-backed threads). Default on.
+  let revertFiles = $state(true);
+  const canRevert = $derived(thread.worktreeDir != null || thread.projectId != null);
+
+  // Refetch the turn list (entry ids) whenever the conversation settles.
+  $effect(() => {
+    void items.length;
+    const id = thread.id;
+    if (thread.status === "running") return;
+    void api.invoke("threads:listTurns", id).then((t) => {
+      if (thread.id === id) turns = t;
+    }).catch(() => {});
+  });
+
+  // Map the kth `user` transcript item to the kth fork entry id (pure helper),
+  // so a rewind button can target the right session-tree node.
+  const turnMap = $derived(mapTurns(items, turns));
+
+  // Clear the greyed preview once it no longer matches the live transcript
+  // (a new message extended the thread, or we switched threads).
+  $effect(() => {
+    const r = rewound;
+    if (r && (r.threadId !== thread.id || items.length !== r.keepCount)) rewound = null;
+  });
+
+  async function doRewind(entryId: string, keepCount: number, revert: boolean) {
+    confirmEntryId = null;
+    const tail = items.slice(keepCount);
+    try {
+      const { editorText } = await api.invoke("threads:rewind", thread.id, entryId, revert);
+      rewound = { threadId: thread.id, keepCount, tail };
+      if (editorText) drafts.update(thread.id, { text: editorText });
+    } catch (err) {
+      console.error("rewind failed", err);
+    }
+  }
+
+  // `/rewind [n]` from the composer — rewind the n-th turn from the end
+  // (reverts files by default on git-backed threads).
+  function rewindFromEnd(n: number): void {
+    if (turns.length === 0) return;
+    const target = turns[Math.max(0, turns.length - Math.max(1, n))];
+    const keepCount = target ? turnMap.keepByEntry.get(target.entryId) : undefined;
+    if (target && keepCount != null) void doRewind(target.entryId, keepCount, canRevert);
+  }
+
+  // The last contained item id of a row (where its rewind button hangs).
+  function rowLastItemId(row: Row): string {
+    return row.type === "group" ? row.items[row.items.length - 1]!.id : row.item.id;
+  }
+
   // "bash ×4 · read ×2" — ordered by first appearance.
   function toolBreakdown(group: ToolItem[]): string {
     const counts = new Map<string, number>();
@@ -362,8 +431,11 @@
     const el = scrollEl;
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (gap <= NEAR_BOTTOM) scrolledUp = false;
-    else if (el.scrollTop < lastScrollTop) scrolledUp = true;
+    // Direction wins over distance: an upward nudge counts as intent even
+    // inside the NEAR_BOTTOM band, otherwise a slow scroll up never escapes
+    // the band — onScroll keeps re-arming the pin and snaps the user back.
+    if (el.scrollTop < lastScrollTop) scrolledUp = true;
+    else if (gap <= NEAR_BOTTOM) scrolledUp = false;
     lastScrollTop = el.scrollTop;
   }
 
@@ -455,6 +527,9 @@
     {/each}
     <div class="ml-auto flex items-center gap-1">
       <GitWidget {thread} />
+      {#if thread.projectId}
+        <DevTapWidget {thread} {onSelectThread} />
+      {/if}
       {#if thread.projectId}
         <button
           class="rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft"
@@ -591,20 +666,35 @@
             {/if}
           </div>
         {:else if item.kind === "assistant"}
-          <div class="item-enter text-[13.5px] leading-relaxed text-fg select-text" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
+          <!-- Guard against a stuck cursor: a dropped/late message_end leaves
+               item.streaming true forever. The thread can only have one open
+               assistant message, so once the thread is no longer running no
+               item is genuinely streaming. -->
+          {@const isStreaming = item.streaming && thread.status === "running"}
+          <!-- Thinking phase: still streaming with reasoning but no answer text
+               yet. The cursor belongs next to whatever is actively growing, so
+               it sits inside the thinking block here and after the answer once
+               text begins. -->
+          {@const inThinking = isStreaming && !!item.thinking && !item.text}
+          <div class="item-enter assistant-message group/assistant text-[13.5px] leading-relaxed text-fg select-text" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId} use:codeCopy={!isStreaming}>
             {#if item.thinking}
-              <details class="group mb-1 text-xs text-faint" open={item.streaming && !item.text}>
+              <details class="group mb-1 text-xs text-faint" open={isStreaming && !item.text}>
                 <summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">
                   <span class="mr-1 inline-block transition-transform group-open:rotate-90">›</span>Thinking
                 </summary>
                 <div class="mt-1.5 border-l-2 border-border pl-3 leading-relaxed text-faint">
-                  <StreamingText text={item.thinking} streaming={item.streaming} plain />
+                  <StreamingText text={item.thinking} streaming={isStreaming} plain revealKey={`${item.id}:thinking`} />{#if inThinking}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-faint"></span>{/if}
                 </div>
               </details>
             {/if}
-            <StreamingText text={item.text} streaming={item.streaming} />{#if item.streaming}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-fg-soft"></span>{/if}
+            <StreamingText text={item.text} streaming={isStreaming} revealKey={`${item.id}:text`} />{#if isStreaming && !inThinking}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-fg-soft"></span>{/if}
             {#if item.error}
               <p class="mt-2 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-1.5 text-xs text-danger">{item.error}</p>
+            {/if}
+            {#if !isStreaming && item.text}
+              <div class="assistant-actions">
+                <CopyButton text={item.text} />
+              </div>
             {/if}
           </div>
         {:else if item.kind === "tool"}
@@ -669,7 +759,55 @@
             <p class="item-enter text-center text-xs text-faint italic" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>{item.text}</p>
           {/if}
         {/if}
+        {#if thread.status !== "running"}
+          {@const turnEnd = turnMap.endById.get(rowLastItemId(row))}
+          {#if turnEnd}
+            <div class="rewind-row">
+              {#if confirmEntryId === turnEnd.entryId}
+                {#if canRevert}
+                  <label
+                    class="rewind-revert"
+                    title="Reverts the working tree to its pre-turn state — discards changes made during this turn, including new files (cannot be undone)"
+                  >
+                    <input type="checkbox" bind:checked={revertFiles} data-testid="rewind-revert" />
+                    revert files
+                  </label>
+                {/if}
+                <button
+                  type="button"
+                  class="rewind-btn rewind-btn--confirm"
+                  onclick={() => doRewind(turnEnd.entryId, turnEnd.keepCount, canRevert && revertFiles)}
+                  data-testid="rewind-confirm"
+                  title={canRevert && revertFiles
+                    ? "Conversation rewinds and files revert — cannot be undone"
+                    : "Conversation rewinds; files on disk are left as-is"}
+                >
+                  <Undo2 size={12} /> Rewind this turn
+                </button>
+                <button type="button" class="rewind-btn rewind-btn--ghost" onclick={() => (confirmEntryId = null)}>Cancel</button>
+              {:else}
+                <button
+                  type="button"
+                  class="rewind-btn"
+                  onclick={() => (confirmEntryId = turnEnd.entryId)}
+                  title="Rewind the conversation to before this turn"
+                  data-testid="rewind-turn"
+                >
+                  <Undo2 size={12} /> Rewind
+                </button>
+              {/if}
+            </div>
+          {/if}
+        {/if}
       {/each}
+      {#if rewound && rewound.threadId === thread.id && rewound.tail.length > 0}
+        <div class="rewound-divider"><span>Rewound · {rewound.tail.length} item{rewound.tail.length === 1 ? "" : "s"} dropped from context</span></div>
+        <div class="rewound-tail" aria-hidden="true">
+          {#each rewound.tail as it (it.id)}
+            <div class="rewound-item">{itemText(it).slice(0, 280) || "(…)"}</div>
+          {/each}
+        </div>
+      {/if}
       {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming)}
         <div class="item-enter text-[13px]">
           <WorkingLabel label="Working…" />
@@ -704,6 +842,7 @@
           type="button"
           class="new-thread__environment"
           aria-pressed={isWorktree}
+          onmousedown={(e) => e.preventDefault()}
           onclick={toggleEnvironment}
           data-testid="environment-toggle"
           title={isWorktree
@@ -714,7 +853,7 @@
         </button>
       </div>
     {/if}
-    <Composer {thread} />
+    <Composer {thread} onRewind={rewindFromEnd} />
   </div>
 </div>
 
@@ -742,6 +881,74 @@
     outline: 2px solid oklch(0.6 0.16 52 / 0.7);
     outline-offset: 3px;
     border-radius: 0.5rem;
+  }
+  /* Per-turn rewind affordance: faint, only firm on hover/confirm. */
+  .rewind-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.375rem;
+    margin-top: -0.25rem;
+    opacity: 0;
+    transition: opacity 0.12s ease-out;
+  }
+  .rewind-row:hover,
+  .rewind-row:focus-within {
+    opacity: 1;
+  }
+  .rewind-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 0.5rem;
+    padding: 0.125rem 0.5rem;
+    font-size: 11px;
+    color: var(--color-fainter, oklch(0.6 0 0));
+    transition: background-color 0.12s, color 0.12s;
+  }
+  .rewind-btn:hover {
+    background: var(--color-surface, oklch(0.2 0 0 / 0.4));
+    color: var(--color-fg-soft, inherit);
+  }
+  .rewind-btn--confirm {
+    color: oklch(0.6 0.16 52);
+  }
+  .rewind-revert {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 11px;
+    color: var(--color-fainter, oklch(0.6 0 0));
+    cursor: pointer;
+  }
+  .rewind-revert input {
+    accent-color: oklch(0.6 0.16 52);
+  }
+  .rewind-divider,
+  .rewound-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0.75rem 0 0.25rem;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-fainter, oklch(0.6 0 0));
+  }
+  .rewound-tail {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    opacity: 0.4;
+    filter: grayscale(0.6);
+    pointer-events: none;
+  }
+  .rewound-item {
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--color-faint, oklch(0.65 0 0));
+    white-space: pre-wrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .animate-fade-in {
     animation: fadeIn 0.15s ease-out;

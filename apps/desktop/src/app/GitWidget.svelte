@@ -39,10 +39,12 @@
     if (open) files = await api.invoke("git:changedFiles", thread.id);
   }
 
-  // Refresh on thread switch and whenever a run finishes.
+  // Refresh on thread switch and on every status change (incl. while running,
+  // so the widget stays visible). Tracks id + status; not a poll.
   $effect(() => {
     void thread.id;
-    if (thread.status !== "running") void refresh();
+    void thread.status;
+    void refresh();
   });
 
   async function toggle() {

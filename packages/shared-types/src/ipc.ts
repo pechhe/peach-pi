@@ -3,6 +3,7 @@ import type {
   AutoCompactSettings,
   CavemanState,
   CommandInfo,
+  DevTapProjectStatus,
   Automation,
   AutomationRun,
   ExtensionWidgetPayload,
@@ -14,6 +15,7 @@ import type {
   GitPushLocalResult,
   GraphifyStatus,
   SubagentAgentInfo,
+  SubagentAgentPatch,
   ExtensionStatusPayload,
   ExtensionUiRequest,
   ImagePayload,
@@ -25,13 +27,16 @@ import type {
   QueueState,
   ResourceInspection,
   SessionMeta,
+  SideConversation,
+  SideDeltaPayload,
+  SideDonePayload,
   ThinkingLevel,
   Thread,
   ThreadId,
   ThreadSearchHit,
   ToolMode,
 } from "./entities.ts";
-import type { TranscriptDelta, TranscriptItem } from "./transcript.ts";
+import type { TranscriptDelta, TranscriptSnapshot } from "./transcript.ts";
 
 /**
  * Typed IPC contract registry (pattern carried over from peche-pi's
@@ -72,12 +77,14 @@ export const ipcContracts = {
   // app
   "app:getSnapshot": invoke<[], AppSnapshot>(),
   "app:ping": invoke<[], { pong: true; version: string }>(),
-  /** Persist selection so the overlay window knows the prompt target. */
+  /** Persist selection so the HUD window knows the prompt target. */
   "app:setSelectedThread": invoke<[threadId: ThreadId | null], void>(),
   /** Read caveman compression state from ~/.pi/agent/caveman.json. */
   "app:getCavemanState": invoke<[], CavemanState>(),
   /** Enable/disable caveman compression for future sessions. */
   "app:setCavemanEnabled": invoke<[enabled: boolean], CavemanState>(),
+  /** Set the caveman on-level the composer toggle maps to (e.g. "full", "ultra"). */
+  "app:setCavemanLevel": invoke<[level: string], CavemanState>(),
   /** All auth-configured models (global, not session-scoped). */
   "app:listModels": invoke<[], ModelInfo[]>(),
   /** Read the configured "utility" model for background LLM tasks (titles/commits). */
@@ -153,13 +160,17 @@ export const ipcContracts = {
   "threads:promoteFollowUpToSteer": invoke<[threadId: ThreadId, index: number], string | null>(),
   /** Pop the last queued follow-up message and return its text (for recall to composer). */
   "threads:popLastFollowUp": invoke<[threadId: ThreadId], string | null>(),
+  /** Delete a queued follow-up message by index. */
+  "threads:deleteFollowUp": invoke<[threadId: ThreadId, index: number], void>(),
+  /** Delete a queued steer message by index. */
+  "threads:deleteSteer": invoke<[threadId: ThreadId, index: number], void>(),
   /** Execute an extension/slash command in the live session (e.g. "/caveman"). */
   "threads:runCommand": invoke<[threadId: ThreadId, command: string], void>((id, cmd) => {
     requireNonEmptyString(id, "threadId");
     requireNonEmptyString(cmd, "command");
   }),
   "threads:abort": invoke<[threadId: ThreadId], void>(),
-  "threads:getTranscript": invoke<[threadId: ThreadId], TranscriptItem[]>(),
+  "threads:getTranscript": invoke<[threadId: ThreadId], TranscriptSnapshot>(),
   /** Full-text search across thread bodies + titles. */
   "threads:search": invoke<[query: string], ThreadSearchHit[]>((q) =>
     requireNonEmptyString(q, "query"),
@@ -184,6 +195,42 @@ export const ipcContracts = {
   "threads:compact": invoke<[threadId: ThreadId], void>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
+
+  // side conversations (`/btw` quick side chat; reads main convo, never writes)
+  /** Start a fresh side conversation for a thread. modelOverride null = use the
+   *  thread's current session model. Returns the created (empty) conversation. */
+  "side:start": invoke<
+    [threadId: ThreadId, modelOverride?: ModelInfo | null],
+    SideConversation
+  >((id) => requireNonEmptyString(id, "threadId")),
+  /** Ask a question in a side conversation; answer streams via event:sideDelta. */
+  "side:ask": invoke<[convId: string, question: string], void>((id, q) => {
+    requireNonEmptyString(id, "convId");
+    requireNonEmptyString(q, "question");
+  }),
+  /** All side conversations for a thread (newest first) — the btw history. */
+  "side:list": invoke<[threadId: ThreadId], SideConversation[]>(),
+  /** Load one side conversation (to reopen + continue it). */
+  "side:get": invoke<[convId: string], SideConversation | null>(),
+  /** Delete a side conversation from the history. */
+  "side:delete": invoke<[convId: string], void>((id) =>
+    requireNonEmptyString(id, "convId"),
+  ),
+
+  /** User turns available as rewind targets (session-tree entry ids, branch order). */
+  "threads:listTurns": invoke<[threadId: ThreadId], { entryId: string; text: string }[]>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
+  /** Rewind the conversation to before a turn. Returns the rewound prompt text
+   *  (for refilling the composer). When `revertFiles` is set and a git snapshot
+   *  exists, the working tree is reverted to its pre-turn state (destructive). */
+  "threads:rewind": invoke<
+    [threadId: ThreadId, entryId: string, revertFiles?: boolean],
+    { editorText?: string }
+  >((id, entryId) => {
+    requireNonEmptyString(id, "threadId");
+    requireNonEmptyString(entryId, "entryId");
+  }),
 
   // automations (scheduled prompts)
   "automations:create": invoke<
@@ -211,6 +258,10 @@ export const ipcContracts = {
 
   // subagents (pi-subagents extension roster)
   "subagents:listAgents": invoke<[projectId: string | null], SubagentAgentInfo[]>(),
+  "subagents:updateAgent": invoke<
+    [filePath: string, patch: SubagentAgentPatch],
+    SubagentAgentInfo
+  >((filePath) => requireNonEmptyString(filePath, "filePath")),
 
   // git (per-thread working directory)
   "git:info": invoke<[threadId: ThreadId], GitInfo>((id) => requireNonEmptyString(id, "threadId")),
@@ -233,9 +284,21 @@ export const ipcContracts = {
   "terminal:resize": invoke<[threadId: ThreadId, cols: number, rows: number], void>(),
   "terminal:kill": invoke<[threadId: ThreadId], void>(),
 
-  // overlay quick-composer window
-  "overlay:hide": invoke<[], void>(),
-  "overlay:toggle": invoke<[], void>(),
+  // HUD — persistent floating composer window
+  "hud:hide": invoke<[], void>(),
+  "hud:toggle": invoke<[], void>(),
+  /** Point the HUD at a thread (independent of the Main Window selection). */
+  "hud:setThread": invoke<[threadId: ThreadId | null], void>(),
+  /** Start a new chat and point the HUD at it. Returns the new thread. */
+  "hud:newChat": invoke<[], Thread>(),
+  /** Grow/shrink the HUD window for the expanded chat (composer stays anchored). */
+  "hud:setExpanded": invoke<[expanded: boolean], void>(),
+  /** Toggle click-through so transparent gap/corners pass clicks to the app behind. */
+  "hud:setClickThrough": invoke<[ignore: boolean], void>(),
+  /** Release HUD keyboard focus back to the app behind (mouse left the window). */
+  "hud:releaseFocus": invoke<[], void>(),
+  /** Persist the opt-in "auto-reveal chat when a thread finishes" setting. */
+  "hud:setAutoReveal": invoke<[on: boolean], void>(),
 
   // resources (skills / extensions / prompts visible for a project)
   "resources:inspect": invoke<[projectId: string | null], ResourceInspection>(),
@@ -262,6 +325,25 @@ export const ipcContracts = {
   "threads:markToTest": invoke<[threadId: ThreadId, note?: string], void>(),
   "threads:unmarkToTest": invoke<[threadId: ThreadId], void>(),
 
+  /** Is the DevTap runtime tap installed in this project? */
+  "devtap:projectStatus": invoke<[projectId: string], DevTapProjectStatus>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+
+  // devtap (renderer → main; dev-only runtime tap). Main drops these unless
+  // DEV_TAP=1, so this channel is inert in normal production.
+  "devtap:report": invoke<
+    [
+      entry: {
+        event: string;
+        message?: string;
+        payload?: unknown;
+        error?: { name: string; message: string; stack?: string };
+      },
+    ],
+    void
+  >(),
+
   // events (main → renderer)
   "event:snapshot": event<AppSnapshot>(),
   "event:threadChanged": event<Thread>(),
@@ -271,8 +353,12 @@ export const ipcContracts = {
   "event:extensionUi": event<ExtensionUiRequest>(),
   "event:notice": event<NoticePayload>(),
   "event:extensionStatus": event<ExtensionStatusPayload>(),
+  "event:sideDelta": event<SideDeltaPayload>(),
+  "event:sideDone": event<SideDonePayload>(),
   /** Notification click — main window should select this thread. */
   "event:focusThread": event<ThreadId>(),
+  /** A run finished while the HUD is up — renderer turns this into an ambient cue. */
+  "event:hudFinish": event<{ threadId: ThreadId }>(),
   "event:extensionWidget": event<ExtensionWidgetPayload>(),
   "event:terminalData": event<{ threadId: ThreadId; data: string }>(),
   "event:terminalExit": event<{ threadId: ThreadId; exitCode: number }>(),

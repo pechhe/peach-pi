@@ -67,6 +67,16 @@ export type TranscriptOp =
 export interface TranscriptDelta {
   threadId: string;
   ops: TranscriptOp[];
+  /** Monotonic flush counter. Lets a renderer that backfills via
+   *  `threads:getTranscript` drop deltas already folded into the snapshot. */
+  seq: number;
+}
+
+/** Full-history backfill: authoritative items plus the flush boundary they
+ *  reflect. Deltas with `seq > seq` must be replayed on top of `items`. */
+export interface TranscriptSnapshot {
+  items: TranscriptItem[];
+  seq: number;
 }
 
 /** Apply ops to an item list (pure; shared by renderer store and tests). */

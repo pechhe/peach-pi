@@ -9,14 +9,18 @@ const packagedBinary = path.resolve(
   "../../out/Peach Pi-darwin-arm64/Peach Pi.app/Contents/MacOS/Peach Pi",
 );
 
-/** Launch the packaged app with an isolated userData dir. */
-export async function launchApp(): Promise<ElectronApplication> {
+/** A fresh isolated userData dir (reusable across relaunches in one test). */
+export function makeUserData(): string {
+  // Space in the dir name mirrors production ("~/Library/Application Support/
+  // Peach Pi") so path-quoting bugs surface in tests instead of only at runtime.
+  return mkdtempSync(path.join(tmpdir(), "peach pi-test-"));
+}
+
+/** Launch the packaged app with an isolated userData dir. Pass a dir to reuse one. */
+export async function launchApp(userData = makeUserData()): Promise<ElectronApplication> {
   if (!existsSync(packagedBinary)) {
     throw new Error(`Packaged app missing — run \`pnpm package\` first (${packagedBinary})`);
   }
-  // Space in the dir name mirrors production ("~/Library/Application Support/
-  // Peach Pi") so path-quoting bugs surface in tests instead of only at runtime.
-  const userData = mkdtempSync(path.join(tmpdir(), "peach pi-test-"));
   return _electron.launch({
     executablePath: packagedBinary,
     args: [`--user-data-dir=${userData}`],

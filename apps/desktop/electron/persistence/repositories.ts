@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto";
-import type { Automation, AutomationRun, Project, Thread, ThreadTag, UiState } from "@peach-pi/shared-types";
+import type {
+  Automation,
+  AutomationRun,
+  ModelInfo,
+  Project,
+  SideConversation,
+  SideMessage,
+  Thread,
+  ThreadTag,
+  UiState,
+} from "@peach-pi/shared-types";
 import type { AppDb } from "./db.ts";
 
 interface ProjectRow {
@@ -317,6 +327,77 @@ export class AutomationRepo {
   }
 }
 
+interface SideConversationRow {
+  id: string;
+  thread_id: string;
+  title: string;
+  model_provider: string | null;
+  model_id: string | null;
+  model_name: string | null;
+  messages: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const toSideConversation = (r: SideConversationRow): SideConversation => ({
+  id: r.id,
+  threadId: r.thread_id,
+  title: r.title,
+  model:
+    r.model_provider && r.model_id
+      ? { provider: r.model_provider, id: r.model_id, name: r.model_name ?? r.model_id }
+      : null,
+  messages: JSON.parse(r.messages) as SideMessage[],
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+export class SideChatRepo {
+  private db: AppDb;
+  constructor(db: AppDb) {
+    this.db = db;
+  }
+
+  create(threadId: string, model: ModelInfo | null): SideConversation {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        "INSERT INTO side_conversations (id, thread_id, title, model_provider, model_id, model_name, messages, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .run(id, threadId, "", model?.provider ?? null, model?.id ?? null, model?.name ?? null, "[]", now, now);
+    return this.get(id)!;
+  }
+
+  get(id: string): SideConversation | null {
+    const row = this.db.prepare("SELECT * FROM side_conversations WHERE id = ?").get(id) as
+      | SideConversationRow
+      | undefined;
+    return row ? toSideConversation(row) : null;
+  }
+
+  listForThread(threadId: string): SideConversation[] {
+    const rows = this.db
+      .prepare("SELECT * FROM side_conversations WHERE thread_id = ? ORDER BY created_at DESC")
+      .all(threadId) as unknown as SideConversationRow[];
+    return rows.map(toSideConversation);
+  }
+
+  setMessages(id: string, messages: SideMessage[]): void {
+    this.db
+      .prepare("UPDATE side_conversations SET messages = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(messages), new Date().toISOString(), id);
+  }
+
+  setTitle(id: string, title: string): void {
+    this.db.prepare("UPDATE side_conversations SET title = ? WHERE id = ?").run(title, id);
+  }
+
+  delete(id: string): void {
+    this.db.prepare("DELETE FROM side_conversations WHERE id = ?").run(id);
+  }
+}
+
 export class KvRepo {
   private db: AppDb;
   constructor(db: AppDb) {
@@ -345,6 +426,9 @@ export const defaultUiState: UiState = {
   activeView: "new-thread",
   selectedThreadId: null,
   collapsedProjects: [],
+  hudThreadId: null,
+  hudPosition: null,
+  hudAutoRevealOnFinish: false,
 };
 
 /** KV key for the configured "utility" model (background LLM tasks: titles/commits). */

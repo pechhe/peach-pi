@@ -13,9 +13,14 @@
     type StreamSpeed,
   } from "../lib/stream-reveal.svelte";
   import { api } from "../lib/ipc";
+  import { Select } from "../components/ui/select";
   import DoneBurstPlayground from "./DoneBurstPlayground.svelte";
   import { autoCompact } from "../stores/auto-compact.svelte";
+  import { caveman } from "../stores/caveman.svelte";
   import { piSettings } from "../stores/pi-settings.svelte";
+  import { snapshot } from "../stores/snapshot.svelte";
+
+  const hudAutoReveal = $derived(snapshot.current?.ui.hudAutoRevealOnFinish ?? false);
 
   let muted = $state(soundsMuted());
   let doneVariant = $state(getDoneSoundVariant() as DoneSoundVariant);
@@ -60,6 +65,7 @@
     selectedKey = utilityModel ? keyOf(utilityModel) : "";
     await autoCompact.load();
     await piSettings.load();
+    await caveman.load();
   });
 
   function saveAutoCompactPercent(e: Event) {
@@ -80,8 +86,8 @@
     if (!muted) playButtonClick("click");
   }
 
-  function pickDoneVariant(e: Event) {
-    const v = (e.currentTarget as HTMLSelectElement).value as DoneSoundVariant;
+  function pickDoneVariant(value: string) {
+    const v = value as DoneSoundVariant;
     doneVariant = v;
     setDoneSoundVariant(v);
     playDoneSound(v); // live preview
@@ -91,8 +97,7 @@
     playDoneSound(doneVariant);
   }
 
-  async function pickUtilityModel(e: Event) {
-    const key = (e.currentTarget as HTMLSelectElement).value;
+  async function pickUtilityModel(key: string) {
     selectedKey = key;
     const model = key ? byKey.get(key) ?? null : null;
     utilityModel = await api.invoke("app:setUtilityModel", model);
@@ -114,12 +119,16 @@
     void piSettings.patch({ retry: { enabled: piSettings.retryEnabled, maxRetries: piSettings.retryMaxRetries, baseDelayMs: ms, provider: { timeoutMs: null, maxRetries: 0, maxRetryDelayMs: 60000 } } });
   }
 
-  function pickSteeringMode(e: Event) {
-    void piSettings.patch({ steeringMode: (e.currentTarget as HTMLSelectElement).value as PiSettings["steeringMode"] });
+  function pickSteeringMode(value: string) {
+    void piSettings.patch({ steeringMode: value as PiSettings["steeringMode"] });
   }
 
-  function pickFollowUpMode(e: Event) {
-    void piSettings.patch({ followUpMode: (e.currentTarget as HTMLSelectElement).value as PiSettings["followUpMode"] });
+  function pickFollowUpMode(value: string) {
+    void piSettings.patch({ followUpMode: value as PiSettings["followUpMode"] });
+  }
+
+  function pickCavemanLevel(value: string) {
+    void caveman.setLevel(value);
   }
 </script>
 
@@ -135,17 +144,14 @@
             <h2 class="text-sm text-fg">Theme</h2>
             <p class="text-xs text-faint">Applies to every window.</p>
           </div>
-          <select
-            class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+          <Select
+            class="rounded-md bg-surface-2"
             value={theme.current}
-            onchange={(e) => theme.set((e.currentTarget as HTMLSelectElement).value)}
+            onValueChange={(v) => theme.set(v)}
+            items={THEMES.map((t) => ({ value: t.id, label: t.label }))}
             data-testid="theme-select"
             aria-label="Theme"
-          >
-            {#each THEMES as t (t.id)}
-              <option value={t.id}>{t.label}</option>
-            {/each}
-          </select>
+          />
         </div>
       </section>
 
@@ -155,17 +161,49 @@
             <h2 class="text-sm text-fg">Composer</h2>
             <p class="text-xs text-faint">Light (silver) or dark (anodized) chassis. Auto follows your theme.</p>
           </div>
-          <select
-            class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+          <Select
+            class="rounded-md bg-surface-2"
             value={theme.composer}
-            onchange={(e) => theme.setComposer((e.currentTarget as HTMLSelectElement).value as ComposerStyle)}
+            onValueChange={(v) => theme.setComposer(v as ComposerStyle)}
+            items={theme.composerOptions.map((opt) => ({ value: opt.id, label: opt.label }))}
             data-testid="composer-style-select"
             aria-label="Composer appearance"
-          >
-            {#each theme.composerOptions as opt (opt.id)}
-              <option value={opt.id}>{opt.label}</option>
-            {/each}
-          </select>
+          />
+        </div>
+      </section>
+
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-sm text-fg">Caveman intensity</h2>
+            <p class="text-xs text-faint">Level the composer caveman toggle maps to when on.</p>
+          </div>
+          <Select
+            class="rounded-md bg-surface-2"
+            value={caveman.level}
+            onValueChange={pickCavemanLevel}
+            items={[
+              { value: "full", label: "Full" },
+              { value: "ultra", label: "Ultra" },
+            ]}
+            data-testid="caveman-level-select"
+            aria-label="Caveman intensity"
+          />
+        </div>
+      </section>
+
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-sm text-fg">HUD auto-reveal</h2>
+            <p class="text-xs text-faint">Expand the HUD chat when its own thread finishes.</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={hudAutoReveal}
+            onchange={(e) => api.invoke("hud:setAutoReveal", e.currentTarget.checked)}
+            data-testid="settings-hud-auto-reveal"
+          />
         </div>
       </section>
 
@@ -184,28 +222,22 @@
             <p class="text-xs text-faint">How assistant replies reveal as they stream in.</p>
           </div>
           <div class="flex flex-col items-end gap-2">
-            <select
-              class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+            <Select
+              class="rounded-md bg-surface-2"
               value={streamReveal.look}
-              onchange={(e) => streamReveal.setLook((e.currentTarget as HTMLSelectElement).value as StreamLook)}
+              onValueChange={(v) => streamReveal.setLook(v as StreamLook)}
+              items={STREAM_LOOKS.map((l) => ({ value: l.id, label: l.label }))}
               data-testid="stream-look-select"
               aria-label="Reveal look"
-            >
-              {#each STREAM_LOOKS as l (l.id)}
-                <option value={l.id}>{l.label}</option>
-              {/each}
-            </select>
-            <select
-              class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+            />
+            <Select
+              class="rounded-md bg-surface-2"
               value={streamReveal.speed}
-              onchange={(e) => streamReveal.setSpeed((e.currentTarget as HTMLSelectElement).value as StreamSpeed)}
+              onValueChange={(v) => streamReveal.setSpeed(v as StreamSpeed)}
+              items={STREAM_SPEEDS.map((s) => ({ value: s.id, label: s.label }))}
               data-testid="stream-speed-select"
               aria-label="Reveal speed"
-            >
-              {#each STREAM_SPEEDS as s (s.id)}
-                <option value={s.id}>{s.label}</option>
-              {/each}
-            </select>
+            />
           </div>
         </div>
       </section>
@@ -240,17 +272,14 @@
             <p class="text-xs text-faint">Pick a celebration cue for when a thread finishes, then preview it.</p>
           </div>
           <div class="flex items-center gap-2">
-            <select
-              class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+            <Select
+              class="rounded-md bg-surface-2"
               value={doneVariant}
-              onchange={pickDoneVariant}
+              onValueChange={pickDoneVariant}
+              items={DONE_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
               data-testid="done-sound-select"
               aria-label="Done chime"
-            >
-              {#each DONE_SOUND_OPTIONS as o (o.id)}
-                <option value={o.id}>{o.label}</option>
-              {/each}
-            </select>
+            />
             <button
               class="rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
               onclick={previewDone}
@@ -377,29 +406,31 @@
         <div class="mt-3 flex flex-col gap-3">
           <label class="flex items-center justify-between gap-4">
             <span class="text-xs text-fg">Steering mode</span>
-            <select
-              class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+            <Select
+              class="rounded-md bg-surface-2"
               value={piSettings.steeringMode}
-              onchange={pickSteeringMode}
+              onValueChange={pickSteeringMode}
+              items={[
+                { value: "one-at-a-time", label: "One at a time" },
+                { value: "all", label: "All" },
+              ]}
               data-testid="steering-mode-select"
               aria-label="Steering mode"
-            >
-              <option value="one-at-a-time">One at a time</option>
-              <option value="all">All</option>
-            </select>
+            />
           </label>
           <label class="flex items-center justify-between gap-4">
             <span class="text-xs text-fg">Follow-up mode</span>
-            <select
-              class="rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+            <Select
+              class="rounded-md bg-surface-2"
               value={piSettings.followUpMode}
-              onchange={pickFollowUpMode}
+              onValueChange={pickFollowUpMode}
+              items={[
+                { value: "one-at-a-time", label: "One at a time" },
+                { value: "all", label: "All" },
+              ]}
               data-testid="followup-mode-select"
               aria-label="Follow-up mode"
-            >
-              <option value="one-at-a-time">One at a time</option>
-              <option value="all">All</option>
-            </select>
+            />
           </label>
         </div>
       </section>
@@ -418,22 +449,19 @@
             composer). Leave on “Default” to auto-pick.
           </p>
         </div>
-        <select
-          class="mt-3 w-full rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+        <Select
+          class="mt-3 w-full rounded-md bg-surface-2"
           value={selectedKey}
-          onchange={pickUtilityModel}
+          onValueChange={pickUtilityModel}
+          items={[
+            { value: "", label: "Default (auto-pick)" },
+            ...grouped.flatMap((group) =>
+              group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider })),
+            ),
+          ]}
           data-testid="utility-model-select"
           aria-label="Utility model"
-        >
-          <option value="">Default (auto-pick)</option>
-          {#each grouped as group (group.provider)}
-            <optgroup label={group.provider}>
-              {#each group.items as m (keyOf(m))}
-                <option value={keyOf(m)}>{m.name}</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
+        />
       </section>
     </div>
   </div>

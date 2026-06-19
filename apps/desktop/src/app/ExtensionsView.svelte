@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Project, ResourceInspection } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
+  import { Select } from "../components/ui/select";
 
   let { projects, projectId }: { projects: Project[]; projectId: string | null } = $props();
 
@@ -18,16 +19,12 @@
 <main class="flex h-full flex-1 flex-col" data-testid="extensions-view">
   <header class="titlebar-drag flex h-12 shrink-0 items-center gap-3 px-6">
     <h1 class="text-sm font-medium text-fg-soft">Extensions</h1>
-    <select
-      class="rounded border border-border-strong bg-surface px-2 py-0.5 text-xs text-fg-soft outline-none"
+    <Select
+      class="rounded bg-surface px-2 py-0.5 text-xs"
       value={scope ?? ""}
-      onchange={(e) => (scope = e.currentTarget.value || null)}
-    >
-      <option value="">Global only</option>
-      {#each projects as p (p.id)}
-        <option value={p.id}>{p.name}</option>
-      {/each}
-    </select>
+      onValueChange={(v) => (scope = v || null)}
+      items={[{ value: "", label: "Global only" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+    />
   </header>
 
   <div class="flex-1 overflow-y-auto px-6 pb-6">

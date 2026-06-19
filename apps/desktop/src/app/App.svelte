@@ -9,6 +9,7 @@
   import { queues } from "../stores/composer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
+  import { sideChat } from "../stores/side-chat.svelte";
   import { preloadSounds } from "../lib/sound/button-click-sound";
   import { playDoneSound } from "../lib/sound/done-sound";
   import Sidebar from "./Sidebar.svelte";
@@ -27,6 +28,7 @@
   import ImageLightbox from "./ImageLightbox.svelte";
   import SkillDialog from "./SkillDialog.svelte";
   import Toasts from "./Toasts.svelte";
+  import SidePanel from "./SidePanel.svelte";
   import PiHealthBanner from "./PiHealthBanner.svelte";
   import { Agentation } from "sv-agentation";
   const agentationProps = import.meta.env.DEV
@@ -217,6 +219,7 @@
     queues.init();
     sessionMetas.init();
     extensionUi.init();
+    sideChat.init();
     void snapshot.init();
     preloadSounds();
   });
@@ -290,6 +293,7 @@
         thread={selectedThread}
         onSetEnvironment={setThreadEnvironment}
         onOpenGraph={() => openView("graph")}
+        onSelectThread={selectThread}
         pendingFind={pendingFindQuery}
         onFindConsumed={() => (pendingFindQuery = null)}
       />
@@ -328,6 +332,7 @@
   <ImageLightbox />
   <SkillDialog />
   <Toasts {sidebarWidth} />
+  <SidePanel />
   <PiHealthBanner />
 </div>
 

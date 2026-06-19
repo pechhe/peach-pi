@@ -137,6 +137,13 @@ body {
   height: 100%;
 }
 
+/* HUD window: transparent overlay — only the composer + chat card paint. */
+html.hud-window,
+html.hud-window body,
+html.hud-window #app {
+  background: transparent;
+}
+
 /* macOS hiddenInset titlebar drag region */
 .titlebar-drag {
   -webkit-app-region: drag;
@@ -297,6 +304,67 @@ button:active:not(:disabled) {
   font-size: 0.8rem;
   line-height: 1.6;
   color: var(--color-fg-soft);
+}
+
+/* Per-code-block copy button, injected by the `codeCopy` action. */
+.code-copy-host {
+  position: relative;
+}
+.code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: var(--color-muted);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  cursor: pointer;
+}
+.code-copy-host:hover .code-copy-btn,
+.code-copy-btn:focus-visible {
+  opacity: 1;
+}
+.code-copy-btn:hover {
+  color: var(--color-fg);
+  background: var(--color-surface);
+}
+.code-copy-btn.is-copied {
+  opacity: 1;
+  color: var(--color-fg);
+}
+
+/* Message-level copy button (assistant responses). */
+.assistant-actions {
+  display: flex;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.assistant-message:hover .assistant-actions,
+.assistant-actions:focus-within {
+  opacity: 1;
+}
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  color: var(--color-muted);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  cursor: pointer;
+}
+.copy-btn:hover {
+  color: var(--color-fg);
+  background: var(--color-surface-2);
 }
 .md blockquote {
   margin: 0.65em 0;

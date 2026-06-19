@@ -22,13 +22,16 @@
   import { caveman } from "../stores/caveman.svelte";
   import { autoCompact } from "../stores/auto-compact.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
+  import { sideChat } from "../stores/side-chat.svelte";
   import { markAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSelector from "./composer/ModelSelector.svelte";
 
-  let { thread }: {
+  let { thread, onRewind }: {
     thread: Thread;
+    /** `/rewind [n]` from the composer — rewind the n-th turn from the end. */
+    onRewind?: (n: number) => void;
   } = $props();
 
   const draft = $derived(drafts.for(thread.id));
@@ -64,6 +67,13 @@
   function toggleCaveman() {
     playClick("down");
     void caveman.toggle(thread.id);
+  }
+
+  // Placeholder slot — same device button as Caveman, no real effect yet.
+  let placeholderOn = $state(false);
+  function togglePlaceholder() {
+    playClick("down");
+    placeholderOn = !placeholderOn;
   }
 
   async function pickModel(provider: string, id: string) {
@@ -130,7 +140,14 @@
   const slashMatches = $derived(
     slashQuery === null
       ? []
-      : commands.filter((c) => c.name.toLowerCase().startsWith(slashQuery)).slice(0, 8),
+      : commands
+          .filter((c) => c.name.toLowerCase().includes(slashQuery))
+          .sort((a, b) => {
+            const ap = a.name.toLowerCase().startsWith(slashQuery) ? 0 : 1;
+            const bp = b.name.toLowerCase().startsWith(slashQuery) ? 0 : 1;
+            return ap - bp;
+          })
+          .slice(0, 8),
   );
 
   $effect(() => {
@@ -254,6 +271,25 @@
   async function submit(asSteer = false) {
     const raw = draft.text.trim();
     if (!raw && draft.attachments.length === 0 && !draft.command) return;
+    // `/rewind [n]` is an app command (conversation rewind), not sent to pi.
+    const rewindMatch = /^\/rewind(?:\s+(\d+))?\s*$/.exec(raw);
+    if (rewindMatch && !draft.command) {
+      playButtonClick("click");
+      drafts.clearText(thread.id);
+      onRewind?.(rewindMatch[1] ? Number(rewindMatch[1]) : 1);
+      return;
+    }
+    // `/btw <question>` opens an isolated side conversation (never sent to pi,
+    // never added to the main transcript). Runs concurrently with any live run.
+    const btwMatch = /^\/btw\b\s*([\s\S]*)$/.exec(raw);
+    if (btwMatch && !draft.command) {
+      const question = btwMatch[1]!.trim();
+      if (!question) return;
+      playButtonClick("click");
+      drafts.clearText(thread.id);
+      void sideChat.openPanel(thread.id, question);
+      return;
+    }
     playButtonClick("click");
 
     const fileRefs = draft.attachments
@@ -432,6 +468,12 @@
           <div class="flex items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs text-muted">
             <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">steer</span>
             <span class="truncate">{t}</span>
+            <button
+              class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-faint hover:bg-danger hover:text-danger-fg"
+              onclick={() => api.invoke("threads:deleteSteer", thread.id, i).catch(console.error)}
+              title="Delete"
+              data-testid="delete-steer"
+            >✕</button>
           </div>
         {/each}
         {#each queue.followUp as t, i ("f-" + i)}
@@ -444,6 +486,12 @@
               title="Steer now"
               data-testid="promote-steer"
             >steer</button>
+            <button
+              class="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-faint hover:bg-danger hover:text-danger-fg"
+              onclick={() => api.invoke("threads:deleteFollowUp", thread.id, i).catch(console.error)}
+              title="Delete"
+              data-testid="delete-followup"
+            >✕</button>
           </div>
         {/each}
       </div>
@@ -622,7 +670,8 @@
             />
           {/if}
 
-          <!-- CAVEMAN: toggles pi-caveman compression (.devbtn) -->
+          <!-- Caveman + placeholder slot, grouped close together. -->
+          <span class="composer__btn-pair">
           <span class="devbtn" data-section-label="Caveman">
             <button
               class="devbtn__switch {caveman.enabled ? 'devbtn__switch--on' : ''}"
@@ -636,6 +685,23 @@
               <span class="devbtn__cap" aria-hidden="true"></span>
               <span class="devbtn__caption">Caveman</span>
             </button>
+          </span>
+
+          <!-- Placeholder slot: identical device button to Caveman, no effect yet. -->
+          <span class="devbtn" data-section-label="Slot">
+            <button
+              class="devbtn__switch {placeholderOn ? 'devbtn__switch--on' : ''}"
+              aria-pressed={placeholderOn}
+              onclick={togglePlaceholder}
+              data-testid="placeholder-toggle"
+              title="Placeholder"
+              aria-label="Placeholder"
+            >
+              <span class="devbtn__led" aria-hidden="true"></span>
+              <span class="devbtn__cap" aria-hidden="true"></span>
+              <span class="devbtn__caption">Slot</span>
+            </button>
+          </span>
           </span>
         </div>
 

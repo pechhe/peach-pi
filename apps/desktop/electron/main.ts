@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, Notification, shell } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, Notification, screen, shell } from "electron";
 import path from "node:path";
 import { openDb } from "./persistence/db.ts";
 import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
@@ -9,11 +9,24 @@ import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
 import { GraphifyService } from "./services/graphify-service.ts";
-import { getCavemanState, setCavemanEnabled } from "./services/caveman.ts";
+import { SideChatService } from "./services/side-chat-service.ts";
+import { DevTapInstallService } from "./services/devtap-install-status.ts";
+import { getCavemanState, setCavemanEnabled, setCavemanLevel } from "./services/caveman.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { computePiHealth } from "./services/pi-health.ts";
+import { emitDevTapEvent, initDevTapMain } from "./services/devtap.ts";
+import {
+  setDevTapStateProvider,
+  startDevTapControlChannel,
+  stopDevTapControlChannel,
+} from "./services/devtap-control.ts";
 import { createMainWindow } from "./windows/main-window.ts";
-import { createOverlayWindow } from "./windows/overlay-window.ts";
+import {
+  createHudWindow,
+  HUD_WIDTH,
+  HUD_COLLAPSED_HEIGHT,
+  HUD_EXPANDED_HEIGHT,
+} from "./windows/hud-window.ts";
 
 // TEMP DEBUG: enable CDP for renderer layout inspection.
 app.commandLine.appendSwitch("remote-debugging-port", "9222");
@@ -55,13 +68,20 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function boot(): Promise<void> {
+  initDevTapMain();
   await app.whenReady();
+  emitDevTapEvent({ area: "lifecycle", event: "app.ready" });
 
   const db = openDb(path.join(app.getPath("userData"), "peach-pi.sqlite"));
   const emit = createEmitter(() => BrowserWindow.getAllWindows());
   const appService = new AppService(db, emit);
+  setDevTapStateProvider(() => ({ app: appService.snapshot() }));
   let mainWindow: BrowserWindow | null = null;
-  let overlayWindow: BrowserWindow | null = null;
+  let hudWindow: BrowserWindow | null = null;
+  let hudExpanded = false;
+
+  const isHudUp = () =>
+    !!hudWindow && !hudWindow.isDestroyed() && hudWindow.isVisible();
 
   const threadService = new ThreadService(
     db,
@@ -69,6 +89,12 @@ async function boot(): Promise<void> {
     () => emit("event:snapshot", appService.snapshot()),
     path.join(app.getPath("userData"), "chats"),
     (thread) => {
+      // HUD up → route to the HUD as an ambient cue instead of a system
+      // notification (the renderer decides pulse/expand/badge via routeFinishCue).
+      if (isHudUp()) {
+        emit("event:hudFinish", { threadId: thread.id });
+        return;
+      }
       // Run finished while the app is in the background → notify (Phase 6).
       if (BrowserWindow.getFocusedWindow() || !Notification.isSupported()) return;
       const note = new Notification({
@@ -97,8 +123,11 @@ async function boot(): Promise<void> {
     path.join(app.getPath("userData"), "worktrees"),
     () => appService.getUtilityModel(),
   );
+  threadService.setGitService(gitService);
   const subagentService = new SubagentService(db);
   const graphifyService = new GraphifyService(db);
+  const sideChatService = new SideChatService(db, emit, threadService, gitService);
+  const devTapInstallService = new DevTapInstallService(db);
   setupSubagentEnvironment(app.getPath("userData"));
 
   async function pickProject() {
@@ -115,6 +144,7 @@ async function boot(): Promise<void> {
     "app:setSelectedThread": (id) => appService.setSelectedThread(id),
     "app:getCavemanState": () => getCavemanState(),
     "app:setCavemanEnabled": (enabled) => setCavemanEnabled(enabled),
+    "app:setCavemanLevel": (level) => setCavemanLevel(level),
     "app:listModels": () => appService.listModels(),
     "app:getUtilityModel": () => appService.getUtilityModel(),
     "app:setUtilityModel": (model) => appService.setUtilityModel(model),
@@ -123,6 +153,16 @@ async function boot(): Promise<void> {
     "app:getPiSettings": () => getPiSettings(),
     "app:setPiSettings": (patch) => setPiSettings(patch),
     "app:getPiHealth": () => computePiHealth(__dirname),
+    "devtap:report": (entry) =>
+      emitDevTapEvent({
+        level: entry.error ? "error" : "info",
+        source: "renderer",
+        area: entry.error ? "error" : "diagnostic",
+        event: entry.event,
+        message: entry.message ?? entry.error?.message,
+        payload: entry.payload,
+        error: entry.error,
+      }),
     "app:openFolder": async (threadId) => {
       const dir = gitService.cwdFor(threadId);
       console.log('[openFolder]', threadId, dir);
@@ -158,16 +198,34 @@ async function boot(): Promise<void> {
     "threads:respondExtensionUi": (requestId, value) =>
       threadService.respondExtensionUi(requestId, value),
     "threads:compact": (id) => threadService.compact(id),
+    "side:start": (threadId, modelOverride) => sideChatService.start(threadId, modelOverride),
+    "side:ask": (convId, question) => sideChatService.ask(convId, question),
+    "side:list": (threadId) => sideChatService.list(threadId),
+    "side:get": (convId) => sideChatService.get(convId),
+    "side:delete": (convId) => sideChatService.delete(convId),
+    "threads:listTurns": (id) => threadService.listTurns(id),
+    "threads:rewind": (id, entryId, revertFiles) => threadService.rewind(id, entryId, revertFiles),
     "automations:create": (fields) => automationService.create(fields),
     "automations:setEnabled": (id, enabled) => automationService.setEnabled(id, enabled),
     "automations:delete": (id) => automationService.delete(id),
     "automations:runNow": (id) => automationService.runNow(id),
     "automations:runs": (id) => automationService.runs(id),
     "automations:previewNext": (cron) => automationService.previewNext(cron),
-    "overlay:hide": () => {
-      overlayWindow?.hide();
+    "hud:hide": () => {
+      hudWindow?.hide();
     },
-    "overlay:toggle": () => toggleOverlay(),
+    "hud:toggle": () => toggleHud(),
+    "hud:setThread": (threadId) => appService.setHudThread(threadId),
+    "hud:newChat": async () => {
+      const thread = await threadService.createChat();
+      appService.setHudThread(thread.id);
+      return thread;
+    },
+    "hud:setExpanded": (expanded) => setHudExpanded(expanded),
+    "hud:setClickThrough": (ignore) =>
+      hudWindow?.setIgnoreMouseEvents(ignore, { forward: true }),
+    "hud:releaseFocus": () => hudWindow?.blur(),
+    "hud:setAutoReveal": (on) => appService.setHudAutoReveal(on),
     "terminal:open": (id) => terminalService.open(id),
     "terminal:input": (id, data) => terminalService.input(id, data),
     "terminal:resize": (id, cols, rows) => terminalService.resize(id, cols, rows),
@@ -207,11 +265,13 @@ async function boot(): Promise<void> {
       }
     },
     "subagents:listAgents": (projectId) => subagentService.listAgents(projectId),
+    "subagents:updateAgent": (filePath, patch) => subagentService.updateAgent(filePath, patch),
     "graphify:status": (id) => graphifyService.status(id),
     "graphify:build": (id) => graphifyService.build(id),
     "graphify:update": (id) => graphifyService.update(id),
     "graphify:openViewer": (id) => graphifyService.openViewer(id),
     "graphify:report": (id) => graphifyService.report(id),
+    "devtap:projectStatus": (id) => devTapInstallService.status(id),
     "git:info": (id) => gitService.info(id),
     "git:changedFiles": (id) => gitService.changedFiles(id),
     "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),
@@ -222,6 +282,8 @@ async function boot(): Promise<void> {
     "threads:steer": (id, text) => threadService.steer(id, text),
     "threads:promoteFollowUpToSteer": (id, index) => threadService.promoteFollowUpToSteer(id, index),
     "threads:popLastFollowUp": (id) => threadService.popLastFollowUp(id),
+    "threads:deleteFollowUp": (id, index) => threadService.deleteFollowUp(id, index),
+    "threads:deleteSteer": (id, index) => threadService.deleteSteer(id, index),
     "threads:abort": (id) => threadService.abort(id),
     "threads:getTranscript": (id) => threadService.getTranscript(id),
     "threads:snooze": (id, until) => appService.snoozeThread(id, until),
@@ -230,19 +292,107 @@ async function boot(): Promise<void> {
     "threads:unmarkToTest": (id) => appService.unmarkToTest(id),
   });
 
-  // Composer-only floating overlay (plan decision #4). ⌘⇧Space toggles.
-  function toggleOverlay(): void {
-    if (!overlayWindow || overlayWindow.isDestroyed()) {
-      overlayWindow = createOverlayWindow();
-      overlayWindow.once("ready-to-show", () => overlayWindow?.show());
+  // Persistent floating HUD (CONTEXT.md, ADR-0002). ⌘⇧Space toggles.
+  async function toggleHud(): Promise<void> {
+    if (!hudWindow || hudWindow.isDestroyed()) {
+      const geom = await hudGeometry();
+      hudWindow = createHudWindow(geom);
+      hudExpanded = false;
+      void ensureHudThread();
+      // The HUD takes over: hide the rest of the app for a seamless transition.
+      hudWindow.once("ready-to-show", () => {
+        hudWindow?.show();
+        mainWindow?.hide();
+      });
       return;
     }
-    if (overlayWindow.isVisible()) {
-      overlayWindow.hide();
+    if (hudWindow.isVisible()) {
+      hudWindow.hide();
+      showMainWindow();
     } else {
-      overlayWindow.show();
-      overlayWindow.focus();
+      void ensureHudThread();
+      await repositionHud();
+      hudWindow.show();
+      hudWindow.focus();
+      mainWindow?.hide();
     }
+  }
+
+  // The HUD always renders the real Composer, which needs a thread: seed from the
+  // Main Window selection, else start a fresh chat.
+  async function ensureHudThread(): Promise<void> {
+    if (appService.seedHudThread()) return;
+    const thread = await threadService.createChat();
+    appService.setHudThread(thread.id);
+  }
+
+  // Measure the Main Window's real composer device (screen coords) so the HUD
+  // can match its exact width and position — the composer "stays where it is".
+  async function measureComposerRect(): Promise<
+    { x: number; y: number; width: number; bottom: number } | null
+  > {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    try {
+      const r = (await mainWindow.webContents.executeJavaScript(
+        `(() => { const el = document.querySelector('footer.composer-device');
+          if (!el) return null; const b = el.getBoundingClientRect();
+          return { left: b.left, top: b.top, width: b.width, height: b.height }; })()`,
+      )) as { left: number; top: number; width: number; height: number } | null;
+      if (!r) return null;
+      const c = mainWindow.getContentBounds();
+      return { x: c.x + r.left, y: c.y + r.top, width: r.width, bottom: c.y + r.top + r.height };
+    } catch {
+      return null;
+    }
+  }
+
+  // Where + how wide the HUD opens. When the composer is on screen the HUD
+  // follows it exactly (seamless) regardless of window state (default/fullscreen)
+  // The HUD always opens centred on the active screen, anchored to the bottom
+  // with the same margin as in-app (the composer's own pb-6 sits inside the
+  // window) — regardless of where it was last. Width still matches the real
+  // composer when one is on screen.
+  async function hudGeometry(): Promise<{ x: number; y: number; width: number }> {
+    const rect = await measureComposerRect();
+    const width = rect?.width ?? HUD_WIDTH;
+    const wa = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    return {
+      x: Math.round(wa.x + (wa.width - width) / 2),
+      y: wa.y + wa.height - HUD_COLLAPSED_HEIGHT,
+      width,
+    };
+  }
+
+  // Re-centre an existing HUD on re-show, keeping its bottom edge stable.
+  async function repositionHud(): Promise<void> {
+    if (!hudWindow || hudWindow.isDestroyed()) return;
+    const geom = await hudGeometry();
+    const [, h = HUD_COLLAPSED_HEIGHT] = hudWindow.getSize();
+    hudWindow.setBounds({
+      x: geom.x,
+      y: geom.y + HUD_COLLAPSED_HEIGHT - h,
+      width: Math.round(geom.width),
+      height: h,
+    });
+  }
+
+  function showMainWindow(): void {
+    if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createMainWindow();
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+
+  // Expand/collapse the chat: grow the window upward, composer anchored at bottom.
+  function setHudExpanded(expanded: boolean): void {
+    if (!hudWindow || hudWindow.isDestroyed() || hudExpanded === expanded) return;
+    hudExpanded = expanded;
+    const [x = 0, y = 0] = hudWindow.getPosition();
+    const [, h = HUD_COLLAPSED_HEIGHT] = hudWindow.getSize();
+    const [w = HUD_WIDTH] = hudWindow.getSize();
+    const bottom = y + h;
+    const height = expanded ? HUD_EXPANDED_HEIGHT : HUD_COLLAPSED_HEIGHT;
+    hudWindow.setBounds({ x, y: bottom - height, width: w, height });
   }
   // Startup compatibility check: surface bundled-pi ↔ extension drift early so
   // it shows up in logs even before the renderer queries it for the banner.
@@ -255,7 +405,8 @@ async function boot(): Promise<void> {
   appService.start();
   automationService.start();
   mainWindow = createMainWindow();
-  globalShortcut.register("CommandOrControl+Shift+Space", toggleOverlay);
+  startDevTapControlChannel();
+  globalShortcut.register("CommandOrControl+Shift+Space", toggleHud);
 
   app.on("second-instance", () => {
     const [win] = BrowserWindow.getAllWindows();
@@ -274,6 +425,8 @@ async function boot(): Promise<void> {
   });
 
   app.on("before-quit", () => {
+    emitDevTapEvent({ area: "lifecycle", event: "app.before-quit" });
+    stopDevTapControlChannel();
     globalShortcut.unregisterAll();
     appService.stop();
     automationService.stop();

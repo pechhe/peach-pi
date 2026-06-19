@@ -85,4 +85,27 @@ export const migrations: Migration[] = [
       db.exec("ALTER TABLE threads ADD COLUMN tag TEXT");
     },
   },
+  {
+    version: 5,
+    up: (db) => {
+      // `/btw` side conversations: cheap, isolated mini-chats attached to a
+      // thread. They read the main conversation as context but never write to
+      // it. Persisted so prior side chats form a browsable history.
+      db.exec(`
+        CREATE TABLE side_conversations (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+          title TEXT NOT NULL DEFAULT '',
+          model_provider TEXT,
+          model_id TEXT,
+          model_name TEXT,
+          messages TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_side_conversations_thread
+          ON side_conversations(thread_id, created_at DESC);
+      `);
+    },
+  },
 ];

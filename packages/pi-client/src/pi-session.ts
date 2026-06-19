@@ -217,6 +217,27 @@ export class PiSession {
     return this.recorder.transcript();
   }
 
+  /** User turns available as rewind targets (session-tree entry ids, in branch order). */
+  listTurns(): { entryId: string; text: string }[] {
+    return this.session.getUserMessagesForForking();
+  }
+
+  /**
+   * Rewind the conversation to before the given user-message entry: moves the
+   * session-tree leaf there (pi keeps the abandoned branch — history is never
+   * destroyed) and rebuilds the transcript from the now-active branch. Returns
+   * the rewound turn's prompt so the caller can refill the composer.
+   * Does NOT revert file changes on disk (conversation-only).
+   */
+  async rewind(entryId: string): Promise<{ editorText?: string }> {
+    if (this.session.isStreaming) throw new Error("Cannot rewind while a run is in progress");
+    const result = await this.session.navigateTree(entryId);
+    if (result.cancelled) return {};
+    this.callbacks.onOps(this.recorder.load(this.session.messages));
+    this.callbacks.onMetaChange?.();
+    return { editorText: result.editorText };
+  }
+
   meta(): PiSessionMeta {
     const model = this.session.model;
     const usage = this.session.getContextUsage();
@@ -388,6 +409,24 @@ export class PiSession {
     for (const s of steering) await this.session.steer(s);
     for (const f of followUp) await this.session.followUp(f);
     return last;
+  }
+
+  /** Delete a queued follow-up message by index. */
+  async deleteFollowUp(index: number): Promise<void> {
+    const { steering, followUp } = this.session.clearQueue();
+    for (const s of steering) await this.session.steer(s);
+    for (let i = 0; i < followUp.length; i++) {
+      if (i !== index) await this.session.followUp(followUp[i]!);
+    }
+  }
+
+  /** Delete a queued steer message by index. */
+  async deleteSteer(index: number): Promise<void> {
+    const { steering, followUp } = this.session.clearQueue();
+    for (let i = 0; i < steering.length; i++) {
+      if (i !== index) await this.session.steer(steering[i]!);
+    }
+    for (const f of followUp) await this.session.followUp(f);
   }
 
   /** Manual compaction. Progress/result surface as notice transcript items. */

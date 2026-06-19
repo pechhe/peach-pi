@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
@@ -31,6 +32,16 @@ async function gitOk(args: string[], cwd: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Run git with extra env (e.g. GIT_INDEX_FILE for an isolated index). */
+async function gitEnv(args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
+  const { stdout } = await execFileAsync("git", args, {
+    cwd,
+    env: { ...process.env, ...env },
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return stdout;
 }
 
 /** Normalize a git remote (ssh or https) to its https web base, sans .git. */
@@ -362,6 +373,52 @@ export class GitService {
       await git(["stash", "drop", seed], project.path).catch(() => undefined);
     }
     return dir;
+  }
+
+  // ── Rewind snapshots (Phase 2) ──────────────────────────────────────
+  // Capture the full working tree (incl. untracked) as a dangling commit.
+  // Non-destructive: a throwaway index (GIT_INDEX_FILE) keeps the real index
+  // and worktree intact. No ref is written — the dangling commit survives the
+  // session under git's default prune window, so nothing leaks into the repo.
+
+  /** Snapshot the thread's working tree; null when cwd is not a git repo. */
+  async snapshot(threadId: string): Promise<string | null> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd || !(await gitOk(["rev-parse", "--git-dir"], cwd))) return null;
+    const indexFile = path.join(tmpdir(), `peach-pi-idx-${randomUUID()}`);
+    const env = { GIT_INDEX_FILE: indexFile };
+    try {
+      const hasHead = await gitOk(["rev-parse", "--verify", "HEAD"], cwd);
+      if (hasHead) await gitEnv(["read-tree", "HEAD"], cwd, env);
+      await gitEnv(["add", "-A"], cwd, env);
+      const tree = (await gitEnv(["write-tree"], cwd, env)).trim();
+      const args = hasHead
+        ? ["commit-tree", tree, "-p", "HEAD", "-m", "peach-pi rewind snapshot"]
+        : ["commit-tree", tree, "-m", "peach-pi rewind snapshot"];
+      return (await gitEnv(args, cwd, env)).trim();
+    } catch {
+      return null;
+    } finally {
+      rmSync(indexFile, { force: true });
+    }
+  }
+
+  /**
+   * Restore the working tree to a snapshot commit. DESTRUCTIVE: discards every
+   * change made since the snapshot, including untracked files (`clean -fd`).
+   * `.gitignore`d artifacts are preserved.
+   */
+  async restoreSnapshot(threadId: string, sha: string): Promise<boolean> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd || !(await gitOk(["rev-parse", "--git-dir"], cwd))) return false;
+    try {
+      await git(["read-tree", "--reset", sha], cwd);
+      await git(["checkout-index", "-f", "-a"], cwd);
+      await git(["clean", "-fd"], cwd);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async removeWorktree(projectPath: string, worktreeDir: string): Promise<void> {
