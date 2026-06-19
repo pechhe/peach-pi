@@ -808,7 +808,7 @@
           {/each}
         </div>
       {/if}
-      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming)}
+      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming) && !agentTimeline.primaryNamesByCall.size}
         <div class="item-enter text-[13px]">
           <WorkingLabel label="Working…" />
         </div>
@@ -828,7 +828,7 @@
     {/if}
   </div>
 
-  {#each extensionUi.widgetsFor(thread.id) as widget (widget.key)}
+  {#each extensionUi.widgetsFor(thread.id).filter((w) => w.key !== FLEET_WIDGET_KEY) as widget (widget.key)}
     <div class="mx-6 mb-1 shrink-0 rounded-lg border border-border bg-surface/60 px-3 py-2" data-testid="extension-widget">
       <pre class="overflow-x-auto font-mono text-[10px] leading-relaxed text-muted">{widget.lines.join("\n")}</pre>
     </div>

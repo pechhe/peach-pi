@@ -1,5 +1,7 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
 import path from "node:path";
+
+import { isExternalUrl } from "./url-guard";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -22,9 +24,16 @@ export function createMainWindow(): BrowserWindow {
     },
   });
 
-  // Block navigation + window.open escapes.
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  win.webContents.on("will-navigate", (event) => event.preventDefault());
+  // Block in-app navigation; external http(s)/mailto links go to the OS
+  // default browser instead of opening inside the renderer.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    if (isExternalUrl(url)) void shell.openExternal(url);
+    event.preventDefault();
+  });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     void win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);

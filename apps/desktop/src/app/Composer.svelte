@@ -461,40 +461,83 @@
       </div>
     {/if}
 
-    <!-- Queued messages shelf -->
+    <!-- Queued messages shelf (Codex/Cursor-style chip rail) -->
     {#if queue.steering.length > 0 || queue.followUp.length > 0}
-      <div class="mb-2 flex flex-col gap-1" data-testid="queued-shelf">
-        {#each queue.steering as t, i ("s-" + i)}
-          <div class="flex items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs text-muted">
-            <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">steer</span>
-            <span class="truncate">{t}</span>
-            <button
-              class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-faint hover:bg-danger hover:text-danger-fg"
-              onclick={() => api.invoke("threads:deleteSteer", thread.id, i).catch(console.error)}
-              title="Delete"
-              data-testid="delete-steer"
-            >✕</button>
-          </div>
-        {/each}
-        {#each queue.followUp as t, i ("f-" + i)}
-          <div class="flex items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs text-muted">
-            <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">queue</span>
-            <span class="truncate">{t}</span>
-            <button
-              class="ml-auto shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase hover:bg-accent hover:text-accent-fg"
-              onclick={() => api.invoke("threads:promoteFollowUpToSteer", thread.id, i)}
-              title="Steer now"
-              data-testid="promote-steer"
-            >steer</button>
-            <button
-              class="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-faint hover:bg-danger hover:text-danger-fg"
-              onclick={() => api.invoke("threads:deleteFollowUp", thread.id, i).catch(console.error)}
-              title="Delete"
-              data-testid="delete-followup"
-            >✕</button>
-          </div>
-        {/each}
-      </div>
+      {@const queueTotal = queue.steering.length + queue.followUp.length}
+      <section
+        class="qq"
+        data-testid="queued-shelf"
+        role="list"
+        aria-label={queue.steering.length > 0
+          ? `${queue.steering.length} steering, ${queue.followUp.length} queued`
+          : `${queueTotal} queued`}
+      >
+        <header class="qq__head">
+          <span class="qq__pulse" aria-hidden="true"></span>
+          <span class="qq__head-label">Up next</span>
+          <span class="qq__count" aria-hidden="true">{queueTotal}</span>
+          <span class="qq__head-hint" aria-hidden="true">
+            {#if queue.steering.length > 0}
+              <span class="qq__head-tag qq__head-tag--steer">{queue.steering.length} steer</span>
+            {/if}
+            {#if queue.followUp.length > 0}
+              <span class="qq__head-tag qq__head-tag--queue">{queue.followUp.length} queued</span>
+            {/if}
+          </span>
+        </header>
+
+        <div class="qq__list">
+          {#if queue.steering.length > 0}
+            <div class="qq__group" role="group" aria-label="Steering, injected this turn">
+              <span class="qq__group-label">steer · this turn</span>
+              <div class="qq__items">
+                {#each queue.steering as t, i ("s-" + i)}
+                  <div class="qq-item qq-item--steer" role="listitem">
+                    <span class="qq-item__bar" aria-hidden="true"></span>
+                    <svg class="qq-item__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5 3.5 8.5H7l-1 6 6-8.5H9.5L9 1.5z" /></svg>
+                    <span class="qq-item__text" title={t}>{t}</span>
+                    <button
+                      class="qq-item__action qq-item__action--delete"
+                      onclick={() => api.invoke("threads:deleteSteer", thread.id, i).catch(console.error)}
+                      title="Remove"
+                      aria-label="Remove steering message"
+                      data-testid="delete-steer"
+                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg></button>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          {#if queue.followUp.length > 0}
+            <div class="qq__group" role="group" aria-label="Queued messages">
+              <span class="qq__group-label">queue</span>
+              <div class="qq__items">
+                {#each queue.followUp as t, i ("f-" + i)}
+                  <div class="qq-item qq-item--queue" role="listitem">
+                    <span class="qq-item__pos" aria-hidden="true">{i + 1}</span>
+                    <span class="qq-item__text" title={t}>{t}</span>
+                    <button
+                      class="qq-item__action qq-item__action--promote"
+                      onclick={() => api.invoke("threads:promoteFollowUpToSteer", thread.id, i)}
+                      title="Steer now"
+                      aria-label="Steer now"
+                      data-testid="promote-steer"
+                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+                    <button
+                      class="qq-item__action qq-item__action--delete"
+                      onclick={() => api.invoke("threads:deleteFollowUp", thread.id, i).catch(console.error)}
+                      title="Remove"
+                      aria-label="Remove queued message"
+                      data-testid="delete-followup"
+                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg></button>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+      </section>
     {/if}
 
     <!-- Attachments shelf -->
@@ -734,3 +777,233 @@
     </div>
   </div>
 </footer>
+
+<style>
+  /* Queued-messages shelf — modern AI-harness chip rail.
+     Codex IDE ext: per-row queue w/ steer-promote + delete.
+     Cursor 1.4: compact single-line chips, contextual action verbs.
+     Steer = inject into current turn (accent). Queue = FIFO next turn (neutral). */
+  .qq {
+    margin-bottom: 8px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--color-border-strong) 70%, transparent);
+    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
+    overflow: hidden;
+  }
+
+  /* Header strip */
+  .qq__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
+    background: color-mix(in srgb, var(--color-surface-2) 35%, transparent);
+    user-select: none;
+  }
+  .qq__pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-accent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent);
+    animation: qq-pulse 1.6s ease-out infinite;
+  }
+  .qq__head-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .qq__count {
+    min-width: 16px;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--color-surface-3);
+    color: var(--color-fg-soft);
+  }
+  .qq__head-hint {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 6px;
+  }
+  .qq__head-tag {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .qq__head-tag--steer {
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  }
+  .qq__head-tag--queue {
+    color: var(--color-muted);
+    background: color-mix(in srgb, var(--color-surface-3) 55%, transparent);
+  }
+
+  /* List body */
+  .qq__list {
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+    gap: 4px;
+    max-height: 184px;
+    overflow-y: auto;
+  }
+  .qq__group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .qq__group + .qq__group {
+    margin-top: 4px;
+  }
+  .qq__group-label {
+    font-size: 9.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-fainter);
+    padding: 0 6px;
+  }
+  .qq__items {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  /* Single chip */
+  .qq-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 6px 5px 8px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
+    background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+    min-width: 0;
+    animation: qq-slide 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Steer variant — accent-tinted, left bar */
+  .qq-item--steer {
+    border-color: color-mix(in srgb, var(--color-accent) 38%, transparent);
+    background: color-mix(in srgb, var(--color-accent) 9%, var(--color-surface));
+    padding-left: 10px;
+  }
+  .qq-item--steer .qq-item__action--delete {
+    color: var(--color-accent);
+  }
+
+  /* Queue variant — neutral */
+  .qq-item--queue .qq-item__action--delete:hover {
+    background: color-mix(in srgb, var(--color-danger) 22%, transparent);
+    color: var(--color-danger);
+  }
+  .qq-item--queue .qq-item__action--promote:hover {
+    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+    color: var(--color-accent);
+  }
+  .qq-item--steer .qq-item__action--delete:hover {
+    background: color-mix(in srgb, var(--color-danger) 22%, transparent);
+    color: var(--color-danger);
+  }
+
+  /* Left accent bar (steer) */
+  .qq-item__bar {
+    position: absolute;
+    left: 3px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--color-accent);
+  }
+
+  /* Icon (steer) */
+  .qq-item__icon {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    fill: var(--color-accent);
+  }
+
+  /* Position badge (queue) */
+  .qq-item__pos {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--color-surface-3);
+    color: var(--color-fg-soft);
+  }
+
+  /* Truncated text */
+  .qq-item__text {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--color-fg-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: text;
+  }
+  .qq-item--steer .qq-item__text {
+    color: var(--color-fg);
+  }
+
+  /* Action buttons — subtle at rest, full on hover/focus */
+  .qq-item__action {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-faint);
+    opacity: 0.55;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+    cursor: pointer;
+  }
+  .qq-item:hover .qq-item__action,
+  .qq-item:focus-within .qq-item__action {
+    opacity: 1;
+  }
+  .qq-item__action svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  @keyframes qq-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 50%, transparent); }
+    70% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 0%, transparent); }
+    100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 0%, transparent); }
+  }
+  @keyframes qq-slide {
+    from { opacity: 0; transform: translateY(-3px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .qq-item { animation: none; }
+    .qq__pulse { animation: none; }
+  }
+</style>

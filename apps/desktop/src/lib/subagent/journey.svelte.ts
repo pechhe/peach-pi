@@ -180,7 +180,10 @@ export function buildNodes(
 
   // Tail: reflect the live / terminal state.
   if (isLive) {
-    const current = liveActivity ?? "Working…";
+    const raw = liveActivity ?? "Working…";
+    // Don't surface generic placeholders as a separate step, but always
+    // surface an active node so the spinner has somewhere to live.
+    const current = /^(?:thinking|working)/i.test(raw) ? "Working…" : raw;
     if (lastActivityIdx >= 0 && nodes[lastActivityIdx]!.title === current) {
       nodes[lastActivityIdx] = { ...nodes[lastActivityIdx]!, tone: "active", at: "Now" };
     } else {
