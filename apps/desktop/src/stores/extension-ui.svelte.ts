@@ -20,8 +20,9 @@ interface Toast extends NoticePayload {
  * Status keys peach-pi renders with its own first-class UI, so the
  * extension's setStatus() pill is suppressed in the thread header.
  * Caveman has a dedicated toggle in the Composer.
+ * vision-proxy config lives in Settings.
  */
-const HIDDEN_STATUS_KEYS = new Set(["caveman"]);
+const HIDDEN_STATUS_KEYS = new Set(["caveman", "vision-proxy"]);
 
 /** Extension dialog queue + toast notifications + per-thread status text. */
 class ExtensionUiStore {

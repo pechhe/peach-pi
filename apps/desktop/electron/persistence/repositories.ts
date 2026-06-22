@@ -115,6 +115,86 @@ export class ProjectRepo {
   }
 }
 
+interface WorktreeRow {
+  id: string;
+  project_id: string;
+  dir: string;
+  name: string;
+  created_at: string;
+  archived_at: string | null;
+}
+
+const toWorktree = (r: WorktreeRow): Worktree => ({
+  id: r.id,
+  projectId: r.project_id,
+  dir: r.dir,
+  name: r.name,
+  createdAt: r.created_at,
+  archivedAt: r.archived_at ?? undefined,
+});
+
+export class WorktreeRepo {
+  private db: AppDb;
+  constructor(db: AppDb) {
+    this.db = db;
+  }
+
+  all(): Worktree[] {
+    const rows = this.db
+      .prepare("SELECT * FROM worktrees ORDER BY created_at")
+      .all() as unknown as WorktreeRow[];
+    return rows.map(toWorktree);
+  }
+
+  /** Active worktrees for a project (archived ones excluded). */
+  activeForProject(projectId: string): Worktree[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM worktrees WHERE project_id = ? AND archived_at IS NULL ORDER BY created_at",
+      )
+      .all(projectId) as unknown as WorktreeRow[];
+    return rows.map(toWorktree);
+  }
+
+  get(id: string): Worktree | null {
+    const row = this.db.prepare("SELECT * FROM worktrees WHERE id = ?").get(id) as
+      | WorktreeRow
+      | undefined;
+    return row ? toWorktree(row) : null;
+  }
+
+  insert(fields: { projectId: string; dir: string; name: string }): Worktree {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        "INSERT INTO worktrees (id, project_id, dir, name, created_at) VALUES (?,?,?,?,?)",
+      )
+      .run(id, fields.projectId, fields.dir, fields.name, now);
+    return this.get(id)!;
+  }
+
+  /** Next "Worktree N" name for a project, counting existing rows. */
+  nextName(projectId: string): string {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS c FROM worktrees WHERE project_id = ?")
+      .get(projectId) as { c: number };
+    return `Worktree ${row.c + 1}`;
+  }
+
+  setName(id: string, name: string): void {
+    this.db.prepare("UPDATE worktrees SET name = ? WHERE id = ?").run(name, id);
+  }
+
+  setArchived(id: string, at: string | null): void {
+    this.db.prepare("UPDATE worktrees SET archived_at = ? WHERE id = ?").run(at, id);
+  }
+
+  delete(id: string): void {
+    this.db.prepare("DELETE FROM worktrees WHERE id = ?").run(id);
+  }
+}
+
 export class ThreadRepo {
   private db: AppDb;
   constructor(db: AppDb) {
@@ -133,13 +213,14 @@ export class ThreadRepo {
     title: string;
     piSessionFile?: string;
     chatWorkspaceDir?: string;
+    worktreeId?: string | null;
     worktreeDir?: string;
   }): Thread {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
       .prepare(
-        "INSERT INTO threads (id, project_id, pi_session_file, chat_workspace_dir, worktree_dir, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO threads (id, project_id, pi_session_file, chat_workspace_dir, worktree_dir, worktree_id, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
       )
       .run(
         id,
@@ -147,6 +228,7 @@ export class ThreadRepo {
         fields.piSessionFile ?? null,
         fields.chatWorkspaceDir ?? null,
         fields.worktreeDir ?? null,
+        fields.worktreeId ?? null,
         fields.title,
         "idle",
         now,
@@ -195,6 +277,14 @@ export class ThreadRepo {
 
   setWorktreeDir(id: string, dir: string | null): void {
     this.db.prepare("UPDATE threads SET worktree_dir = ? WHERE id = ?").run(dir, id);
+  }
+
+  /** Link a thread to a worktree record (and sync the denormalized dir).
+   *  Passing null detaches it back to the project's main checkout. */
+  setWorktree(id: string, worktreeId: string | null, dir: string | null): void {
+    this.db
+      .prepare("UPDATE threads SET worktree_id = ?, worktree_dir = ? WHERE id = ?")
+      .run(worktreeId, dir, id);
   }
 
   get(id: string): Thread | null {
@@ -407,121 +497,6 @@ export class SideChatRepo {
 
   delete(id: string): void {
     this.db.prepare("DELETE FROM side_conversations WHERE id = ?").run(id);
-  }
-}
-
-export interface ConnectorRow {
-  id: string;
-  provider: string;
-  label: string;
-  auth_kind: "api_key" | "oauth";
-  config_json: string;
-  secret_blob: Uint8Array | null;
-  expires_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-/** Persisted shape of an OAuth connector's non-secret config (`config_json`). */
-export interface ConnectorOauthConfigRow {
-  clientId: string;
-  redirectUri: string;
-  authorizeUrl: string;
-  tokenUrl: string;
-  scopes: string[];
-  usePkce: boolean;
-  useBasicAuth: boolean;
-  /** Handshake + exchange run through the vendor broker (confidential
-   *  providers). When true, clientId/secret are held server-side. */
-  useBroker?: boolean;
-}
-
-/** Persisted encrypted-blob payload (decrypted by ConnectorService). */
-export interface ConnectorSecretBlob {
-  // api-key connectors: apiKey set, oauth fields absent.
-  apiKey?: string;
-  // OAuth connectors: clientSecret held once (BYO), plus the live token set.
-  clientSecret?: string;
-  accessToken?: string;
-  refreshToken?: string;
-  tokenType?: string;
-  scope?: string;
-  expiresAt?: string;
-}
-
-export class ConnectorRepo {
-  private db: AppDb;
-  constructor(db: AppDb) {
-    this.db = db;
-  }
-
-  all(): ConnectorRow[] {
-    return this.db
-      .prepare("SELECT * FROM connectors ORDER BY created_at")
-      .all() as unknown as ConnectorRow[];
-  }
-
-  get(id: string): ConnectorRow | null {
-    const row = this.db.prepare("SELECT * FROM connectors WHERE id = ?").get(id) as
-      | ConnectorRow
-      | undefined;
-    return row ?? null;
-  }
-
-  insert(fields: {
-    id: string;
-    provider: string;
-    label: string;
-    authKind: "api_key" | "oauth";
-    configJson: string;
-    secretBlob: Uint8Array | null;
-    expiresAt: string | null;
-    now: string;
-  }): void {
-    this.db
-      .prepare(
-        `INSERT INTO connectors
-           (id, provider, label, auth_kind, config_json, secret_blob, expires_at, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        fields.id,
-        fields.provider,
-        fields.label,
-        fields.authKind,
-        fields.configJson,
-        fields.secretBlob ? Buffer.from(fields.secretBlob) : null,
-        fields.expiresAt,
-        fields.now,
-        fields.now,
-      );
-  }
-
-  updateSecret(
-    id: string,
-    secretBlob: Uint8Array | null,
-    expiresAt: string | null,
-    now: string,
-  ): void {
-    this.db
-      .prepare(
-        "UPDATE connectors SET secret_blob = ?, expires_at = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(secretBlob ? Buffer.from(secretBlob) : null, expiresAt, now, id);
-  }
-
-  updateConfig(
-    id: string,
-    configJson: string,
-    now: string,
-  ): void {
-    this.db
-      .prepare("UPDATE connectors SET config_json = ?, updated_at = ? WHERE id = ?")
-      .run(configJson, now, id);
-  }
-
-  delete(id: string): void {
-    this.db.prepare("DELETE FROM connectors WHERE id = ?").run(id);
   }
 }
 

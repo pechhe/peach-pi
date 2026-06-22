@@ -56,9 +56,20 @@ export class RecordingService {
   private tray: Tray | null = null;
   /** Set once when an active recording is swapped out for stop processing. */
   private pendingStopId: string | null = null;
+  /** Thread that started the current recording (so stop can auto-send the
+   *  synthesis prompt to that chat). Null when started from the tray. */
+  private activeThreadId: string | null = null;
+  /** Injected hook to send the synthesis prompt into a chat thread. Keeps
+   *  this service decoupled from ThreadService. */
+  private prompter: ((threadId: string, text: string) => void | Promise<void>) | null = null;
 
   constructor(emit: Emit) {
     this.emit = emit;
+  }
+
+  /** Wire the hook that delivers the synthesis prompt to a chat thread. */
+  setPrompter(fn: (threadId: string, text: string) => void | Promise<void>): void {
+    this.prompter = fn;
   }
 
   /** Attach a tray icon with Start/Stop/Cancel + live status. */
@@ -115,15 +126,16 @@ export class RecordingService {
     return this.state;
   }
 
-  start(): RecordingState {
+  start(threadId?: string): RecordingState {
     if (this.state.status === "recording") return this.state;
+    this.activeThreadId = threadId ?? null;
 
     const bin = captureBinPath();
     if (!existsSync(bin)) {
       this.setState({
         ...idle(),
         status: "error",
-        message: `Capture binary not found at ${bin}. Run \`pnpm --filter peach-pi-record-replay build:native\`.`,
+        message: `Capture binary not found at ${bin}. Run \`pnpm --filter @peach-pi/record-replay build:native\`.`,
       });
       return this.state;
     }
@@ -194,6 +206,23 @@ export class RecordingService {
       if (rec) saveRecording(ROOT, { ...rec, skillPath: savedSkillPath, digest });
     }
 
+    const synthesisPrompt = synthesisSystemPrompt(digest, id);
+    // Auto-send the synthesis prompt to the chat that started the recording,
+    // so the agent authors the skill inline instead of the user asking.
+    const threadId = this.activeThreadId;
+    this.activeThreadId = null;
+    if (threadId && this.prompter) {
+      try {
+        await this.prompter(threadId, synthesisPrompt);
+      } catch (err) {
+        // Delivery failure surfaces via state; events are still persisted.
+        this.setState({
+          status: "error",
+          message: `Synthesis prompt delivery failed: ${String(err)}`,
+        });
+      }
+    }
+
     this.setState({ ...idle(), skillPath: savedSkillPath });
     this.pendingStopId = null;
 
@@ -203,6 +232,7 @@ export class RecordingService {
       durationMs,
       digest,
       skillPath: savedSkillPath,
+      synthesisPrompt,
     };
   }
 

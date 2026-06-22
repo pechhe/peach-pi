@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb, migrate } from "../../electron/persistence/db.ts";
-import { AutomationRepo, ProjectRepo, ThreadRepo, KvRepo } from "../../electron/persistence/repositories.ts";
+import { AutomationRepo, ProjectRepo, ThreadRepo, WorktreeRepo, KvRepo } from "../../electron/persistence/repositories.ts";
 import { DatabaseSync } from "node:sqlite";
 
 function memoryDb() {
@@ -14,7 +14,7 @@ test("migrations are idempotent", () => {
   const db = memoryDb();
   migrate(db); // second run = no-op
   const v = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  assert.equal(v.user_version, 7);
+  assert.equal(v.user_version, 8);
 });
 
 test("automation lifecycle: insert, due, fire, runs, disable", () => {
@@ -97,6 +97,29 @@ test("kv json round-trip", () => {
   assert.deepEqual(kv.get("ui"), { sidebarWidth: 300 });
   kv.set("ui", { sidebarWidth: 200 });
   assert.deepEqual(kv.get("ui"), { sidebarWidth: 200 });
+});
+
+test("worktree repo: insert, nextName, active for project, archive", () => {
+  const db = memoryDb();
+  const projects = new ProjectRepo(db);
+  const threads = new ThreadRepo(db);
+  const repo = new WorktreeRepo(db);
+  const p = projects.add("/tmp/proj", "proj", "repo");
+
+  const w1 = repo.insert({ projectId: p.id, dir: "/tmp/proj/.wt/1", name: repo.nextName(p.id) });
+  assert.equal(w1.name, "Worktree 1");
+  const w2 = repo.insert({ projectId: p.id, dir: "/tmp/proj/.wt/2", name: repo.nextName(p.id) });
+  assert.equal(w2.name, "Worktree 2");
+
+  // Threads link via worktree id, and the repo reports active worktrees.
+  threads.insert({ projectId: p.id, title: "t1", worktreeId: w1.id, worktreeDir: w1.dir });
+  threads.insert({ projectId: p.id, title: "t2", worktreeId: w1.id, worktreeDir: w1.dir });
+  assert.equal(repo.activeForProject(p.id).length, 2);
+
+  // Archiving a worktree removes it from the active list but keeps the row.
+  repo.setArchived(w1.id, new Date().toISOString());
+  assert.equal(repo.activeForProject(p.id).length, 1);
+  assert.equal(repo.get(w1.id)!.archivedAt != null, true);
 });
 
 test("openDb creates file-backed db with WAL", (t) => {

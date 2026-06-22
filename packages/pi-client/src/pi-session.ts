@@ -382,6 +382,15 @@ export class PiSession {
       mimeType: img.mimeType,
     }));
     const options = imageContent?.length ? { images: imageContent } : {};
+    // Optimistic echo: see threadService.prompt for the full rationale. The
+    // SDK runs `before_agent_start` (which pi-vision-proxy uses for a blocking
+    // vision-model round-trip) *before* it emits the user `message_start`, so
+    // the sent message + image otherwise wouldn't render until that returns.
+    // The recorder seeds placeholders only for image-bearing prompts and
+    // drops them when the real user message_start arrives. Routed through
+    // onOps so main flushes like any op.
+    const pending = this.recorder.seedPendingUser(text, images);
+    if (pending.length > 0) this.callbacks.onOps(pending);
     if (this.session.isStreaming) {
       await this.session.prompt(text, { ...options, streamingBehavior: "followUp" });
     } else {

@@ -487,123 +487,43 @@ export interface AppSnapshot {
   ui: UiState;
 }
 
-/** A saved external-service credential. Secrets never cross the IPC seam:
- *  only identity/metadata + non-secret OAuth config is exposed to the renderer.
- *  The secret blob (API key or OAuth token set) lives encrypted in SQLite. */
-export interface Connector {
-  id: string;
-  /** Service id, e.g. "notion", "github", "linear", or "custom:<name>". */
-  provider: string;
-  /** Human label chosen by the user. */
-  label: string;
-  authKind: "api_key" | "oauth";
-  /** OAuth: false until a token exchange completes. API-key: always true. */
+/** Connection status as reported by Composio for a connected account. */
+export type ConnectionStatus = "ACTIVE" | "INITIATED" | "EXPIRED" | "FAILED" | "INACTIVE";
+
+/** One toolkit in the Composio catalogue (a searchable connect target).
+ *  Sourced live from `toolkits.list`; nothing about it is persisted. */
+export interface ToolkitCatalogEntry {
+  /** Composio toolkit slug, e.g. "gmail", "github", "notion". */
+  slug: string;
+  /** Display name, e.g. "Gmail". */
+  name: string;
+  description: string;
+  logoUrl: string | null;
+  /** Primary auth scheme: "OAUTH2", "API_KEY", "BEARER_TOKEN", … */
+  authScheme: string;
+  /** True when the local user already has an ACTIVE connected account. */
   connected: boolean;
-  /** Non-secret OAuth config (omitted for api-key connectors). */
-  oauth?: ConnectorOauthConfig;
-  /** Token expiry (ISO), when the provider tells us. */
-  expiresAt: string | null;
+}
+
+/** A connected account: one provider the local user has authenticated through
+ *  Composio. Composio holds the tokens; peach-pi holds only this metadata. */
+export interface Connection {
+  /** Composio connected-account id (ca_…). */
+  id: string;
+  toolkitSlug: string;
+  name: string;
+  logoUrl: string | null;
+  status: ConnectionStatus;
   createdAt: string;
-  updatedAt: string;
 }
 
-/** Non-secret OAuth connector config — surfaced to the renderer for editing.
- *  CLIENT_SECRET is intentionally absent; it lives only in the encrypted blob. */
-export interface ConnectorOauthConfig {
-  clientId: string;
-  redirectUri: string;
-  authorizeUrl: string;
-  tokenUrl: string;
-  scopes: string[];
-  /** PKCE S256 by default; false for providers that don't support it (Notion). */
-  usePkce: boolean;
-  /** Send client_secret as HTTP Basic auth (Notion requires it) vs in the body. */
-  useBasicAuth: boolean;
-  /** Route the handshake + token exchange through the vendor OAuth broker
-   *  instead of talking to the provider directly. Set for confidential
-   *  providers (Notion, GitHub, …) so the client_secret never ships. */
-  useBroker?: boolean;
-}
-
-/** Input for `connectors:createApiKey`. */
-export interface CreateApiKeyInput {
-  provider: string;
-  label: string;
-  apiKey: string;
-}
-
-/** Input for `connectors:createOAuth` (BYO client — no bundled secrets). */
-export interface CreateOAuthInput {
-  provider: string;
-  label: string;
-  clientId: string;
-  /** User-supplied client secret — encrypted before persistence, never
-   *  returned. Omit for PKCE public clients (GitHub, Google, Linear, …). */
-  clientSecret?: string;
-  redirectUri: string;
-  authorizeUrl: string;
-  tokenUrl: string;
-  scopes?: string[];
-  usePkce?: boolean;
-  useBasicAuth?: boolean;
-  /** Route through the vendor broker (confidential providers); client_id and
-   *  client_secret are then held server-side and omitted here. */
-  useBroker?: boolean;
-}
-
-/** Result of starting an OAuth flow — the URL for the renderer to open. */
-export interface OAuthStartResult {
-  authUrl: string;
-}
-
-/** What `connectors:resolve` returns for a configured connector. Raw token or
- *  ready-to-use headers; agents/tools use this like Claude's apiKeyHelper. */
-export interface ResolvedCredential {
-  headers: Record<string, string>;
-  tokenType: string | null;
-  expiresAt: string | null;
-}
-
-/** Defaults for a known OAuth provider — pre-fills the BYO-client form in the
- *  renderer. The user still supplies their own client_id + client_secret
- *  (unless a `clientId` is bundled). Also drives the connector catalog grid. */
-export interface OAuthPreset {
-  provider: string;
-  label: string;
-  authorizeUrl: string;
-  tokenUrl: string;
-  scopes: string[];
-  /** PKCE S256 supported? false for Notion (Notion doesn't fully support PKCE). */
-  usePkce: boolean;
-  /** Requires HTTP Basic auth on the token endpoint? true for Notion. */
-  useBasicAuth: boolean;
-  /** Default redirect URI. Custom-scheme-tolerant providers use deep-link;
-   *  Notion rejects custom schemes and needs `http://localhost:<port>/callback`. */
-  redirectUri: string;
-  /** simple-icons slug (e.g. "notion"); renderer falls back to a monogram
-   *  tile when absent or unknown. */
-  icon?: string;
-  /** Brand hex override; otherwise the renderer uses simple-icons' own hex. */
-  iconHex?: string;
-  /** Provider REST base, shown for reference (agent-side tools call this). */
-  apiBaseUrl?: string;
-  /** "Create an OAuth app" / credentials docs — linked from the connect form. */
-  docsUrl?: string;
-  /** Bundled public client_id, when peach-pi ships a registered app for this
-   *  provider. Undefined = user supplies their own (BYO). */
-  clientId?: string;
-  /** When true, confidential handshakes route through the vendor broker (the
-   *  broker holds the secret). One-click without any local credential. */
-  useBroker?: boolean;
-  /** Bundled client_secret for confidential clients (e.g. Notion). Provisioned
-   *  out-of-band; lets "Connect" skip the form entirely. */
-  clientSecret?: string;
-  /** Does the token endpoint need a client_secret? false for PKCE-only public
-   *  clients. Defaults to true. */
-  clientSecretRequired?: boolean;
-  /** Runtime-only: true when a client (bundled or provisioned via the local
-   *  clients file) exists, so the renderer can offer one-click Connect. */
-  hasClient?: boolean;
+/** Result of starting a connect flow. For OAuth, `redirectUrl` is the
+ *  Composio-hosted authorize URL the renderer opens; completion is reported
+ *  later via `event:connectorsChanged`. Null for non-redirect (API-key)
+ *  schemes, which complete synchronously. */
+export interface ConnectStartResult {
+  redirectUrl: string | null;
+  connectionRequestId: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -635,4 +555,8 @@ export interface RecordingStopResult {
   digest: string;
   /** Path the skill file was saved to, if `skill` body was provided. */
   skillPath: string | null;
+  /** The ready-to-send synthesis prompt (digest + instructions). The renderer
+   *  forwards this to the chat thread that started the recording so the agent
+   *  authors the skill inline, instead of the user asking manually. */
+  synthesisPrompt: string;
 }

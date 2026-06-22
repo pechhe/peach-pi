@@ -184,13 +184,22 @@
     startNewThread(selectedThread?.projectId ?? null);
   }
 
-  // Sidebar new-thread button: explicit project (+ optional worktree).
-  async function newThreadInProject(projectId: string, worktree = false) {
+  // Sidebar new-thread button: create a thread in the project's main
+  // checkout or inside an existing worktree (worktreeId set).
+  async function newThreadInProject(projectId: string, worktreeId?: string) {
     const thread = await api.invoke(
       "threads:create",
       projectId,
-      worktree ? { worktree: true } : undefined,
+      worktreeId ? { worktreeId } : undefined,
     );
+    selectThread(thread.id);
+  }
+
+  // Sidebar git-branch-plus button: create a new worktree (registry record +
+  // isolated git checkout) and open a fresh thread inside it.
+  async function newWorktreeInProject(projectId: string) {
+    const worktree = await api.invoke("worktrees:create", projectId);
+    const thread = await api.invoke("threads:create", projectId, { worktreeId: worktree.id });
     selectThread(thread.id);
   }
 
@@ -252,6 +261,7 @@
     <Sidebar
       width={sidebarWidth}
       projects={snapshot.current.projects}
+      worktrees={snapshot.current.worktrees}
       threads={snapshot.current.threads}
       collapsedProjects={snapshot.current.ui.collapsedProjects}
       {selectedThreadId}
@@ -261,6 +271,7 @@
       onOpenView={openView}
       onOpenTesting={openTesting}
       onNewThread={newThreadInProject}
+      onNewWorktree={newWorktreeInProject}
       onOpenSearch={() => (searchOpen = true)}
     />
     <!-- Drag handle straddling the sidebar/content seam (no layout footprint). -->

@@ -19,6 +19,7 @@
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import Circle from "@lucide/svelte/icons/circle";
   import { parseSkillInvocation } from "../lib/composer/skill-message";
   import { skillViewer } from "../stores/skill-viewer.svelte";
   import Markdown from "./Markdown.svelte";
@@ -32,6 +33,7 @@
   import { collectAgents } from "../lib/subagent/journey.svelte";
   import { FLEET_WIDGET_KEY, parseFleet, type FleetAgent } from "../lib/subagent/fleet";
   import { extensionUi } from "../stores/extension-ui.svelte";
+  import { recording } from "../stores/recording.svelte";
   import { lightbox } from "../stores/lightbox.svelte";
   import { terminal } from "../stores/terminal.svelte";
   import FindBar from "./FindBar.svelte";
@@ -886,6 +888,17 @@
         >
           {isWorktree ? "⎇ Worktree" : "◈ Local"}
         </button>
+        <button
+          type="button"
+          class="new-thread__record"
+          onclick={() => recording.start(thread.id)}
+          data-testid="start-recording"
+          title="Record a desktop task → synthesize a skill in this chat"
+          aria-label="Start recording"
+        >
+          <Circle size={11} class="fill-red-500 text-red-500" />
+          <span>Record</span>
+        </button>
       </div>
     {/if}
     <Composer {thread} onRewind={rewindFromEnd} {onNewThread} centered={isEmpty} />
@@ -917,7 +930,26 @@
   .new-thread__bar {
     display: flex;
     justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
     padding-bottom: 0.75rem;
+  }
+  .new-thread__record {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--color-faint);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 0.375rem;
+    background: var(--color-surface);
+    transition: color 120ms ease, background 120ms ease;
+  }
+  .new-thread__record:hover {
+    background: var(--color-surface-2);
+    color: var(--color-fg);
   }
 
   :global(.thread-find-hit) {

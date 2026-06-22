@@ -29,6 +29,21 @@
   function reveal() {
     if (lastSkillPath) recording.revealSkill(lastSkillPath);
   }
+
+  // Error state is a toast, not a persistent bar: auto-dismiss after a few
+  // seconds (still retryable via the tray menu or a fresh start attempt).
+  let errorDismissed = $state(false);
+  let errorTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $effect(() => {
+    if (recording.state.status === "error" && recording.state.message) {
+      errorDismissed = false;
+      errorTimer = setTimeout(() => (errorDismissed = true), 6000);
+      return () => {
+        if (errorTimer) clearTimeout(errorTimer);
+      };
+    }
+  });
 </script>
 
 {#if recording.state.status !== "idle" || justStopped}
@@ -54,13 +69,18 @@
       >
         <X class="h-3 w-3" /> Cancel
       </button>
-    {:else if recording.state.status === "error"}
+    {:else if recording.state.status === "error" && !errorDismissed}
       <Circle class="h-3 w-3 fill-amber-500 text-amber-500" />
       <span class="text-amber-600">{recording.state.message ?? "Recorder error"}</span>
       <button
         class="ml-1 text-[11px] text-faint underline hover:text-fg-soft"
         onclick={() => recording.start()}
       >Retry</button>
+      <button
+        class="text-faint hover:text-fg-soft"
+        aria-label="Dismiss"
+        onclick={() => (errorDismissed = true)}
+      ><X class="h-3 w-3" /></button>
     {:else if justStopped}
       {#if lastSkillPath}
         <FileText class="h-3 w-3 text-emerald-500" />
@@ -69,7 +89,7 @@
           Reveal file
         </button>
       {:else}
-        <span class="text-fg-soft">Stopped. Ask the agent to synthesize the skill.</span>
+        <span class="text-fg-soft">Stopped. Synthesizing skill in chat…</span>
       {/if}
       <button
         class="ml-1 text-[11px] text-faint hover:text-fg-soft"

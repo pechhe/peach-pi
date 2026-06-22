@@ -5,39 +5,24 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { ConnectorService } from "./connector-service.ts";
-import { OAUTH_PRESETS } from "./connector-catalog.ts";
 
 /**
  * Localhost-only HTTP bridge that lets a pi extension (running in the terminal,
- * with no access to Electron IPC) read connector credentials out of the main
- * process. Secrets never touch disk: OAuth tokens live encrypted in Keychain
- * via `SecretStore` and are handed out live over this loopback socket.
+ * with no access to Electron IPC) reach Composio through the main process. The
+ * Composio API key stays in the main process — the extension only sees tool
+ * schemas and execution results.
  *
  * Auth: a random bearer token, written (with the random port) to a non-secret
- * bootstrap file at `~/.pi/agent/peach-connectors.json` that the extension reads
- * to find us. That token is a low-value local secret — any process that can
- * read the user's home dir already has broad access — but it keeps casual
- * port-scans from grabbing tokens.
+ * bootstrap file at `~/.pi/agent/peach-connectors.json` that the extension
+ * reads to find us. A low-value local secret that keeps casual port-scans out.
  *
  * Surface:
- *   GET /health                       → { ok: true }
- *   GET /connectors                   → [{ provider, label, authKind, connected, apiBaseUrl }]
- *   GET /connectors/:provider/credentials → { provider, apiBaseUrl, headers, expiresAt }
+ *   GET  /health                          → { ok: true }
+ *   GET  /tools?search=&toolkits=a,b       → Composio tool schemas (discovery)
+ *   POST /execute  { toolSlug, arguments } → execute a tool in the Composio cloud
  */
 const BOOTSTRAP_DIR = join(homedir(), ".pi", "agent");
 const BOOTSTRAP_PATH = join(BOOTSTRAP_DIR, "peach-connectors.json");
-
-// Provider → REST base, for URL building on the extension side. Custom
-// connectors without a preset have no known base (null).
-const API_BASES = new Map(OAUTH_PRESETS.map((p) => [p.provider, p.apiBaseUrl ?? null]));
-
-interface ResolverMeta {
-  provider: string;
-  label: string;
-  authKind: string;
-  connected: boolean;
-  apiBaseUrl: string | null;
-}
 
 export class ConnectorResolver {
   private server: Server | null = null;
@@ -82,38 +67,40 @@ export class ConnectorResolver {
     try {
       if (!this.checkAuth(req)) return this.send(res, 401, { error: "unauthorized" });
       const url = new URL(req.url ?? "/", this.baseUrl);
-      if (req.method !== "GET") return this.send(res, 405, { error: "method not allowed" });
 
-      if (url.pathname === "/health") return this.send(res, 200, { ok: true });
-
-      if (url.pathname === "/connectors") {
-        const rows = this.service.list().map<ResolverMeta>((c) => ({
-          provider: c.provider,
-          label: c.label,
-          authKind: c.authKind,
-          connected: c.connected,
-          apiBaseUrl: API_BASES.get(c.provider) ?? null,
-        }));
-        return this.send(res, 200, { connectors: rows });
+      if (req.method === "GET" && url.pathname === "/health") {
+        return this.send(res, 200, { ok: true });
       }
 
-      const m = /^\/connectors\/([^/]+)\/credentials$/.exec(url.pathname);
-      if (m) {
-        const provider = m[1] ? decodeURIComponent(m[1]) : "";
-        const resolved = await this.service.resolve(provider);
-        if (!resolved) return this.send(res, 404, { error: `no connector for ${provider}` });
-        return this.send(res, 200, {
-          provider,
-          apiBaseUrl: API_BASES.get(provider) ?? null,
-          headers: resolved.headers,
-          expiresAt: resolved.expiresAt,
-        });
+      if (req.method === "GET" && url.pathname === "/tools") {
+        const search = url.searchParams.get("search") ?? "";
+        const toolkitsParam = url.searchParams.get("toolkits") ?? "";
+        const toolkits = toolkitsParam ? toolkitsParam.split(",").filter(Boolean) : undefined;
+        const tools = await this.service.searchTools(search, toolkits);
+        return this.send(res, 200, { tools });
+      }
+
+      if (req.method === "POST" && url.pathname === "/execute") {
+        const body = (await this.readJson(req)) as {
+          toolSlug?: string;
+          arguments?: Record<string, unknown>;
+        };
+        if (!body.toolSlug) return this.send(res, 400, { error: "toolSlug required" });
+        const result = await this.service.executeTool(body.toolSlug, body.arguments ?? {});
+        return this.send(res, 200, { result });
       }
 
       return this.send(res, 404, { error: "not found" });
     } catch (err) {
       return this.send(res, 500, { error: String(err) });
     }
+  }
+
+  private async readJson(req: IncomingMessage): Promise<unknown> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const raw = Buffer.concat(chunks).toString("utf8");
+    return raw ? JSON.parse(raw) : {};
   }
 
   private checkAuth(req: IncomingMessage): boolean {

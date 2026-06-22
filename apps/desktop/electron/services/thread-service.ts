@@ -119,10 +119,10 @@ export class ThreadService {
     this.rewindSnapshots.delete(threadId);
   }
 
-  async createThread(projectId: string, worktreeDir?: string): Promise<Thread> {
+  async createThread(projectId: string, worktreeId?: string | null, worktreeDir?: string): Promise<Thread> {
     const project = this.projects.all().find((p) => p.id === projectId);
     if (!project) throw new Error(`Unknown project: ${projectId}`);
-    const thread = this.threads.insert({ projectId, title: "New thread", worktreeDir });
+    const thread = this.threads.insert({ projectId, title: "New thread", worktreeId, worktreeDir });
     await this.ensureSession(thread.id, worktreeDir ?? project.path, null);
     this.onThreadsChanged();
     return this.threads.get(thread.id)!;
@@ -456,9 +456,9 @@ export class ThreadService {
    *  isolated worktree, keeping the same thread id so the renderer's
    *  ThreadView stays mounted (no flash). The caller resolves the git
    *  worktree dir; we only own the session swap + row mutation. */
-  async setEnvironment(threadId: string, worktreeDir: string | undefined): Promise<void> {
+  async setEnvironment(threadId: string, worktreeId: string | null, worktreeDir: string | undefined): Promise<void> {
     this.disposeSession(threadId);
-    this.threads.setWorktreeDir(threadId, worktreeDir ?? null);
+    this.threads.setWorktree(threadId, worktreeId, worktreeDir ?? null);
     const thread = this.threads.get(threadId);
     if (thread) {
       const project = thread.projectId
@@ -477,7 +477,7 @@ export class ThreadService {
     const thread = this.threads.get(threadId);
     if (!thread?.worktreeDir) return;
     this.disposeSession(threadId);
-    this.threads.setWorktreeDir(threadId, null);
+    this.threads.setWorktree(threadId, null, null);
     const project = thread.projectId
       ? this.projects.all().find((p) => p.id === thread.projectId)
       : null;

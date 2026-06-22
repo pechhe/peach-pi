@@ -64,7 +64,8 @@ export type TranscriptItem =
 export type TranscriptOp =
   | { op: "reset"; items: TranscriptItem[] }
   | { op: "upsert"; item: TranscriptItem }
-  | { op: "append"; id: string; field: "text" | "thinking" | "output"; delta: string };
+  | { op: "append"; id: string; field: "text" | "thinking" | "output"; delta: string }
+  | { op: "delete"; id: string };
 
 export interface TranscriptDelta {
   threadId: string;
@@ -93,6 +94,8 @@ export function applyTranscriptOps(
     } else if (op.op === "upsert") {
       const idx = next.findIndex((i) => i.id === op.item.id);
       next = idx === -1 ? [...next, op.item] : next.with(idx, op.item);
+    } else if (op.op === "delete") {
+      next = next.filter((i) => i.id !== op.id);
     } else {
       const idx = next.findIndex((i) => i.id === op.id);
       if (idx === -1) continue;

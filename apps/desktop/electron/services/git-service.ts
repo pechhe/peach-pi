@@ -430,6 +430,10 @@ export class GitService {
   }
 
   async removeWorktree(projectPath: string, worktreeDir: string): Promise<void> {
-    await git(["worktree", "remove", "--force", worktreeDir], projectPath).catch(() => undefined);
+    // `-f -f` overrides locked worktrees (other editors like supacode lock
+    // working trees). Without the second `-f`, git refuses and the old code
+    // silently swallowed the error, leaving orphaned worktrees in the git
+    // registry while peach-pi marked them archived.
+    await git(["worktree", "remove", "--force", "--force", worktreeDir], projectPath);
   }
 }

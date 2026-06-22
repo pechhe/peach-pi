@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AppView, Project, Thread } from "@peach-pi/shared-types";
+  import type { AppView, Project, Thread, Worktree } from "@peach-pi/shared-types";
   import { isNewThread } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { extensionUi } from "../stores/extension-ui.svelte";
@@ -25,6 +25,9 @@
   import { doneAnim } from "../lib/done-anim.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Plus from "@lucide/svelte/icons/plus";
+  import GitBranch from "@lucide/svelte/icons/git-branch";
+  import Folder from "@lucide/svelte/icons/folder";
+  import Archive from "@lucide/svelte/icons/archive";
   import GitBranchPlus from "@lucide/svelte/icons/git-branch-plus";
   import SquarePen from "@lucide/svelte/icons/square-pen";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -34,12 +37,14 @@
   let {
     width = 280,
     projects,
+    worktrees,
     threads,
     selectedThreadId,
     activeView,
     collapsedProjects = [],
     onSelect,
     onNewThread,
+    onNewWorktree,
     onNewChat,
     onOpenView,
     onOpenTesting,
@@ -47,12 +52,14 @@
   }: {
     width?: number;
     projects: Project[];
+    worktrees: Worktree[];
     threads: Thread[];
     selectedThreadId: string | null;
     activeView: AppView;
     collapsedProjects?: string[];
     onSelect: (threadId: string) => void;
-    onNewThread: (projectId: string, worktree?: boolean) => void;
+    onNewThread: (projectId: string, worktreeId?: string) => void;
+    onNewWorktree: (projectId: string) => void;
     onNewChat: () => void;
     onOpenView: (view: AppView) => void;
     onOpenTesting: (projectId: string) => void;
@@ -140,15 +147,29 @@
   }
 
   const byProject = $derived(
-    projects.map((p) => ({ project: p, ...partition(threads.filter((t) => t.projectId === p.id)) })),
+    projects.map((p) => {
+      const projThreads = threads.filter((t) => t.projectId === p.id);
+      const parts = partition(projThreads);
+      const projWorktrees = worktrees.filter(
+        (w) => w.projectId === p.id && !w.archivedAt,
+      );
+      const masterActive = parts.active.filter((t) => !t.worktreeId);
+      const worktreeGroups = projWorktrees.map((w) => ({
+        worktree: w,
+        active: parts.active.filter((t) => t.worktreeId === w.id),
+      }));
+      return { project: p, ...parts, masterActive, worktreeGroups };
+    }),
   );
   const chatGroups = $derived(partition(chats));
 
   // Flat, top-to-bottom order of the rows ⌘⇧↑/↓ can land on: every visible
-  // active row (project threads first, then chats). Collapsed groups
-  // (snoozed/to-test/past) are intentionally excluded.
+  // active row (master threads, then each worktree's threads, per project;
+  // then chats). Collapsed groups (snoozed/to-test/past) are intentionally excluded.
   const previewOrder = $derived([
-    ...byProject.filter((g) => !isCollapsed(g.project.id)).flatMap((g) => g.active),
+    ...byProject
+      .filter((g) => !isCollapsed(g.project.id))
+      .flatMap((g) => [...g.masterActive, ...g.worktreeGroups.flatMap((wg) => wg.active)]),
     ...chatGroups.active,
   ].map((t) => t.id));
 
@@ -202,9 +223,22 @@
     expanded = { ...expanded, [key]: !expanded[key] };
   }
 
-  function newThread(projectId: string, worktree = false) {
+  function newThread(projectId: string, worktreeId?: string) {
     playButtonSecondary("click");
-    onNewThread(projectId, worktree);
+    onNewThread(projectId, worktreeId);
+  }
+
+  function newWorktree(projectId: string) {
+    playButtonSecondary("click");
+    onNewWorktree(projectId);
+  }
+
+  function archiveWorktree(worktree: Worktree) {
+    if (
+      !confirm(`Archive worktree “${worktree.name}”? All its threads will be archived and the checkout removed.`)
+    )
+      return;
+    void api.invoke("worktrees:archive", worktree.id);
   }
 
   function newChat() {
@@ -526,7 +560,7 @@
             {/if}
             <span class="truncate text-sm font-medium text-fg-soft">{group.project.name}</span>
             {#if isCollapsed(group.project.id)}
-              {@const total = group.active.length + group.snoozed.length + group.toTest.length + group.archived.length}
+              {@const total = group.masterActive.length + group.worktreeGroups.reduce((n, wg) => n + wg.active.length, 0) + group.snoozed.length + group.toTest.length + group.archived.length}
               {#if total > 0}
                 <span class="shrink-0 rounded-full bg-surface-2 px-1.5 text-[10px] text-fainter">{total}</span>
               {/if}
@@ -547,14 +581,14 @@
               class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
               onclick={() => newThread(group.project.id)}
               data-testid="new-thread"
-              title="Add thread"
+              title="Add thread to master"
               aria-label="Add thread"><Plus size={14} /></button
             >
             <button
               class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
-              onclick={() => newThread(group.project.id, true)}
+              onclick={() => newWorktree(group.project.id)}
               data-testid="new-worktree-thread"
-              title="New worktree thread (isolated checkout)"><GitBranchPlus size={14} /></button
+              title="New worktree (isolated checkout)"><GitBranchPlus size={14} /></button
             >
             <button
               class="rounded p-1 text-faint hover:bg-surface-2 hover:text-danger"
@@ -566,11 +600,60 @@
           </div>
         </div>
         {#if !isCollapsed(group.project.id)}
+          <!-- Master (project main checkout) — always visible, even with 0 threads. -->
+          <div class="flex items-center justify-between rounded px-2 pt-1.5 pb-0.5" role="group" aria-label="Master">
+            <span class="flex items-center gap-1 text-[11px] font-medium text-muted">
+              <Folder size={12} class="shrink-0" /> Master
+              {#if group.masterActive.length > 0}
+                <span class="text-fainter">· {group.masterActive.length}</span>
+              {/if}
+            </span>
+            <button
+              class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
+              onclick={() => newThread(group.project.id)}
+              title="Add thread to master"
+              aria-label="Add thread to master"><Plus size={12} /></button
+            >
+          </div>
           <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
-            {#each group.active as thread (thread.id)}
+            {#each group.masterActive as thread (thread.id)}
               {@render threadRow(thread, "active")}
             {/each}
           </MovingHighlight>
+
+          <!-- Active worktrees — each gets its own header + nested threads.
+               Tinted via an inset accent border to distinguish from master. -->
+          {#each group.worktreeGroups as wg (wg.worktree.id)}
+            <div class="worktree-header flex items-center justify-between rounded-md px-2 py-0.5" role="group" aria-label={wg.worktree.name}>
+              <span class="flex min-w-0 items-center gap-1 text-[11px] font-medium text-muted">
+                <GitBranch size={12} class="shrink-0 text-accent/70" />
+                <span class="truncate">{wg.worktree.name}</span>
+                {#if wg.active.length > 0}
+                  <span class="text-fainter">· {wg.active.length}</span>
+                {/if}
+              </span>
+              <div class="flex items-center gap-0.5 opacity-0 hover:opacity-100">
+                <button
+                  class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
+                  onclick={() => newThread(group.project.id, wg.worktree.id)}
+                  title="Add thread to worktree"
+                  aria-label="Add thread to worktree"><Plus size={12} /></button
+                >
+                <button
+                  class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-danger"
+                  onclick={() => archiveWorktree(wg.worktree)}
+                  title="Archive worktree and its threads"
+                  aria-label="Archive worktree"><Archive size={12} /></button
+                >
+              </div>
+            </div>
+            <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
+              {#each wg.active as thread (thread.id)}
+                {@render threadRow(thread, "active")}
+              {/each}
+            </MovingHighlight>
+          {/each}
+
           {@render collapsible(`sn:${group.project.id}`, "Snoozed", group.snoozed, "snoozed")}
           {@render collapsible(`ar:${group.project.id}`, "Done", group.archived, "archived")}
         {/if}
@@ -603,6 +686,13 @@
 </aside>
 
 <style>
+  /* ── worktree header: tinted to distinguish from master ───────── */
+  .worktree-header {
+    background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface) 94%);
+    box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent);
+  }
+  .worktree-header:hover > div { opacity: 1; }
+
   /* ── per-variant card pop (hero motion) ────────────────────────── */
   :global(.session-row.done-pop) { transform-origin: center; }
 

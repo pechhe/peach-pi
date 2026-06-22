@@ -50,15 +50,15 @@ class RecordingStore {
     }
   }
 
-  start(): void {
-    void api.invoke("recording:start");
+  start(threadId?: string): void {
+    void api.invoke("recording:start", threadId);
   }
 
-  stop(skillBody?: string): Promise<{ skillPath: string | null; digest: string }> {
-    return api.invoke("recording:stop", skillBody).then((r) => ({
-      skillPath: r.skillPath,
-      digest: r.digest,
-    }));
+  async stop(): Promise<{ skillPath: string | null; digest: string }> {
+    // Main process owns the thread↔recording association and auto-sends the
+    // synthesis prompt to the originating chat on stop.
+    const r = await api.invoke("recording:stop");
+    return { skillPath: r.skillPath, digest: r.digest };
   }
 
   cancel(): void {

@@ -13,6 +13,7 @@
     "test:e2e": "playwright test tests/core"
   },
   "dependencies": {
+    "@composio/core": "^0.11.0",
     "@earendil-works/pi-coding-agent": "catalog:",
     "@lucide/svelte": "^1.18.0",
     "@peach-pi/automation-core": "workspace:*",

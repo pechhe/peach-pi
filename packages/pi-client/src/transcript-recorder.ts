@@ -173,6 +173,35 @@ export class TranscriptRecorder {
     return this.items;
   }
 
+  /** Seed optimistic send-time placeholders (pending user message +
+   *  vision-proxy card) so the renderer shows them instantly while
+   *  `before_agent_start` blocks on the vision round-trip. Dropped when
+   *  the real user `message_start` arrives (see message_start handler).
+   *  Returns the ops so main can flush them via onOps like every other op. */
+  seedPendingUser(text: string, images?: { mimeType: string; data: string }[]): TranscriptOp[] {
+    // The optimistic placeholder exists only to cover the vision-proxy
+    // `before_agent_start` hook, which blocks on a vision-model round-trip
+    // for image-bearing prompts and delays the real user `message_start`.
+    // Text-only prompts echo promptly, so a placeholder would just risk a
+    // stale duplicate if the echoed text differs from the sent text. Gate on
+    // images so text-only sends never seed one.
+    if (!images?.length) return [];
+    const ts = Date.now();
+    return [
+      this.upsertOp({
+        id: `vp-pending-user-${ts}`,
+        kind: "user",
+        text,
+        images,
+      }),
+      this.upsertOp({
+        id: `vp-card-${ts}`,
+        kind: "notice",
+        text: "Analyzing image with vision proxy…",
+      }),
+    ];
+  }
+
   /** Rebuild from persisted message history (session resume). */
   load(messages: MessageLike[]): TranscriptOp[] {
     this.items = [];
@@ -187,8 +216,18 @@ export class TranscriptRecorder {
       case "message_start": {
         if (!event.message) return [];
         const item = this.messageToItem(event.message, true);
+        const ops: TranscriptOp[] = [];
+        // The real user `message_start` fires after `before_agent_start`.
+        // Replace our optimistic pending-user/item and the vision-proxy card.
+        // Drop by sentinel id, not text: pi-vision-proxy rewrites image-bearing
+        // user content (its whole purpose), so the echoed text commonly differs
+        // from the sent text and a text-match would leave a stale duplicate.
+        // Prompts serialise (isStreaming queues followUp), so at most one
+        // placeholder is outstanding when a user message_start arrives.
+        if (item.kind === "user") ops.push(...this.dropPendingPlaceholders());
         if (item.kind === "assistant") this.activeAssistantId = item.id;
-        return [this.upsertOp(item)];
+        ops.push(this.upsertOp(item));
+        return ops;
       }
       case "message_update": {
         const id = this.activeAssistantId;
@@ -356,5 +395,25 @@ export class TranscriptRecorder {
     const idx = this.items.findIndex((i) => i.id === item.id);
     if (idx === -1) this.items.push(item);
     else this.items[idx] = item;
+  }
+
+  private deleteOp(id: string): TranscriptOp {
+    this.items = this.items.filter((i) => i.id !== id);
+    return { op: "delete", id };
+  }
+
+  /** Drop the optimistic send-time placeholders (pending user message +
+   *  vision-proxy card) once the real user `message_start` arrives — the
+   *  `before_agent_start` hook (pi-vision-proxy's blocking vision round-trip)
+   *  has returned by this point. No-op when no placeholders exist, so this
+   *  is safe for every prompt, image-less or proxy-disabled. */
+  private dropPendingPlaceholders(): TranscriptOp[] {
+    const ops: TranscriptOp[] = [];
+    for (const it of this.items) {
+      if (it.id.startsWith("vp-pending-user-") || it.id.startsWith("vp-card-")) {
+        ops.push(this.deleteOp(it.id));
+      }
+    }
+    return ops;
   }
 }

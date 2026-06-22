@@ -6,6 +6,7 @@ import type {
   ModelInfo,
   Project,
   UiState,
+  Worktree,
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { seedHudThreadId } from "@peach-pi/shared-types";
@@ -17,6 +18,7 @@ import {
   KvRepo,
   ProjectRepo,
   ThreadRepo,
+  WorktreeRepo,
 } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
 
@@ -29,6 +31,7 @@ const DEFAULT_AUTO_COMPACT: AutoCompactSettings = { percent: 80, tokens: null };
 export class AppService {
   private projects: ProjectRepo;
   private threads: ThreadRepo;
+  private worktrees: WorktreeRepo;
   private kv: KvRepo;
   private automations: AutomationRepo;
   private snoozeTimer: NodeJS.Timeout | null = null;
@@ -38,6 +41,7 @@ export class AppService {
     this.emit = emit;
     this.projects = new ProjectRepo(db);
     this.threads = new ThreadRepo(db);
+    this.worktrees = new WorktreeRepo(db);
     this.kv = new KvRepo(db);
     this.automations = new AutomationRepo(db);
   }
@@ -55,6 +59,7 @@ export class AppService {
   snapshot(): AppSnapshot {
     return {
       projects: this.projects.all(),
+      worktrees: this.worktrees.all(),
       threads: this.threads.all(),
       automations: this.automations.all(),
       ui: this.loadUiState(),
@@ -106,6 +111,33 @@ export class AppService {
   setSidebarWidth(width: number): void {
     this.saveUiState({ sidebarWidth: Math.round(Math.min(560, Math.max(200, width))) });
     this.publish();
+  }
+
+  addWorktree(projectId: string, dir: string): Worktree {
+    const wt = this.worktrees.insert({ projectId, dir, name: this.worktrees.nextName(projectId) });
+    this.publish();
+    return wt;
+  }
+
+  worktree(id: string): Worktree | null {
+    return this.worktrees.get(id);
+  }
+
+  renameWorktree(id: string, name: string): void {
+    this.worktrees.setName(id, name);
+    this.publish();
+  }
+
+  /** Mark a worktree archived; returns its live (non-archived) thread ids so
+   *  the caller can archive each thread + remove the git worktree dir. */
+  archiveWorktree(id: string): string[] {
+    const now = new Date().toISOString();
+    this.worktrees.setArchived(id, now);
+    const threadIds = this.threads.all()
+      .filter((t) => t.worktreeId === id && !t.archivedAt)
+      .map((t) => t.id);
+    this.publish();
+    return threadIds;
   }
 
   setSelectedThread(threadId: string | null): void {

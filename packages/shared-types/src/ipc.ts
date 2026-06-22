@@ -3,9 +3,8 @@ import type {
   AutoCompactSettings,
   CavemanState,
   CommandInfo,
-  Connector,
-  CreateApiKeyInput,
-  CreateOAuthInput,
+  Connection,
+  ConnectStartResult,
   DevTapProjectStatus,
   Automation,
   AutomationRun,
@@ -17,9 +16,7 @@ import type {
   GitPrResult,
   GitPushLocalResult,
   GraphifyStatus,
-  OAuthPreset,
-  OAuthStartResult,
-  ResolvedCredential,
+  ToolkitCatalogEntry,
   SubagentAgentInfo,
   SubagentAgentPatch,
   ExtensionStatusPayload,
@@ -48,6 +45,7 @@ import type {
   ThreadId,
   ThreadSearchHit,
   ToolMode,
+  Worktree,
 } from "./entities.ts";
 import type { TranscriptDelta, TranscriptSnapshot } from "./transcript.ts";
 
@@ -177,10 +175,30 @@ export const ipcContracts = {
     },
   ),
 
-  // threads
-  "threads:create": invoke<[projectId: string, opts?: { worktree?: boolean }], Thread>((id) =>
+  // worktrees
+  /** Create a registered worktree record for a project. Resolves the isolated
+   *  git checkout, persists a `worktrees` row, and returns it. The renderer
+   *  then creates threads inside it via `threads:create` with `worktreeId`. */
+  "worktrees:create": invoke<[projectId: string], Worktree>((id) =>
     requireNonEmptyString(id, "projectId"),
   ),
+  /** Rename a worktree (sidebar label only). */
+  "worktrees:rename": invoke<[worktreeId: string, name: string], void>((id, name) => {
+    requireNonEmptyString(id, "worktreeId");
+    requireNonEmptyString(name, "name");
+  }),
+  /** Archive every non-archived thread in the worktree, remove the git worktree
+   *  dir, and mark the worktree archived. The node disappears from the sidebar;
+   *  its (now archived) threads still surface under the project's Done bucket. */
+  "worktrees:archive": invoke<[worktreeId: string], void>((id) =>
+    requireNonEmptyString(id, "worktreeId"),
+  ),
+
+  // threads
+  "threads:create": invoke<
+    [projectId: string, opts?: { worktreeId?: string; worktree?: boolean }],
+    Thread
+  >((id) => requireNonEmptyString(id, "projectId")),
   "threads:createChat": invoke<[], Thread>(),
   "threads:prompt": invoke<
     [threadId: ThreadId, text: string, images?: ImagePayload[], toolMode?: ToolMode],
@@ -398,62 +416,38 @@ export const ipcContracts = {
     void
   >(),
 
-  // connectors (saved external-service credentials: OAuth + API keys). BYO
-  // client for OAuth; peach-pi bundles no secrets. Secrets live encrypted in
-  // SQLite and never cross the IPC seam — the renderer sees only `Connector`.
-  /** All saved connectors (metadata only; no secrets). */
-  "connectors:list": invoke<[], Connector[]>(),
-  /** Known-provider presets to pre-fill the BYO-client form in the renderer.
-   *  Each carries `hasClient` so the UI knows which support one-click Connect. */
-  "connectors:presets": invoke<[], OAuthPreset[]>(),
-  /** One-click Connect from the catalog: provisions the bundled/local OAuth
-   *  client, (re)creates the connector, and returns the authUrl to open. No
-   *  form. Throws if no client is provisioned for the provider. */
-  "connectors:connectCatalog": invoke<[provider: string], OAuthStartResult>((p) =>
-    requireNonEmptyString(p, "provider"),
+  // connectors (Composio toolkits). Composio owns auth + token storage; the
+  // main process holds the API key and proxies catalogue/connect/execute. The
+  // renderer only ever sees toolkit metadata + connection status — never a
+  // token. OAuth completion is async and reported via event:connectorsChanged.
+  /** Search the Composio toolkit catalogue. Empty query → popular toolkits. */
+  "connectors:catalogue": invoke<[query: string], ToolkitCatalogEntry[]>(),
+  /** The local user's connected accounts (ACTIVE + pending). */
+  "connectors:list": invoke<[], Connection[]>(),
+  /** Begin connecting a toolkit. OAuth → opens the hosted authorize URL via
+   *  shell.openExternal and returns its redirectUrl; completion arrives later
+   *  via event:connectorsChanged. API-key schemes are rejected here — use
+   *  connectors:connectApiKey. */
+  "connectors:connect": invoke<[toolkitSlug: string], ConnectStartResult>((s) =>
+    requireNonEmptyString(s, "toolkitSlug"),
   ),
-  /** Save a long-lived API key / PAT for a provider. */
-  "connectors:createApiKey": invoke<[input: CreateApiKeyInput], Connector>((i) => {
-    requireNonEmptyString(i?.provider, "provider");
-    requireNonEmptyString(i?.label, "label");
-    requireNonEmptyString(i?.apiKey, "apiKey");
-  }),
-  /** Register an OAuth connector (BYO client). Returns the (disconnected)
-   *  connector; call `connectors:startOAuth` to begin the auth flow. */
-  "connectors:createOAuth": invoke<[input: CreateOAuthInput], Connector>((i) => {
-    requireNonEmptyString(i?.provider, "provider");
-    requireNonEmptyString(i?.label, "label");
-    requireNonEmptyString(i?.clientId, "clientId");
-    // Confidential clients must send a secret; PKCE public clients (GitHub,
-    // Google, Linear, …) authenticate with the verifier alone.
-    if (!i?.usePkce) requireNonEmptyString(i?.clientSecret, "clientSecret");
-    requireNonEmptyString(i?.redirectUri, "redirectUri");
-    requireNonEmptyString(i?.authorizeUrl, "authorizeUrl");
-    requireNonEmptyString(i?.tokenUrl, "tokenUrl");
-  }),
-  /** Begin an OAuth handshake. Returns the authUrl for the renderer to open
-   *  (via shell.openExternal). The callback arrives via the deep-link scheme or
-   *  a loopback HTTP server, depending on the connector's redirect_uri. */
-  "connectors:startOAuth": invoke<[connectorId: string], OAuthStartResult>((id) =>
-    requireNonEmptyString(id, "connectorId"),
+  /** Connect an API-key/token toolkit with a user-supplied secret. Completes
+   *  synchronously and returns the new connection. */
+  "connectors:connectApiKey": invoke<[toolkitSlug: string, apiKey: string], Connection>(
+    (slug, key) => {
+      requireNonEmptyString(slug, "toolkitSlug");
+      requireNonEmptyString(key, "apiKey");
+    },
   ),
-  /** Force a token refresh (or surface that re-auth is needed). */
-  "connectors:refresh": invoke<[connectorId: string], Connector>((id) =>
-    requireNonEmptyString(id, "connectorId"),
-  ),
-  /** Delete a connector (local only; provider-side revocation is a follow-up). */
-  "connectors:revoke": invoke<[connectorId: string], void>((id) =>
-    requireNonEmptyString(id, "connectorId"),
-  ),
-  /** Resolve a connector for a tool/agent to ready-to-use credentials. This is
-   *  the apiKeyHelper analogue — main-process callers only. */
-  "connectors:resolve": invoke<[provider: string], ResolvedCredential | null>((p) =>
-    requireNonEmptyString(p, "provider"),
+  /** Disconnect: delete the connected account at Composio. */
+  "connectors:disconnect": invoke<[connectionId: string], void>((id) =>
+    requireNonEmptyString(id, "connectionId"),
   ),
 
   // recording (desktop task capture → skill synthesis)
-  /** Begin capturing desktop input. Returns the initial RecordingState. */
-  "recording:start": invoke<[], RecordingState>(),
+  /** Begin capturing desktop input. `threadId` (optional) ties the recording
+   *  to a chat so `recording:stop` can auto-send the synthesis prompt there. */
+  "recording:start": invoke<[threadId?: string], RecordingState>(),
   /** Stop + persist events. With a `skill` body → saves the skill file.
    *  Without → returns the digest for the agent/UI to synthesize. */
   "recording:stop": invoke<[skillBody?: string], RecordingStopResult>(),

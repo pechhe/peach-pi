@@ -30,15 +30,9 @@ import {
   startDevTapControlChannel,
   stopDevTapControlChannel,
 } from "./services/devtap-control.ts";
-import { SafeStorageSecretStore } from "./services/secret-store.ts";
-import {
-  DEEP_LINK_SCHEME,
-  ConnectorService,
-  OAUTH_PRESETS,
-} from "./services/connector-service.ts";
+import { ConnectorService } from "./services/connector-service.ts";
 import { ConnectorResolver } from "./services/connector-resolver.ts";
 import { ensureConnectorExtension } from "./services/connector-extension.ts";
-import { hasProvisionedClient } from "./services/connector-clients.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import {
   createHudWindow,
@@ -159,6 +153,9 @@ async function boot(): Promise<void> {
   );
   const terminalService = new TerminalService(db, emit);
   const recordingService = new RecordingService(emit);
+  recordingService.setPrompter((threadId, text) =>
+    threadService.prompt(threadId, text, [], "all"),
+  );
   const gitService = new GitService(
     db,
     path.join(app.getPath("userData"), "worktrees"),
@@ -175,28 +172,15 @@ async function boot(): Promise<void> {
   );
   setupSubagentEnvironment(app.getPath("userData"));
 
-  const connectorService = new ConnectorService(
-    db,
-    emit,
-    new SafeStorageSecretStore(),
-  );
+  const connectorService = new ConnectorService(emit);
 
   // Localhost bridge so a pi extension (in the terminal, no IPC access) can
-  // resolve stored connector credentials. Started after ready; stopped on quit.
+  // reach Composio through the main process. Started after ready; stopped on quit.
   const connectorResolver = new ConnectorResolver(connectorService);
   void connectorResolver.start().then(() => connectorResolver.writeBootstrap());
   // Write the pi extension (auto-discovered by pi) so the agent gets the
-  // connector_call / connectors_list tools. Idempotent; only rewrites on version bump.
+  // connectors_search_tools / connector_execute tools. Idempotent; rewrites on bump.
   void ensureConnectorExtension();
-
-  // OAuth deep-link callback: peachpi://oauth/callback?code=…&state=…
-  if (!app.isDefaultProtocolClient(DEEP_LINK_SCHEME)) {
-    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
-  }
-  // macOS: a running instance receives the URL here.
-  app.on("open-url", (_event, url) => {
-    void connectorService.handleDeepLink(url);
-  });
 
   async function pickProject() {
     const result = await dialog.showOpenDialog({
@@ -229,16 +213,15 @@ async function boot(): Promise<void> {
     "extensions:remove": (spec) => piUpdateService.removeExtension(spec),
     "extensions:deleteLocal": (p) => piUpdateService.deleteLocalExtension(p),
     "app:getPiHealth": () => computePiHealth(__dirname),
+    "connectors:catalogue": (query) => connectorService.catalogue(query),
     "connectors:list": () => connectorService.list(),
-    "connectors:presets": () =>
-      OAUTH_PRESETS.map((p) => ({ ...p, hasClient: hasProvisionedClient(p) })),
-    "connectors:connectCatalog": (provider) => connectorService.connectCatalog(provider),
-    "connectors:createApiKey": (input) => connectorService.createApiKey(input),
-    "connectors:createOAuth": (input) => connectorService.createOAuth(input),
-    "connectors:startOAuth": (connectorId) => connectorService.startOAuth(connectorId),
-    "connectors:refresh": (connectorId) => connectorService.refresh(connectorId),
-    "connectors:revoke": (connectorId) => connectorService.revoke(connectorId),
-    "connectors:resolve": (provider) => connectorService.resolve(provider),
+    "connectors:connect": async (slug) => {
+      const r = await connectorService.connect(slug);
+      if (r.redirectUrl) void shell.openExternal(r.redirectUrl);
+      return r;
+    },
+    "connectors:connectApiKey": (slug, apiKey) => connectorService.connectApiKey(slug, apiKey),
+    "connectors:disconnect": (id) => connectorService.disconnect(id),
     "devtap:report": (entry) =>
       emitDevTapEvent({
         level: entry.error ? "error" : "info",
@@ -264,9 +247,37 @@ async function boot(): Promise<void> {
     "projects:reorder": (orderedIds) => appService.reorderProjects(orderedIds),
     "projects:setCollapsed": (projectId, collapsed) =>
       appService.setProjectCollapsed(projectId, collapsed),
+    "worktrees:create": async (projectId) => {
+      const dir = await gitService.createWorktree(projectId);
+      return appService.addWorktree(projectId, dir);
+    },
+    "worktrees:rename": (worktreeId, name) => {
+      appService.renameWorktree(worktreeId, name);
+    },
+    "worktrees:archive": async (worktreeId) => {
+      const wt = appService.worktree(worktreeId);
+      if (!wt) return;
+      const project = appService.snapshot().projects.find((p) => p.id === wt.projectId);
+      const threadIds = appService.archiveWorktree(worktreeId);
+      for (const tid of threadIds) threadService.archive(tid);
+      if (project) await gitService.removeWorktree(project.path, wt.dir);
+    },
     "threads:create": async (projectId, opts) => {
-      const worktreeDir = opts?.worktree ? await gitService.createWorktree(projectId) : undefined;
-      return threadService.createThread(projectId, worktreeDir);
+      let worktreeId: string | null = null;
+      let worktreeDir: string | undefined;
+      if (opts?.worktreeId) {
+        const wt = appService.worktree(opts.worktreeId);
+        if (!wt) throw new Error(`Unknown worktree: ${opts.worktreeId}`);
+        worktreeId = wt.id;
+        worktreeDir = wt.dir;
+      } else if (opts?.worktree) {
+        // Legacy one-shot: create a worktree record + git checkout together.
+        const dir = await gitService.createWorktree(projectId);
+        const wt = appService.addWorktree(projectId, dir);
+        worktreeId = wt.id;
+        worktreeDir = wt.dir;
+      }
+      return threadService.createThread(projectId, worktreeId, worktreeDir);
     },
     "threads:createChat": () => threadService.createChat(),
     "threads:prompt": (id, text, images, toolMode) =>
@@ -320,7 +331,7 @@ async function boot(): Promise<void> {
     "terminal:input": (id, data) => terminalService.input(id, data),
     "terminal:resize": (id, cols, rows) => terminalService.resize(id, cols, rows),
     "terminal:kill": (id) => terminalService.kill(id),
-    "recording:start": () => recordingService.start(),
+    "recording:start": (threadId) => recordingService.start(threadId),
     "recording:stop": (skillBody) => recordingService.stop(skillBody),
     "recording:cancel": () => recordingService.cancel(),
     "recording:status": () => recordingService.status(),
@@ -333,33 +344,36 @@ async function boot(): Promise<void> {
     "files:readImage": (filePath) => readImageFile(filePath),
     "threads:archive": (id) => threadService.archive(id),
     "threads:unarchive": (id) => threadService.unarchive(id),
-    "threads:delete": async (id) => {
-      const thread = appService.snapshot().threads.find((t) => t.id === id);
+    "threads:delete": (id) => {
+      // Deleting one thread leaves the worktree record + dir intact; teardown
+      // happens only when the whole worktree is archived.
       threadService.delete(id);
-      if (thread?.worktreeDir && thread.projectId) {
-        const project = appService.snapshot().projects.find((p) => p.id === thread.projectId);
-        if (project) await gitService.removeWorktree(project.path, thread.worktreeDir);
-      }
     },
     "threads:bringToLocal": async (id) => {
-      const thread = appService.snapshot().threads.find((t) => t.id === id);
+      // Detach the thread back to the project checkout. The worktree record
+      // and its git dir persist — other threads may still run in it. Use
+      // `worktrees:archive` to tear the whole worktree down.
       await threadService.bringWorktreeToLocal(id);
-      if (thread?.worktreeDir && thread.projectId) {
-        const project = appService.snapshot().projects.find((p) => p.id === thread.projectId);
-        if (project) await gitService.removeWorktree(project.path, thread.worktreeDir);
-      }
     },
     "threads:setEnvironment": async (threadId, worktree) => {
       const before = appService.snapshot().threads.find((t) => t.id === threadId);
       if (!before?.projectId) return;
       if ((before.worktreeDir != null) === worktree) return;
-      // Resolve the new worktree dir before disposing anything.
-      const newDir = worktree ? await gitService.createWorktree(before.projectId) : undefined;
-      await threadService.setEnvironment(threadId, newDir);
-      // Tear down the old worktree when switching back to the project dir.
-      if (before.worktreeDir && !worktree) {
-        const project = appService.snapshot().projects.find((p) => p.id === before.projectId);
-        if (project) await gitService.removeWorktree(project.path, before.worktreeDir);
+      // Resolve a freshly-created worktree record + dir before disposing.
+      if (worktree) {
+        const dir = await gitService.createWorktree(before.projectId);
+        const wt = appService.addWorktree(before.projectId, dir);
+        await threadService.setEnvironment(threadId, wt.id, wt.dir);
+      } else {
+        await threadService.setEnvironment(threadId, null, undefined);
+        // Tear down the old worktree record + git checkout.
+        if (before.worktreeId) {
+          const project = appService.snapshot().projects.find((p) => p.id === before.projectId);
+          if (project && before.worktreeDir) {
+            await gitService.removeWorktree(project.path, before.worktreeDir);
+          }
+          appService.archiveWorktree(before.worktreeId);
+        }
       }
     },
     "subagents:listAgents": (projectId) => subagentService.listAgents(projectId),
@@ -514,13 +528,7 @@ async function boot(): Promise<void> {
   tray.setTitle("REC");
   recordingService.attachTray(tray);
 
-  app.on("second-instance", (_event, argv) => {
-    // Windows/Linux deep-link callback arrives in argv.
-    for (const arg of argv) {
-      if (arg.startsWith(`${DEEP_LINK_SCHEME}://`)) {
-        void connectorService.handleDeepLink(arg);
-      }
-    }
+  app.on("second-instance", () => {
     const [win] = BrowserWindow.getAllWindows();
     if (win) {
       if (win.isMinimized()) win.restore();
