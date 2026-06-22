@@ -30,7 +30,7 @@
           {@const Icon = toast.icon}
           <Icon class="size-4 shrink-0 opacity-80" />
         {/if}
-        <span class="flex-1">{toast.message}</span>
+        <span class="select-text flex-1">{toast.message}</span>
         {#if toast.action}
           <button
             class="shrink-0 rounded px-2 py-0.5 font-medium underline-offset-2 hover:underline"

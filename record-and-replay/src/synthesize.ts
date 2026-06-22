@@ -128,7 +128,11 @@ Rules:
 - Identify the goal in 1-2 sentences.
 - Break the workflow into numbered steps in PLAIN ENGLISH.
 - ABSTRACT away literal coordinates/UI chrome into semantic actions ("open Google Sheets", "navigate to Hacker News", "copy the title of the top story"). Use the screenshot-grounded understanding of what each click was actually doing.
-- Where a robust programmatic path exists (CLI, script, API, connector), prefer it over brittle UI clicks — note it in the step and in the Notes section.
+- Prefer the most robust execution path, in this order, and note the chosen path per step:
+  1. Programmatic (CLI, script, API, connector) — always best; no UI at all.
+  2. Web pages → the \`agent-browser\` CLI skill (DOM-aware, web-native).
+  3. Native desktop UI → the \`cua-driver\` CLI skill (background native computer use; for macOS apps, system dialogs, menu bar, anything with no web/API surface).
+  Only fall back down the list when the path above has no clean route.
 - Capture triggers: natural-language phrases a user might say that should invoke this skill.
 - Be conservative: only assert what the recording shows. If the goal is ambiguous, say so in Notes.
 

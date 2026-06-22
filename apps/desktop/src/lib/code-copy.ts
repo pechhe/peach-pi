@@ -36,6 +36,48 @@ function attachButton(pre: HTMLPreElement): void {
   pre.appendChild(btn);
 }
 
+import { extensionUi } from "../stores/extension-ui.svelte";
+
+/**
+ * Svelte action: an element that copies its own text on click. Used on paths,
+ * error messages, and other content users want to grab without highlighting.
+ * Sets a "Click to copy" tooltip, briefly flashes "Copied!", and toasts.
+ */
+export function clickCopy(node: HTMLElement, text?: string) {
+  node.style.cursor = "pointer";
+  const baseTitle = node.getAttribute("title") ?? "Click to copy";
+  node.setAttribute("title", baseTitle);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let toasting = false;
+
+  function onClick() {
+    const content = (text ?? node.textContent ?? "").trim();
+    if (!content) return;
+    void navigator.clipboard.writeText(content).then(() => {
+      node.classList.add("is-copied");
+      node.setAttribute("title", "Copied!");
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        node.classList.remove("is-copied");
+        node.setAttribute("title", baseTitle);
+      }, 1500);
+      if (!toasting) {
+        toasting = true;
+        extensionUi.notify("Copied");
+        setTimeout(() => (toasting = false), 1500);
+      }
+    });
+  }
+
+  node.addEventListener("click", onClick);
+  return {
+    destroy() {
+      clearTimeout(timer);
+      node.removeEventListener("click", onClick);
+    },
+  };
+}
+
 export function codeCopy(node: HTMLElement, enabled = true) {
   let observer: MutationObserver | undefined;
 

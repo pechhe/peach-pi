@@ -2,6 +2,7 @@
   import type { ModelInfo, Project, SubagentAgentInfo } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { Select } from "../components/ui/select";
+  import { clickCopy } from "../lib/code-copy";
 
   let { projects }: { projects: Project[] } = $props();
 
@@ -75,7 +76,7 @@
     <div class="flex-1 overflow-y-auto px-6 py-4">
       {#if selected}
         <h2 class="text-base font-medium text-fg">{selected.name}</h2>
-        <p class="mt-1 font-mono text-[11px] text-fainter">{selected.filePath}</p>
+        <p class="mt-1 font-mono text-[11px] text-fainter" use:clickCopy={selected.filePath}>{selected.filePath}</p>
         <div class="mt-4 grid max-w-md gap-3">
           <label class="grid gap-1">
             <span class="text-[10px] uppercase tracking-wide text-faint">Model</span>

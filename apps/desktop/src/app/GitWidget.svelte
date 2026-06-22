@@ -47,6 +47,12 @@
     void refresh();
   });
 
+  function close() {
+    open = false;
+    // Drop the focus ring left on the toggle button
+    requestAnimationFrame(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+  }
+
   async function toggle() {
     open = !open;
     if (open) {
@@ -55,6 +61,32 @@
       lastResult = "";
     }
   }
+
+  // Close on Escape key via window listener
+  $effect(() => {
+    if (!open) return;
+    function onWindowKeydown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+      }
+    }
+    window.addEventListener("keydown", onWindowKeydown);
+    return () => window.removeEventListener("keydown", onWindowKeydown);
+  });
+
+  // Close on click outside via window listener
+  $effect(() => {
+    if (!open) return;
+    function onWindowClick(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-testid='git-panel']") && !target.closest("[data-testid='git-widget']")) {
+        close();
+      }
+    }
+    window.addEventListener("click", onWindowClick);
+    return () => window.removeEventListener("click", onWindowClick);
+  });
 
   async function showDiff(path: string) {
     if (selectedFile === path) {

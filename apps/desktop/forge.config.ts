@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { MakerZIP } from "@electron-forge/maker-zip";
@@ -70,6 +71,9 @@ const config: ForgeConfig = {
   packagerConfig: {
     appBundleId: "com.peach-pi.desktop",
     icon: path.join(__dirname, "build/icon"), // .icns appended per-platform by packager
+    // Ship the bundled CuaDriver.app (vendored by the prePackage hook) into
+    // Contents/Resources so CuaDriverService can install + drive it (ADR-0007).
+    extraResource: [path.join(__dirname, "build/cua-driver/CuaDriver.app")],
     // Native N-API prebuilds (clipboard, pi-tui) must live outside the asar.
     // node-pty's prebuilds dir also holds the spawn-helper executable.
     asar: { unpack: "{**/*.node,**/node-pty/prebuilds/**}" },
@@ -89,6 +93,13 @@ const config: ForgeConfig = {
       : {}),
   },
   hooks: {
+    // Vendor CuaDriver.app before packaging so `extraResource` can copy it.
+    // Idempotent + pinned + checksum-verified (see scripts/fetch-cua-driver.mjs).
+    prePackage: async () => {
+      execFileSync(process.execPath, [path.join(__dirname, "scripts/fetch-cua-driver.mjs")], {
+        stdio: "inherit",
+      });
+    },
     packageAfterCopy: async (_config, buildPath) => {
       vendorPiSdk(buildPath);
     },

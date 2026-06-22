@@ -28,6 +28,8 @@
   import { commandPrefs } from "../stores/command-prefs.svelte";
   import { markAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
+  import { detectSecret, type DetectedSecret } from "../lib/secret-detect";
+  import BwsSecretPrompt from "./BwsSecretPrompt.svelte";
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSelector from "./composer/ModelSelector.svelte";
   import QuickSlots from "./composer/QuickSlots.svelte";
@@ -137,6 +139,8 @@
   // Esc-to-stop is a two-press confirm to avoid accidental aborts.
   let abortArmed = $state(false);
   let dragActive = $state(false);
+  // Set when a pasted token looks like a secret; shows the "store in BWS" offer.
+  let pastedSecret = $state<DetectedSecret | null>(null);
   let commands = $state<CommandInfo[]>([]);
   let commandsLoadedFor = $state<string | null>(null);
   let slashIndex = $state(0);
@@ -404,7 +408,12 @@
       if (added.length > 0) {
         drafts.update(thread.id, { attachments: [...draft.attachments, ...added] });
       }
+      return;
     }
+    // Plain-text paste still lands in the textarea as normal; if it looks like a
+    // credential, offer to stash it in BWS instead of leaving it in the chat.
+    const found = detectSecret(e.clipboardData?.getData("text/plain") ?? "");
+    if (found) pastedSecret = found;
   }
 
   function onDrop(e: DragEvent) {
@@ -606,6 +615,9 @@
 
 <footer class="composer-device shrink-0 px-6 pb-6">
   <div class="composer__frame relative">
+    {#if pastedSecret}
+      <BwsSecretPrompt secret={pastedSecret} onClose={() => (pastedSecret = null)} />
+    {/if}
     <!-- Slash menu -->
     {#if slashQuery !== null}
       <div

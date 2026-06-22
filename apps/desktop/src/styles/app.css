@@ -130,6 +130,16 @@ body {
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
+  user-select: text;
+}
+
+/* Chrome stays non-selectable: buttons/labels/titles read cleanly, and
+   titlebar-drag regions ignore stray drags. Content elements inherit text
+   selection from above, so highlighting works wherever it matters. */
+button,
+label,
+.titlebar-drag,
+.select-none {
   user-select: none;
 }
 
@@ -180,7 +190,9 @@ html.hud-window #app {
 :focus {
   outline: none;
 }
-:focus-visible {
+/* Inputs already signal focus via their own border, so skip the generic
+ * outline on them — it would otherwise stack into a double ring. */
+:focus-visible:not(input):not(textarea) {
   outline: 2px solid color-mix(in srgb, var(--color-muted) 50%, transparent);
   outline-offset: 1px;
   border-radius: 6px;
@@ -192,11 +204,7 @@ button {
   transition:
     background-color 0.12s ease,
     color 0.12s ease,
-    opacity 0.12s ease,
-    transform 0.06s ease;
-}
-button:active:not(:disabled) {
-  transform: scale(0.97);
+    opacity 0.12s ease;
 }
 
 /* New transcript items ease in. */

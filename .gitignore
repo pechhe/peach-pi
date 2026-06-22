@@ -8,5 +8,7 @@ test-results/
 playwright-report/
 *.tsbuildinfo
 apps/desktop/out/
+# Vendored at build time by scripts/fetch-cua-driver.mjs (pinned + checksummed).
+apps/desktop/build/cua-driver/
 .pi/devtap.jsonl
 .pi/devtap/

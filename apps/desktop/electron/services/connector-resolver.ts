@@ -5,6 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { ConnectorService } from "./connector-service.ts";
+import type { CustomConnectionService } from "./custom-connection-service.ts";
 
 /**
  * Localhost-only HTTP bridge that lets a pi extension (running in the terminal,
@@ -20,6 +21,9 @@ import type { ConnectorService } from "./connector-service.ts";
  *   GET  /health                          → { ok: true }
  *   GET  /tools?search=&toolkits=a,b       → Composio tool schemas (discovery)
  *   POST /execute  { toolSlug, arguments } → execute a tool in the Composio cloud
+ *   GET  /custom-connections               → saved custom connections (names+URLs)
+ *   POST /custom-request { connection, method, path, body, headers }
+ *                                          → authenticated HTTP call via a saved key
  */
 const BOOTSTRAP_DIR = join(homedir(), ".pi", "agent");
 const BOOTSTRAP_PATH = join(BOOTSTRAP_DIR, "peach-connectors.json");
@@ -29,7 +33,10 @@ export class ConnectorResolver {
   private baseUrl = "";
   private readonly token = randomBytes(32).toString("hex");
 
-  constructor(private service: ConnectorService) {}
+  constructor(
+    private service: ConnectorService,
+    private custom: CustomConnectionService,
+  ) {}
 
   async start(): Promise<void> {
     if (this.server) return;
@@ -88,6 +95,29 @@ export class ConnectorResolver {
         if (!body.toolSlug) return this.send(res, 400, { error: "toolSlug required" });
         const result = await this.service.executeTool(body.toolSlug, body.arguments ?? {});
         return this.send(res, 200, { result });
+      }
+
+      if (req.method === "GET" && url.pathname === "/custom-connections") {
+        return this.send(res, 200, { connections: await this.custom.listForAgent() });
+      }
+
+      if (req.method === "POST" && url.pathname === "/custom-request") {
+        const body = (await this.readJson(req)) as {
+          connection?: string;
+          method?: string;
+          path?: string;
+          body?: unknown;
+          headers?: Record<string, string>;
+        };
+        if (!body.connection) return this.send(res, 400, { error: "connection required" });
+        const result = await this.custom.request(
+          body.connection,
+          body.method ?? "GET",
+          body.path ?? "/",
+          body.body,
+          body.headers,
+        );
+        return this.send(res, 200, result);
       }
 
       return this.send(res, 404, { error: "not found" });

@@ -26,7 +26,7 @@
   import StreamingText from "./StreamingText.svelte";
   import CopyButton from "./CopyButton.svelte";
   import RewindDialog from "./RewindDialog.svelte";
-  import { codeCopy } from "../lib/code-copy";
+  import { codeCopy, clickCopy } from "../lib/code-copy";
   import WorkingLabel from "./WorkingLabel.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import SubagentCard from "./SubagentCard.svelte";
@@ -747,7 +747,7 @@
             {/if}
             <StreamingText text={item.text} streaming={isStreaming} revealKey={`${item.id}:text`} />{#if isStreaming && !inThinking}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-fg-soft"></span>{/if}
             {#if item.error}
-              <p class="mt-2 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-1.5 text-xs text-danger">{item.error}</p>
+              <p class="mt-2 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-1.5 text-xs text-danger" use:clickCopy={item.error}>{item.error}</p>
             {/if}
             {#if !isStreaming && item.text}
               <div class="assistant-actions">
@@ -819,7 +819,7 @@
                 {/if}
               </summary>
               {#if item.error}
-                <p class="mx-1 mt-1.5 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-2 text-xs text-danger">{item.error}</p>
+                <p class="mx-1 mt-1.5 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-2 text-xs text-danger" use:clickCopy={item.error}>{item.error}</p>
               {:else if item.summary}
                 <div class="mx-1 mt-1.5 rounded-lg border border-border/80 bg-surface/40 px-3 py-2 text-xs leading-relaxed text-fg-soft">
                   <Markdown text={item.summary} />

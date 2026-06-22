@@ -2,6 +2,9 @@
   import { onMount } from "svelte";
   import type {
     Connection,
+    CuaDriverStatus,
+    CustomConnection,
+    McpServer,
     ToolkitCatalogEntry,
     ToolkitDetail,
     ToolInfo,
@@ -9,6 +12,11 @@
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import Search from "@lucide/svelte/icons/search";
+import Server from "@lucide/svelte/icons/server";
+  import Monitor from "@lucide/svelte/icons/monitor";
+  import Plus from "@lucide/svelte/icons/plus";
+  import Link from "@lucide/svelte/icons/link";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
   import ConnectorIcon from "./ConnectorIcon.svelte";
 
   // Master-detail over the Composio catalogue. Left: connectors grouped by
@@ -16,10 +24,40 @@
   // Composio owns auth + tokens; toolkits can hold multiple accounts.
   let connections = $state<Connection[]>([]);
   let catalogue = $state<ToolkitCatalogEntry[]>([]);
+  let mcpServers = $state<McpServer[]>([]);
+  let cuaDriver = $state<CuaDriverStatus | null>(null);
+  // Driver is usable only with both macOS permissions granted.
+  const cuaNeedsPerms = $derived(
+    !!cuaDriver?.installed &&
+      (cuaDriver.accessibility !== "granted" || cuaDriver.screenRecording !== "granted"),
+  );
   let query = $state("");
   let error = $state("");
 
+  let searchEl = $state<HTMLInputElement | null>(null);
   let selectedSlug = $state<string | null>(null);
+
+  // What the detail pane shows. Custom connections are local (non-Composio).
+  let mode = $state<"none" | "toolkit" | "custom" | "custom-new" | "mcp">("none");
+  let customConnections = $state<CustomConnection[]>([]);
+  let selectedCustom = $state<CustomConnection | null>(null);
+  // New-custom form.
+  let cName = $state("");
+  let cBaseUrl = $state("");
+  let cKey = $state("");
+  let cHeaderName = $state("Authorization");
+  let cHeaderPrefix = $state("Bearer ");
+  let cBusy = $state(false);
+  const cValid = $derived(!!cName.trim() && !!cBaseUrl.trim() && !!cKey.trim());
+
+  // "+ Add": jump to search so the user can pick any app (incl. manual
+  // url+key ones like Metabase). Composio needs a known toolkit, so there is
+  // no truly generic connection — adding = finding the app.
+  function startAdd() {
+    query = "";
+    void loadCatalogue();
+    searchEl?.focus();
+  }
   let detail = $state<ToolkitDetail | null>(null);
   let detailLoading = $state(false);
   let busySlug = $state<string | null>(null);
@@ -82,7 +120,9 @@
   }
 
   async function select(slug: string) {
+    mode = "toolkit";
     selectedSlug = slug;
+    selectedCustom = null;
     formOpen = false;
     fieldValues = {};
     detailLoading = true;
@@ -97,12 +137,94 @@
     }
   }
 
+  async function loadCustom() {
+    customConnections = await api.invoke("customConnections:list");
+  }
+
+  async function loadMcp() {
+    mcpServers = await api.invoke("mcp:list");
+  }
+
+  async function loadCuaDriver() {
+    cuaDriver = await api.invoke("cuaDriver:status");
+  }
+
+  async function grantCuaPermissions() {
+    await api.invoke("cuaDriver:grantPermissions");
+    // Grant is interactive; re-poll shortly so the badge reflects the result.
+    setTimeout(() => void loadCuaDriver(), 3000);
+  }
+
+  function selectMcp() {
+    mode = "mcp";
+    selectedSlug = null;
+    selectedCustom = null;
+  }
+
+  function selectCustom(c: CustomConnection) {
+    mode = "custom";
+    selectedCustom = c;
+    selectedSlug = null;
+  }
+
+  function startCustomNew() {
+    mode = "custom-new";
+    selectedSlug = null;
+    selectedCustom = null;
+    cName = "";
+    cBaseUrl = "";
+    cKey = "";
+    cHeaderName = "Authorization";
+    cHeaderPrefix = "Bearer ";
+    error = "";
+  }
+
+  async function saveCustom() {
+    if (!cValid) return;
+    cBusy = true;
+    error = "";
+    try {
+      const created = await api.invoke("customConnections:create", {
+        name: cName.trim(),
+        baseUrl: cBaseUrl.trim(),
+        apiKey: cKey.trim(),
+        headerName: cHeaderName.trim() || "Authorization",
+        headerPrefix: cHeaderPrefix,
+      });
+      await loadCustom();
+      selectCustom(created);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      cBusy = false;
+    }
+  }
+
+  async function deleteCustom(c: CustomConnection) {
+    error = "";
+    try {
+      await api.invoke("customConnections:delete", c.id);
+      await loadCustom();
+      if (selectedCustom?.id === c.id) {
+        mode = "none";
+        selectedCustom = null;
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   onMount(() => {
     void loadConnections();
     void loadCatalogue();
+    void loadCustom();
+    void loadMcp();
+    void loadCuaDriver();
     return api.on("event:connectorsChanged", () => {
       void loadConnections();
       void loadCatalogue();
+      void loadCustom();
+      void loadMcp();
     });
   });
 
@@ -181,15 +303,23 @@
 <main class="flex h-full flex-1" data-testid="connections-view">
   <!-- ── Sidebar ─────────────────────────────────────────────── -->
   <aside class="flex w-64 shrink-0 flex-col border-r border-border bg-bg">
-    <header class="titlebar-drag flex h-12 shrink-0 items-center px-4">
+    <header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-4">
       <h1 class="text-sm font-semibold text-fg">Connectors</h1>
+      <button
+        class="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-fg"
+        onclick={startAdd}
+        title="Add a connection"
+        aria-label="Add a connection"
+        data-testid="add-connection"
+      ><Plus size={16} /></button>
     </header>
     <div class="px-3 pb-2">
       <div class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 focus-within:border-border-focus">
         <Search size={14} class="shrink-0 text-muted" />
         <input
+          bind:this={searchEl}
           class="w-full bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
-          placeholder="Search apps…"
+          placeholder="Search apps to connect…"
           bind:value={query}
           oninput={onSearchInput}
           data-testid="connector-search"
@@ -216,6 +346,85 @@
         {/each}
       {/if}
 
+      <div class="flex items-center justify-between px-2 pb-1 pt-3">
+        <p class="text-[11px] font-semibold uppercase tracking-wider text-fainter">Custom</p>
+        <button
+          class="flex h-5 w-5 items-center justify-center rounded text-fainter transition hover:bg-surface hover:text-fg"
+          onclick={startCustomNew}
+          title="Add a custom connection"
+          aria-label="Add a custom connection"
+          data-testid="add-custom"
+        ><Plus size={13} /></button>
+      </div>
+      {#each customConnections as c (c.id)}
+        <button
+          class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
+          class:bg-surface={mode === "custom" && selectedCustom?.id === c.id}
+          onclick={() => selectCustom(c)}
+          data-testid={`sidebar-custom-${c.id}`}
+        >
+          <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Link size={12} /></span>
+          <span class="flex-1 truncate text-sm text-fg">{c.name}</span>
+        </button>
+      {/each}
+      {#if customConnections.length === 0}
+        <button
+          class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
+          onclick={startCustomNew}
+        ><Plus size={13} /> Add custom connection</button>
+      {/if}
+
+      <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">MCP servers</p>
+      {#if mcpServers.length > 0}
+        {#each mcpServers as s (s.name)}
+          <button
+            class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
+            class:bg-surface={mode === "mcp"}
+            onclick={selectMcp}
+            data-testid={`sidebar-mcp-${s.name}`}
+          >
+            <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Server size={12} /></span>
+            <span class="flex-1 truncate text-sm {mode === "mcp" ? "text-fg" : "text-muted"}">{s.name}</span>
+            {#if s.connected}
+              <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted" title="{s.toolCount ?? 0} tools">{s.toolCount ?? 0}</span>
+            {/if}
+          </button>
+        {/each}
+      {:else}
+        <button
+          class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
+          onclick={selectMcp}
+          data-testid="sidebar-mcp-empty"
+        ><Server size={13} /> No MCP servers configured</button>
+      {/if}
+
+      <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">Computer use</p>
+      {#if cuaDriver}
+        <div
+          class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left"
+          data-testid="sidebar-cua-driver"
+        >
+          <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Monitor size={12} /></span>
+          <span class="flex-1 truncate text-sm text-muted">Cua Driver</span>
+          {#if !cuaDriver.installed}
+            <span class="rounded-full bg-bg px-1.5 text-[11px] text-fainter">not installed</span>
+          {:else if cuaNeedsPerms}
+            <span class="rounded-full bg-bg px-1.5 text-[11px] text-amber-500" title="Needs Accessibility + Screen Recording">needs access</span>
+          {:else if cuaDriver.daemonRunning}
+            <span class="rounded-full bg-bg px-1.5 text-[11px] text-emerald-500" title="Driver ready{cuaDriver.version ? ` · v${cuaDriver.version}` : ''}">ready</span>
+          {:else}
+            <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted">idle</span>
+          {/if}
+        </div>
+        {#if cuaNeedsPerms}
+          <button
+            class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
+            onclick={grantCuaPermissions}
+            data-testid="cua-grant-permissions"
+          ><Monitor size={13} /> Grant permissions</button>
+        {/if}
+      {/if}
+
       <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">Not connected</p>
       {#each notConnected as t (t.slug)}
         <button
@@ -240,9 +449,81 @@
       <p class="m-6 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>
     {/if}
 
-    {#if !selectedSlug}
+    {#if mode === "none"}
       <div class="flex flex-1 items-center justify-center text-sm text-fainter">
         Select a connector to view its details.
+      </div>
+    {:else if mode === "custom-new"}
+      <div class="mx-auto w-full max-w-xl px-8 py-6">
+        <h2 class="text-lg font-semibold text-fg">New custom connection</h2>
+        <p class="mt-1 text-sm text-fg-soft">
+          Save an API key for any HTTP service. The agent calls it with the
+          <code class="rounded bg-surface px-1 text-xs">custom_request</code> tool;
+          the key is stored on this device and never sent to the model.
+        </p>
+        <form class="mt-5 flex flex-col gap-4" onsubmit={(e) => { e.preventDefault(); void saveCustom(); }}>
+          <label class="flex flex-col gap-1">
+            <span class="text-sm font-medium text-fg">Name</span>
+            <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus"
+              placeholder="e.g. Metabase" bind:value={cName} data-testid="custom-name" />
+          </label>
+          <label class="flex flex-col gap-1">
+            <span class="text-sm font-medium text-fg">Base URL</span>
+            <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus"
+              placeholder="https://metabase.acme.com" bind:value={cBaseUrl} data-testid="custom-url" />
+          </label>
+          <label class="flex flex-col gap-1">
+            <span class="text-sm font-medium text-fg">API key</span>
+            <input type="password" class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm text-fg outline-none focus:border-border-focus"
+              placeholder="••••••••" bind:value={cKey} data-testid="custom-key" />
+          </label>
+          <div class="flex gap-3">
+            <label class="flex flex-1 flex-col gap-1">
+              <span class="text-sm font-medium text-fg">Header name</span>
+              <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus"
+                placeholder="Authorization" bind:value={cHeaderName} />
+            </label>
+            <label class="flex flex-1 flex-col gap-1">
+              <span class="text-sm font-medium text-fg">Value prefix</span>
+              <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus"
+                placeholder="Bearer " bind:value={cHeaderPrefix} />
+            </label>
+          </div>
+          <p class="-mt-1 text-xs text-fainter">
+            Sent as <code class="rounded bg-surface px-1">{cHeaderName || "Authorization"}: {cHeaderPrefix}&lt;key&gt;</code>.
+            For Metabase use header <code class="rounded bg-surface px-1">X-API-Key</code> with an empty prefix.
+          </p>
+          <div class="flex justify-end gap-2">
+            <button type="button" class="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-fg" onclick={() => (mode = "none")}>Cancel</button>
+            <button type="submit" class="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg disabled:opacity-50"
+              disabled={!cValid || cBusy}>{cBusy ? "Saving…" : "Save connection"}</button>
+          </div>
+        </form>
+      </div>
+    {:else if mode === "custom" && selectedCustom}
+      {@const c = selectedCustom}
+      <div class="mx-auto w-full max-w-3xl px-8 py-6">
+        <div class="flex items-start gap-3">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-muted"><Link size={16} /></span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <h2 class="truncate text-lg font-semibold text-fg">{c.name}</h2>
+              <span class="rounded-md bg-surface px-1.5 py-0.5 text-[11px] text-muted">Custom</span>
+            </div>
+            <p class="truncate text-sm text-fainter">{c.baseUrl}</p>
+          </div>
+          <button class="flex shrink-0 items-center gap-1.5 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm font-medium text-fg transition hover:border-red-500/50 hover:text-red-400"
+            onclick={() => deleteCustom(c)} data-testid="custom-delete"><Trash2 size={14} /> Delete</button>
+        </div>
+        <dl class="mt-6 overflow-hidden rounded-xl border border-border bg-surface text-sm">
+          <div class="flex justify-between gap-4 px-4 py-2.5"><dt class="text-muted">Base URL</dt><dd class="truncate text-fg">{c.baseUrl}</dd></div>
+          <div class="flex justify-between gap-4 border-t border-border px-4 py-2.5"><dt class="text-muted">Auth header</dt><dd class="font-mono text-fg">{c.headerName}: {c.headerPrefix}{c.keyPreview}</dd></div>
+          <div class="flex justify-between gap-4 border-t border-border px-4 py-2.5"><dt class="text-muted">Added</dt><dd class="text-fg">{fmtDate(c.createdAt)}</dd></div>
+        </dl>
+        <p class="mt-4 text-sm text-fg-soft">
+          The agent can call this with <code class="rounded bg-surface px-1 text-xs">custom_request</code>
+          — e.g. <code class="rounded bg-surface px-1 text-xs">custom_request(connection: "{c.name}", path: "/api/...")</code>.
+        </p>
       </div>
     {:else if detailLoading && !detail}
       <div class="flex flex-1 items-center justify-center text-sm text-fainter">Loading…</div>
@@ -369,6 +650,52 @@
         {/each}
         {#if detail.tools.length === 0 && !detailLoading}
           <p class="mt-3 text-sm text-fainter">No tools listed for this app.</p>
+        {/if}
+      </div>
+    {:else if mode === "mcp"}
+      <div class="mx-auto w-full max-w-3xl px-8 py-6">
+        <div class="flex items-start gap-3">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-muted"><Server size={16} /></span>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-lg font-semibold text-fg">MCP servers</h2>
+            <p class="text-sm text-fainter">
+              Configured in <code class="rounded bg-surface px-1 text-xs">~/.pi/agent/mcp.json</code> · managed by the pi-mcp-adapter extension.
+            </p>
+          </div>
+        </div>
+
+        {#if mcpServers.length === 0}
+          <p class="mt-6 text-sm text-fainter">
+            No MCP servers configured. Add them under
+            <code class="rounded bg-surface px-1 text-xs">mcpServers</code> in
+            <code class="rounded bg-surface px-1 text-xs">~/.pi/agent/mcp.json</code>,
+            then reload the thread.
+          </p>
+        {:else}
+          <div class="mt-6 overflow-hidden rounded-xl border border-border bg-surface">
+            {#each mcpServers as s, i (s.name)}
+              <div class="px-4 py-3" class:border-t={i > 0} class:border-border={i > 0}>
+                <div class="flex items-center gap-2">
+                  <span class="h-1.5 w-1.5 shrink-0 rounded-full {s.connected ? "bg-emerald-500" : "bg-fainter"}"></span>
+                  <span class="text-sm font-medium text-fg">{s.name}</span>
+                  {#if s.connected}
+                    <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-muted">{s.toolCount ?? 0} tools</span>
+                  {:else}
+                    <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-fainter">Not connected yet</span>
+                  {/if}
+                </div>
+                {#if s.command}
+                  <p class="mt-1 truncate font-mono text-xs text-fainter" title={s.command}>{s.command}</p>
+                {/if}
+              </div>
+            {/each}
+          </div>
+          <p class="mt-4 text-sm text-fg-soft">
+            Connection counts shown here come from the pi-mcp-adapter metadata
+            cache and refresh when threads reconnect. peach-pi does not start or
+            stop MCP servers — edit the config file and re-run the thread to
+            change what's available.
+          </p>
         {/if}
       </div>
     {/if}

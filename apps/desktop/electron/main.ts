@@ -32,8 +32,13 @@ import {
   stopDevTapControlChannel,
 } from "./services/devtap-control.ts";
 import { ConnectorService } from "./services/connector-service.ts";
+import { BwsService } from "./services/bws-service.ts";
+import { CustomConnectionService } from "./services/custom-connection-service.ts";
+import { McpService } from "./services/mcp-service.ts";
+import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { ConnectorResolver } from "./services/connector-resolver.ts";
 import { ensureConnectorExtension } from "./services/connector-extension.ts";
+import { ensureCuaDriverExtension } from "./services/cua-driver-extension.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import {
   createHudWindow,
@@ -181,14 +186,24 @@ async function boot(): Promise<void> {
   void getPiSettings().then((s) => insomniaService.setEnabled(s.insomnia));
 
   const connectorService = new ConnectorService(emit);
+  const bwsService = new BwsService(emit);
+  const customConnectionService = new CustomConnectionService(emit);
+  const mcpService = new McpService();
+  const cuaDriverService = new CuaDriverService();
+  // Install CuaDriver.app + start its background daemon + install the agent
+  // skill. Best-effort; never blocks boot (see ADR-0007).
+  void cuaDriverService.init();
 
   // Localhost bridge so a pi extension (in the terminal, no IPC access) can
   // reach Composio through the main process. Started after ready; stopped on quit.
-  const connectorResolver = new ConnectorResolver(connectorService);
+  const connectorResolver = new ConnectorResolver(connectorService, customConnectionService);
   void connectorResolver.start().then(() => connectorResolver.writeBootstrap());
   // Write the pi extension (auto-discovered by pi) so the agent gets the
   // connectors_search_tools / connector_execute tools. Idempotent; rewrites on bump.
   void ensureConnectorExtension();
+  // Install the cua-driver toolset extension (cua_driver_* tools driving the
+  // bundled native driver — ADR-0007). Idempotent; rewrites on bump.
+  void ensureCuaDriverExtension();
 
   async function pickProject() {
     const result = await dialog.showOpenDialog({
@@ -235,6 +250,22 @@ async function boot(): Promise<void> {
     },
     "connectors:connectFields": (slug, fields) => connectorService.connectFields(slug, fields),
     "connectors:disconnect": (id) => connectorService.disconnect(id),
+    "bws:status": () => bwsService.status(),
+    "bws:setAccessToken": (token) => bwsService.setAccessToken(token),
+    "bws:clearAuth": () => bwsService.clearAuth(),
+    "bws:setProject": (projectId) => bwsService.setProject(projectId),
+    "bws:install": () => bwsService.install(),
+    "bws:listProjects": () => bwsService.listProjects(),
+    "bws:listSecrets": (projectId) => bwsService.listSecrets(projectId),
+    "bws:createSecret": (input) => bwsService.createSecret(input),
+    "bws:editSecret": (secretId, patch) => bwsService.editSecret(secretId, patch),
+    "bws:deleteSecret": (secretId) => bwsService.deleteSecret(secretId),
+    "customConnections:list": () => customConnectionService.list(),
+    "mcp:list": () => mcpService.list(),
+    "cuaDriver:status": () => cuaDriverService.status(),
+    "cuaDriver:grantPermissions": () => cuaDriverService.grantPermissions(),
+    "customConnections:create": (input) => customConnectionService.create(input),
+    "customConnections:delete": (id) => customConnectionService.delete(id),
     "devtap:report": (entry) =>
       emitDevTapEvent({
         level: entry.error ? "error" : "info",

@@ -337,13 +337,11 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   text-align: center;
-  color: oklch(0.55 0.01 250);
+  /* Match the engraved labels used elsewhere on the device (dial settings). */
+  color: var(--crt-ink-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-:root.dark .composer-device .composer__slots .devbtn__caption {
-  color: oklch(0.5 0.01 250);
 }
 /* Empty slot: dimmed cap with a centred “+” affordance. */
 .composer-device .devbtn--empty .devbtn__switch {

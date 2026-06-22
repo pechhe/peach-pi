@@ -20,6 +20,19 @@ interface MessageLike {
   errorMessage?: string;
 }
 
+/** Structural subset of pi's `SessionEntry` read by `loadFromEntries`. The
+ *  recorder stays decoupled from the SDK (unit-testable without it), so this
+ *  mirrors only the fields the GUI transcript needs. */
+export interface BranchEntryLike {
+  id: string;
+  type: string;
+  message?: MessageLike;
+  content?: unknown;
+  display?: boolean;
+  summary?: string;
+  tokensBefore?: number;
+}
+
 export interface RecorderEvent {
   type: string;
   message?: MessageLike;
@@ -209,6 +222,54 @@ export class TranscriptRecorder {
     this.activeAssistantId = null;
     for (const m of messages) this.upsert(this.messageToItem(m, false));
     return [{ op: "reset", items: this.items }];
+  }
+
+  /** Rebuild from the full active branch (root→leaf) of pi session entries.
+   *  Unlike `load(messages)`, this does NOT fence at compaction boundaries:
+   *  compaction entries render as divider cards in-stream and every message on
+   *  the branch stays scrollable. This is the GUI transcript's source of truth
+   *  (the SDK's trimmed `session.messages` is only the LLM context). */
+  loadFromEntries(entries: BranchEntryLike[]): TranscriptOp[] {
+    this.items = [];
+    this.seq = 0;
+    this.activeAssistantId = null;
+    for (const entry of entries) {
+      const item = this.entryToItem(entry);
+      if (item) this.upsert(item);
+    }
+    return [{ op: "reset", items: this.items }];
+  }
+
+  private entryToItem(entry: BranchEntryLike): TranscriptItem | undefined {
+    switch (entry.type) {
+      case "message":
+        return this.messageToItem(entry.message ?? { role: "unknown" }, false);
+      case "custom_message":
+        // Injected context (extensions/asides). `display: false` is hidden in
+        // the TUI too; render the rest as a notice, not a real user turn.
+        if (entry.display === false) return undefined;
+        return this.messageToItem({ role: "custom", content: entry.content }, false);
+      case "branch_summary":
+        return { id: this.nextId("n"), kind: "notice", text: entry.summary ?? "" };
+      case "compaction":
+        // Keyed by the persisted entry id so it's stable across reloads and so
+        // the live `compaction_end` handler can patch the just-completed one.
+        // Persisted entries don't store the trigger reason; default to
+        // "threshold" (the common auto-compaction case).
+        return {
+          id: entry.id,
+          kind: "compaction",
+          running: false,
+          reason: "threshold",
+          summary: entry.summary,
+          tokensBefore: entry.tokensBefore,
+          tokensAfter: entry.summary ? Math.ceil(entry.summary.length / 4) : undefined,
+        };
+      // thinking_level_change / model_change / custom / label / session_info:
+      // not transcript rows (buildSessionContext never emitted them either).
+      default:
+        return undefined;
+    }
   }
 
   handleEvent(event: RecorderEvent): TranscriptOp[] {

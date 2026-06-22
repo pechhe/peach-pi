@@ -1,6 +1,7 @@
 <script lang="ts">
   import Copy from "@lucide/svelte/icons/copy";
   import Check from "@lucide/svelte/icons/check";
+  import { extensionUi } from "../stores/extension-ui.svelte";
 
   let {
     text,
@@ -18,6 +19,7 @@
       timer = setTimeout(() => {
         copied = false;
       }, 1500);
+      extensionUi.notify("Copied");
     });
   }
 </script>

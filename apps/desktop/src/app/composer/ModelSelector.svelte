@@ -106,6 +106,7 @@
   function selectModel(m: ModelInfo) {
     visualKey = keyOf(m.provider, m.id);
     open = false;
+    requestAnimationFrame(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
     if (m.provider === model?.provider && m.id === model?.id) return;
     onPick(m.provider, m.id);
   }
@@ -130,12 +131,17 @@
 
 <svelte:document
   onmousedown={(e) => {
-    if (open && !(e.target as HTMLElement)?.closest?.(".model-selector")) open = false;
+    if (open && !(e.target as HTMLElement)?.closest?.(".model-selector")) {
+      open = false;
+      requestAnimationFrame(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    }
   }}
   onkeydown={(e) => {
     if (!open) return;
-    if (e.key === "Escape") open = false;
-    else if (e.key === "Tab") {
+    if (e.key === "Escape") {
+      open = false;
+      requestAnimationFrame(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    } else if (e.key === "Tab") {
       e.preventDefault();
       viewAll = !viewAll;
     }

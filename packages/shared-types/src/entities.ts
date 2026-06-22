@@ -109,7 +109,8 @@ export type AppView =
   | "connections"
   | "testing"
   | "agents"
-  | "graph";
+  | "graph"
+  | "bws";
 
 /** Base64 image crossing the IPC boundary with a prompt. */
 export interface ImagePayload {
@@ -489,6 +490,32 @@ export interface AppSnapshot {
   ui: UiState;
 }
 
+/** A locally-saved API credential for an arbitrary HTTP service, independent
+ *  of Composio. Stored on-device; the agent calls it via the `custom_request`
+ *  tool. The raw key never crosses IPC to the renderer (only `keyPreview`). */
+export interface CustomConnection {
+  id: string;
+  name: string;
+  /** e.g. "https://metabase.acme.com" — no trailing slash needed. */
+  baseUrl: string;
+  /** Header the key is sent in, e.g. "Authorization" or "X-API-Key". */
+  headerName: string;
+  /** Prefix prepended to the key, e.g. "Bearer " or "" (raw). */
+  headerPrefix: string;
+  /** Masked tail of the key for display, e.g. "••••7f3a". */
+  keyPreview: string;
+  createdAt: string;
+}
+
+/** Params for creating a custom connection (includes the raw key). */
+export interface CustomConnectionInput {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  headerName?: string;
+  headerPrefix?: string;
+}
+
 /** Connection status as reported by Composio for a connected account. */
 export type ConnectionStatus = "ACTIVE" | "INITIATED" | "EXPIRED" | "FAILED" | "INACTIVE";
 
@@ -568,6 +595,120 @@ export interface Connection {
 export interface ConnectStartResult {
   redirectUrl: string | null;
   connectionRequestId: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP servers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One MCP server configured in `~/.pi/agent/mcp.json`, surfaced in the
+ *  Connections view. Server identity + launch command come from the config;
+ *  `toolCount` and `connected` come from the pi-mcp-adapter metadata cache
+ *  (`~/.pi/agent/mcp-cache.json`) when available. peach-pi does not manage MCP
+ *  server lifecycles — pi-mcp-adapter does — so this is read-only display. */
+export interface McpServer {
+  /** Server name (key in mcp.json `mcpServers`). */
+  name: string;
+  /** Launch command + args as configured, e.g. `node --experimental-strip-types …`.
+ *  Truncated for display; full value is not needed by the renderer. */
+  command: string;
+  /** Number of tools discovered for this server (from the metadata cache).
+ *  Null when the cache has no entry yet (server never connected or is lazy). */
+  toolCount: number | null;
+  /** Whether the metadata cache has a fresh entry for this server's config.
+ *  False until the first successful connection populates the cache. */
+  connected: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BWS — Bitwarden Secrets Manager CLI
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A Secrets Manager project the machine account can access. */
+export interface BwsProject {
+  id: string;
+  organizationId: string;
+  name: string;
+}
+
+/** One secret in Secrets Manager. `value` is the cleartext secret — it only
+ *  crosses IPC because the view explicitly displays/edits it (masked in the UI
+ *  until revealed). The access token never leaves the main process. */
+export interface BwsSecret {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  key: string;
+  value: string;
+  note: string;
+  creationDate: string;
+  revisionDate: string;
+}
+
+/** Fields for creating a secret (`bws secret create <KEY> <VALUE> <PROJECT_ID>`). */
+export interface BwsSecretInput {
+  key: string;
+  value: string;
+  projectId: string;
+  note?: string;
+}
+
+/** Partial edit for an existing secret (`bws secret edit <ID> --key … --value …`). */
+export interface BwsSecretPatch {
+  key?: string;
+  value?: string;
+  note?: string;
+  projectId?: string;
+}
+
+/** Snapshot of the local bws integration state, shown by the BWS view.
+ *  `hasToken` reports whether an access token is saved on-device; the token
+ *  itself is never returned. `authenticated` is true only when a probe call
+ *  (project list) succeeded with that token. */
+export interface BwsStatus {
+  /** Is the `bws` binary discoverable on this machine? */
+  installed: boolean;
+  /** Version string from `bws --version`, e.g. "2.0.0". Null if not installed. */
+  version: string | null;
+  /** Whether an access token is available (saved on-device or found in shell). */
+  hasToken: boolean;
+  /** Where the active token came from: "saved" (entered here), "shell"
+   *  (BWS_ACCESS_TOKEN exported in your login shell), or null (none). */
+  tokenSource: "saved" | "shell" | null;
+  /** Whether the saved token successfully authenticated against Secrets Manager. */
+  authenticated: boolean;
+  /** The currently selected project id (persisted), or null. */
+  projectId: string | null;
+  /** The selected project's metadata, if it resolves in `projects`. */
+  project: BwsProject | null;
+  /** All projects the token can access (empty unless authenticated). */
+  projects: BwsProject[];
+  /** Last error from the auth probe (e.g. invalid token), for display. */
+  error: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cua Driver (native background computer use)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** macOS TCC permission grant state, as reported by the driver daemon.
+ *  `unknown` when the daemon isn't running or the grant can't be read. */
+export type PermissionState = "granted" | "denied" | "unknown";
+
+/** Read-only status of the bundled Cua Driver, surfaced in the Connections
+ *  view. peach-pi installs CuaDriver.app + starts its background daemon; the
+ *  agent drives it via the `cua-driver` CLI (see ADR-0007). */
+export interface CuaDriverStatus {
+  /** CuaDriver.app present (installed to /Applications, or the bundled copy). */
+  installed: boolean;
+  /** Driver version from `cua-driver --version`; null when unavailable. */
+  version: string | null;
+  /** Whether the background daemon is reachable. */
+  daemonRunning: boolean;
+  /** Accessibility permission grant (required to read/drive native UI). */
+  accessibility: PermissionState;
+  /** Screen Recording permission grant (required for window screenshots). */
+  screenRecording: PermissionState;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

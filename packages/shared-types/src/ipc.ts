@@ -1,8 +1,14 @@
 import type {
   AppSnapshot,
   AutoCompactSettings,
+  BwsProject,
+  BwsSecret,
+  BwsSecretInput,
+  BwsSecretPatch,
+  BwsStatus,
   CavemanState,
   CommandInfo,
+  CuaDriverStatus,
   Connection,
   ConnectStartResult,
   DevTapProjectStatus,
@@ -16,6 +22,9 @@ import type {
   GitPrResult,
   GitPushLocalResult,
   GraphifyStatus,
+  CustomConnection,
+  CustomConnectionInput,
+  McpServer,
   ToolkitCatalogEntry,
   ToolkitDetail,
   SubagentAgentInfo,
@@ -448,6 +457,72 @@ export const ipcContracts = {
     requireNonEmptyString(id, "connectionId"),
   ),
 
+  // custom connections (local API key + URL, independent of Composio). Stored
+  // on-device; the agent uses them via the `custom_request` tool. Raw keys
+  // never reach the renderer.
+  /** List saved custom connections (keys masked). */
+  "customConnections:list": invoke<[], CustomConnection[]>(),
+  /** Save a new custom connection. */
+  "customConnections:create": invoke<[input: CustomConnectionInput], CustomConnection>(
+    (input) => {
+      requireNonEmptyString(input?.name, "name");
+      requireNonEmptyString(input?.baseUrl, "baseUrl");
+      requireNonEmptyString(input?.apiKey, "apiKey");
+    },
+  ),
+  /** Delete a custom connection by id. */
+  "customConnections:delete": invoke<[id: string], void>((id) =>
+    requireNonEmptyString(id, "id"),
+  ),
+
+  // MCP servers (read-only display). Configuration lives in
+  // ~/.pi/agent/mcp.json and is managed by the pi-mcp-adapter extension
+  // (`/mcp` commands). peach-pi surfaces them in the Connections view; it
+  // does not start/stop them.
+  /** List configured MCP servers with cached tool counts. */
+  "mcp:list": invoke<[], McpServer[]>(),
+
+  // Cua Driver (native background computer use; see ADR-0007). peach-pi
+  // bundles CuaDriver.app, installs it + starts the daemon; the agent drives
+  // it via the `cua-driver` CLI. These are status/permission affordances only.
+  /** Current driver install + daemon + permission status. */
+  "cuaDriver:status": invoke<[], CuaDriverStatus>(),
+  /** Trigger the macOS Accessibility + Screen Recording prompts (interactive). */
+  "cuaDriver:grantPermissions": invoke<[], void>(),
+
+  // bws (Bitwarden Secrets Manager CLI). The main process runs `bws` with the
+  // access token injected via env (never an arg, never returned to the
+  // renderer). Secret values do cross IPC because the view displays/edits them.
+  /** Installed/auth/project state for the BWS view. */
+  "bws:status": invoke<[], BwsStatus>(),
+  /** Save (or clear, when empty) the on-device access token, then re-probe. */
+  "bws:setAccessToken": invoke<[token: string], BwsStatus>((t) => {
+    if (typeof t !== "string") throw new Error("token must be a string");
+  }),
+  /** Forget the saved access token. */
+  "bws:clearAuth": invoke<[], BwsStatus>(),
+  /** Persist the active project id (null clears it). */
+  "bws:setProject": invoke<[projectId: string | null], BwsStatus>(),
+  /** Download + install the `bws` binary (macOS, from GitHub releases). */
+  "bws:install": invoke<[], { ok: boolean; error?: string }>(),
+  /** Projects the token can access. */
+  "bws:listProjects": invoke<[], BwsProject[]>(),
+  /** Secrets, optionally scoped to a project id. */
+  "bws:listSecrets": invoke<[projectId?: string | null], BwsSecret[]>(),
+  /** Create a secret. Returns the created secret. */
+  "bws:createSecret": invoke<[input: BwsSecretInput], BwsSecret>((input) => {
+    requireNonEmptyString(input?.key, "key");
+    requireNonEmptyString(input?.projectId, "projectId");
+  }),
+  /** Edit a secret's fields. Returns the updated secret. */
+  "bws:editSecret": invoke<[secretId: string, patch: BwsSecretPatch], BwsSecret>((id) =>
+    requireNonEmptyString(id, "secretId"),
+  ),
+  /** Delete a secret by id. */
+  "bws:deleteSecret": invoke<[secretId: string], void>((id) =>
+    requireNonEmptyString(id, "secretId"),
+  ),
+
   // recording (desktop task capture → skill synthesis)
   /** Begin capturing desktop input. `threadId` (optional) ties the recording
    *  to a chat so `recording:stop` can auto-send the synthesis prompt there. */
@@ -489,6 +564,8 @@ export const ipcContracts = {
   "event:terminalCustom": event<TerminalCustomFrame>(),
   /** Recorder state changed (start/stop/cancel/error/event-count tick). */
   "event:recordingState": event<RecordingState>(),
+  /** bws auth/project/secret state changed — renderer re-reads status/secrets. */
+  "event:bwsChanged": event<void>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

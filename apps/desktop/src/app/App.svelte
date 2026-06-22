@@ -25,6 +25,7 @@
   import GraphView from "./GraphView.svelte";
   import RecordingBar from "./RecordingBar.svelte";
   import ConnectorsView from "./ConnectorsView.svelte";
+  import BwsView from "./BwsView.svelte";
   import TestingView from "./TestingView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
@@ -312,6 +313,8 @@
       />
     {:else if view === "connections"}
       <ConnectorsView />
+    {:else if view === "bws"}
+      <BwsView />
     {:else if view === "agents"}
       <AgentsView projects={snapshot.current.projects} />
     {:else if view === "graph"}

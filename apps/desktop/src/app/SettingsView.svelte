@@ -5,6 +5,7 @@
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import { DONE_SOUND_OPTIONS, playDoneSound, type DoneSoundVariant } from "../lib/sound/done-sound";
   import { THEMES, theme, type ComposerStyle } from "../lib/theme.svelte";
+  import { clickCopy } from "../lib/code-copy";
   import {
     STREAM_LOOKS,
     STREAM_SPEEDS,
@@ -646,7 +647,7 @@
             </button>
           </div>
           {#if visionError}
-            <p class="mt-2 text-xs text-danger" data-testid="vision-proxy-error">{visionError}</p>
+            <p class="mt-2 text-xs text-danger" data-testid="vision-proxy-error" use:clickCopy={visionError}>{visionError}</p>
           {/if}
         {:else}
           <div class="flex flex-col gap-3">
@@ -691,7 +692,7 @@
               {/if}
             </div>
             {#if visionError}
-              <p class="text-xs text-danger" data-testid="vision-proxy-error">{visionError}</p>
+              <p class="text-xs text-danger" data-testid="vision-proxy-error" use:clickCopy={visionError}>{visionError}</p>
             {/if}
           </div>
         {/if}

@@ -134,6 +134,38 @@ test("load rebuilds transcript from history with reset op", () => {
   assert.equal(view[1]!.kind, "assistant");
 });
 
+test("loadFromEntries renders the full active branch with compaction as an in-stream divider", () => {
+  // Plan B: the GUI scrollback shows the WHOLE conversation, not the SDK's
+  // compaction-trimmed `session.messages`. A compaction entry mid-branch must
+  // render as a divider card while the messages before it stay visible — so
+  // the user can still scroll above the compaction boundary.
+  const r = new TranscriptRecorder();
+  const ops = r.loadFromEntries([
+    { id: "e0", type: "message", message: { role: "user", content: [{ type: "text", text: "first" }] } },
+    { id: "e1", type: "message", message: { role: "assistant", content: [{ type: "text", text: "reply" }] } },
+    { id: "e2", type: "compaction", summary: "## Goal\nrecap", tokensBefore: 200000 },
+    { id: "e3", type: "message", message: { role: "user", content: [{ type: "text", text: "after" }] } },
+    // Skipped: metadata + hidden injected context never appear as rows.
+    { id: "e4", type: "model_change" },
+    { id: "e5", type: "custom_message", display: false, content: "hidden" },
+  ]);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0]!.op, "reset");
+  const view = applyTranscriptOps([], ops);
+  assert.equal(view.length, 4);
+  assert.equal(view[0]!.kind, "user");
+  assert.equal((view[0] as { text: string }).text, "first");
+  // The compaction renders in place (keyed by its persisted entry id), and the
+  // message before it is NOT fenced away.
+  const divider = view[2]!;
+  assert.equal(divider.kind, "compaction");
+  assert.equal(divider.id, "e2");
+  assert.equal((divider as { running: boolean }).running, false);
+  assert.equal((divider as { summary?: string }).summary, "## Goal\nrecap");
+  assert.equal((view[3] as { text: string }).text, "after");
+  assert.deepEqual(r.transcript(), view);
+});
+
 test("pending send-time placeholders are dropped when the real user message_start arrives", () => {
   // PiSession.prompt seeds an optimistic user item + a vision-proxy notice
   // card (before_agent_start blocks the real user event). The recorder must

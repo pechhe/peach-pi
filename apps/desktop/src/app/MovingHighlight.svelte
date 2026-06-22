@@ -38,10 +38,44 @@
     Math.abs(a.height - b.height) < 0.5;
 
   let container = $state<HTMLDivElement | null>(null);
+  let hoverIndicatorEl = $state<HTMLDivElement | null>(null);
+  let activeIndicatorEl = $state<HTMLDivElement | null>(null);
   let hoveredItem: HTMLElement | null = null;
   let hover = $state<Box>(hidden());
   let active = $state<Box>(hidden());
   let shouldAnimate = $state(false);
+
+  const reduceMotion =
+    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Subtle press feedback: on pointerdown inside the container, bounce the
+  // indicator (hover or active, whichever is parked at the click) via WAAPI.
+  // Keyframes keep the inline translate3d as the base so the block scales in
+  // place — text on the button never moves. Skipped under reduced motion.
+  function onPointerDown(e: PointerEvent) {
+    if (reduceMotion) return;
+    const target = e.target;
+    // itemFrom returns null for the already-active row, so check the active
+    // path next — that row shows the active indicator, not hover.
+    let el: HTMLDivElement | null = null;
+    if (itemFrom(target)) el = hoverIndicatorEl;
+    else if (target instanceof Element) {
+      const activeItem = target.closest<HTMLElement>(itemSelector);
+      if (activeItem?.matches(activeSelector)) el = activeIndicatorEl;
+    }
+    if (!el) return;
+    const base = el.style.transform; // "translate3d(Xpx, Ypx, 0)"
+    if (!base) return;
+    el.getAnimations().forEach((a) => a.cancel());
+    el.animate(
+      [
+        { transform: base, offset: 0, easing: "ease-in" },
+        { transform: `${base} scale(0.94)`, offset: 0.4, easing: "cubic-bezier(0.34, 1.56, 0.64, 1)" },
+        { transform: base, offset: 1 },
+      ],
+      { duration: 220 },
+    );
+  }
 
   function measure(target: HTMLElement): Box {
     const c = container!.getBoundingClientRect();
@@ -207,6 +241,7 @@
 <div
   bind:this={container}
   class="sidebar-moving-highlight {className}"
+  onpointerdown={onPointerDown}
   onpointermove={(e) => {
     const next = itemFrom(e.target);
     if (next === hoveredItem) return;
@@ -229,11 +264,13 @@
   }}
 >
   <div
+    bind:this={hoverIndicatorEl}
     aria-hidden="true"
     class="sidebar-moving-highlight__indicator sidebar-moving-highlight__indicator--hover"
     style="transform: translate3d({hover.left}px, {hover.top}px, 0); width: {hover.width}px; height: {hover.height}px; opacity: {hover.visible ? 1 : 0}; transition: {transition};"
   ></div>
   <div
+    bind:this={activeIndicatorEl}
     aria-hidden="true"
     class="sidebar-moving-highlight__indicator sidebar-moving-highlight__indicator--active"
     style="transform: translate3d({active.left}px, {active.top}px, 0); width: {active.width}px; height: {active.height}px; opacity: {active.visible ? 1 : 0}; transition: {transition};"

@@ -128,30 +128,54 @@ export class PiSession {
         ]);
       }
       if (event.type === "compaction_end") {
-        // Pop the matching start id. If the queue is empty (unexpected end
-        // without a paired start), fabricate a card that still renders as
-        // completed rather than spinning forever.
+        // Pop the matching start id (the transient "compacting…" card).
         const id = this.activeCompactionIds.shift() ?? `compaction-${Date.now()}`;
-        this.callbacks.onOps([
-          {
-            op: "upsert",
-            item: {
-              id,
-              kind: "compaction",
-              running: false,
-              reason: event.reason,
-              summary: event.result?.summary,
-              tokensBefore: event.result?.tokensBefore,
-              // The summary is what the summarised region was compressed to;
-              // ~4 chars/token is a good-enough estimate for display.
-              tokensAfter: event.result?.summary
-                ? Math.ceil(event.result.summary.length / 4)
-                : undefined,
-              aborted: event.aborted,
-              error: event.errorMessage,
+        if (event.aborted || event.errorMessage) {
+          // No compaction entry was persisted on failure, so reconciling the
+          // branch would silently drop the running card and hide the failure.
+          // Finalise the transient card in place instead.
+          this.callbacks.onOps([
+            {
+              op: "upsert",
+              item: {
+                id,
+                kind: "compaction",
+                running: false,
+                reason: event.reason,
+                aborted: event.aborted,
+                error: event.errorMessage,
+              },
             },
-          },
-        ]);
+          ]);
+        } else {
+          // Success: a compaction entry is now on the branch. Reconcile the
+          // whole transcript from the branch so the new summary renders as an
+          // in-stream divider (the transient card is wiped by the reset). This
+          // also keeps the GUI consistent with the SDK after live compaction.
+          this.callbacks.onOps(
+            this.recorder.loadFromEntries(this.session.sessionManager.getBranch()),
+          );
+          // Persisted compaction entries don't store the trigger reason; patch
+          // the just-completed (leaf) card with the precise reason/summary.
+          const items = this.recorder.transcript();
+          const last = items[items.length - 1];
+          if (last?.kind === "compaction") {
+            this.callbacks.onOps([
+              {
+                op: "upsert",
+                item: {
+                  ...last,
+                  reason: event.reason,
+                  summary: event.result?.summary ?? last.summary,
+                  tokensBefore: event.result?.tokensBefore ?? last.tokensBefore,
+                  tokensAfter: event.result?.summary
+                    ? Math.ceil(event.result.summary.length / 4)
+                    : last.tokensAfter,
+                },
+              },
+            ]);
+          }
+        }
         this.callbacks.onMetaChange?.();
         // Reconcile the run flag against the real streaming state. A standalone
         // compaction (manual / threshold after a finished turn) can leave the
@@ -193,7 +217,12 @@ export class PiSession {
       resourceLoader: loader,
     });
     const recorder = new TranscriptRecorder();
-    const loadOps = recorder.load(session.messages);
+    // Seed from the full active branch (root→leaf), not the SDK's trimmed
+    // `session.messages`: the GUI scrollback shows the whole conversation,
+    // with compaction summaries as in-stream dividers, while the LLM context
+    // stays trimmed. (`session.messages` is only what's sent to the model.)
+    const branch = session.sessionManager.getBranch();
+    const loadOps = recorder.loadFromEntries(branch);
     const pi = new PiSession(session, recorder, callbacks, loader);
     pi.extensionsResult = extensionsResult;
     await session.bindExtensions({
@@ -218,7 +247,7 @@ export class PiSession {
           "error",
         ),
     });
-    if (session.messages.length > 0) callbacks.onOps(loadOps);
+    if (branch.length > 0) callbacks.onOps(loadOps);
     return pi;
   }
 
@@ -250,7 +279,7 @@ export class PiSession {
     if (this.session.isStreaming) throw new Error("Cannot rewind while a run is in progress");
     const result = await this.session.navigateTree(entryId);
     if (result.cancelled) return {};
-    this.callbacks.onOps(this.recorder.load(this.session.messages));
+    this.callbacks.onOps(this.recorder.loadFromEntries(this.session.sessionManager.getBranch()));
     this.callbacks.onMetaChange?.();
     return { editorText: result.editorText };
   }

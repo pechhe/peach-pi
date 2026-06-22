@@ -14,6 +14,7 @@
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import BellRing from "@lucide/svelte/icons/bell-ring";
   import Plug from "@lucide/svelte/icons/plug";
+  import KeyRound from "@lucide/svelte/icons/key-round";
   import Bot from "@lucide/svelte/icons/bot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
@@ -219,9 +220,44 @@
     onSelect(id);
   }
 
-  function toggle(key: string) {
-    expanded = { ...expanded, [key]: !expanded[key] };
+  // Auto-hide for "Done" dropdowns only: collapse after DONE_HIDE_MS of
+  // no pointer interaction. Cancel-while-hovered, restart-on-leave.
+  const DONE_HIDE_MS = 10_000;
+  const reduceMotion =
+    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let doneHideTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+
+  function isDoneKey(key: string): boolean {
+    return key.startsWith("ar:") || key === "chats:past";
   }
+
+  function startDoneHide(key: string) {
+    if (!isDoneKey(key)) return;
+    clearDoneHide(key);
+    doneHideTimers[key] = setTimeout(() => toggle(key, false), DONE_HIDE_MS);
+  }
+
+  function clearDoneHide(key: string) {
+    const t = doneHideTimers[key];
+    if (t) {
+      clearTimeout(t);
+      delete doneHideTimers[key];
+    }
+  }
+
+  function toggle(key: string, value?: boolean) {
+    const next = value ?? !expanded[key];
+    expanded = { ...expanded, [key]: next };
+    if (next) startDoneHide(key);
+    else clearDoneHide(key);
+  }
+
+  $effect(() => {
+    return () => {
+      for (const k of Object.keys(doneHideTimers)) clearTimeout(doneHideTimers[k]);
+      doneHideTimers = {};
+    };
+  });
 
   function newThread(projectId: string, worktreeId?: string) {
     playButtonSecondary("click");
@@ -420,6 +456,7 @@
 
 {#snippet collapsible(key: string, label: string, list: Thread[], variant: "snoozed" | "toTest" | "archived")}
   {#if list.length > 0}
+    {@const doneAutos = isDoneKey(key)}
     <button
       class="flex w-full items-center gap-1 px-2 py-0.5 text-[11px] text-fainter hover:text-muted"
       onclick={() => toggle(key)}
@@ -427,12 +464,32 @@
       {#if expanded[key]}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
       {label} · {list.length}
     </button>
-    {#if expanded[key]}
-      <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
-        {#each list as thread (thread.id)}
-          {@render threadRow(thread, variant)}
-        {/each}
-      </MovingHighlight>
+    {#if doneAutos}
+      <div
+        class="done-panel"
+        class:done-panel--open={expanded[key]}
+        class:done-panel--animated={!reduceMotion}
+        onpointerenter={() => expanded[key] && clearDoneHide(key)}
+        onpointerleave={() => expanded[key] && startDoneHide(key)}
+      >
+        <div class="done-panel__inner">
+          {#if expanded[key]}
+            <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
+              {#each list as thread (thread.id)}
+                {@render threadRow(thread, variant)}
+              {/each}
+            </MovingHighlight>
+          {/if}
+        </div>
+      </div>
+    {:else}
+      {#if expanded[key]}
+        <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
+          {#each list as thread (thread.id)}
+            {@render threadRow(thread, variant)}
+          {/each}
+        </MovingHighlight>
+      {/if}
     {/if}
   {/if}
 {/snippet}
@@ -515,6 +572,14 @@
       >
         <span class="flex items-center gap-2.5"><Plug size={15} /> Connections</span>
       </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'bws' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("bws")}
+        data-testid="nav-bws"
+      >
+        <span class="flex items-center gap-2.5"><KeyRound size={15} /> Secrets</span>
+      </button>
     </MovingHighlight>
   </nav>
 
@@ -528,7 +593,7 @@
       title="Add project"><Plus size={15} /></button
     >
   </div>
-  <nav class="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+  <nav class="min-h-0 flex-1 overflow-y-auto px-3 pb-2" style="scrollbar-gutter: stable">
     {#each byProject as group (group.project.id)}
       <div class="mb-3">
         <div
@@ -560,22 +625,12 @@
             {/if}
             <span class="truncate text-sm font-medium text-fg-soft">{group.project.name}</span>
             {#if isCollapsed(group.project.id)}
-              {@const total = group.masterActive.length + group.worktreeGroups.reduce((n, wg) => n + wg.active.length, 0) + group.snoozed.length + group.toTest.length + group.archived.length}
+              {@const total = group.masterActive.length + group.worktreeGroups.reduce((n, wg) => n + wg.active.length, 0)}
               {#if total > 0}
                 <span class="shrink-0 rounded-full bg-surface-2 px-1.5 text-[10px] text-fainter">{total}</span>
               {/if}
             {/if}
           </button>
-          {#if group.toTest.length > 0 && !isCollapsed(group.project.id)}
-            <button
-              class="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px]
-                {activeView === 'testing' ? 'text-accent' : 'text-faint hover:text-fg'}"
-              onclick={() => onOpenTesting(group.project.id)}
-              data-testid="project-to-test"
-              title="Open testing area"
-              aria-label="Open testing area"><Eye size={14} /><span>{group.toTest.length}</span></button
-            >
-          {/if}
           <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
             <button
               class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
@@ -598,23 +653,37 @@
               aria-label="Remove project"><Trash2 size={14} /></button
             >
           </div>
+          {#if group.toTest.length > 0 && !isCollapsed(group.project.id)}
+            <button
+              class="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px]
+                {activeView === 'testing' ? 'text-accent' : 'text-faint hover:text-fg'}"
+              onclick={() => onOpenTesting(group.project.id)}
+              data-testid="project-to-test"
+              title="Open testing area"
+              aria-label="Open testing area"><Eye size={14} /><span>{group.toTest.length}</span></button
+            >
+          {/if}
         </div>
         {#if !isCollapsed(group.project.id)}
-          <!-- Master (project main checkout) — always visible, even with 0 threads. -->
-          <div class="flex items-center justify-between rounded px-2 pt-1.5 pb-0.5" role="group" aria-label="Master">
-            <span class="flex items-center gap-1 text-[11px] font-medium text-muted">
-              <Folder size={12} class="shrink-0" /> Master
-              {#if group.masterActive.length > 0}
-                <span class="text-fainter">· {group.masterActive.length}</span>
-              {/if}
-            </span>
-            <button
-              class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
-              onclick={() => newThread(group.project.id)}
-              title="Add thread to master"
-              aria-label="Add thread to master"><Plus size={12} /></button
-            >
-          </div>
+          <!-- Master (project main checkout). Only nest under a "Master"
+               folder header when an active worktree exists; otherwise the
+               project's main threads render flat (no extra nesting layer). -->
+          {#if group.worktreeGroups.length > 0}
+            <div class="flex items-center justify-between rounded px-2 pt-1.5 pb-0.5" role="group" aria-label="Master">
+              <span class="flex items-center gap-1 text-[11px] font-medium text-muted">
+                <Folder size={12} class="shrink-0" /> Master
+                {#if group.masterActive.length > 0}
+                  <span class="text-fainter">· {group.masterActive.length}</span>
+                {/if}
+              </span>
+              <button
+                class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
+                onclick={() => newThread(group.project.id)}
+                title="Add thread to master"
+                aria-label="Add thread to master"><Plus size={12} /></button
+              >
+            </div>
+          {/if}
           <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
             {#each group.masterActive as thread (thread.id)}
               {@render threadRow(thread, "active")}
@@ -741,5 +810,31 @@
 
   @media (prefers-reduced-motion: reduce) {
     :global(.session-row.done-pop) { animation: none !important; }
+  }
+
+  /* ── auto-collapsing Done accordion ───────────────────────────── */
+  /* grid 1fr/0fr animates height natively (no per-frame measuring,
+     so no text-reflow jitter); opacity + small settle soften the cut. */
+  .done-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  .done-panel--animated {
+    transition:
+      grid-template-rows 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 160ms ease;
+  }
+  .done-panel--open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  .done-panel__inner {
+    min-height: 0;
+    overflow-y: auto;
+    /* Cap so the accordion only ever grows to a bounded height; long Done
+       lists scroll inside instead of inflating the panel to thousands of
+       px (which made the open transition read as an instant flash). */
+    max-height: 16rem;
   }
 </style>

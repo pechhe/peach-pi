@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { GraphifyStatus } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
+  import { clickCopy } from "../lib/code-copy";
 
   let { projectId }: { projectId: string | null } = $props();
 
@@ -93,7 +94,7 @@
             </p>
           {/if}
           {#if error}
-            <pre class="mt-3 max-h-40 overflow-auto rounded-lg bg-bg p-2 text-[10px] text-danger">{error}</pre>
+            <pre class="mt-3 max-h-40 overflow-auto rounded-lg bg-bg p-2 text-[10px] text-danger" use:clickCopy={error}>{error}</pre>
           {/if}
         </div>
 

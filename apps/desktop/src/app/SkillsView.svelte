@@ -4,6 +4,7 @@
   import { Select } from "../components/ui/select";
   import Copy from "@lucide/svelte/icons/copy";
   import Check from "@lucide/svelte/icons/check";
+  import { clickCopy } from "../lib/code-copy";
   import Download from "@lucide/svelte/icons/download";
 
   let { projects, projectId }: { projects: Project[]; projectId: string | null } = $props();
@@ -100,7 +101,7 @@
         <div class="flex items-start justify-between gap-4">
           <div>
             <h2 class="text-base font-medium text-fg">{selected.name}</h2>
-            <p class="mt-0.5 font-mono text-[11px] text-fainter">{selected.filePath}</p>
+            <p class="mt-0.5 font-mono text-[11px] text-fainter" use:clickCopy={selected.filePath}>{selected.filePath}</p>
           </div>
           <div class="flex shrink-0 gap-2">
             <button

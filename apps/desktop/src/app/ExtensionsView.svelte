@@ -3,6 +3,7 @@
   import { api } from "../lib/ipc";
   import { Select } from "../components/ui/select";
   import ConfirmDialog from "../components/ui/dialog/ConfirmDialog.svelte";
+  import { clickCopy } from "../lib/code-copy";
 
   let { projects, projectId }: { projects: Project[]; projectId: string | null } = $props();
 
@@ -91,9 +92,9 @@
                 {/if}
               </div>
             </div>
-            <p class="mt-0.5 truncate font-mono text-[11px] text-fainter">{ext.path}</p>
+            <p class="mt-0.5 truncate font-mono text-[11px] text-fainter" use:clickCopy={ext.path}>{ext.path}</p>
             {#if ext.error}
-              <p class="mt-1 text-xs text-danger">{ext.error}</p>
+              <p class="mt-1 text-xs text-danger" use:clickCopy={ext.error}>{ext.error}</p>
             {:else}
               <p class="mt-1 text-xs text-faint">
                 {ext.tools.length} tools

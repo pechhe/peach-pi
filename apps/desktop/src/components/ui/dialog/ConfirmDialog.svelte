@@ -1,5 +1,6 @@
 <script lang="ts">
   import { AlertDialog } from "bits-ui";
+  import { clickCopy } from "../../../lib/code-copy";
 
   let {
     open = $bindable(false),
@@ -40,7 +41,7 @@
         </AlertDialog.Description>
       {/if}
       {#if error}
-        <p class="mt-3 rounded-lg border border-danger-border/50 bg-danger-surface/20 px-3 py-2 text-[12px] text-danger">
+        <p class="mt-3 rounded-lg border border-danger-border/50 bg-danger-surface/20 px-3 py-2 text-[12px] text-danger" use:clickCopy={error}>
           {error}
         </p>
       {/if}
