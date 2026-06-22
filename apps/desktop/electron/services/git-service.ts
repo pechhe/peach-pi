@@ -355,22 +355,30 @@ export class GitService {
     if (!project) throw new Error(`Unknown project: ${projectId}`);
     mkdirSync(this.worktreesDir, { recursive: true });
 
-    // Seed the worktree from the local working state: move (not copy) any
-    // uncommitted local work into it via the shared stash, leaving local clean.
-    const dirty = Boolean((await git(["status", "--porcelain"], project.path)).trim());
-    let seed: string | null = null;
-    if (dirty) {
-      await git(["stash", "push", "-u", "-m", "peach-pi worktree seed"], project.path);
-      seed = (await git(["rev-parse", "stash@{0}"], project.path)).trim();
-    }
-
+    // Create the worktree first at HEAD. The project repo is never touched,
+    // so a failure here (or below) leaves nothing lost — unlike a stash-and-
+    // move, which empties the project checkout before the worktree is seeded.
     const dir = path.join(this.worktreesDir, randomUUID());
     await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
 
-    if (seed) {
-      // Worktree is fresh at the same HEAD, so the stash applies cleanly.
-      await git(["stash", "apply", seed], dir);
-      await git(["stash", "drop", seed], project.path).catch(() => undefined);
+    // Seed the worktree as a COPY of the local working state (including
+    // uncommitted changes) without disturbing the project checkout. The full
+    // working tree is snapshotted into a throwaway tree object via an isolated
+    // index, then the fresh worktree is reset onto it. HEAD stays at base, so
+    // `git status` in the worktree shows the same uncommitted set as the
+    // project repo. Same non-destructive technique as snapshot() below.
+    const dirty = Boolean((await git(["status", "--porcelain"], project.path)).trim());
+    if (dirty) {
+      const indexFile = path.join(tmpdir(), `peach-pi-lidx-${randomUUID()}`);
+      const env = { GIT_INDEX_FILE: indexFile };
+      try {
+        await gitEnv(["read-tree", "HEAD"], project.path, env);
+        await gitEnv(["add", "-A"], project.path, env);
+        const tree = (await gitEnv(["write-tree"], project.path, env)).trim();
+        await git(["read-tree", "--reset", "-u", tree], dir);
+      } finally {
+        rmSync(indexFile, { force: true });
+      }
     }
     return dir;
   }

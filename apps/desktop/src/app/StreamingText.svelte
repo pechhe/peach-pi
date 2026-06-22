@@ -57,7 +57,7 @@
 
   // Steady-rate reveal at char boundaries. Each active frame advances `step`
   // chars; `tickEvery` skips frames at slower speeds so the trickle stays
-  // visible. No adaptive catch-up — constant rate, mirroring peche-pi.
+  // visible at low backlog.
   const SPEED_TABLE = {
     low: { step: 1, tickEvery: 4 }, // ~15 chars/sec @60fps
     medium: { step: 1, tickEvery: 2 }, // ~30 chars/sec
@@ -67,6 +67,11 @@
   // trickle. Past this we jump to whole-word boundaries so each word's span
   // fades as one unit (clean wave) instead of growing mid-fade.
   const WORD_SNAP_BACKLOG = 16;
+  // Adaptive catch-up: past WORD_SNAP_BACKLOG we drain this fraction of the
+  // backlog per active frame (snapped to a word boundary). Bounds visible lag
+  // so a fast provider burst is chased down in a few frames instead of
+  // trickling one word/frame forever and lagging after the stream ends.
+  const CATCHUP_FRACTION = 0.15;
 
   function resolveRate() {
     const raw = document.documentElement.getAttribute("data-stream-speed");
@@ -79,6 +84,14 @@
     while (i < s.length && !/\s/.test(s[i]!)) i += 1;
     while (i < s.length && /\s/.test(s[i]!)) i += 1;
     return i;
+  }
+
+  // First word boundary at/after char index `target`. Reveals whole words
+  // (never mid-word) while catching up across many words in one frame.
+  function wordBoundaryAtOrAfter(s: string, from: number, target: number): number {
+    let i = from;
+    while (i < target && i < s.length) i = nextWordBoundary(s, i);
+    return Math.min(i, s.length);
   }
 
   // During streaming the revealed slice often ends mid inline-code (before its
@@ -127,8 +140,11 @@
         const backlog = target.length - revealed;
         let next: number;
         if (backlog > WORD_SNAP_BACKLOG) {
-          next = Math.min(nextWordBoundary(target, revealed), target.length);
-          if (next <= revealed) next = revealed + 1;
+          // Drain a fraction of the backlog this frame, snapped up to a whole
+          // word, so big bursts are chased down fast instead of one word/frame.
+          const advance = Math.max(1, Math.ceil(backlog * CATCHUP_FRACTION));
+          next = wordBoundaryAtOrAfter(target, revealed, revealed + advance);
+          if (next <= revealed) next = Math.min(revealed + 1, target.length);
         } else {
           next = revealed + Math.min(rate.step, backlog);
         }

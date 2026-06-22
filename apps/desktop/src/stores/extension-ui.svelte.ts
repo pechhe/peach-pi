@@ -1,6 +1,6 @@
 import type { Component } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
-import type { ExtensionUiRequest, NoticePayload } from "@peach-pi/shared-types";
+import type { ExtensionUiRequest, NoticePayload, TerminalCustomFrame } from "@peach-pi/shared-types";
 import { api } from "../lib/ipc";
 
 interface ToastAction {
@@ -27,6 +27,8 @@ const HIDDEN_STATUS_KEYS = new Set(["caveman"]);
 class ExtensionUiStore {
   dialogs = $state<ExtensionUiRequest[]>([]);
   toasts = $state<Toast[]>([]);
+  /** Latest frame of a live extension `custom()` TUI, or null when none. */
+  terminalCustom = $state<TerminalCustomFrame | null>(null);
   /** threadId → (key → text) */
   private statuses = new SvelteMap<string, SvelteMap<string, string>>();
   /** threadId → (key → widget lines) — e.g. pi-subagents fleet feed. */
@@ -46,6 +48,9 @@ class ExtensionUiStore {
       }
       if (text === null || text === "") map.delete(key);
       else map.set(key, text);
+    });
+    api.on("event:terminalCustom", (frame) => {
+      this.terminalCustom = frame.closed ? null : frame;
     });
     api.on("event:extensionWidget", ({ threadId, key, lines }) => {
       let map = this.widgets.get(threadId);
@@ -100,6 +105,17 @@ class ExtensionUiStore {
   async respond(requestId: string, value: string | boolean | undefined): Promise<void> {
     this.dialogs = this.dialogs.filter((d) => d.requestId !== requestId);
     await api.invoke("threads:respondExtensionUi", requestId, value);
+  }
+
+  /** Forward a keystroke from the overlay to the live `custom()` component. */
+  terminalCustomInput(threadId: string, requestId: string, data: string): void {
+    void api.invoke("threads:terminalCustomInput", threadId, requestId, data);
+  }
+
+  /** Cancel the live `custom()` TUI (esc / overlay close). */
+  cancelTerminalCustom(threadId: string, requestId: string): void {
+    this.terminalCustom = null;
+    void api.invoke("threads:terminalCustomCancel", threadId, requestId);
   }
 }
 

@@ -13,6 +13,7 @@
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import BellRing from "@lucide/svelte/icons/bell-ring";
+  import Plug from "@lucide/svelte/icons/plug";
   import Bot from "@lucide/svelte/icons/bot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
@@ -471,6 +472,14 @@
         data-testid="nav-settings"
       >
         <span class="flex items-center gap-2.5"><Settings size={15} /> Settings</span>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'connections' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("connections")}
+        data-testid="nav-connections"
+      >
+        <span class="flex items-center gap-2.5"><Plug size={15} /> Connections</span>
       </button>
     </MovingHighlight>
   </nav>

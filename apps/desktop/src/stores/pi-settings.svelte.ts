@@ -14,6 +14,7 @@ class PiSettingsStore {
   retryBaseDelayMs = $state(2000);
   steeringMode = $state<"all" | "one-at-a-time">("one-at-a-time");
   followUpMode = $state<"all" | "one-at-a-time">("one-at-a-time");
+  autoUpdateExtensions = $state(true);
   private loaded = false;
 
   async load(): Promise<void> {
@@ -34,6 +35,7 @@ class PiSettingsStore {
     this.retryBaseDelayMs = s.retry.baseDelayMs;
     this.steeringMode = s.steeringMode;
     this.followUpMode = s.followUpMode;
+    this.autoUpdateExtensions = s.autoUpdateExtensions;
   }
 }
 

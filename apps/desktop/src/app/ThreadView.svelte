@@ -36,13 +36,15 @@
   import { terminal } from "../stores/terminal.svelte";
   import FindBar from "./FindBar.svelte";
 
-  let { thread, onSetEnvironment, onOpenGraph, onSelectThread, pendingFind, onFindConsumed }: {
+  let { thread, onSetEnvironment, onOpenGraph, onSelectThread, onNewThread, pendingFind, onFindConsumed }: {
     thread: Thread;
     /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
     onSetEnvironment?: (threadId: string, worktree: boolean) => void | Promise<void>;
     onOpenGraph: () => void;
     /** Navigate to a thread (used by the DevTap install action). */
     onSelectThread?: (threadId: string) => void;
+    /** Start a new thread in the current project (`/new` system command). */
+    onNewThread?: () => void;
     /** Set when the search overlay passes a body-match query through. ThreadView
      *  opens its FindBar pre-filled and calls `onFindConsumed` once applied. */
     pendingFind?: string | null;
@@ -147,7 +149,9 @@
   // shows the result in its journey timeline. Detect and suppress them.
   const STEER_RE = /^Sub-agent ".+?" completed/;
   function isSteerMessage(item: { kind: string; text?: string }): boolean {
-    return item.kind === "assistant" && typeof item.text === "string" && STEER_RE.test(item.text);
+    // Steer/result messages arrive as role=system, recorded as kind "notice",
+    // not "assistant". Match by text pattern regardless of kind.
+    return typeof item.text === "string" && STEER_RE.test(item.text);
   }
 
   const findMatches = $derived.by(() => {
@@ -884,7 +888,7 @@
         </button>
       </div>
     {/if}
-    <Composer {thread} onRewind={rewindFromEnd} />
+    <Composer {thread} onRewind={rewindFromEnd} {onNewThread} centered={isEmpty} />
   </div>
   <RewindDialog
     bind:open={rewindDialogOpen}

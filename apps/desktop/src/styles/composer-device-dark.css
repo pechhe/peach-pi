@@ -186,6 +186,13 @@
     drop-shadow(0 1px 0 oklch(0 0 0 / 0.6))
     drop-shadow(0 -0.5px 0.5px oklch(0.7 0.004 265 / 0.5));
 }
+/* Engraved BTW on the anodized-black cap: light ink, dark deboss below. */
+:root[data-composer="dark"] .composer-device .btw-btn__label {
+  color: oklch(0.82 0.004 265);
+  text-shadow:
+    0 1px 0 oklch(0 0 0 / 0.6),
+    0 -0.5px 0.5px oklch(0.7 0.004 265 / 0.45);
+}
 /* With input / stop state the cap goes warm — keep the orange glyph. */
 :root[data-composer="dark"] .composer-device .send-dial[data-has-input],
 :root[data-composer="dark"] .composer-device .send-dial--stop {

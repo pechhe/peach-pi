@@ -8,6 +8,8 @@ import type {
   ImagePayload,
   ModelInfo,
   ResourceInspection,
+  SlotToggleSpec,
+  CommandKind,
   SessionMeta,
   ThinkingLevel,
   Thread,
@@ -247,14 +249,28 @@ export class ThreadService {
   /** Run an extension/slash command in the live session (executes immediately). */
   async runCommand(threadId: string, command: string): Promise<void> {
     const session = await this.sessionFor(threadId);
-    void session.prompt(command).catch((err) => {
-      this.queueOps(threadId, [
-        {
-          op: "upsert",
-          item: { id: `err-${Date.now()}`, kind: "notice", text: `Command failed: ${String(err)}` },
-        },
-      ]);
-    });
+    void session
+      .prompt(command)
+      .catch((err) => {
+        this.queueOps(threadId, [
+          {
+            op: "upsert",
+            item: { id: `err-${Date.now()}`, kind: "notice", text: `Command failed: ${String(err)}` },
+          },
+        ]);
+      })
+      // Clear any `custom()` TUI overlay the command left open.
+      .finally(() => session.closeTerminalCustom());
+  }
+
+  /** Forward a keystroke to a live extension `custom()` TUI component. */
+  terminalCustomInput(threadId: string, requestId: string, data: string): void {
+    this.sessions.get(threadId)?.terminalCustomInput(requestId, data);
+  }
+
+  /** Cancel a live extension `custom()` TUI component (esc / overlay close). */
+  terminalCustomCancel(threadId: string, requestId: string): void {
+    this.sessions.get(threadId)?.cancelTerminalCustom(requestId);
   }
 
   async abort(threadId: string): Promise<void> {
@@ -402,6 +418,18 @@ export class ThreadService {
     return inspectResources(cwd);
   }
 
+  async inspectSlotCommand(
+    projectId: string | null,
+    kind: CommandKind,
+    name: string,
+  ): Promise<SlotToggleSpec | null> {
+    const project = projectId ? this.projects.all().find((p) => p.id === projectId) : null;
+    const cwd = project?.path ?? this.chatsDir;
+    const config = this.getUtilityModel();
+    const { inspectCommandToggle } = await import("@peach-pi/pi-client");
+    return inspectCommandToggle(cwd, kind, name, config);
+  }
+
   setTitle(threadId: string, title: string): void {
     this.threads.setTitle(threadId, title);
     this.onThreadsChanged();
@@ -541,6 +569,8 @@ export class ThreadService {
           this.emit("event:extensionStatus", { threadId, key, text }),
         onExtensionWidget: (key, lines) =>
           this.emit("event:extensionWidget", { threadId, key, lines }),
+        onTerminalCustomFrame: (frame) =>
+          this.emit("event:terminalCustom", { threadId, ...frame }),
         getAutoCompact: () => this.getAutoCompact(),
       },
       sessionFile ?? undefined,

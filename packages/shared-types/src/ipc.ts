@@ -3,6 +3,9 @@ import type {
   AutoCompactSettings,
   CavemanState,
   CommandInfo,
+  Connector,
+  CreateApiKeyInput,
+  CreateOAuthInput,
   DevTapProjectStatus,
   Automation,
   AutomationRun,
@@ -14,18 +17,28 @@ import type {
   GitPrResult,
   GitPushLocalResult,
   GraphifyStatus,
+  OAuthPreset,
+  OAuthStartResult,
+  ResolvedCredential,
   SubagentAgentInfo,
   SubagentAgentPatch,
   ExtensionStatusPayload,
   ExtensionUiRequest,
+  TerminalCustomFrame,
   ImagePayload,
   ModelInfo,
   NoticePayload,
   PiHealth,
   PiSettings,
+  VisionProxyConfig,
+  VisionProxyInstallState,
   Project,
   QueueState,
+  RecordingState,
+  RecordingStopResult,
   ResourceInspection,
+  SlotToggleSpec,
+  CommandKind,
   SessionMeta,
   SideConversation,
   SideDeltaPayload,
@@ -104,6 +117,17 @@ export const ipcContracts = {
   }),
   /** Read the pi settings subset exposed in the GUI. */
   "app:getPiSettings": invoke<[], PiSettings>(),
+  /** Whether the `npm:pi-vision-proxy` package is listed among pi's packages. */
+  "app:getVisionProxyInstallState": invoke<[], VisionProxyInstallState>(),
+  /** Install `npm:pi-vision-proxy` via `pi install`. Async notice on completion. */
+  "app:installVisionProxy": invoke<[], { ok: boolean; error?: string }>(),
+  /** Read the GUI-relevant pi-vision-proxy config (~/.pi/agent/vision-proxy.json,
+   *  merged over extension defaults). Null-returning fields are filled in. */
+  "app:getVisionProxyConfig": invoke<[], VisionProxyConfig>(),
+  /** Persist the vision model choice. `provider` derives from ModelInfo. */
+  "app:setVisionProxyModel": invoke<[model: ModelInfo], VisionProxyConfig>(),
+  /** Persist the proxy mode (fallback | always | off). */
+  "app:setVisionProxyMode": invoke<[mode: VisionProxyConfig["mode"]], VisionProxyConfig>(),
   /** Open the working directory for a thread in Finder. */
   "app:openFolder": invoke<[threadId: ThreadId], void>((id) =>
     requireNonEmptyString(id, "threadId"),
@@ -112,6 +136,16 @@ export const ipcContracts = {
   "app:getPiHealth": invoke<[], PiHealth>(),
   /** Write pi settings (partial merge into ~/.pi/agent/settings.json). */
   "app:setPiSettings": invoke<[patch: Partial<PiSettings>], PiSettings>(),
+  /** Manually run `pi update --extensions` now (bypasses throttle). */
+  "app:updateExtensions": invoke<[], { ok: boolean; updated: boolean; error?: string }>(),
+  /** Uninstall a package extension via `pi remove <spec>`. */
+  "extensions:remove": invoke<[spec: string], { ok: boolean; error?: string }>((spec) =>
+    requireNonEmptyString(spec, "spec"),
+  ),
+  /** Delete a local extension's file/dir from disk (validated under an extensions dir). */
+  "extensions:deleteLocal": invoke<[targetPath: string], { ok: boolean; error?: string }>((p) =>
+    requireNonEmptyString(p, "targetPath"),
+  ),
 
   /** Persist the sidebar width (pixels). */
   "ui:setSidebarWidth": invoke<[width: number], void>((w) => {
@@ -191,6 +225,14 @@ export const ipcContracts = {
     [requestId: string, value: string | boolean | undefined],
     void
   >((id) => requireNonEmptyString(id, "requestId")),
+  /** Forward a keystroke to a live extension `custom()` TUI component. Does
+   *  not settle the command — the component decides when to call done(). */
+  "threads:terminalCustomInput": invoke<
+    [threadId: ThreadId, requestId: string, data: string],
+    void
+  >(),
+  /** Cancel a live extension `custom()` TUI (esc / overlay close). */
+  "threads:terminalCustomCancel": invoke<[threadId: ThreadId, requestId: string], void>(),
 
   "threads:compact": invoke<[threadId: ThreadId], void>((id) =>
     requireNonEmptyString(id, "threadId"),
@@ -302,8 +344,20 @@ export const ipcContracts = {
 
   // resources (skills / extensions / prompts visible for a project)
   "resources:inspect": invoke<[projectId: string | null], ResourceInspection>(),
+  /** Probe a command with a helper LLM to propose quick-slot toggle behavior. */
+  "resources:inspectSlotCommand": invoke<
+    [projectId: string | null, kind: CommandKind, name: string],
+    SlotToggleSpec | null
+  >(),
   /** Read a skill/prompt markdown file surfaced by resources:inspect. */
   "resources:readMarkdown": invoke<[filePath: string], string>((p) => {
+    requireNonEmptyString(p, "filePath");
+    if (!p.endsWith(".md")) throw new Error("filePath must be a .md file");
+  }),
+  /** Save a skill's markdown to a user-chosen file via a native save dialog.
+   *  Returns the destination path, or null if the user cancelled. */
+  "skills:save": invoke<[skillName: string, filePath: string], string | null>((name, p) => {
+    requireNonEmptyString(name, "skillName");
     requireNonEmptyString(p, "filePath");
     if (!p.endsWith(".md")) throw new Error("filePath must be a .md file");
   }),
@@ -344,6 +398,74 @@ export const ipcContracts = {
     void
   >(),
 
+  // connectors (saved external-service credentials: OAuth + API keys). BYO
+  // client for OAuth; peach-pi bundles no secrets. Secrets live encrypted in
+  // SQLite and never cross the IPC seam — the renderer sees only `Connector`.
+  /** All saved connectors (metadata only; no secrets). */
+  "connectors:list": invoke<[], Connector[]>(),
+  /** Known-provider presets to pre-fill the BYO-client form in the renderer.
+   *  Each carries `hasClient` so the UI knows which support one-click Connect. */
+  "connectors:presets": invoke<[], OAuthPreset[]>(),
+  /** One-click Connect from the catalog: provisions the bundled/local OAuth
+   *  client, (re)creates the connector, and returns the authUrl to open. No
+   *  form. Throws if no client is provisioned for the provider. */
+  "connectors:connectCatalog": invoke<[provider: string], OAuthStartResult>((p) =>
+    requireNonEmptyString(p, "provider"),
+  ),
+  /** Save a long-lived API key / PAT for a provider. */
+  "connectors:createApiKey": invoke<[input: CreateApiKeyInput], Connector>((i) => {
+    requireNonEmptyString(i?.provider, "provider");
+    requireNonEmptyString(i?.label, "label");
+    requireNonEmptyString(i?.apiKey, "apiKey");
+  }),
+  /** Register an OAuth connector (BYO client). Returns the (disconnected)
+   *  connector; call `connectors:startOAuth` to begin the auth flow. */
+  "connectors:createOAuth": invoke<[input: CreateOAuthInput], Connector>((i) => {
+    requireNonEmptyString(i?.provider, "provider");
+    requireNonEmptyString(i?.label, "label");
+    requireNonEmptyString(i?.clientId, "clientId");
+    // Confidential clients must send a secret; PKCE public clients (GitHub,
+    // Google, Linear, …) authenticate with the verifier alone.
+    if (!i?.usePkce) requireNonEmptyString(i?.clientSecret, "clientSecret");
+    requireNonEmptyString(i?.redirectUri, "redirectUri");
+    requireNonEmptyString(i?.authorizeUrl, "authorizeUrl");
+    requireNonEmptyString(i?.tokenUrl, "tokenUrl");
+  }),
+  /** Begin an OAuth handshake. Returns the authUrl for the renderer to open
+   *  (via shell.openExternal). The callback arrives via the deep-link scheme or
+   *  a loopback HTTP server, depending on the connector's redirect_uri. */
+  "connectors:startOAuth": invoke<[connectorId: string], OAuthStartResult>((id) =>
+    requireNonEmptyString(id, "connectorId"),
+  ),
+  /** Force a token refresh (or surface that re-auth is needed). */
+  "connectors:refresh": invoke<[connectorId: string], Connector>((id) =>
+    requireNonEmptyString(id, "connectorId"),
+  ),
+  /** Delete a connector (local only; provider-side revocation is a follow-up). */
+  "connectors:revoke": invoke<[connectorId: string], void>((id) =>
+    requireNonEmptyString(id, "connectorId"),
+  ),
+  /** Resolve a connector for a tool/agent to ready-to-use credentials. This is
+   *  the apiKeyHelper analogue — main-process callers only. */
+  "connectors:resolve": invoke<[provider: string], ResolvedCredential | null>((p) =>
+    requireNonEmptyString(p, "provider"),
+  ),
+
+  // recording (desktop task capture → skill synthesis)
+  /** Begin capturing desktop input. Returns the initial RecordingState. */
+  "recording:start": invoke<[], RecordingState>(),
+  /** Stop + persist events. With a `skill` body → saves the skill file.
+   *  Without → returns the digest for the agent/UI to synthesize. */
+  "recording:stop": invoke<[skillBody?: string], RecordingStopResult>(),
+  /** Stop + discard ALL captured data. Nothing persists. */
+  "recording:cancel": invoke<[], RecordingState>(),
+  /** Current recorder state (for initial renderer load). */
+  "recording:status": invoke<[], RecordingState>(),
+  /** Reveal the synthesized skill file in Finder. */
+  "recording:revealSkill": invoke<[skillPath: string], void>((p) =>
+    requireNonEmptyString(p, "skillPath"),
+  ),
+
   // events (main → renderer)
   "event:snapshot": event<AppSnapshot>(),
   "event:threadChanged": event<Thread>(),
@@ -360,8 +482,15 @@ export const ipcContracts = {
   /** A run finished while the HUD is up — renderer turns this into an ambient cue. */
   "event:hudFinish": event<{ threadId: ThreadId }>(),
   "event:extensionWidget": event<ExtensionWidgetPayload>(),
+  /** A connector's status changed (connected/revoked/refreshed). Renderer
+   *  re-lists via `connectors:list`. */
+  "event:connectorsChanged": event<void>(),
   "event:terminalData": event<{ threadId: ThreadId; data: string }>(),
   "event:terminalExit": event<{ threadId: ThreadId; exitCode: number }>(),
+  /** A render frame from an extension's `custom()` TUI, for the xterm overlay. */
+  "event:terminalCustom": event<TerminalCustomFrame>(),
+  /** Recorder state changed (start/stop/cancel/error/event-count tick). */
+  "event:recordingState": event<RecordingState>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

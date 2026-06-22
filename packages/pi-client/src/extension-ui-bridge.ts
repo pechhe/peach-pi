@@ -15,13 +15,16 @@ export interface UiBridgeCallbacks {
   onStatus(key: string, text: string | null): void;
   /** Text widgets (e.g. pi-subagents fleet feed). Component widgets are dropped. */
   onWidget?(key: string, lines: string[] | null): void;
+  /** Drive a terminal `custom()` TUI component in the GUI overlay. Resolves
+   *  with the component's done() result. */
+  onTerminalCustom(factory: unknown): Promise<unknown>;
 }
 
 /**
  * ExtensionUIContext implementation for a GUI host. Dialog-style requests
- * (select/confirm/input/editor) proxy to the renderer; TUI-component surfaces
- * (widgets, footer, custom components) are unsupported and degrade to no-ops —
- * extensions awaiting `custom()` get `undefined` back immediately.
+ * (select/confirm/input/editor) proxy to the renderer; `custom()` TUI
+ * components are driven onto an xterm overlay via onTerminalCustom. Other
+ * TUI-component surfaces (footer, header, component widgets) remain no-ops.
  */
 export function createUiBridge(callbacks: UiBridgeCallbacks): ExtensionUIContext {
   // Plain-text passthrough Theme. Extensions (e.g. pi-subagents' fleet widget)
@@ -83,7 +86,7 @@ export function createUiBridge(callbacks: UiBridgeCallbacks): ExtensionUIContext
     setFooter: () => {},
     setHeader: () => {},
     setTitle: () => {},
-    custom: async () => undefined,
+    custom: (factory: unknown) => callbacks.onTerminalCustom(factory),
     pasteToEditor: () => {},
     setEditorText: () => {},
     getEditorText: () => "",

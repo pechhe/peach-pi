@@ -15,6 +15,21 @@ export interface Project {
   archivedAt?: string;
 }
 
+/** A first-class isolated git worktree owned by a project (ADR-0003 evolve).
+ *  Many threads can run inside one worktree. `archivedAt` marks a worktree
+ *  whose dir has been removed and threads archived; it no longer appears in
+ *  the sidebar. */
+export interface Worktree {
+  id: string;
+  projectId: ProjectId;
+  /** Absolute path to the worktree checkout. */
+  dir: string;
+  /** Sidebar label, e.g. "Worktree 2". */
+  name: string;
+  createdAt: string;
+  archivedAt?: string;
+}
+
 export type ThreadStatus = "idle" | "running" | "failed" | "completed";
 
 /** Auto-classified thread category (utility model picks one of these). */
@@ -38,7 +53,10 @@ export interface Thread {
   piSessionFile: string | null;
   /** For custom chats: the chat-specific workspace directory. */
   chatWorkspaceDir?: string;
-  /** For worktree threads: the isolated git worktree this thread works in. */
+  /** Worktree this thread runs in; null = the project's main checkout ("master"). */
+  worktreeId?: string | null;
+  /** Denormalized cache of the worktree's dir (for git-service); null when
+   *  the thread runs in the main checkout. */
   worktreeDir?: string;
   title: string;
   /** Auto-classified category; null until the title/tag pass runs. */
@@ -88,6 +106,7 @@ export type AppView =
   | "skills"
   | "extensions"
   | "automations"
+  | "connections"
   | "testing"
   | "agents"
   | "graph";
@@ -99,7 +118,21 @@ export interface ImagePayload {
 }
 
 /** Where a slash-menu entry originates, for categorising the menu. */
-export type CommandKind = "prompt" | "extension" | "skill";
+export type CommandKind = "prompt" | "extension" | "skill" | "system";
+
+/** Proposed quick-slot toggle behavior produced by the LLM command probe. */
+export interface SlotToggleSpec {
+  /** Whether the command reads as an on/off mode rather than a one-shot action. */
+  isToggle: boolean;
+  /** Exact slash command that enables it (null when not a toggle). */
+  on: string | null;
+  /** Exact slash command that disables it (null when not a toggle). */
+  off: string | null;
+  /** Short Title Case label for the slot caption. */
+  label: string;
+  /** One-line rationale (shown to the user). */
+  reason: string;
+}
 
 /** Slash-menu entry surfaced from pi prompt templates / extension commands / skills. */
 export interface CommandInfo {
@@ -138,6 +171,29 @@ export interface AutoCompactSettings {
   tokens: number | null;
 }
 
+/** Whether `npm:pi-vision-proxy` is present in the pi `packages` list. */
+export interface VisionProxyInstallState {
+  installed: boolean;
+}
+
+/** GUI-relevant subset of the `pi-vision-proxy` config
+ *  (`~/.pi/agent/vision-proxy.json`). The extension merges this over its
+ *  built-in defaults on read; we only store the keys the user can change. */
+export interface VisionProxyConfig {
+  /** Proxy mode (default "fallback"). */
+  mode: "fallback" | "always" | "off";
+  /** Vision model provider (default "anthropic"). */
+  provider: string;
+  /** Vision model id within the provider (default "claude-sonnet-4-5"). */
+  modelId: string;
+  /** Whether the extension is currently installed as a pi package. */
+  installed: boolean;
+  /** Whether an env var (PI_VISION_PROXY_MODE / _MODEL) is currently
+   *  overriding the file value, which locks the corresponding GUI control. */
+  modeLocked: boolean;
+  modelLocked: boolean;
+}
+
 /** Caveman compression state, mirrored from the pi-caveman extension config. */
 export interface CavemanState {
   enabled: boolean;
@@ -162,6 +218,8 @@ export interface PiSettings {
   retry: RetrySettings;
   steeringMode: "all" | "one-at-a-time";
   followUpMode: "all" | "one-at-a-time";
+  /** Auto-run `pi update --extensions` on launch + periodically. Default on. */
+  autoUpdateExtensions: boolean;
 }
 
 /** Live per-session metadata published main → renderer. */
@@ -302,6 +360,10 @@ export interface ExtensionInfo {
   tools: string[];
   commands: string[];
   error?: string;
+  /** Install spec (`npm:…`/`git:…`) for `pi remove`; null for local extensions. */
+  removeSpec: string | null;
+  /** On-disk file/dir to delete for a local extension; null for packages. */
+  deletePath: string | null;
 }
 
 /** Resources visible for a given cwd (global + project-local). */
@@ -320,6 +382,18 @@ export interface ExtensionUiRequest {
   message?: string;
   options?: string[];
   placeholder?: string;
+}
+
+/** One render frame of an extension's terminal `custom()` TUI component,
+ *  streamed main → renderer for the xterm overlay. `busy` keeps the last
+ *  frame visible (under a spinner) between screens; `closed` clears the
+ *  overlay when the command finishes or the session is disposed. */
+export interface TerminalCustomFrame {
+  threadId: ThreadId;
+  requestId: string;
+  lines: string[];
+  busy?: boolean;
+  closed?: boolean;
 }
 
 /** Toast-style notification (extension notify or app notices). */
@@ -407,7 +481,158 @@ export interface SideDonePayload {
 /** Snapshot published main → renderer. Grows with features. */
 export interface AppSnapshot {
   projects: Project[];
+  worktrees: Worktree[];
   threads: Thread[];
   automations: Automation[];
   ui: UiState;
+}
+
+/** A saved external-service credential. Secrets never cross the IPC seam:
+ *  only identity/metadata + non-secret OAuth config is exposed to the renderer.
+ *  The secret blob (API key or OAuth token set) lives encrypted in SQLite. */
+export interface Connector {
+  id: string;
+  /** Service id, e.g. "notion", "github", "linear", or "custom:<name>". */
+  provider: string;
+  /** Human label chosen by the user. */
+  label: string;
+  authKind: "api_key" | "oauth";
+  /** OAuth: false until a token exchange completes. API-key: always true. */
+  connected: boolean;
+  /** Non-secret OAuth config (omitted for api-key connectors). */
+  oauth?: ConnectorOauthConfig;
+  /** Token expiry (ISO), when the provider tells us. */
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Non-secret OAuth connector config — surfaced to the renderer for editing.
+ *  CLIENT_SECRET is intentionally absent; it lives only in the encrypted blob. */
+export interface ConnectorOauthConfig {
+  clientId: string;
+  redirectUri: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  /** PKCE S256 by default; false for providers that don't support it (Notion). */
+  usePkce: boolean;
+  /** Send client_secret as HTTP Basic auth (Notion requires it) vs in the body. */
+  useBasicAuth: boolean;
+  /** Route the handshake + token exchange through the vendor OAuth broker
+   *  instead of talking to the provider directly. Set for confidential
+   *  providers (Notion, GitHub, …) so the client_secret never ships. */
+  useBroker?: boolean;
+}
+
+/** Input for `connectors:createApiKey`. */
+export interface CreateApiKeyInput {
+  provider: string;
+  label: string;
+  apiKey: string;
+}
+
+/** Input for `connectors:createOAuth` (BYO client — no bundled secrets). */
+export interface CreateOAuthInput {
+  provider: string;
+  label: string;
+  clientId: string;
+  /** User-supplied client secret — encrypted before persistence, never
+   *  returned. Omit for PKCE public clients (GitHub, Google, Linear, …). */
+  clientSecret?: string;
+  redirectUri: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  scopes?: string[];
+  usePkce?: boolean;
+  useBasicAuth?: boolean;
+  /** Route through the vendor broker (confidential providers); client_id and
+   *  client_secret are then held server-side and omitted here. */
+  useBroker?: boolean;
+}
+
+/** Result of starting an OAuth flow — the URL for the renderer to open. */
+export interface OAuthStartResult {
+  authUrl: string;
+}
+
+/** What `connectors:resolve` returns for a configured connector. Raw token or
+ *  ready-to-use headers; agents/tools use this like Claude's apiKeyHelper. */
+export interface ResolvedCredential {
+  headers: Record<string, string>;
+  tokenType: string | null;
+  expiresAt: string | null;
+}
+
+/** Defaults for a known OAuth provider — pre-fills the BYO-client form in the
+ *  renderer. The user still supplies their own client_id + client_secret
+ *  (unless a `clientId` is bundled). Also drives the connector catalog grid. */
+export interface OAuthPreset {
+  provider: string;
+  label: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  /** PKCE S256 supported? false for Notion (Notion doesn't fully support PKCE). */
+  usePkce: boolean;
+  /** Requires HTTP Basic auth on the token endpoint? true for Notion. */
+  useBasicAuth: boolean;
+  /** Default redirect URI. Custom-scheme-tolerant providers use deep-link;
+   *  Notion rejects custom schemes and needs `http://localhost:<port>/callback`. */
+  redirectUri: string;
+  /** simple-icons slug (e.g. "notion"); renderer falls back to a monogram
+   *  tile when absent or unknown. */
+  icon?: string;
+  /** Brand hex override; otherwise the renderer uses simple-icons' own hex. */
+  iconHex?: string;
+  /** Provider REST base, shown for reference (agent-side tools call this). */
+  apiBaseUrl?: string;
+  /** "Create an OAuth app" / credentials docs — linked from the connect form. */
+  docsUrl?: string;
+  /** Bundled public client_id, when peach-pi ships a registered app for this
+   *  provider. Undefined = user supplies their own (BYO). */
+  clientId?: string;
+  /** When true, confidential handshakes route through the vendor broker (the
+   *  broker holds the secret). One-click without any local credential. */
+  useBroker?: boolean;
+  /** Bundled client_secret for confidential clients (e.g. Notion). Provisioned
+   *  out-of-band; lets "Connect" skip the form entirely. */
+  clientSecret?: string;
+  /** Does the token endpoint need a client_secret? false for PKCE-only public
+   *  clients. Defaults to true. */
+  clientSecretRequired?: boolean;
+  /** Runtime-only: true when a client (bundled or provisioned via the local
+   *  clients file) exists, so the renderer can offer one-click Connect. */
+  hasClient?: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Record & Replay
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Live state of the desktop recorder, pushed to the renderer on every change
+ *  via `event:recordingState`. Idle = nothing running. */
+export interface RecordingState {
+  status: "idle" | "recording" | "stopping" | "error";
+  /** Active recording id; null when idle. */
+  recordingId: string | null;
+  /** Wall-clock ISO when recording started. */
+  startedAt: string | null;
+  /** Captured event count so far. */
+  eventCount: number;
+  /** Human-readable status/error note (e.g. permission denied, binary missing). */
+  message: string | null;
+  /** Path to the synthesized skill file once stop completes; null otherwise. */
+  skillPath: string | null;
+}
+
+/** Result of `recording:stop` — drives the post-stop UI (show skill path). */
+export interface RecordingStopResult {
+  recordingId: string;
+  eventCount: number;
+  durationMs: number;
+  /** The semantic digest of captured events, for display or LLM synthesis. */
+  digest: string;
+  /** Path the skill file was saved to, if `skill` body was provided. */
+  skillPath: string | null;
 }

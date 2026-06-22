@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { ModelInfo, PiSettings } from "@peach-pi/shared-types";
+  import type { ModelInfo, PiSettings, VisionProxyConfig } from "@peach-pi/shared-types";
   import { setSoundsMuted, soundsMuted, setDoneSoundVariant, getDoneSoundVariant } from "../lib/sound/sound-prefs";
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import { DONE_SOUND_OPTIONS, playDoneSound, type DoneSoundVariant } from "../lib/sound/done-sound";
@@ -18,6 +18,7 @@
   import { autoCompact } from "../stores/auto-compact.svelte";
   import { caveman } from "../stores/caveman.svelte";
   import { piSettings } from "../stores/pi-settings.svelte";
+  import { visionProxy } from "../stores/vision-proxy.svelte";
   import { snapshot } from "../stores/snapshot.svelte";
 
   let { initialQuery = "" }: { initialQuery?: string } = $props();
@@ -37,8 +38,11 @@
     autoCompact: "auto-compaction compact context usage threshold tokens percentage",
     retry: "retry on error network drop transient exponential backoff wait doubles",
     messageDelivery: "message delivery steering mode follow-up mode",
+    extensions: "extensions auto update packages pi update periodic refresh",
     about: "about peach-pi version",
     utilityModel: "utility model background tasks thread titles commit messages fast inexpensive",
+    visionProxy:
+      "vision proxy images description describe blind text-only model fallback always off consent claude gemini qwen",
   } as const;
 
   let query = $state(initialQuery);
@@ -115,6 +119,7 @@
     await autoCompact.load();
     await piSettings.load();
     await caveman.load();
+    await visionProxy.load();
   });
 
   function saveAutoCompactPercent(e: Event) {
@@ -153,6 +158,35 @@
     selectedKey = utilityModel ? keyOf(utilityModel) : "";
   }
 
+  /** provider:id for the selected vision model (matches the utility-model key shape). */
+  const visionKey = $derived(`${visionProxy.provider}:${visionProxy.modelId}`);
+  let installingVision = $state(false);
+  let visionError = $state("");
+
+  async function pickVisionModel(key: string) {
+    if (visionProxy.modelLocked || !key) return;
+    const model = byKey.get(key);
+    if (!model) return;
+    visionError = "";
+    try {
+      await visionProxy.setModel(model);
+    } catch (err) {
+      visionError = String(err);
+    }
+  }
+
+  async function installVisionProxy() {
+    if (installingVision || visionProxy.installed) return;
+    installingVision = true;
+    visionError = "";
+    try {
+      const res = await visionProxy.install();
+      if (!res.ok) visionError = res.error ?? "Install failed.";
+    } finally {
+      installingVision = false;
+    }
+  }
+
   function toggleRetryEnabled() {
     void piSettings.patch({ retry: { enabled: !piSettings.retryEnabled, maxRetries: piSettings.retryMaxRetries, baseDelayMs: piSettings.retryBaseDelayMs, provider: { timeoutMs: null, maxRetries: 0, maxRetryDelayMs: 60000 } } });
   }
@@ -174,6 +208,21 @@
 
   function pickFollowUpMode(value: string) {
     void piSettings.patch({ followUpMode: value as PiSettings["followUpMode"] });
+  }
+
+  function toggleAutoUpdateExtensions() {
+    void piSettings.patch({ autoUpdateExtensions: !piSettings.autoUpdateExtensions });
+  }
+
+  let updatingExtensions = $state(false);
+  async function updateExtensionsNow() {
+    if (updatingExtensions) return;
+    updatingExtensions = true;
+    try {
+      await api.invoke("app:updateExtensions");
+    } finally {
+      updatingExtensions = false;
+    }
   }
 
   function pickCavemanLevel(value: string) {
@@ -522,10 +571,128 @@
       </section>
       {/if}
 
+      {#if hit("extensions")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div>
+          <h2 class="text-sm text-fg">Extensions</h2>
+          <p class="text-xs text-faint">
+            Keep installed pi packages up to date by running
+            <code>pi update --extensions</code> on launch and periodically. Runs
+            only while no thread is active; restart to load new versions.
+          </p>
+        </div>
+        <div class="mt-3 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-fg">Auto-update</span>
+            <button
+              class="relative h-5 w-9 rounded-full transition-colors {piSettings.autoUpdateExtensions ? 'bg-success' : 'bg-surface-3'}"
+              onclick={toggleAutoUpdateExtensions}
+              data-testid="auto-update-extensions-toggle"
+              aria-label="Toggle extension auto-update"
+              role="switch"
+              aria-checked={piSettings.autoUpdateExtensions}
+            >
+              <span
+                class="absolute top-0.5 size-4 rounded-full bg-white transition-transform {piSettings.autoUpdateExtensions
+                  ? 'translate-x-[1.1rem]'
+                  : 'translate-x-0.5'}"
+              ></span>
+            </button>
+          </div>
+          <button
+            class="self-start rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
+            onclick={updateExtensionsNow}
+            disabled={updatingExtensions}
+            data-testid="update-extensions-now"
+          >
+            {updatingExtensions ? "Updating…" : "Update now"}
+          </button>
+        </div>
+      </section>
+      {/if}
+
       {#if hit("about")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
         <h2 class="text-sm text-fg">About</h2>
         <p class="mt-1 text-xs text-faint">peach-pi {version}</p>
+      </section>
+      {/if}
+
+      {#if hit("visionProxy")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="mb-2">
+          <h2 class="text-sm text-fg">Vision proxy</h2>
+          <p class="text-xs text-faint">
+            Routes images to a vision-capable model, collects descriptions, and
+            injects them into the agent's context — so text-only models can
+            "see" your images across turns. Requires restart after install.
+          </p>
+        </div>
+
+        {#if !visionProxy.installed}
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-xs text-faint">
+              Not installed. Installs <code>npm:pi-vision-proxy</code> via pi.
+            </span>
+            <button
+              class="rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
+              onclick={installVisionProxy}
+              disabled={installingVision}
+              data-testid="install-vision-proxy"
+            >
+              {installingVision ? "Installing…" : "Install"}
+            </button>
+          </div>
+          {#if visionError}
+            <p class="mt-2 text-xs text-danger" data-testid="vision-proxy-error">{visionError}</p>
+          {/if}
+        {:else}
+          <div class="flex flex-col gap-3">
+            <div>
+              <label class="mb-1 block text-xs text-fg">Vision model</label>
+              <Select
+                class="w-full rounded-md bg-surface-2"
+                value={visionKey}
+                onValueChange={pickVisionModel}
+                disabled={visionProxy.modelLocked}
+                items={grouped.flatMap((group) =>
+                  group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider })),
+                )}
+                data-testid="vision-model-select"
+                aria-label="Vision model"
+              />
+              {#if visionProxy.modelLocked}
+                <p class="mt-1 text-[11px] text-fainter">
+                  Locked by <code>PI_VISION_PROXY_MODEL</code> env var.
+                </p>
+              {/if}
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-fg">Mode</label>
+              <Select
+                class="w-full rounded-md bg-surface-2"
+                value={visionProxy.mode}
+                onValueChange={(v) => visionProxy.setMode(v as VisionProxyConfig["mode"])}
+                disabled={visionProxy.modeLocked}
+                items={[
+                  { value: "fallback", label: "Fallback — only when active model can't see images" },
+                  { value: "always", label: "Always — always route through the proxy" },
+                  { value: "off", label: "Off — disabled" },
+                ]}
+                data-testid="vision-mode-select"
+                aria-label="Vision proxy mode"
+              />
+              {#if visionProxy.modeLocked}
+                <p class="mt-1 text-[11px] text-fainter">
+                  Locked by <code>PI_VISION_PROXY_MODE</code> env var.
+                </p>
+              {/if}
+            </div>
+            {#if visionError}
+              <p class="text-xs text-danger" data-testid="vision-proxy-error">{visionError}</p>
+            {/if}
+          </div>
+        {/if}
       </section>
       {/if}
 

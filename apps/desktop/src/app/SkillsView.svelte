@@ -2,6 +2,9 @@
   import type { Project, ResourceInspection, SkillInfo } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { Select } from "../components/ui/select";
+  import Copy from "@lucide/svelte/icons/copy";
+  import Check from "@lucide/svelte/icons/check";
+  import Download from "@lucide/svelte/icons/download";
 
   let { projects, projectId }: { projects: Project[]; projectId: string | null } = $props();
 
@@ -10,6 +13,29 @@
   let inspection = $state<ResourceInspection | null>(null);
   let selected = $state<SkillInfo | null>(null);
   let content = $state<string>("");
+  let copied = $state(false);
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  let saving = $state(false);
+
+  function copy() {
+    if (!content) return;
+    void navigator.clipboard.writeText(content).then(() => {
+      copied = true;
+      clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => (copied = false), 1500);
+    });
+  }
+
+  async function download() {
+    const skill = selected;
+    if (!skill) return;
+    saving = true;
+    try {
+      await api.invoke("skills:save", skill.name, skill.filePath);
+    } finally {
+      saving = false;
+    }
+  }
 
   $effect(() => {
     const target = scope;
@@ -71,8 +97,39 @@
 
     <div class="flex-1 overflow-y-auto px-6 py-4">
       {#if selected}
-        <h2 class="text-base font-medium text-fg">{selected.name}</h2>
-        <p class="mt-0.5 font-mono text-[11px] text-fainter">{selected.filePath}</p>
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-base font-medium text-fg">{selected.name}</h2>
+            <p class="mt-0.5 font-mono text-[11px] text-fainter">{selected.filePath}</p>
+          </div>
+          <div class="flex shrink-0 gap-2">
+            <button
+              class="copy-btn"
+              onclick={copy}
+              disabled={!content}
+              title={copied ? "Copied" : "Copy"}
+              aria-label={copied ? "Copied" : "Copy"}
+            >
+              {#if copied}
+                <Check size={13} />
+                <span>Copied</span>
+              {:else}
+                <Copy size={13} />
+                <span>Copy</span>
+              {/if}
+            </button>
+            <button
+              class="copy-btn"
+              onclick={download}
+              disabled={saving || !content}
+              title="Download"
+              aria-label="Download"
+            >
+              <Download size={13} />
+              <span>{saving ? "Saving…" : "Download"}</span>
+            </button>
+          </div>
+        </div>
         <p class="mt-4 text-sm whitespace-pre-wrap text-fg-soft">{content}</p>
       {:else if inspection}
         <p class="text-sm text-fainter">Select a skill.</p>

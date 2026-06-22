@@ -20,6 +20,7 @@ const DEFAULTS: PiSettings = {
   retry: DEFAULT_RETRY,
   steeringMode: "one-at-a-time",
   followUpMode: "one-at-a-time",
+  autoUpdateExtensions: true,
 };
 
 interface RawSettingsFile {
@@ -35,6 +36,7 @@ interface RawSettingsFile {
   };
   steeringMode?: string;
   followUpMode?: string;
+  autoUpdateExtensions?: boolean;
   [key: string]: unknown;
 }
 
@@ -64,6 +66,7 @@ export async function getPiSettings(): Promise<PiSettings> {
     retry,
     steeringMode: (raw.steeringMode as PiSettings["steeringMode"]) ?? DEFAULTS.steeringMode,
     followUpMode: (raw.followUpMode as PiSettings["followUpMode"]) ?? DEFAULTS.followUpMode,
+    autoUpdateExtensions: raw.autoUpdateExtensions ?? DEFAULTS.autoUpdateExtensions,
   };
 }
 
@@ -83,6 +86,8 @@ export async function setPiSettings(patch: Partial<PiSettings>): Promise<PiSetti
   }
   if (patch.steeringMode !== undefined) raw.steeringMode = patch.steeringMode;
   if (patch.followUpMode !== undefined) raw.followUpMode = patch.followUpMode;
+  if (patch.autoUpdateExtensions !== undefined)
+    raw.autoUpdateExtensions = patch.autoUpdateExtensions;
 
   await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
   await writeFile(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, "utf8");

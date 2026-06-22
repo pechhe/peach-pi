@@ -14,7 +14,8 @@
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
-  import PanelRight from "@lucide/svelte/icons/panel-right";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
+  import Star from "@lucide/svelte/icons/star";
   import X from "@lucide/svelte/icons/x";
   import Tooltip from "./Tooltip.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
@@ -24,15 +25,21 @@
   import { autoCompact } from "../stores/auto-compact.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { sideChat } from "../stores/side-chat.svelte";
+  import { commandPrefs } from "../stores/command-prefs.svelte";
   import { markAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSelector from "./composer/ModelSelector.svelte";
+  import QuickSlots from "./composer/QuickSlots.svelte";
 
-  let { thread, onRewind }: {
+  let { thread, onRewind, onNewThread, centered = false }: {
     thread: Thread;
     /** `/rewind [n]` from the composer — rewind the n-th turn from the end. */
     onRewind?: (n: number) => void;
+    /** `/new` system command — start a new thread in the current project. */
+    onNewThread?: () => void;
+    /** Centered "new thread" state (composer in the middle, no messages yet). */
+    centered?: boolean;
   } = $props();
 
   const draft = $derived(drafts.for(thread.id));
@@ -63,6 +70,7 @@
   });
   void caveman.load();
   void autoCompact.load();
+  commandPrefs.init();
 
   // Caveman shares the heavier "clanky" click with the send button.
   function toggleCaveman() {
@@ -70,11 +78,27 @@
     void caveman.toggle(thread.id);
   }
 
-  // Placeholder slot — same device button as Caveman, no real effect yet.
-  let placeholderOn = $state(false);
-  function togglePlaceholder() {
-    playClick("down");
-    placeholderOn = !placeholderOn;
+  // Quick-slot helpers. A skill slot injects its chip into the composer; an
+  // extension/prompt/system slot runs its slash command; a toggle slot runs a
+  // raw on/off command string against the live session.
+  function injectSkill(cmd: CommandInfo) {
+    playButtonClick("click");
+    drafts.update(thread.id, { command: { name: cmd.name, kind: "skill" } });
+    textareaEl?.focus();
+  }
+  function runRawCommand(raw: string) {
+    if (!raw) return;
+    playButtonClick("click");
+    void api.invoke("threads:runCommand", thread.id, raw).catch((err) => {
+      console.error("slot command failed", err);
+    });
+  }
+  // The slash command list loads lazily; the slot picker needs it on demand.
+  function ensureCommands() {
+    if (commandsLoadedFor !== thread.id) {
+      commandsLoadedFor = thread.id;
+      void api.invoke("threads:listCommands", thread.id).then((c) => (commands = c));
+    }
   }
 
   async function pickModel(provider: string, id: string) {
@@ -116,6 +140,9 @@
   let commands = $state<CommandInfo[]>([]);
   let commandsLoadedFor = $state<string | null>(null);
   let slashIndex = $state(0);
+  // Active browse filter for the slash menu ("starred", "all", or a kind).
+  type SlashFilter = "starred" | "all" | CommandInfo["kind"];
+  let slashFilter = $state<SlashFilter>("starred");
   // Caret position, tracked so the slash menu can trigger anywhere (not just
   // at the start of the message).
   let cursor = $state(0);
@@ -138,18 +165,48 @@
     return { start: slash, query: token.toLowerCase() };
   });
   const slashQuery = $derived(slashContext?.query ?? null);
-  const slashMatches = $derived(
-    slashQuery === null
-      ? []
-      : commands
-          .filter((c) => c.name.toLowerCase().includes(slashQuery))
-          .sort((a, b) => {
-            const ap = a.name.toLowerCase().startsWith(slashQuery) ? 0 : 1;
-            const bp = b.name.toLowerCase().startsWith(slashQuery) ? 0 : 1;
-            return ap - bp;
-          })
-          .slice(0, 8),
+  // GUI-native "system" commands: slash aliases that fire the GUI flow
+  // (never sent to pi). See runSystemCommand for the wiring.
+  const systemCommandList: CommandInfo[] = [
+    { name: "model", description: "Choose the model", kind: "system" },
+    { name: "compact", description: "Compact the conversation", kind: "system" },
+    { name: "rewind", description: "Rewind the last turn (/rewind [n])", kind: "system" },
+    { name: "btw", description: "Ask a side question (/btw <question>)", kind: "system" },
+    { name: "plan", description: "Switch to Plan mode", kind: "system" },
+    { name: "build", description: "Switch to Build mode", kind: "system" },
+    { name: "new", description: "Start a new thread in this project", kind: "system" },
+  ];
+  const systemCommandNames = new Set(systemCommandList.map((c) => c.name));
+  const allCommands = $derived<CommandInfo[]>([...systemCommandList, ...commands]);
+  const starKey = (c: CommandInfo) => `${c.kind}:${c.name}`;
+  const hasStarred = $derived(allCommands.some((c) => commandPrefs.isStarred(starKey(c))));
+  // While searching, "Starred" (the browse default) widens to "All" so a query
+  // finds everything; an explicitly chosen tab still narrows the search. Used
+  // for both matching and the active-tab highlight.
+  const effectiveFilter = $derived<SlashFilter>(
+    slashQuery && slashFilter === "starred" ? "all" : slashFilter,
   );
+  const slashMatches = $derived.by(() => {
+    if (slashQuery === null) return [];
+    const filter = effectiveFilter;
+    return allCommands
+      .filter((c) =>
+        filter === "all"
+          ? true
+          : filter === "starred"
+            ? commandPrefs.isStarred(starKey(c))
+            : c.kind === filter,
+      )
+      .filter((c) => c.name.toLowerCase().includes(slashQuery))
+      .sort((a, b) => {
+        const ap = a.name.toLowerCase().startsWith(slashQuery) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(slashQuery) ? 0 : 1;
+        return ap - bp;
+      })
+      .slice(0, 50);
+  });
+  // Kinds that actually have commands — drives which browse tabs to show.
+  const slashKindsPresent = $derived(new Set(allCommands.map((c) => c.kind)));
 
   $effect(() => {
     if (slashQuery !== null && commandsLoadedFor !== thread.id) {
@@ -161,23 +218,113 @@
     void slashMatches;
     slashIndex = 0;
   });
+  // Reset the browse filter each time the menu closes: reopen on "Starred" if
+  // anything is starred, otherwise "All".
+  $effect(() => {
+    if (slashQuery === null) slashFilter = hasStarred ? "starred" : "all";
+  });
 
   const commandKindLabel: Record<CommandInfo["kind"], string> = {
     skill: "skill",
     extension: "extension",
     prompt: "prompt",
+    system: "system",
+  };
+  // Per-kind badge colour so skills/extensions/prompts/system read apart.
+  const commandKindBadge: Record<CommandInfo["kind"], string> = {
+    skill: "bg-emerald-500/15 text-emerald-700",
+    extension: "bg-sky-500/15 text-sky-700",
+    prompt: "bg-violet-500/15 text-violet-700",
+    system: "bg-amber-500/15 text-amber-700",
+  };
+  const slashTabs: Array<{ key: SlashFilter; label: string }> = [
+    { key: "starred", label: "Starred" },
+    { key: "all", label: "All" },
+    { key: "system", label: "System" },
+    { key: "extension", label: "Extensions" },
+    { key: "skill", label: "Skills" },
+    { key: "prompt", label: "Prompts" },
+  ];
+  // Visible tabs in order (Starred + All + kinds that have commands); Tab
+  // cycles these.
+  const slashVisibleTabs = $derived(
+    slashTabs.filter(
+      (t) =>
+        t.key === "all" ||
+        t.key === "starred" ||
+        slashKindsPresent.has(t.key as CommandInfo["kind"]),
+    ),
+  );
+  function cycleSlashFilter(dir: 1 | -1) {
+    const keys = slashVisibleTabs.map((t) => t.key);
+    const i = keys.indexOf(slashFilter);
+    slashFilter = keys[(i + dir + keys.length) % keys.length]!;
+  }
+
+  const commandIcon = {
+    skill: BookOpen,
+    extension: Puzzle,
+    prompt: MessageSquareText,
+    system: SlidersHorizontal,
   };
 
-  const commandIcon = { skill: BookOpen, extension: Puzzle, prompt: MessageSquareText };
-
-  // A slash command collapses into a chip; the `/token` is removed from the text.
+  // Skills collapse into an editable chip (they usually take a prompt body);
+  // system commands fire a GUI action; extension/prompt commands run via pi.
   function pickSlash(cmd: CommandInfo) {
     const ctx = slashContext;
     const text = draft.text;
     const stripped = ctx ? text.slice(0, ctx.start) + text.slice(cursor) : "";
+    if (cmd.kind === "system") {
+      drafts.clearText(thread.id);
+      runSystemCommand(cmd.name, stripped.trim());
+      return;
+    }
+    if (cmd.kind !== "skill") {
+      runSlashCommand(cmd, stripped.trim());
+      return;
+    }
     drafts.update(thread.id, { command: { name: cmd.name, kind: cmd.kind }, text: stripped });
     textareaEl?.focus();
     requestAnimationFrame(syncCursor);
+  }
+
+  // System commands are slash aliases for GUI-native flows — never sent to pi.
+  function runSystemCommand(name: string, body: string) {
+    playButtonClick("click");
+    switch (name) {
+      case "model":
+        modelSelector?.openMenu();
+        break;
+      case "compact":
+        void api.invoke("threads:compact", thread.id);
+        break;
+      case "rewind":
+        onRewind?.(/^\d+$/.test(body) ? Number(body) : 1);
+        break;
+      case "btw":
+        void sideChat.openPanel(thread.id, body || undefined);
+        break;
+      case "plan":
+        drafts.update(thread.id, { mode: "plan" });
+        break;
+      case "build":
+        drafts.update(thread.id, { mode: "build" });
+        break;
+      case "new":
+        onNewThread?.();
+        break;
+    }
+  }
+
+  // Run an extension/prompt command now: send `/<name> [body]` as a prompt
+  // (the pi session executes the slash command natively).
+  function runSlashCommand(cmd: CommandInfo, body: string) {
+    const outgoing = [`/${cmd.name}`, body].filter(Boolean).join(" ");
+    playButtonClick("click");
+    drafts.clearText(thread.id);
+    void api.invoke("threads:prompt", thread.id, outgoing, [], "all").catch((err) => {
+      console.error("run command failed", err);
+    });
   }
 
   function removeCommand() {
@@ -185,14 +332,16 @@
     textareaEl?.focus();
   }
 
-  // Typing a full `/<name> ` (known command, leading) also collapses into a chip.
+  // Typing a full `/<name> ` (known skill, leading) collapses into a chip.
+  // Extension/prompt commands are left as text — submit() runs them via its
+  // slash path, and they never show a chip.
   $effect(() => {
     if (draft.command) return;
     const m = /^\/(\S+)\s/.exec(draft.text);
     if (!m) return;
     const name = m[1]!;
     const cmd = commands.find((c) => c.name === name);
-    if (!cmd) return;
+    if (!cmd || cmd.kind !== "skill") return;
     drafts.update(thread.id, {
       command: { name: cmd.name, kind: cmd.kind },
       text: draft.text.slice(m[0].length),
@@ -289,6 +438,14 @@
       playButtonClick("click");
       drafts.clearText(thread.id);
       void sideChat.openPanel(thread.id, question);
+      return;
+    }
+    // Typed-out system commands (e.g. `/model`, `/compact`, `/new`) fire the
+    // GUI-native flow rather than being sent to pi as text.
+    const sysMatch = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(raw);
+    if (sysMatch && !draft.command && systemCommandNames.has(sysMatch[1]!)) {
+      drafts.clearText(thread.id);
+      runSystemCommand(sysMatch[1]!, (sysMatch[2] ?? "").trim());
       return;
     }
     playButtonClick("click");
@@ -388,6 +545,13 @@
       removeCommand();
       return;
     }
+    // Tab cycles the browse-filter tabs (Shift+Tab backwards) whenever the
+    // menu is open, even with no matches.
+    if (slashQuery !== null && e.key === "Tab") {
+      e.preventDefault();
+      cycleSlashFilter(e.shiftKey ? -1 : 1);
+      return;
+    }
     if (slashMatches.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -399,7 +563,7 @@
         slashIndex = (slashIndex - 1 + slashMatches.length) % slashMatches.length;
         return;
       }
-      if (e.key === "Tab") {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         pickSlash(slashMatches[slashIndex]!);
         return;
@@ -443,59 +607,145 @@
 <footer class="composer-device shrink-0 px-6 pb-6">
   <div class="composer__frame relative">
     <!-- Slash menu -->
-    {#if slashMatches.length > 0}
+    {#if slashQuery !== null}
       <div
         class="absolute bottom-full mb-2 w-full overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
         data-testid="slash-menu"
       >
-        {#each slashMatches as cmd, i (cmd.kind + ":" + cmd.name)}
-          <button
-            class="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-sm
-              {i === slashIndex ? 'bg-surface-2' : ''} hover:bg-surface-2"
-            onclick={() => pickSlash(cmd)}
-          >
-            <span class="font-mono text-fg">/{cmd.name}</span>
-            <span class="truncate text-xs text-faint">{cmd.description}</span>
-            <span class="ml-auto shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-faint">{commandKindLabel[cmd.kind]}</span>
-          </button>
-        {/each}
+        <!-- Browse tabs: click to filter by kind; Tab cycles them. -->
+        <div class="flex items-center gap-1 border-b border-border-strong px-2 py-1.5">
+          {#each slashVisibleTabs as tab (tab.key)}
+            <button
+              class="rounded px-2 py-0.5 text-[11px] font-medium
+                {effectiveFilter === tab.key
+                  ? tab.key === 'all'
+                    ? 'bg-surface-3 text-fg'
+                    : tab.key === 'starred'
+                      ? 'bg-amber-400/20 text-amber-700'
+                      : commandKindBadge[tab.key]
+                  : 'text-faint hover:bg-surface-2'}"
+              onclick={() => (slashFilter = tab.key)}>{tab.label}</button
+            >
+          {/each}
+          <span class="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-faint">
+            <kbd
+              class="rounded border border-border-strong bg-surface-2 px-1 py-0.5 font-sans text-[10px] leading-none"
+              >⇥ Tab</kbd
+            >
+            to switch
+          </span>
+        </div>
+        <div class="max-h-96 overflow-y-auto">
+          {#each slashMatches as cmd, i (cmd.kind + ":" + cmd.name)}
+            {@const starred = commandPrefs.isStarred(starKey(cmd))}
+            <div
+              class="flex items-center {i === slashIndex ? 'bg-surface-2' : ''} hover:bg-surface-2"
+            >
+              <button
+                class="flex min-w-0 flex-1 items-baseline gap-2 px-3 py-1.5 text-left text-sm"
+                onclick={() => pickSlash(cmd)}
+              >
+                <span class="shrink-0 whitespace-nowrap font-mono text-fg">/{cmd.name}</span>
+                <span class="min-w-0 truncate text-xs text-faint">{cmd.description}</span>
+                <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide {commandKindBadge[cmd.kind]}">{commandKindLabel[cmd.kind]}</span>
+              </button>
+              <button
+                class="shrink-0 px-2 py-1.5 {starred ? 'text-amber-500' : 'text-faint hover:text-amber-500'}"
+                title={starred ? "Unstar" : "Star"}
+                aria-label={starred ? "Unstar command" : "Star command"}
+                onclick={() => commandPrefs.toggle(starKey(cmd))}
+              >
+                <Star size={14} class={starred ? "fill-amber-400" : ""} />
+              </button>
+            </div>
+          {:else}
+            <div class="px-3 py-2 text-xs text-faint">
+              {slashFilter === "starred" && !slashQuery
+                ? "No starred commands yet — click the ★ to add one"
+                : "No matching commands"}
+            </div>
+          {/each}
+        </div>
       </div>
     {/if}
 
-    <!-- Queued messages shelf -->
+    <!-- Queued messages shelf (Codex/Cursor-style chip rail) -->
     {#if queue.steering.length > 0 || queue.followUp.length > 0}
-      <div class="mb-2 flex flex-col gap-1" data-testid="queued-shelf">
-        {#each queue.steering as t, i ("s-" + i)}
-          <div class="flex items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs text-muted">
-            <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">steer</span>
-            <span class="truncate">{t}</span>
-            <button
-              class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-faint hover:bg-danger hover:text-danger-fg"
-              onclick={() => api.invoke("threads:deleteSteer", thread.id, i).catch(console.error)}
-              title="Delete"
-              data-testid="delete-steer"
-            >✕</button>
-          </div>
-        {/each}
-        {#each queue.followUp as t, i ("f-" + i)}
-          <div class="flex items-center gap-2 rounded-lg border border-dashed border-border-strong px-3 py-1.5 text-xs text-muted">
-            <span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase">queue</span>
-            <span class="truncate">{t}</span>
-            <button
-              class="ml-auto shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase hover:bg-accent hover:text-accent-fg"
-              onclick={() => api.invoke("threads:promoteFollowUpToSteer", thread.id, i)}
-              title="Steer now"
-              data-testid="promote-steer"
-            >steer</button>
-            <button
-              class="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-faint hover:bg-danger hover:text-danger-fg"
-              onclick={() => api.invoke("threads:deleteFollowUp", thread.id, i).catch(console.error)}
-              title="Delete"
-              data-testid="delete-followup"
-            >✕</button>
-          </div>
-        {/each}
-      </div>
+      {@const queueTotal = queue.steering.length + queue.followUp.length}
+      <section
+        class="qq"
+        data-testid="queued-shelf"
+        role="list"
+        aria-label={queue.steering.length > 0
+          ? `${queue.steering.length} steering, ${queue.followUp.length} queued`
+          : `${queueTotal} queued`}
+      >
+        <header class="qq__head">
+          <span class="qq__pulse" aria-hidden="true"></span>
+          <span class="qq__head-label">Up next</span>
+          <span class="qq__count" aria-hidden="true">{queueTotal}</span>
+          <span class="qq__head-hint" aria-hidden="true">
+            {#if queue.steering.length > 0}
+              <span class="qq__head-tag qq__head-tag--steer">{queue.steering.length} steer</span>
+            {/if}
+            {#if queue.followUp.length > 0}
+              <span class="qq__head-tag qq__head-tag--queue">{queue.followUp.length} queued</span>
+            {/if}
+          </span>
+        </header>
+
+        <div class="qq__list">
+          {#if queue.steering.length > 0}
+            <div class="qq__group" role="group" aria-label="Steering messages">
+              <span class="qq__group-label">steer · this turn</span>
+              <div class="qq__items">
+                {#each queue.steering as t, i ("s-" + i)}
+                  <div class="qq-item qq-item--steer" role="listitem">
+                    <span class="qq-item__bar" aria-hidden="true"></span>
+                    <svg class="qq-item__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5 3.5 8.5H7l-1 6 6-8.5H9.5L9 1.5z" /></svg>
+                    <span class="qq-item__text" title={t}>{t}</span>
+                    <button
+                      class="qq-item__action qq-item__action--delete"
+                      onclick={() => api.invoke("threads:deleteSteer", thread.id, i).catch(console.error)}
+                      title="Remove"
+                      aria-label="Remove steering message"
+                      data-testid="delete-steer"
+                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg></button>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          {#if queue.followUp.length > 0}
+            <div class="qq__group" role="group" aria-label="Queued messages">
+              <span class="qq__group-label">queue</span>
+              <div class="qq__items">
+                {#each queue.followUp as t, i ("f-" + i)}
+                  <div class="qq-item qq-item--queue" role="listitem">
+                    <span class="qq-item__pos" aria-hidden="true">{i + 1}</span>
+                    <span class="qq-item__text" title={t}>{t}</span>
+                    <button
+                      class="qq-item__action qq-item__action--promote"
+                      onclick={() => api.invoke("threads:promoteFollowUpToSteer", thread.id, i)}
+                      title="Steer now"
+                      aria-label="Steer now"
+                      data-testid="promote-steer"
+                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+                    <button
+                      class="qq-item__action qq-item__action--delete"
+                      onclick={() => api.invoke("threads:deleteFollowUp", thread.id, i).catch(console.error)}
+                      title="Remove"
+                      aria-label="Remove queued message"
+                      data-testid="delete-followup"
+                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg></button>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+      </section>
     {/if}
 
     <!-- Attachments shelf -->
@@ -671,51 +921,22 @@
             />
           {/if}
 
-          <!-- Caveman + placeholder slot, grouped close together. -->
-          <span class="composer__btn-pair">
-          <span class="devbtn" data-section-label="Caveman">
-            <button
-              class="devbtn__switch {caveman.enabled ? 'devbtn__switch--on' : ''}"
-              aria-pressed={caveman.enabled}
-              onclick={toggleCaveman}
-              data-testid="caveman-toggle"
-              title={`Caveman compression ${caveman.enabled ? "on" : "off"} (click to toggle)`}
-              aria-label={`Caveman compression ${caveman.enabled ? "on" : "off"}`}
-            >
-              <span class="devbtn__led" aria-hidden="true"></span>
-              <span class="devbtn__cap" aria-hidden="true"></span>
-              <span class="devbtn__caption">Caveman</span>
-            </button>
-          </span>
-
-          <!-- Placeholder slot: identical device button to Caveman, no effect yet. -->
-          <span class="devbtn" data-section-label="Slot">
-            <button
-              class="devbtn__switch {placeholderOn ? 'devbtn__switch--on' : ''}"
-              aria-pressed={placeholderOn}
-              onclick={togglePlaceholder}
-              data-testid="placeholder-toggle"
-              title="Placeholder"
-              aria-label="Placeholder"
-            >
-              <span class="devbtn__led" aria-hidden="true"></span>
-              <span class="devbtn__cap" aria-hidden="true"></span>
-              <span class="devbtn__caption">Slot</span>
-            </button>
-          </span>
-          </span>
+          <!-- Quick-access drawer: 2×2 grid of custom actions. -->
+          <QuickSlots
+            commands={allCommands}
+            cavemanEnabled={caveman.enabled}
+            onToggleCaveman={toggleCaveman}
+            onInjectSkill={injectSkill}
+            onRunCommand={(cmd) => runSlashCommand(cmd, "")}
+            onRunSystem={(name) => runSystemCommand(name, "")}
+            onRunRaw={runRawCommand}
+            onRequestCommands={ensureCommands}
+            onAutoDetect={(kind, name) =>
+              api.invoke("resources:inspectSlotCommand", thread.projectId, kind, name)}
+          />
         </div>
 
         <div class="composer__actions">
-          <button
-            class="btw-btn"
-            onclick={() => sideChat.openPanel(thread.id)}
-            data-testid="open-side-chat"
-            title="Side conversation (/btw) — ask a quick question without touching this task"
-            aria-label="Open side conversation"
-          >
-            <PanelRight />
-          </button>
           {#if running && !draft.text.trim()}
             <button
               class="send-dial send-dial--stop"
@@ -743,4 +964,251 @@
       </div>
     </div>
   </div>
+
+  <!-- Side conversation (/btw): floats at the footer's bottom-right, outside the chassis.
+       Hidden on the centered new-thread state (no message sent yet). -->
+  {#if !centered}
+  <button
+    class="btw-btn btw-btn--floating"
+    onclick={() =>
+      sideChat.open && sideChat.threadId === thread.id
+        ? sideChat.close()
+        : sideChat.openPanel(thread.id)}
+    data-testid="open-side-chat"
+    title="Side conversation (/btw) — ask a quick question without touching this task"
+    aria-label="Open side conversation"
+  >
+    <span class="btw-btn__label">BTW</span>
+  </button>
+  {/if}
 </footer>
+
+<style>
+  /* Queued-messages shelf — modern AI-harness chip rail.
+     Codex IDE ext: per-row queue w/ steer-promote + delete.
+     Cursor 1.4: compact single-line chips, contextual action verbs.
+     Steer = inject into current turn (accent). Queue = FIFO next turn (neutral). */
+  .qq {
+    margin-bottom: 8px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--color-border-strong) 70%, transparent);
+    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
+    overflow: hidden;
+  }
+
+  /* Header strip */
+  .qq__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
+    background: color-mix(in srgb, var(--color-surface-2) 35%, transparent);
+    user-select: none;
+  }
+  .qq__pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-accent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent);
+    animation: qq-pulse 1.6s ease-out infinite;
+  }
+  .qq__head-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .qq__count {
+    min-width: 16px;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--color-surface-3);
+    color: var(--color-fg-soft);
+  }
+  .qq__head-hint {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 6px;
+  }
+  .qq__head-tag {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 9999px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .qq__head-tag--steer {
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  }
+  .qq__head-tag--queue {
+    color: var(--color-muted);
+    background: color-mix(in srgb, var(--color-surface-3) 55%, transparent);
+  }
+
+  /* List body */
+  .qq__list {
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+    gap: 4px;
+    max-height: 184px;
+    overflow-y: auto;
+  }
+  .qq__group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .qq__group + .qq__group {
+    margin-top: 4px;
+  }
+  .qq__group-label {
+    font-size: 9.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-fainter);
+    padding: 0 6px;
+  }
+  .qq__items {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  /* Single chip */
+  .qq-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 6px 5px 8px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
+    background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+    min-width: 0;
+    animation: qq-slide 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Steer variant — accent-tinted, left bar */
+  .qq-item--steer {
+    border-color: color-mix(in srgb, var(--color-accent) 38%, transparent);
+    background: color-mix(in srgb, var(--color-accent) 9%, var(--color-surface));
+    padding-left: 10px;
+  }
+  .qq-item--steer .qq-item__action--delete {
+    color: var(--color-accent);
+  }
+
+  /* Queue variant — neutral */
+  .qq-item--queue .qq-item__action--delete:hover {
+    background: color-mix(in srgb, var(--color-danger) 22%, transparent);
+    color: var(--color-danger);
+  }
+  .qq-item--queue .qq-item__action--promote:hover {
+    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+    color: var(--color-accent);
+  }
+  .qq-item--steer .qq-item__action--delete:hover {
+    background: color-mix(in srgb, var(--color-danger) 22%, transparent);
+    color: var(--color-danger);
+  }
+
+  /* Left accent bar (steer) */
+  .qq-item__bar {
+    position: absolute;
+    left: 3px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--color-accent);
+  }
+
+  /* Icon (steer) */
+  .qq-item__icon {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    fill: var(--color-accent);
+  }
+
+  /* Position badge (queue) */
+  .qq-item__pos {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--color-surface-3);
+    color: var(--color-fg-soft);
+  }
+
+  /* Truncated text */
+  .qq-item__text {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--color-fg-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: text;
+  }
+  .qq-item--steer .qq-item__text {
+    color: var(--color-fg);
+  }
+
+  /* Action buttons — subtle at rest, full on hover/focus */
+  .qq-item__action {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-faint);
+    opacity: 0.55;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+    cursor: pointer;
+  }
+  .qq-item:hover .qq-item__action,
+  .qq-item:focus-within .qq-item__action {
+    opacity: 1;
+  }
+  .qq-item__action svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  @keyframes qq-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 50%, transparent); }
+    70% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 0%, transparent); }
+    100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 0%, transparent); }
+  }
+  @keyframes qq-slide {
+    from { opacity: 0; transform: translateY(-3px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .qq-item { animation: none; }
+    .qq__pulse { animation: none; }
+  }
+</style>

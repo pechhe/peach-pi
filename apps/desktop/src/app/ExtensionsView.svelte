@@ -1,7 +1,8 @@
 <script lang="ts">
-  import type { Project, ResourceInspection } from "@peach-pi/shared-types";
+  import type { Project, ResourceInspection, ExtensionInfo } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { Select } from "../components/ui/select";
+  import ConfirmDialog from "../components/ui/dialog/ConfirmDialog.svelte";
 
   let { projects, projectId }: { projects: Project[]; projectId: string | null } = $props();
 
@@ -14,6 +15,42 @@
     inspection = null;
     void api.invoke("resources:inspect", target).then((result) => (inspection = result));
   });
+
+  // Remove/uninstall flow drives the Bits UI confirm dialog.
+  let pending = $state<ExtensionInfo | null>(null);
+  let dialogOpen = $state(false);
+  let removing = $state(false);
+  let dialogError = $state("");
+
+  function startRemove(ext: ExtensionInfo) {
+    if (!ext.removeSpec && !ext.deletePath) return;
+    dialogError = "";
+    pending = ext;
+    dialogOpen = true;
+  }
+
+  async function confirmRemove() {
+    const ext = pending;
+    if (!ext || removing) return;
+    removing = true;
+    dialogError = "";
+    try {
+      const res = ext.removeSpec
+        ? await api.invoke("extensions:remove", ext.removeSpec)
+        : await api.invoke("extensions:deleteLocal", ext.deletePath!);
+      if (res.ok) {
+        dialogOpen = false;
+        pending = null;
+        inspection = await api.invoke("resources:inspect", scope);
+      } else {
+        dialogError = res.error ?? "Failed.";
+      }
+    } catch (err) {
+      dialogError = String(err);
+    } finally {
+      removing = false;
+    }
+  }
 </script>
 
 <main class="flex h-full flex-1 flex-col" data-testid="extensions-view">
@@ -37,9 +74,22 @@
             class="rounded-lg border px-4 py-3
               {ext.error ? 'border-danger-border bg-danger-surface/30' : 'border-border bg-surface/50'}"
           >
-            <div class="flex items-baseline justify-between">
+            <div class="flex items-baseline justify-between gap-3">
               <span class="text-sm text-fg">{ext.name}</span>
-              <span class="text-[11px] text-faint">{ext.source}</span>
+              <div class="flex items-center gap-3">
+                <span class="text-[11px] text-faint">{ext.source}</span>
+                {#if ext.removeSpec || ext.deletePath}
+                  <button
+                    class="rounded border border-border-strong px-2 py-0.5 text-[11px] text-faint hover:border-danger-border hover:text-danger disabled:opacity-50"
+                    onclick={() => startRemove(ext)}
+                    disabled={removing && pending?.path === ext.path}
+                    title={ext.removeSpec ? `pi remove ${ext.removeSpec}` : `Delete ${ext.deletePath}`}
+                    data-testid="remove-extension"
+                  >
+                    {removing && pending?.path === ext.path ? "Removing…" : ext.removeSpec ? "Uninstall" : "Delete"}
+                  </button>
+                {/if}
+              </div>
             </div>
             <p class="mt-0.5 truncate font-mono text-[11px] text-fainter">{ext.path}</p>
             {#if ext.error}
@@ -57,10 +107,24 @@
           <p class="text-xs text-fainter">No extensions found.</p>
         {/each}
         <p class="mt-2 text-[11px] text-fainter">
-          Extensions load from ~/.pi/agent/extensions and each project's .pi/extensions. Manage them
-          with the pi CLI; changes apply to new sessions.
+          Extensions load from ~/.pi/agent/extensions and each project's .pi/extensions. Packages
+          uninstall via pi remove; local extensions are deleted from disk. Changes apply to new
+          sessions.
         </p>
       </div>
     {/if}
   </div>
+
+  <ConfirmDialog
+    bind:open={dialogOpen}
+    title={pending?.removeSpec ? `Uninstall ${pending?.name}?` : `Delete ${pending?.name}?`}
+    description={pending?.removeSpec
+      ? `Runs: pi remove ${pending.removeSpec}`
+      : `Permanently deletes from disk:\n${pending?.deletePath ?? ""}`}
+    confirmLabel={pending?.removeSpec ? "Uninstall" : "Delete"}
+    destructive
+    busy={removing}
+    error={dialogError}
+    onConfirm={confirmRemove}
+  />
 </main>

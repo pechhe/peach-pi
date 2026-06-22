@@ -1,0 +1,13 @@
+{
+  "name": "peachpi-oauth-broker",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Vendor OAuth broker for peach-pi confidential connectors (Cloudflare Worker). Standalone — not part of the pnpm workspace.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3"
+  }
+}

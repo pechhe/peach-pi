@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - record-and-replay
 
 # Single source of truth for the embedded pi SDK version. Every workspace
 # package references it via `"@earendil-works/pi-coding-agent": "catalog:"`,

@@ -18,6 +18,7 @@ import type {
 } from "@peach-pi/shared-types";
 import { TranscriptRecorder, type RecorderEvent } from "./transcript-recorder.ts";
 import { createUiBridge, type UiBridgeCallbacks } from "./extension-ui-bridge.ts";
+import { TerminalCustomDriver, type TerminalCustomFrameEvent } from "./terminal-custom.ts";
 import { scopeModels, stripThinkingSuffix } from "./scope-models.ts";
 
 export interface PiSessionCallbacks {
@@ -31,6 +32,8 @@ export interface PiSessionCallbacks {
   onExtensionNotify?(message: string, level: "info" | "warning" | "error"): void;
   onExtensionStatus?(key: string, text: string | null): void;
   onExtensionWidget?(key: string, lines: string[] | null): void;
+  /** A render frame from an extension's `custom()` TUI overlay. */
+  onTerminalCustomFrame?(frame: TerminalCustomFrameEvent): void;
   /** Current auto-compaction thresholds; read after each run ends. */
   getAutoCompact?(): AutoCompactSettings;
 }
@@ -60,6 +63,7 @@ export class PiSession {
   private callbacks: PiSessionCallbacks;
   private unsubscribe: () => void;
   private loader: DefaultResourceLoader;
+  private terminalCustom: TerminalCustomDriver;
   private extensionsResult: LoadExtensionsResult | null = null;
   private allToolNames: string[];
   private toolMode: ToolMode = "all";
@@ -79,6 +83,9 @@ export class PiSession {
     this.recorder = recorder;
     this.callbacks = callbacks;
     this.loader = loader;
+    this.terminalCustom = new TerminalCustomDriver((frame) =>
+      this.callbacks.onTerminalCustomFrame?.(frame),
+    );
     this.allToolNames = session.getAllTools().map((t) => t.name);
     this.unsubscribe = session.subscribe((event) => {
       if (event.type === "agent_start") this.callbacks.onRunningChange(true);
@@ -190,7 +197,11 @@ export class PiSession {
     const pi = new PiSession(session, recorder, callbacks, loader);
     pi.extensionsResult = extensionsResult;
     await session.bindExtensions({
-      mode: "rpc",
+      // "tui" (not "rpc") so extensions that gate terminal UI behind
+      // ctx.mode === "tui" actually invoke ui.custom(); we render those onto
+      // the xterm overlay (createUiBridge.onTerminalCustom). Component-based
+      // widgets/footers remain no-ops.
+      mode: "tui",
       uiContext: createUiBridge({
         onDialog: (req) =>
           callbacks.onExtensionDialog
@@ -199,6 +210,7 @@ export class PiSession {
         onNotify: (message, level) => callbacks.onExtensionNotify?.(message, level),
         onStatus: (key, text) => callbacks.onExtensionStatus?.(key, text),
         onWidget: (key, lines) => callbacks.onExtensionWidget?.(key, lines),
+        onTerminalCustom: (factory) => pi.driveTerminalCustom(factory),
       }),
       onError: (err) =>
         callbacks.onExtensionNotify?.(
@@ -465,7 +477,28 @@ export class PiSession {
     await this.session.abort();
   }
 
+  /** Drive an extension `custom()` TUI; resolves with its done() result. */
+  driveTerminalCustom(factory: unknown): Promise<unknown> {
+    return this.terminalCustom.drive(factory as Parameters<TerminalCustomDriver["drive"]>[0]);
+  }
+
+  /** Forward a keystroke to a live `custom()` TUI component. */
+  terminalCustomInput(requestId: string, data: string): void {
+    this.terminalCustom.input(requestId, data);
+  }
+
+  /** Cancel a live `custom()` TUI component. */
+  cancelTerminalCustom(requestId: string): void {
+    this.terminalCustom.cancel(requestId);
+  }
+
+  /** Clear the `custom()` overlay when the owning command ends. */
+  closeTerminalCustom(): void {
+    this.terminalCustom.close();
+  }
+
   dispose(): void {
+    this.terminalCustom.close();
     this.unsubscribe();
     this.session.dispose();
   }

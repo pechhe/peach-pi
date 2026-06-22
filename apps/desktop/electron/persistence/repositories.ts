@@ -9,6 +9,7 @@ import type {
   Thread,
   ThreadTag,
   UiState,
+  Worktree,
 } from "@peach-pi/shared-types";
 import type { AppDb } from "./db.ts";
 
@@ -28,6 +29,7 @@ interface ThreadRow {
   pi_session_file: string | null;
   chat_workspace_dir: string | null;
   worktree_dir: string | null;
+  worktree_id: string | null;
   title: string;
   tag: string | null;
   status: string;
@@ -55,6 +57,7 @@ const toThread = (r: ThreadRow): Thread => ({
   projectId: r.project_id,
   piSessionFile: r.pi_session_file,
   chatWorkspaceDir: r.chat_workspace_dir ?? undefined,
+  worktreeId: r.worktree_id,
   worktreeDir: r.worktree_dir ?? undefined,
   title: r.title,
   tag: (r.tag as ThreadTag | null) ?? undefined,
@@ -404,6 +407,121 @@ export class SideChatRepo {
 
   delete(id: string): void {
     this.db.prepare("DELETE FROM side_conversations WHERE id = ?").run(id);
+  }
+}
+
+export interface ConnectorRow {
+  id: string;
+  provider: string;
+  label: string;
+  auth_kind: "api_key" | "oauth";
+  config_json: string;
+  secret_blob: Uint8Array | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Persisted shape of an OAuth connector's non-secret config (`config_json`). */
+export interface ConnectorOauthConfigRow {
+  clientId: string;
+  redirectUri: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  usePkce: boolean;
+  useBasicAuth: boolean;
+  /** Handshake + exchange run through the vendor broker (confidential
+   *  providers). When true, clientId/secret are held server-side. */
+  useBroker?: boolean;
+}
+
+/** Persisted encrypted-blob payload (decrypted by ConnectorService). */
+export interface ConnectorSecretBlob {
+  // api-key connectors: apiKey set, oauth fields absent.
+  apiKey?: string;
+  // OAuth connectors: clientSecret held once (BYO), plus the live token set.
+  clientSecret?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  tokenType?: string;
+  scope?: string;
+  expiresAt?: string;
+}
+
+export class ConnectorRepo {
+  private db: AppDb;
+  constructor(db: AppDb) {
+    this.db = db;
+  }
+
+  all(): ConnectorRow[] {
+    return this.db
+      .prepare("SELECT * FROM connectors ORDER BY created_at")
+      .all() as unknown as ConnectorRow[];
+  }
+
+  get(id: string): ConnectorRow | null {
+    const row = this.db.prepare("SELECT * FROM connectors WHERE id = ?").get(id) as
+      | ConnectorRow
+      | undefined;
+    return row ?? null;
+  }
+
+  insert(fields: {
+    id: string;
+    provider: string;
+    label: string;
+    authKind: "api_key" | "oauth";
+    configJson: string;
+    secretBlob: Uint8Array | null;
+    expiresAt: string | null;
+    now: string;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO connectors
+           (id, provider, label, auth_kind, config_json, secret_blob, expires_at, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        fields.id,
+        fields.provider,
+        fields.label,
+        fields.authKind,
+        fields.configJson,
+        fields.secretBlob ? Buffer.from(fields.secretBlob) : null,
+        fields.expiresAt,
+        fields.now,
+        fields.now,
+      );
+  }
+
+  updateSecret(
+    id: string,
+    secretBlob: Uint8Array | null,
+    expiresAt: string | null,
+    now: string,
+  ): void {
+    this.db
+      .prepare(
+        "UPDATE connectors SET secret_blob = ?, expires_at = ?, updated_at = ? WHERE id = ?",
+      )
+      .run(secretBlob ? Buffer.from(secretBlob) : null, expiresAt, now, id);
+  }
+
+  updateConfig(
+    id: string,
+    configJson: string,
+    now: string,
+  ): void {
+    this.db
+      .prepare("UPDATE connectors SET config_json = ?, updated_at = ? WHERE id = ?")
+      .run(configJson, now, id);
+  }
+
+  delete(id: string): void {
+    this.db.prepare("DELETE FROM connectors WHERE id = ?").run(id);
   }
 }
 

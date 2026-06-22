@@ -292,11 +292,58 @@
   display: contents;
 }
 
-/* Keep Caveman + the placeholder slot grouped tightly as one item. */
-.composer-device .composer__btn-pair {
+/* Quick-access drawer: one flex item holding a 2×2 grid of slot buttons.
+   The wrap is the positioning context for the assignment picker popover. */
+.composer-device .composer__slots-wrap {
+  position: relative;
   display: inline-flex;
+}
+.composer-device .composer__slots {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 10px 18px;
+  align-items: start;
+}
+/* In the grid each slot carries its own caption below the cap; the engraved
+   section label (used by single keys) is suppressed. */
+.composer-device .composer__slots .devbtn {
+  margin: 0;
+}
+.composer-device .composer__slots .devbtn::before {
+  display: none;
+}
+.composer-device .composer__slots .devbtn__caption {
+  display: block;
+  margin-top: 3px;
+  max-width: 56px;
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  color: oklch(0.55 0.01 250);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:root.dark .composer-device .composer__slots .devbtn__caption {
+  color: oklch(0.5 0.01 250);
+}
+/* Empty slot: dimmed cap with a centred “+” affordance. */
+.composer-device .devbtn--empty .devbtn__switch {
+  opacity: 0.65;
+}
+.composer-device .devbtn--empty .devbtn__cap {
+  display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 400;
+  color: oklch(0.5 0.01 250);
+}
+.composer-device .devbtn--empty .devbtn__led {
+  visibility: hidden;
 }
 
 /* Engraved section labels above clusters. */
@@ -502,6 +549,8 @@
 /* ---------------- SEND dial (orange-metal circle) ---------------- */
 .composer-device .send-dial {
   position: relative;
+  /* Nudge the dial further from the slot drawer toward the right edge. */
+  margin-left: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -639,11 +688,11 @@
   margin-right: 12px;
 }
 
-/* Floating variant: seated at the bottom-right of the chassis, outside it. */
+/* Floating variant: anchored to the footer's bottom-right, outside the chassis. */
 .composer-device .btw-btn--floating {
   position: absolute;
   right: 24px;
-  bottom: 30px;
+  bottom: 24px;
   margin: 0;
   z-index: 5;
 }
@@ -655,6 +704,21 @@
   filter:
     drop-shadow(0 1px 0 oklch(1 0.002 250 / 0.55))
     drop-shadow(0 -0.5px 0.5px oklch(0.22 0.005 250 / 0.7));
+}
+
+/* Engraved "BTW" — dark ink debossed into the metal cap (light highlight below). */
+.composer-device .btw-btn__label {
+  position: relative;
+  z-index: 2;
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: oklch(0.34 0.005 250);
+  text-shadow:
+    0 1px 0 oklch(1 0.002 250 / 0.75),
+    0 -0.5px 0.5px oklch(0.22 0.005 250 / 0.55);
 }
 .composer-device .btw-btn:is(:active, .is-pressed) {
   transform: translateY(2px);

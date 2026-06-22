@@ -13,13 +13,32 @@ import { SideChatService } from "./services/side-chat-service.ts";
 import { DevTapInstallService } from "./services/devtap-install-status.ts";
 import { getCavemanState, setCavemanEnabled, setCavemanLevel } from "./services/caveman.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
+import {
+  getVisionProxyConfig,
+  getVisionProxyInstallState,
+  installVisionProxy,
+  setVisionProxyMode,
+  setVisionProxyModel,
+} from "./services/pi-vision-proxy.ts";
 import { computePiHealth } from "./services/pi-health.ts";
+import { PiUpdateService } from "./services/pi-update-service.ts";
 import { emitDevTapEvent, initDevTapMain } from "./services/devtap.ts";
+import { Tray, Menu, nativeImage } from "electron";
+import { RecordingService } from "./services/recording-service.ts";
 import {
   setDevTapStateProvider,
   startDevTapControlChannel,
   stopDevTapControlChannel,
 } from "./services/devtap-control.ts";
+import { SafeStorageSecretStore } from "./services/secret-store.ts";
+import {
+  DEEP_LINK_SCHEME,
+  ConnectorService,
+  OAUTH_PRESETS,
+} from "./services/connector-service.ts";
+import { ConnectorResolver } from "./services/connector-resolver.ts";
+import { ensureConnectorExtension } from "./services/connector-extension.ts";
+import { hasProvisionedClient } from "./services/connector-clients.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import {
   createHudWindow,
@@ -55,6 +74,27 @@ async function readImageFile(
     const { readFile } = await import("node:fs/promises");
     const buf = await readFile(filePath);
     return { mimeType, data: buf.toString("base64") };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save a skill's markdown to a user-chosen destination. Reads the source skill
+ * file and writes its contents to the picked path. Returns null on cancel or error.
+ */
+async function saveSkillFile(skillName: string, filePath: string): Promise<string | null> {
+  try {
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const content = await readFile(filePath, "utf8");
+    const result = await dialog.showSaveDialog({
+      title: `Save “${skillName}”`,
+      defaultPath: `${skillName}.md`,
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    await writeFile(result.filePath, content, "utf8");
+    return result.filePath;
   } catch {
     return null;
   }
@@ -118,6 +158,7 @@ async function boot(): Promise<void> {
     emit("event:snapshot", appService.snapshot()),
   );
   const terminalService = new TerminalService(db, emit);
+  const recordingService = new RecordingService(emit);
   const gitService = new GitService(
     db,
     path.join(app.getPath("userData"), "worktrees"),
@@ -128,7 +169,34 @@ async function boot(): Promise<void> {
   const graphifyService = new GraphifyService(db);
   const sideChatService = new SideChatService(db, emit, threadService, gitService);
   const devTapInstallService = new DevTapInstallService(db);
+  const piUpdateService = new PiUpdateService(db, emit, () =>
+    appService.snapshot().threads.some((t) => t.status === "running"),
+    () => appService.snapshot().projects.map((p) => p.path),
+  );
   setupSubagentEnvironment(app.getPath("userData"));
+
+  const connectorService = new ConnectorService(
+    db,
+    emit,
+    new SafeStorageSecretStore(),
+  );
+
+  // Localhost bridge so a pi extension (in the terminal, no IPC access) can
+  // resolve stored connector credentials. Started after ready; stopped on quit.
+  const connectorResolver = new ConnectorResolver(connectorService);
+  void connectorResolver.start().then(() => connectorResolver.writeBootstrap());
+  // Write the pi extension (auto-discovered by pi) so the agent gets the
+  // connector_call / connectors_list tools. Idempotent; only rewrites on version bump.
+  void ensureConnectorExtension();
+
+  // OAuth deep-link callback: peachpi://oauth/callback?code=…&state=…
+  if (!app.isDefaultProtocolClient(DEEP_LINK_SCHEME)) {
+    app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  }
+  // macOS: a running instance receives the URL here.
+  app.on("open-url", (_event, url) => {
+    void connectorService.handleDeepLink(url);
+  });
 
   async function pickProject() {
     const result = await dialog.showOpenDialog({
@@ -152,7 +220,25 @@ async function boot(): Promise<void> {
     "app:setAutoCompact": (settings) => appService.setAutoCompact(settings),
     "app:getPiSettings": () => getPiSettings(),
     "app:setPiSettings": (patch) => setPiSettings(patch),
+    "app:getVisionProxyInstallState": () => getVisionProxyInstallState(),
+    "app:installVisionProxy": () => installVisionProxy(emit),
+    "app:getVisionProxyConfig": () => getVisionProxyConfig(),
+    "app:setVisionProxyModel": (model) => setVisionProxyModel(model),
+    "app:setVisionProxyMode": (mode) => setVisionProxyMode(mode),
+    "app:updateExtensions": () => piUpdateService.updateNow(),
+    "extensions:remove": (spec) => piUpdateService.removeExtension(spec),
+    "extensions:deleteLocal": (p) => piUpdateService.deleteLocalExtension(p),
     "app:getPiHealth": () => computePiHealth(__dirname),
+    "connectors:list": () => connectorService.list(),
+    "connectors:presets": () =>
+      OAUTH_PRESETS.map((p) => ({ ...p, hasClient: hasProvisionedClient(p) })),
+    "connectors:connectCatalog": (provider) => connectorService.connectCatalog(provider),
+    "connectors:createApiKey": (input) => connectorService.createApiKey(input),
+    "connectors:createOAuth": (input) => connectorService.createOAuth(input),
+    "connectors:startOAuth": (connectorId) => connectorService.startOAuth(connectorId),
+    "connectors:refresh": (connectorId) => connectorService.refresh(connectorId),
+    "connectors:revoke": (connectorId) => connectorService.revoke(connectorId),
+    "connectors:resolve": (provider) => connectorService.resolve(provider),
     "devtap:report": (entry) =>
       emitDevTapEvent({
         level: entry.error ? "error" : "info",
@@ -197,6 +283,10 @@ async function boot(): Promise<void> {
     "threads:getMeta": (id) => threadService.getMeta(id),
     "threads:respondExtensionUi": (requestId, value) =>
       threadService.respondExtensionUi(requestId, value),
+    "threads:terminalCustomInput": (id, requestId, data) =>
+      threadService.terminalCustomInput(id, requestId, data),
+    "threads:terminalCustomCancel": (id, requestId) =>
+      threadService.terminalCustomCancel(id, requestId),
     "threads:compact": (id) => threadService.compact(id),
     "side:start": (threadId, modelOverride) => sideChatService.start(threadId, modelOverride),
     "side:ask": (convId, question) => sideChatService.ask(convId, question),
@@ -230,8 +320,16 @@ async function boot(): Promise<void> {
     "terminal:input": (id, data) => terminalService.input(id, data),
     "terminal:resize": (id, cols, rows) => terminalService.resize(id, cols, rows),
     "terminal:kill": (id) => terminalService.kill(id),
+    "recording:start": () => recordingService.start(),
+    "recording:stop": (skillBody) => recordingService.stop(skillBody),
+    "recording:cancel": () => recordingService.cancel(),
+    "recording:status": () => recordingService.status(),
+    "recording:revealSkill": (p) => recordingService.revealSkill(p),
     "resources:inspect": (projectId) => threadService.inspectResources(projectId),
+    "resources:inspectSlotCommand": (projectId, kind, name) =>
+      threadService.inspectSlotCommand(projectId, kind, name),
     "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
+    "skills:save": (skillName, filePath) => saveSkillFile(skillName, filePath),
     "files:readImage": (filePath) => readImageFile(filePath),
     "threads:archive": (id) => threadService.archive(id),
     "threads:unarchive": (id) => threadService.unarchive(id),
@@ -404,11 +502,25 @@ async function boot(): Promise<void> {
 
   appService.start();
   automationService.start();
+  piUpdateService.start();
   mainWindow = createMainWindow();
   startDevTapControlChannel();
   globalShortcut.register("CommandOrControl+Shift+Space", toggleHud);
 
-  app.on("second-instance", () => {
+  // Record & Replay tray — always-available Start/Stop/Cancel + live status.
+  const trayIcon = nativeImage.createFromPath(path.join(__dirname, "..", "build", "icon-1024.png"));
+  if (!trayIcon.isEmpty()) trayIcon.resize({ width: 20, height: 20 });
+  const tray = new Tray(trayIcon.isEmpty() ? nativeImage.createEmpty() : trayIcon);
+  tray.setTitle("REC");
+  recordingService.attachTray(tray);
+
+  app.on("second-instance", (_event, argv) => {
+    // Windows/Linux deep-link callback arrives in argv.
+    for (const arg of argv) {
+      if (arg.startsWith(`${DEEP_LINK_SCHEME}://`)) {
+        void connectorService.handleDeepLink(arg);
+      }
+    }
     const [win] = BrowserWindow.getAllWindows();
     if (win) {
       if (win.isMinimized()) win.restore();
@@ -430,7 +542,11 @@ async function boot(): Promise<void> {
     globalShortcut.unregisterAll();
     appService.stop();
     automationService.stop();
+    piUpdateService.stop();
     terminalService.dispose();
+    recordingService.dispose();
+    tray?.destroy();
+    void connectorResolver.stop();
     threadService.dispose();
     db.close();
   });

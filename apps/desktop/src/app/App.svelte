@@ -23,8 +23,11 @@
   import AutomationsView from "./AutomationsView.svelte";
   import AgentsView from "./AgentsView.svelte";
   import GraphView from "./GraphView.svelte";
+  import RecordingBar from "./RecordingBar.svelte";
+  import ConnectorsView from "./ConnectorsView.svelte";
   import TestingView from "./TestingView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
+  import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
   import SkillDialog from "./SkillDialog.svelte";
   import Toasts from "./Toasts.svelte";
@@ -296,6 +299,8 @@
         automations={snapshot.current.automations}
         onSelectThread={selectThread}
       />
+    {:else if view === "connections"}
+      <ConnectorsView />
     {:else if view === "agents"}
       <AgentsView projects={snapshot.current.projects} />
     {:else if view === "graph"}
@@ -313,6 +318,7 @@
         onSetEnvironment={setThreadEnvironment}
         onOpenGraph={() => openView("graph")}
         onSelectThread={selectThread}
+        onNewThread={newThreadForCurrentProject}
         pendingFind={pendingFindQuery}
         onFindConsumed={() => (pendingFindQuery = null)}
       />
@@ -331,6 +337,7 @@
       <TerminalPane threadId={selectedThread.id} onClose={() => terminal.hide()} />
     {/if}
     </div>
+    <RecordingBar />
     <SidePanel />
     {#if searchOpen}
       <SearchOverlay
@@ -352,6 +359,9 @@
 
   {#if extensionUi.dialogs[0]}
     <ExtensionDialog request={extensionUi.dialogs[0]} />
+  {/if}
+  {#if extensionUi.terminalCustom && extensionUi.terminalCustom.threadId === selectedThreadId}
+    <TerminalCustomOverlay frame={extensionUi.terminalCustom} threadId={extensionUi.terminalCustom.threadId} />
   {/if}
   <ImageLightbox />
   <SkillDialog />

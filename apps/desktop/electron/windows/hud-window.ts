@@ -1,5 +1,7 @@
-import { BrowserWindow, screen } from "electron";
+import { BrowserWindow, screen, shell } from "electron";
 import path from "node:path";
+
+import { isExternalUrl } from "./url-guard";
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -51,8 +53,14 @@ export function createHudWindow(geom: { x: number; y: number; width: number }): 
   });
   win.setAlwaysOnTop(true, "floating");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  win.webContents.on("will-navigate", (event) => event.preventDefault());
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalUrl(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (event, url) => {
+    if (isExternalUrl(url)) void shell.openExternal(url);
+    event.preventDefault();
+  });
   // No hide-on-blur: the HUD persists while you work in another app.
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
