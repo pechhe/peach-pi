@@ -12,7 +12,7 @@ import {dirname, join} from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RecordEvent } from "./types.ts";
 import { MAX_DURATION_MS, type Recording } from "./types.ts";
-import { appendEvent, discardRecording, loadRecording, saveRecording } from "./store.ts";
+import { appendEvent, discardRecording, loadRecording, saveRecording, recordingsDir } from "./store.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -82,7 +82,7 @@ export function startCapture(
     return { root, id, proc: null, timeout: null, aborted: false };
   }
 
-  const proc = spawn(binPath, [id], { stdio: ["pipe", "pipe", "inherit"] });
+  const proc = spawn(binPath, [id, recordingsDir(root)], { stdio: ["pipe", "pipe", "inherit"] });
 
   proc.stdout?.setEncoding("utf8");
   let buf = "";

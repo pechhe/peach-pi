@@ -40,17 +40,18 @@ export function buildDigest(events: RecordEvent[]): string {
         break;
       }
       case "focus": {
-        const p = e.payload as { url?: string; value?: string; element?: string };
+        const p = e.payload as { url?: string; value?: string; element?: string; role?: string };
         if (p.url) lines.push(`[${ms(e.t)}] url: ${p.url}`);
-        if (p.element || p.value) {
-          lines.push(`[${ms(e.t)}] focus: ${p.element ?? "?"} value=${JSON.stringify(p.value ?? "")}`);
-        }
+        const focusCtx = [p.role, p.element, p.value].filter(Boolean).join(" / ");
+        if (focusCtx) lines.push(`[${ms(e.t)}] focus: ${focusCtx}`);
         break;
       }
       case "click": {
-        const p = e.payload as { target?: string; window?: string };
+        const p = e.payload as { target?: string; window?: string; role?: string; value?: string; targetPath?: string[] };
         flushText(e.t);
-        lines.push(`[${ms(e.t)}] click: ${p.target ?? "(no target)"} @ ${p.window ?? ""}`.trim());
+        const ctx = [p.role, p.target, p.value].filter(Boolean).join(" / ");
+        const pathStr = p.targetPath && p.targetPath.length > 0 ? ` path=[${p.targetPath.join(" > ")}]` : "";
+        lines.push(`[${ms(e.t)}] click: ${ctx || "(no target)"} @ ${p.window ?? ""}${pathStr}`.trim());
         break;
       }
       case "keypress": {
@@ -70,6 +71,13 @@ export function buildDigest(events: RecordEvent[]): string {
       }
       case "scroll": {
         // Compress scroll bursts: only log direction changes.
+        break;
+      }
+      case "screenshot": {
+        const p = e.payload as { path?: string; trigger?: string; index?: number };
+        if (p.path) {
+          lines.push(`[${ms(e.t)}] screenshot: ${p.path} (trigger: ${p.trigger ?? "?"}, #${p.index ?? "?"})`);
+        }
         break;
       }
       case "note": {
@@ -99,14 +107,27 @@ function ms(t: number): string {
 export function synthesisSystemPrompt(digest: string, recordingId: string): string {
   return `You are converting a desktop task recording into a reusable skill file.
 
-A user recorded themselves performing a recurring task. Below is a semantic digest of the captured events (window titles, click targets, typed text, URLs, focused elements). Raw pixel coordinates have been abstracted away.
+A user recorded themselves performing a recurring task. Below is a semantic digest of the captured events (window titles, click targets with AX role/value + ancestor path, typed text, URLs, focused elements, and SCREENSHOTS taken at each significant action). Raw pixel coordinates have been abstracted away.
+
+## CRITICAL: read the screenshots before writing the skill
+
+The digest contains lines like:
+  [0:05] screenshot: /abs/path/00003.png (trigger: click, #3)
+
+Those PNG files ARE the recording. The text digest alone is brittle (Notion/Electron often expose no AX labels — clicks show as "(no target)"). The screenshots are what lets you infer real intent, the way Codex's Record & Replay does.
+
+Before writing the skill:
+1. Collect every screenshot path listed in the digest.
+2. Call analyze_image on them (batch multiple paths per call, up to 20 images). Use a focused question per batch, e.g. "What UI element is highlighted/clicked here, and what is the user about to do?" Group by timestamps and surrounding actions in the digest.
+3. Cross-reference what you see in the screenshots with the AX target / typed text / focus events at the same timestamp.
+4. Only then write the skill — grounded in what the screenshots show, not just the text labels.
 
 Your job: infer the high-level GOAL, then write a procedural skill anyone (or any agent) could follow to reproduce it.
 
 Rules:
 - Identify the goal in 1-2 sentences.
 - Break the workflow into numbered steps in PLAIN ENGLISH.
-- ABSTRACT away literal coordinates/UI chrome into semantic actions ("open Google Sheets", "navigate to Hacker News", "copy the title of the top story").
+- ABSTRACT away literal coordinates/UI chrome into semantic actions ("open Google Sheets", "navigate to Hacker News", "copy the title of the top story"). Use the screenshot-grounded understanding of what each click was actually doing.
 - Where a robust programmatic path exists (CLI, script, API, connector), prefer it over brittle UI clicks — note it in the step and in the Notes section.
 - Capture triggers: natural-language phrases a user might say that should invoke this skill.
 - Be conservative: only assert what the recording shows. If the goal is ambiguous, say so in Notes.
@@ -124,7 +145,7 @@ created: <ISO timestamp>
 <1-2 sentence goal description>
 
 ## Prerequisites
-<tools, connectors, or permissions needed, e.g. macOS Accessibility, Google Sheets API token>
+<tools, connectors, or permissions needed, e.g. macOS Accessibility + Screen Recording, Google Sheets API token>
 
 ## Workflow
 1. <step>

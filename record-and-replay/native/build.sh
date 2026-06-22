@@ -7,6 +7,9 @@ swiftc \
   -framework Cocoa \
   -framework ApplicationServices \
   -framework CoreGraphics \
+  -framework ImageIO \
+  -framework ScreenCaptureKit \
+  -framework UniformTypeIdentifiers \
   capture.swift \
   -o capture
 echo "built: $(pwd)/capture"

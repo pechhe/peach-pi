@@ -63,9 +63,12 @@
 }
 
 /* Scale the whole device down + size it to its contents so it neither
-   dominates the window nor stretches too wide. */
+   dominates the window nor stretches too wide.
+   Width chosen so the post-scale width matches the transcript column
+   (max-w-3xl = 768px): 768 / 0.78 ≈ 985px. Wider frame + the footer-row's
+   space-evenly layout also gives the control keys more room to breathe. */
 .composer-device .composer__frame {
-  width: 950px;
+  width: 985px;
   max-width: 100%;
   margin-inline: auto;
   transform: scale(0.78);
@@ -281,9 +284,11 @@
 .composer-device .composer__footer-row {
   display: flex;
   align-items: center;
-  justify-content: space-evenly;
+  /* Anchor the first key (Build/Plan) to the left edge and the send dial to
+     the right edge; the middle controls (incl. the slot bank) breathe. */
+  justify-content: space-between;
   min-height: 66px;
-  padding: 10px 12px 4px;
+  padding: 10px 14px 4px;
 }
 
 /* Unwrap the clusters so every tool is an equally-spaced flex item. */
@@ -300,21 +305,31 @@
 }
 .composer-device .composer__slots {
   display: grid;
-  grid-template-columns: repeat(2, auto);
-  gap: 10px 18px;
-  align-items: start;
+  grid-template-columns: repeat(3, auto);
+  /* Single row of three keys with room to breathe; labels sit below. */
+  gap: 0 16px;
+  align-items: center;
 }
-/* In the grid each slot carries its own caption below the cap; the engraved
-   section label (used by single keys) is suppressed. */
+/* No LED on slot keys; the engraved section label (used by single keys) is
+   suppressed too. The caption is the only label. */
 .composer-device .composer__slots .devbtn {
   margin: 0;
 }
-.composer-device .composer__slots .devbtn::before {
+.composer-device .composer__slots .devbtn::before,
+.composer-device .composer__slots .devbtn__led {
   display: none;
+}
+.composer-device .composer__slots .devbtn__switch {
+  gap: 4px;
+}
+/* Lit-up label for an active toggle (replaces the old indicator LED). */
+.composer-device .composer__slots .devbtn__switch--on .devbtn__caption {
+  color: oklch(0.66 0.2 150);
+  text-shadow: 0 0 6px oklch(0.82 0.21 150 / 0.55);
 }
 .composer-device .composer__slots .devbtn__caption {
   display: block;
-  margin-top: 3px;
+  margin-top: 0;
   max-width: 56px;
   font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
   font-size: 9px;

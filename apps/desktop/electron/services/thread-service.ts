@@ -57,6 +57,7 @@ export class ThreadService {
   private onThreadsChanged: () => void;
   private chatsDir: string;
   private onRunIdle?: (thread: Thread) => void;
+  private onRunningChange?: (running: boolean) => void;
   private sessions = new Map<string, PiSession>();
   private pendingOps = new Map<string, TranscriptOp[]>();
   /** Threads with an in-flight compaction; their extension toasts are suppressed. */
@@ -84,6 +85,7 @@ export class ThreadService {
     onRunIdle?: (thread: Thread) => void,
     getUtilityModel?: () => ModelInfo | null,
     getAutoCompact?: () => AutoCompactSettings,
+    onRunningChange?: (running: boolean) => void,
   ) {
     this.threads = new ThreadRepo(db);
     this.projects = new ProjectRepo(db);
@@ -91,6 +93,7 @@ export class ThreadService {
     this.onThreadsChanged = onThreadsChanged;
     this.chatsDir = chatsDir;
     this.onRunIdle = onRunIdle;
+    this.onRunningChange = onRunningChange;
     this.getUtilityModel = getUtilityModel ?? (() => null);
     this.getAutoCompact = getAutoCompact ?? (() => ({ percent: 80, tokens: null }));
   }
@@ -583,8 +586,12 @@ export class ThreadService {
   }
 
   private setStatus(threadId: string, status: Thread["status"]): void {
+    const prev = this.threads.get(threadId)?.status;
+    const wasRunning = prev === "running";
+    const nowRunning = status === "running";
     this.threads.setStatus(threadId, status);
     this.onThreadsChanged();
+    if (wasRunning !== nowRunning && this.onRunningChange) this.onRunningChange(nowRunning);
     if (status === "completed" && this.onRunIdle) {
       const thread = this.threads.get(threadId);
       if (thread) this.onRunIdle(thread);

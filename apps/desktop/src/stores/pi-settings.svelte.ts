@@ -15,6 +15,7 @@ class PiSettingsStore {
   steeringMode = $state<"all" | "one-at-a-time">("one-at-a-time");
   followUpMode = $state<"all" | "one-at-a-time">("one-at-a-time");
   autoUpdateExtensions = $state(true);
+  insomnia = $state(false);
   private loaded = false;
 
   async load(): Promise<void> {
@@ -36,6 +37,7 @@ class PiSettingsStore {
     this.steeringMode = s.steeringMode;
     this.followUpMode = s.followUpMode;
     this.autoUpdateExtensions = s.autoUpdateExtensions;
+    this.insomnia = s.insomnia;
   }
 }
 

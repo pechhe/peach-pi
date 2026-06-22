@@ -27,6 +27,7 @@ export type EventType =
   | "focus"
   | "window"
   | "scroll"
+  | "screenshot"
   | "note";
 
 export type EventPayload =
@@ -36,6 +37,7 @@ export type EventPayload =
   | FocusPayload
   | WindowPayload
   | ScrollPayload
+  | ScreenshotPayload
   | NotePayload
   | SessionPayload
   | UnknownPayload;
@@ -55,6 +57,12 @@ export interface ClickPayload extends BasePayload {
   /** Semantic target label or AX title of the clicked element, if any. */
   target?: string;
   button: "left" | "right" | "other";
+  /** AX value of the clicked element (button label, field text), if any. */
+  value?: string;
+  /** Ancestor element titles from root → clicked, for disambiguation. */
+  targetPath?: string[];
+  /** AX identifier/hint of the clicked element, if exposed (e.g. "AXTextField:email"). */
+  elementId?: string;
 }
 
 export interface KeypressPayload extends BasePayload {
@@ -85,6 +93,15 @@ export interface WindowPayload extends BasePayload {
 export interface ScrollPayload extends BasePayload {
   dx: number;
   dy: number;
+}
+
+export interface ScreenshotPayload extends BasePayload {
+  /** Absolute path to the PNG, agent-readable via analyze_image. */
+  path: string;
+  /** Why this screenshot was captured. */
+  trigger: "click" | "keypress" | "focus" | "window" | "typing-burst";
+  /** 1-based index of this screenshot within the recording. */
+  index: number;
 }
 
 export interface NotePayload {

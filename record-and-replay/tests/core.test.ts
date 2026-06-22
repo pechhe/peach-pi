@@ -2,12 +2,12 @@ import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 
 import {
   defaultRoot, recordingsDir, skillsDir, newRecordingId,
   saveRecording, loadRecording, appendEvent, readEvents,
-  discardRecording, saveSkill, parseSkill, listSkills,
+  discardRecording, saveSkill, parseSkill, listSkills, shotsDir,
 } from "../src/store.ts";
 import {
   processLine, MAX_DURATION_MS,
@@ -55,12 +55,17 @@ test("appendEvent + readEvents persists NDJSON lines", () => {
   assert.equal(evts.length, 2);
 });
 
-test("discardRecording removes manifest + events", () => {
+test("discardRecording removes manifest + events + shots dir", () => {
   const id = newRecordingId();
   appendEvent(root, id, '{"t":0}');
+  // Simulate a screenshot dir created during the recording.
+  const dir = shotsDir(root, id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "00001.png"), "fake");
   discardRecording(root, id);
   assert.equal(loadRecording(root, id), null);
   assert.equal(readEvents(root, id).length, 0);
+  assert.equal(existsSync(dir), false, "shots dir should be removed");
 });
 
 test("saveSkill + parseSkill round-trips frontmatter incl triggers array", () => {
@@ -174,6 +179,27 @@ test("buildDigest collapses text + keeps clicks, urls, windows, notes", () => {
   assert.match(d, /NOTE: this is the goal/);
 });
 
+test("buildDigest shows AX role/value on clicks + ancestor paths", () => {
+  const events: RecordEvent[] = [
+    { t: 0, ts: "x", type: "click", payload: { x: 5, y: 5, button: "left", target: "Submit", role: "AXButton", value: "Submit", targetPath: ["Modal", "Form"] } },
+    { t: 1000, ts: "x", type: "click", payload: { x: 9, y: 9, button: "left" } },
+  ];
+  const d = buildDigest(events);
+  assert.match(d, /click: AXButton \/ Submit \/ Submit @ .*path=\[Modal > Form\]/);
+  assert.match(d, /click: \(no target\)/);
+});
+
+test("buildDigest emits screenshot lines with path + trigger + index", () => {
+  const events: RecordEvent[] = [
+    { t: 500, ts: "x", type: "click", payload: { x: 1, y: 1, button: "left", target: "foo" } },
+    { t: 600, ts: "x", type: "screenshot", payload: { path: "/tmp/00001.png", trigger: "click", index: 1 } },
+    { t: 2000, ts: "x", type: "screenshot", payload: { path: "/tmp/00002.png", trigger: "focus", index: 2 } },
+  ];
+  const d = buildDigest(events);
+  assert.match(d, /screenshot: \/tmp\/00001\.png \(trigger: click, #1\)/);
+  assert.match(d, /screenshot: \/tmp\/00002\.png \(trigger: focus, #2\)/);
+});
+
 test("synthesisSystemPrompt embeds digest + mandates skill.md format", () => {
   const p = synthesisSystemPrompt("DIGEST_HERE", "rec-1");
   assert.match(p, /RECORDED DIGEST \(recording rec-1\)/);
@@ -181,4 +207,12 @@ test("synthesisSystemPrompt embeds digest + mandates skill.md format", () => {
   assert.match(p, /name: <short-kebab-name>/);
   assert.match(p, /## Workflow/);
   assert.match(p, /prefer.*programmatic|API|script/i);
+});
+
+test("synthesisSystemPrompt instructs agent to read screenshots via analyze_image", () => {
+  const p = synthesisSystemPrompt("", "rec-1");
+  assert.match(p, /CRITICAL: read the screenshots before writing the skill/);
+  assert.match(p, /analyze_image/);
+  assert.match(p, /screenshot: /);  // shows the example line format
+  assert.match(p, /macOS Accessibility \+ Screen Recording/);
 });

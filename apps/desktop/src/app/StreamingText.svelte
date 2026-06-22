@@ -1,14 +1,15 @@
 <script module lang="ts">
-  // Reveal progress must survive the component remount a thread switch causes:
-  // App.svelte wraps ThreadView in {#key thread:id}, so switching away and back
-  // destroys + recreates every StreamingText. Keyed by a stable per-message id,
-  // returning to a thread resumes the wave instead of replaying it from char 0.
-  type RevealMemory = { revealed: number; times: Map<number, number> };
+  // Per-word first-seen timestamps must survive the component remount a thread
+  // switch causes: App.svelte wraps ThreadView in {#key thread:id}, so switching
+  // away and back destroys + recreates every StreamingText. Keyed by a stable
+  // per-message id, already-revealed words keep their first-seen time across the
+  // remount so the rebuild doesn't re-fire their fade.
+  type RevealMemory = { times: Map<number, number> };
   const revealMemory = new Map<string, RevealMemory>();
   function memoryFor(key: string): RevealMemory {
     let m = revealMemory.get(key);
     if (!m) {
-      m = { revealed: 0, times: new Map() };
+      m = { times: new Map() };
       revealMemory.set(key, m);
     }
     return m;
@@ -107,14 +108,20 @@
   // Reveal progress persists across remounts when a stable revealKey is given
   // (see <script module>); without one (or for historical text) it stays local.
   const mem: RevealMemory = untrack(() =>
-    revealKey ? memoryFor(revealKey) : { revealed: 0, times: new Map() },
+    revealKey ? memoryFor(revealKey) : { times: new Map() },
   );
-  // Historical (non-streaming) messages mount fully revealed — no replay.
-  // untrack: snapshot the mount-time prop values only; resume from the stored
-  // index so a thread switch mid-stream continues instead of restarting.
-  let revealed = $state(untrack(() => (streaming && !reduceMotion ? mem.revealed : text.length)));
+  // Mount fully revealed: any text already accumulated (history, or a backlog
+  // that grew while the user was on another thread) renders in one go. Only
+  // deltas arriving *after* mount get the typewriter trickle + per-word fade —
+  // see the `$effect` rAF loop below (kicks in when `text` grows past
+  // `revealed`) and the `firstBuild` anchor in the html builder.
+  let revealed = $state(untrack(() => text.length));
   const rate = resolveRate();
   let frame = 0;
+  // True until the first html build completes. Lets that first build anchor
+  // every already-present word to a far-past delay (final frame, no fade) so
+  // jumping to full text doesn't flash-fade the whole message.
+  let firstBuild = true;
   // word index → first time (performance.now) we saw it. Drives per-word delay.
   const revealTimes = mem.times;
 
@@ -149,7 +156,6 @@
           next = revealed + Math.min(rate.step, backlog);
         }
         revealed = next;
-        mem.revealed = next;
       }
       if (revealed < target.length) raf = requestAnimationFrame(tick);
     };
@@ -195,7 +201,10 @@
           continue;
         }
         const i = wordIndex++;
-        if (!revealTimes.has(i)) revealTimes.set(i, now);
+        // Words already in the buffer at mount render at the final frame — no
+        // flash-fade of the whole backlog. Only words revealed while the user
+        // is actively watching (first build already done) get the per-word wave.
+        if (!revealTimes.has(i)) revealTimes.set(i, firstBuild ? now - 1_000_000 : now);
         const span = doc.createElement("span");
         span.className = "sw";
         span.style.animationDelay = `${revealTimes.get(i)! - now}ms`;
@@ -204,6 +213,7 @@
       }
       node.replaceWith(frag);
     }
+    firstBuild = false;
     return doc.body.innerHTML;
   });
 </script>

@@ -1,5 +1,5 @@
 /**
- * Quick-access slots: a 2×2 drawer of custom actions in the composer. Each
+ * Quick-access slots: a row of 3 custom actions in the composer. Each
  * slot holds a slash command (skill / extension / prompt / system) that the
  * user either fires once or treats as a toggle. Global UI preference (not
  * per-thread), persisted to localStorage like command-prefs.svelte.ts. The
@@ -13,7 +13,7 @@
 
 import type { CommandKind } from "@peach-pi/shared-types";
 
-export const SLOT_COUNT = 4;
+export const SLOT_COUNT = 3;
 
 export type SlotBehavior =
   | { type: "fire" }
@@ -35,7 +35,6 @@ const DEFAULT_SLOTS: (QuickSlot | null)[] = [
     label: "Caveman",
     behavior: { type: "bound", binding: "caveman" },
   },
-  null,
   null,
   null,
 ];

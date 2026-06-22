@@ -50,7 +50,8 @@
     return slot.behavior.type !== "fire";
   }
 
-  function ledOn(index: number, slot: QuickSlot): boolean {
+  // A toggle slot's on/off state. Drives the lit-up caption (no LED anymore).
+  function isOn(index: number, slot: QuickSlot): boolean {
     if (slot.behavior.type === "bound") return cavemanEnabled;
     if (slot.behavior.type === "toggle") return quickSlots.toggles[index] ?? false;
     return false;
@@ -184,8 +185,8 @@
       {#if slot}
         <span class="devbtn">
           <button
-            class="devbtn__switch {ledOn(index, slot) ? 'devbtn__switch--on' : ''}"
-            aria-pressed={isToggle(slot) ? ledOn(index, slot) : undefined}
+            class="devbtn__switch {isOn(index, slot) ? 'devbtn__switch--on' : ''}"
+            aria-pressed={isToggle(slot) ? isOn(index, slot) : undefined}
             onclick={() => activate(index)}
             oncontextmenu={(e) => {
               e.preventDefault();
@@ -195,7 +196,6 @@
             title={`${slot.label}${isToggle(slot) ? " (toggle)" : ""} — right-click to change`}
             aria-label={slot.label}
           >
-            <span class="devbtn__led" aria-hidden="true"></span>
             <span class="devbtn__cap" aria-hidden="true"></span>
             <span class="devbtn__caption">{slot.label}</span>
           </button>
@@ -209,7 +209,6 @@
             title="Add a quick action"
             aria-label="Add a quick action"
           >
-            <span class="devbtn__led" aria-hidden="true"></span>
             <span class="devbtn__cap" aria-hidden="true">+</span>
             <span class="devbtn__caption">Add</span>
           </button>
@@ -261,6 +260,14 @@
           <span class="font-mono text-fg">/{picked.name}</span>
           <span class="ml-auto rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide {kindBadge[picked.kind]}">{picked.kind}</span>
         </div>
+        <span class="mb-1 block px-1 text-[10px] uppercase tracking-wide text-faint">Button label</span>
+        <input
+          aria-label="Button label"
+          class="mb-2 w-full rounded border border-border-strong bg-surface-2 px-2 py-1 text-xs text-fg outline-none"
+          placeholder={picked.name}
+          maxlength="16"
+          bind:value={label}
+        />
         <div class="mb-2 flex items-center gap-2">
           <div class="grid flex-1 grid-cols-2 gap-1 rounded bg-surface-2 p-0.5 text-xs">
             <button

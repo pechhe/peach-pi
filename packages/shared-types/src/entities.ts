@@ -220,6 +220,8 @@ export interface PiSettings {
   followUpMode: "all" | "one-at-a-time";
   /** Auto-run `pi update --extensions` on launch + periodically. Default on. */
   autoUpdateExtensions: boolean;
+  /** Prevent macOS idle sleep while an agent run is active (caffeinate). Default off. */
+  insomnia: boolean;
 }
 
 /** Live per-session metadata published main → renderer. */
@@ -501,8 +503,47 @@ export interface ToolkitCatalogEntry {
   logoUrl: string | null;
   /** Primary auth scheme: "OAUTH2", "API_KEY", "BEARER_TOKEN", … */
   authScheme: string;
-  /** True when the local user already has an ACTIVE connected account. */
-  connected: boolean;
+  /** How many ACTIVE connected accounts the local user has for this toolkit.
+   *  >0 still allows connecting more (e.g. a second Gmail account). */
+  connectedCount: number;
+}
+
+/** One tool a toolkit exposes, for the detail pane. `readOnly` is derived from
+ *  Composio's MCP-style hint tags (readOnlyHint). */
+export interface ToolInfo {
+  slug: string;
+  name: string;
+  description: string;
+  readOnly: boolean;
+}
+
+/** One credential field a non-OAuth toolkit asks for at connect time, e.g.
+ *  Metabase's base URL + API key. Sourced from Composio's
+ *  `connectedAccountInitiation` schema; the `name` is the exact key Composio
+ *  expects back. */
+export interface AuthField {
+  /** Composio field key, e.g. "full", "generic_api_key", "subdomain". */
+  name: string;
+  label: string;
+  description: string;
+  required: boolean;
+  /** True for secret fields (rendered as password inputs). */
+  secret: boolean;
+}
+
+/** Full view of one toolkit for the detail pane: metadata + its tool list.
+ *  Fetched live on selection; nothing persisted. */
+export interface ToolkitDetail {
+  slug: string;
+  name: string;
+  description: string;
+  logoUrl: string | null;
+  authScheme: string;
+  /** Category labels from Composio meta, e.g. ["email"]. */
+  categories: string[];
+  /** Fields to collect for a manual (non-OAuth) connection. Empty for OAuth. */
+  authFields: AuthField[];
+  tools: ToolInfo[];
 }
 
 /** A connected account: one provider the local user has authenticated through
@@ -512,6 +553,9 @@ export interface Connection {
   id: string;
   toolkitSlug: string;
   name: string;
+  /** User/provider label distinguishing multiple accounts of one toolkit
+   *  (e.g. two Gmail addresses). Null when Composio has none. */
+  alias: string | null;
   logoUrl: string | null;
   status: ConnectionStatus;
   createdAt: string;

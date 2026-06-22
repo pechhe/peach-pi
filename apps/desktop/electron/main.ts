@@ -13,6 +13,7 @@ import { SideChatService } from "./services/side-chat-service.ts";
 import { DevTapInstallService } from "./services/devtap-install-status.ts";
 import { getCavemanState, setCavemanEnabled, setCavemanLevel } from "./services/caveman.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
+import { InsomniaService } from "./services/insomnia.ts";
 import {
   getVisionProxyConfig,
   getVisionProxyInstallState,
@@ -147,6 +148,10 @@ async function boot(): Promise<void> {
     },
     () => appService.getUtilityModel(),
     () => appService.getAutoCompact(),
+    (running) => {
+      if (running) insomniaService.onRunStart();
+      else insomniaService.onRunEnd();
+    },
   );
   const automationService = new AutomationService(db, threadService, () =>
     emit("event:snapshot", appService.snapshot()),
@@ -171,6 +176,9 @@ async function boot(): Promise<void> {
     () => appService.snapshot().projects.map((p) => p.path),
   );
   setupSubagentEnvironment(app.getPath("userData"));
+
+  const insomniaService = new InsomniaService();
+  void getPiSettings().then((s) => insomniaService.setEnabled(s.insomnia));
 
   const connectorService = new ConnectorService(emit);
 
@@ -203,7 +211,11 @@ async function boot(): Promise<void> {
     "app:getAutoCompact": () => appService.getAutoCompact(),
     "app:setAutoCompact": (settings) => appService.setAutoCompact(settings),
     "app:getPiSettings": () => getPiSettings(),
-    "app:setPiSettings": (patch) => setPiSettings(patch),
+    "app:setPiSettings": async (patch) => {
+      const updated = await setPiSettings(patch);
+      if (patch.insomnia !== undefined) insomniaService.setEnabled(updated.insomnia);
+      return updated;
+    },
     "app:getVisionProxyInstallState": () => getVisionProxyInstallState(),
     "app:installVisionProxy": () => installVisionProxy(emit),
     "app:getVisionProxyConfig": () => getVisionProxyConfig(),
@@ -214,13 +226,14 @@ async function boot(): Promise<void> {
     "extensions:deleteLocal": (p) => piUpdateService.deleteLocalExtension(p),
     "app:getPiHealth": () => computePiHealth(__dirname),
     "connectors:catalogue": (query) => connectorService.catalogue(query),
+    "connectors:toolkit": (slug) => connectorService.toolkit(slug),
     "connectors:list": () => connectorService.list(),
     "connectors:connect": async (slug) => {
       const r = await connectorService.connect(slug);
       if (r.redirectUrl) void shell.openExternal(r.redirectUrl);
       return r;
     },
-    "connectors:connectApiKey": (slug, apiKey) => connectorService.connectApiKey(slug, apiKey),
+    "connectors:connectFields": (slug, fields) => connectorService.connectFields(slug, fields),
     "connectors:disconnect": (id) => connectorService.disconnect(id),
     "devtap:report": (entry) =>
       emitDevTapEvent({
@@ -556,6 +569,7 @@ async function boot(): Promise<void> {
     tray?.destroy();
     void connectorResolver.stop();
     threadService.dispose();
+    insomniaService.dispose();
     db.close();
   });
 }

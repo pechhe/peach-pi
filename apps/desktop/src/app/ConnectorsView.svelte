@@ -1,539 +1,376 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type {
-    Connector,
-    CreateApiKeyInput,
-    CreateOAuthInput,
-    OAuthPreset,
+    Connection,
+    ToolkitCatalogEntry,
+    ToolkitDetail,
+    ToolInfo,
   } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
-  import Plug from "@lucide/svelte/icons/plug";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import Plus from "@lucide/svelte/icons/plus";
-  import ExternalLink from "@lucide/svelte/icons/external-link";
-  import { Select } from "../components/ui/select";
+  import Search from "@lucide/svelte/icons/search";
   import ConnectorIcon from "./ConnectorIcon.svelte";
 
-  // BYO model: user supplies their own OAuth client (id + secret). peach-pi
-  // bundles no secrets; presets only pre-fill the endpoints + flags.
-  let connectors = $state<Connector[]>([]);
-  let presets = $state<OAuthPreset[]>([]);
-  let mode = $state<"list" | "catalog" | "apikey" | "oauth">("list");
-  let busyId = $state<string | null>(null);
+  // Master-detail over the Composio catalogue. Left: connectors grouped by
+  // connection state. Right: the selected toolkit's metadata + tool list.
+  // Composio owns auth + tokens; toolkits can hold multiple accounts.
+  let connections = $state<Connection[]>([]);
+  let catalogue = $state<ToolkitCatalogEntry[]>([]);
+  let query = $state("");
   let error = $state("");
 
-  // ── API-key form ──
-  let akProvider = $state("");
-  let akLabel = $state("");
-  let akKey = $state("");
+  let selectedSlug = $state<string | null>(null);
+  let detail = $state<ToolkitDetail | null>(null);
+  let detailLoading = $state(false);
+  let busySlug = $state<string | null>(null);
 
-  // ── OAuth form ──
-  let oaProvider = $state("");
-  let oaPreset = $state<OAuthPreset | null>(null);
-  let oaLabel = $state("");
-  let oaClientId = $state("");
-  let oaClientSecret = $state("");
-  let oaRedirectUri = $state("");
-  let oaAuthorizeUrl = $state("");
-  let oaTokenUrl = $state("");
-  let oaScopes = $state(""); // space/comma-separated
-  let oaUsePkce = $state(true);
-  let oaUseBasicAuth = $state(false);
+  // Manual-connection form in the detail pane (non-OAuth toolkits, e.g.
+  // Metabase base URL + API key). Driven by detail.authFields.
+  let formOpen = $state(false);
+  let fieldValues = $state<Record<string, string>>({});
+  // A toolkit connects manually when Composio asks for credential fields.
+  const isManual = $derived((detail?.authFields.length ?? 0) > 0);
 
-  function parseScopes(s: string): string[] {
-    return s.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Connected toolkits (deduped — one row per toolkit, even with N accounts).
+  const connectedToolkits = $derived.by(() => {
+    const bySlug = new Map<string, { slug: string; name: string; logoUrl: string | null; count: number }>();
+    for (const c of connections) {
+      const e = bySlug.get(c.toolkitSlug);
+      if (e) e.count += 1;
+      else bySlug.set(c.toolkitSlug, { slug: c.toolkitSlug, name: c.name, logoUrl: c.logoUrl, count: 1 });
+    }
+    const q = query.trim().toLowerCase();
+    return [...bySlug.values()]
+      .filter((t) => !q || t.name.toLowerCase().includes(q) || t.slug.includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  const notConnected = $derived(catalogue.filter((t) => t.connectedCount === 0));
+
+  const accountsForSelected = $derived(
+    selectedSlug ? connections.filter((c) => c.toolkitSlug === selectedSlug) : [],
+  );
+
+  const toolGroups = $derived.by(() => {
+    const tools = detail?.tools ?? [];
+    const read = tools.filter((t) => t.readOnly);
+    const write = tools.filter((t) => !t.readOnly);
+    const out: { label: string; tools: ToolInfo[] }[] = [];
+    if (write.length) out.push({ label: "Write tools", tools: write });
+    if (read.length) out.push({ label: "Read-only tools", tools: read });
+    return out;
+  });
+
+  async function loadConnections() {
+    connections = await api.invoke("connectors:list");
   }
 
-  async function load() {
-    [connectors, presets] = await Promise.all([
-      api.invoke("connectors:list"),
-      api.invoke("connectors:presets"),
-    ]);
+  async function loadCatalogue() {
+    error = "";
+    try {
+      catalogue = await api.invoke("connectors:catalogue", query.trim());
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function onSearchInput() {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => void loadCatalogue(), 250);
+  }
+
+  async function select(slug: string) {
+    selectedSlug = slug;
+    formOpen = false;
+    fieldValues = {};
+    detailLoading = true;
+    error = "";
+    try {
+      detail = await api.invoke("connectors:toolkit", slug);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      detail = null;
+    } finally {
+      detailLoading = false;
+    }
   }
 
   onMount(() => {
-    void load();
-    return api.on("event:connectorsChanged", () => void load());
+    void loadConnections();
+    void loadCatalogue();
+    return api.on("event:connectorsChanged", () => {
+      void loadConnections();
+      void loadCatalogue();
+    });
   });
 
-  function applyPreset(name: string) {
-    const p = presets.find((x) => x.provider === name) ?? null;
-    oaPreset = p;
-    if (p) {
-      oaRedirectUri = p.redirectUri;
-      oaAuthorizeUrl = p.authorizeUrl;
-      oaTokenUrl = p.tokenUrl;
-      oaScopes = p.scopes.join(", ");
-      oaUsePkce = p.usePkce;
-      oaUseBasicAuth = p.useBasicAuth;
+  async function connect() {
+    if (!detail) return;
+    error = "";
+    if (isManual) {
+      formOpen = !formOpen;
+      if (formOpen) fieldValues = {};
+      return;
     }
-  }
-
-  // Catalog tile → prefill the whole OAuth form and jump to it. Only client
-  // credentials are left for the user (BYO).
-  function pickCatalog(p: OAuthPreset) {
-    applyPreset(p.provider);
-    oaProvider = p.provider;
-    oaLabel = p.label;
-    oaClientId = p.clientId ?? "";
-    oaClientSecret = "";
-    error = "";
-    mode = "oauth";
-  }
-
-  // Open the browser for an OAuth handshake, then drop back to the list. The
-  // deep-link/loopback callback finishes the exchange out-of-band.
-  let connecting = $state<string | null>(null);
-  async function launchAuth(start: () => Promise<{ authUrl: string }>, provider: string) {
-    error = "";
-    connecting = provider;
+    busySlug = detail.slug;
     try {
-      const { authUrl } = await start();
-      window.open(authUrl, "_blank", "noopener");
-      mode = "list";
+      await api.invoke("connectors:connect", detail.slug);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      connecting = null;
+      busySlug = null;
     }
   }
 
-  // The saved OAuth connector for a provider, if one exists.
-  function connectorFor(provider: string): Connector | null {
-    return connectors.find((c) => c.provider === provider && c.authKind === "oauth") ?? null;
-  }
+  const formValid = $derived(
+    !!detail &&
+      detail.authFields.filter((f) => f.required).every((f) => (fieldValues[f.name] ?? "").trim()),
+  );
 
-  // Catalog tile click. Three tiers, most-specific first:
-  //  1. A connector already exists → re-auth one-click (creds live in Keychain).
-  //  2. A client is provisioned (bundled or local file) → connect one-click.
-  //  3. Nothing yet → open the BYO form so the user can set it up once.
-  function openProvider(p: OAuthPreset) {
-    const existing = connectorFor(p.provider);
-    if (existing) return void launchAuth(() => api.invoke("connectors:startOAuth", existing.id), p.provider);
-    if (p.hasClient) return void launchAuth(() => api.invoke("connectors:connectCatalog", p.provider), p.provider);
-    pickCatalog(p);
-  }
-
-  // Icon slug for a saved connector row (matched back to its catalog entry).
-  function slugFor(provider: string): string | null {
-    return presets.find((p) => p.provider === provider)?.icon ?? null;
-  }
-
-  async function saveApiKey() {
-    error = "";
-    if (!akProvider.trim() || !akLabel.trim() || !akKey.trim()) {
-      error = "Provider, label, and API key are required.";
-      return;
+  async function submitFields() {
+    if (!detail || !formValid) return;
+    const fields: Record<string, string> = {};
+    for (const f of detail.authFields) {
+      const v = (fieldValues[f.name] ?? "").trim();
+      if (v) fields[f.name] = v;
     }
-    const input: CreateApiKeyInput = {
-      provider: akProvider.trim(),
-      label: akLabel.trim(),
-      apiKey: akKey.trim(),
-    };
-    await api.invoke("connectors:createApiKey", input);
-    resetForms();
-  }
-
-  async function saveOAuth() {
-    error = "";
-    // client_id is always required. client_secret is required only for
-    // confidential clients; PKCE public clients authenticate via the verifier.
-    if (!oaProvider.trim() || !oaClientId.trim()) {
-      error = "Provider and client ID are required.";
-      return;
-    }
-    if (!oaUsePkce && !oaClientSecret.trim()) {
-      error = "Client secret is required when PKCE is off.";
-      return;
-    }
-    const input: CreateOAuthInput = {
-      provider: oaProvider.trim(),
-      label: oaLabel.trim() || oaProvider.trim(),
-      clientId: oaClientId.trim(),
-      clientSecret: oaClientSecret.trim() || undefined,
-      redirectUri: oaRedirectUri.trim(),
-      authorizeUrl: oaAuthorizeUrl.trim(),
-      tokenUrl: oaTokenUrl.trim(),
-      scopes: parseScopes(oaScopes),
-      usePkce: oaUsePkce,
-      useBasicAuth: oaUseBasicAuth,
-    };
-    const created = await api.invoke("connectors:createOAuth", input);
-    // Kick off the auth flow immediately — renderer opens the URL in the
-    // browser; the callback arrives via the deep-link scheme or loopback.
-    const { authUrl } = await api.invoke("connectors:startOAuth", created.id);
-    window.open(authUrl, "_blank", "noopener");
-    resetForms();
-  }
-
-  async function connect(row: Connector) {
-    busyId = row.id;
+    busySlug = detail.slug;
     error = "";
     try {
-      const { authUrl } = await api.invoke("connectors:startOAuth", row.id);
-      window.open(authUrl, "_blank", "noopener");
+      await api.invoke("connectors:connectFields", detail.slug, fields);
+      formOpen = false;
+      fieldValues = {};
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      busyId = null;
+      busySlug = null;
     }
   }
 
-  async function refresh(row: Connector) {
-    busyId = row.id;
+  async function disconnect(c: Connection) {
     error = "";
     try {
-      await api.invoke("connectors:refresh", row.id);
+      await api.invoke("connectors:disconnect", c.id);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
-    } finally {
-      busyId = null;
     }
   }
 
-  async function revoke(row: Connector) {
-    await api.invoke("connectors:revoke", row.id);
-  }
-
-  function resetForms() {
-    mode = "list";
-    akProvider = "";
-    akLabel = "";
-    akKey = "";
-    oaProvider = "";
-    oaLabel = "";
-    oaClientId = "";
-    oaClientSecret = "";
-    oaRedirectUri = "";
-    oaAuthorizeUrl = "";
-    oaTokenUrl = "";
-    oaScopes = "";
-    oaUsePkce = true;
-    oaUseBasicAuth = false;
-    oaPreset = null;
-  }
-
-  const fmt = (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—";
-
-  function statusText(c: Connector): string {
-    if (c.authKind === "api_key") return "API key";
-    if (!c.connected) return "Not connected";
-    if (c.expiresAt && Date.parse(c.expiresAt) <= Date.now()) return "Expired";
-    return "Connected";
-  }
+  const STATUS_DOT: Record<Connection["status"], string> = {
+    ACTIVE: "bg-emerald-500",
+    INITIATED: "bg-amber-500",
+    EXPIRED: "bg-red-500",
+    FAILED: "bg-red-500",
+    INACTIVE: "bg-fainter",
+  };
+  const STATUS_LABEL: Record<Connection["status"], string> = {
+    ACTIVE: "Connected",
+    INITIATED: "Awaiting authorization…",
+    EXPIRED: "Expired — reconnect",
+    FAILED: "Failed",
+    INACTIVE: "Disabled",
+  };
+  const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const accountLabel = (c: Connection) => c.alias ?? `Added ${fmtDate(c.createdAt)} · #${c.id.slice(-4)}`;
 </script>
 
-<main class="flex h-full flex-1 flex-col" data-testid="connections-view">
-  <header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-6">
-    <h1 class="flex items-center gap-2 text-sm font-medium text-fg-soft">
-      <Plug size={15} /> Connections
-    </h1>
-    {#if mode === "list"}
-      <button
-        class="rounded-lg bg-primary px-3 py-1 text-sm font-medium text-primary-fg"
-        onclick={() => {
-          playButtonClick();
-          mode = "catalog";
-        }}
-      >
-        + Add
-      </button>
-    {:else}
-      <button
-        class="rounded-lg px-3 py-1 text-sm text-muted hover:text-fg"
-        onclick={() => { mode = mode === "oauth" ? "catalog" : "list"; error = ""; }}
-      >← Back</button>
-    {/if}
-  </header>
+<main class="flex h-full flex-1" data-testid="connections-view">
+  <!-- ── Sidebar ─────────────────────────────────────────────── -->
+  <aside class="flex w-64 shrink-0 flex-col border-r border-border bg-bg">
+    <header class="titlebar-drag flex h-12 shrink-0 items-center px-4">
+      <h1 class="text-sm font-semibold text-fg">Connectors</h1>
+    </header>
+    <div class="px-3 pb-2">
+      <div class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 focus-within:border-border-focus">
+        <Search size={14} class="shrink-0 text-muted" />
+        <input
+          class="w-full bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
+          placeholder="Search apps…"
+          bind:value={query}
+          oninput={onSearchInput}
+          data-testid="connector-search"
+        />
+      </div>
+    </div>
 
-  <div class="flex-1 overflow-y-auto px-6 pb-6">
-    <div class="mx-auto flex max-w-2xl flex-col gap-3">
-      {#if error}
-        <p class="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>
+    <nav class="flex-1 overflow-y-auto px-2 pb-4">
+      {#if connectedToolkits.length > 0}
+        <p class="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-fainter">Connected</p>
+        {#each connectedToolkits as t (t.slug)}
+          <button
+            class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
+            class:bg-surface={selectedSlug === t.slug}
+            onclick={() => select(t.slug)}
+            data-testid={`sidebar-${t.slug}`}
+          >
+            <ConnectorIcon logoUrl={t.logoUrl} label={t.name} size={20} />
+            <span class="flex-1 truncate text-sm text-fg">{t.name}</span>
+            {#if t.count > 1}
+              <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted">{t.count}</span>
+            {/if}
+          </button>
+        {/each}
       {/if}
 
-      {#if mode === "list"}
-        {#if connectors.length === 0}
-          <div class="rounded-lg border border-border-strong bg-surface p-6 text-center">
-            <p class="text-sm text-muted">No saved connections yet.</p>
-            <p class="mt-1 text-xs text-fainter">
-              Add a Notion PAT, GitHub PAT, or OAuth connector to give your agents access to
-              external services.
-            </p>
-          </div>
-        {:else}
-          {#each connectors as c (c.id)}
-            <div
-              class="flex items-center justify-between rounded-lg border border-border-strong bg-surface p-4"
-              data-testid={`connector-${c.provider}`}
-            >
-              <div class="flex min-w-0 items-center gap-3">
-                <ConnectorIcon slug={slugFor(c.provider)} label={c.label} size={22} />
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="truncate text-sm font-medium text-fg">{c.label}</span>
-                    <span class="rounded bg-bg px-1.5 py-0.5 text-[11px] uppercase text-muted">
-                      {c.provider}
-                    </span>
-                  </div>
-                  <p class="mt-0.5 text-xs text-fainter">
-                    {statusText(c)} · expires {fmt(c.expiresAt)}
-                  </p>
-                </div>
-              </div>
-              <div class="flex shrink-0 items-center gap-1">
-                {#if c.authKind === "oauth" && !c.connected}
-                  <button
-                    class="rounded-md px-2 py-1 text-xs text-muted hover:bg-bg hover:text-fg"
-                    onclick={() => connect(c)}
-                    disabled={busyId === c.id}
-                  >Connect</button>
-                {/if}
-                {#if c.authKind === "oauth" && c.connected}
-                  <button
-                    class="rounded-md px-2 py-1 text-muted hover:bg-bg hover:text-fg"
-                    onclick={() => refresh(c)}
-                    disabled={busyId === c.id}
-                    title="Refresh token"
-                  ><RefreshCw size={14} /></button>
-                {/if}
-                <button
-                  class="rounded-md px-2 py-1 text-muted hover:bg-bg hover:text-red-400"
-                  onclick={() => revoke(c)}
-                  title="Revoke & delete"
-                ><Trash2 size={14} /></button>
-              </div>
-            </div>
-          {/each}
-        {/if}
+      <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">Not connected</p>
+      {#each notConnected as t (t.slug)}
+        <button
+          class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
+          class:bg-surface={selectedSlug === t.slug}
+          onclick={() => select(t.slug)}
+          data-testid={`sidebar-${t.slug}`}
+        >
+          <ConnectorIcon logoUrl={t.logoUrl} label={t.name} size={20} />
+          <span class="flex-1 truncate text-sm text-muted">{t.name}</span>
+        </button>
+      {/each}
+      {#if notConnected.length === 0 && connectedToolkits.length === 0}
+        <p class="px-2 py-4 text-xs text-fainter">No matching apps.</p>
+      {/if}
+    </nav>
+  </aside>
 
-        <div class="flex flex-col gap-2 rounded-lg border border-border-strong bg-surface p-4">
-          <p class="text-sm font-medium text-fg-soft">Add a connection</p>
-          <div class="flex gap-2">
-            <button
-              class="flex-1 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm hover:border-border-focus"
-              onclick={() => { mode = "catalog"; }}
-            >Browse catalog…</button>
-            <button
-              class="flex-1 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm hover:border-border-focus"
-              onclick={() => { mode = "apikey"; }}
-            >API key / PAT…</button>
-          </div>
-        </div>
-      {:else if mode === "catalog"}
-        <p class="text-sm text-fainter">
-          Pick a service to connect. Configured ones open the provider's sign-in
-          page directly — approve access and you're done. “Needs setup” means no
-          OAuth client is provisioned yet; use the form to add one.
-        </p>
-        <div class="grid grid-cols-2 gap-2" data-testid="connector-catalog">
-          {#each presets as p (p.provider)}
-            {@const existing = connectorFor(p.provider)}
-            <button
-              class="flex items-center gap-3 rounded-lg border border-border-strong bg-surface p-3 text-left hover:border-border-focus disabled:opacity-50"
-              onclick={() => openProvider(p)}
-              disabled={connecting === p.provider}
-              data-testid={`catalog-${p.provider}`}
-            >
-              <ConnectorIcon slug={p.icon ?? null} hex={p.iconHex ?? null} label={p.label} size={24} />
-              <span class="flex min-w-0 flex-1 flex-col">
-                <span class="truncate text-sm text-fg">{p.label}</span>
-                {#if existing?.connected}
-                  <span class="text-[11px] text-accent">connected</span>
-                {:else if existing}
-                  <span class="text-[11px] text-fainter">reconnect</span>
-                {:else if !p.hasClient}
-                  <span class="text-[11px] text-fainter">needs setup</span>
-                {/if}
-              </span>
-              {#if connecting === p.provider}
-                <span class="text-[11px] text-muted">…</span>
+  <!-- ── Detail ──────────────────────────────────────────────── -->
+  <section class="flex flex-1 flex-col overflow-y-auto">
+    {#if error}
+      <p class="m-6 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>
+    {/if}
+
+    {#if !selectedSlug}
+      <div class="flex flex-1 items-center justify-center text-sm text-fainter">
+        Select a connector to view its details.
+      </div>
+    {:else if detailLoading && !detail}
+      <div class="flex flex-1 items-center justify-center text-sm text-fainter">Loading…</div>
+    {:else if detail}
+      {@const connected = accountsForSelected.length > 0}
+      <div class="mx-auto w-full max-w-3xl px-8 py-6">
+        <!-- header -->
+        <div class="flex items-start gap-3">
+          <ConnectorIcon logoUrl={detail.logoUrl} label={detail.name} size={32} />
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <h2 class="truncate text-lg font-semibold text-fg">{detail.name}</h2>
+              {#if detail.categories[0]}
+                <span class="rounded-md bg-surface px-1.5 py-0.5 text-[11px] text-muted">{cap(detail.categories[0])}</span>
               {/if}
-            </button>
-          {/each}
+            </div>
+          </div>
           <button
-            class="flex items-center gap-3 rounded-lg border border-dashed border-border-strong bg-bg p-3 text-left hover:border-border-focus"
-            onclick={() => { applyPreset(""); oaPreset = null; oaProvider = ""; oaLabel = ""; oaClientId = ""; oaClientSecret = ""; oaRedirectUri = ""; oaAuthorizeUrl = ""; oaTokenUrl = ""; oaScopes = ""; oaUsePkce = true; oaUseBasicAuth = false; mode = "oauth"; }}
-            data-testid="catalog-custom"
+            class="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50"
+            class:border={true}
+            class:border-border-strong={true}
+            class:bg-bg={connected}
+            class:text-fg={connected}
+            class:bg-primary={!connected}
+            class:text-primary-fg={!connected}
+            class:border-transparent={!connected}
+            onclick={() => { playButtonClick(); void connect(); }}
+            disabled={busySlug === detail.slug}
           >
-            <Plus size={20} />
-            <span class="text-sm text-muted">Custom…</span>
+            {#if busySlug === detail.slug}
+              …
+            {:else if connected}
+              {isManual ? "Add another" : "Add account"}
+            {:else}
+              Connect
+            {/if}
           </button>
         </div>
-        <button
-          class="self-start rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm hover:border-border-focus"
-          onclick={() => { mode = "apikey"; }}
-        >Use an API key / PAT instead…</button>
-      {:else if mode === "apikey"}
-        <div class="flex flex-col gap-3 rounded-lg border border-border-strong bg-surface p-4" data-testid="apikey-form">
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="ak-provider">Provider</label>
-            <input
-              id="ak-provider"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"
-              placeholder="notion / github / linear"
-              bind:value={akProvider}
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="ak-label">Label</label>
-            <input
-              id="ak-label"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"
-              placeholder="Personal Notion"
-              bind:value={akLabel}
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="ak-key">API key / token</label>
-            <input
-              id="ak-key"
-              type="password"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm outline-none focus:border-border-focus"
-              placeholder="secret_••••"
-              bind:value={akKey}
-            />
-            <p class="text-[11px] text-fainter">Stored encrypted via macOS Keychain. Never sent to the renderer except at resolution time.</p>
-          </div>
-          <div class="flex justify-end gap-2">
-            <button class="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-fg" onclick={resetForms}>Cancel</button>
-            <button class="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg" onclick={saveApiKey}>Save</button>
-          </div>
-        </div>
-      {:else if mode === "oauth"}
-        <div class="flex flex-col gap-3 rounded-lg border border-border-strong bg-surface p-4" data-testid="oauth-form">
-          <div class="flex items-start justify-between gap-3">
-            <p class="text-xs text-fainter">
-              Bring your own OAuth client — register one with the provider and paste the
-              credentials here. peach-pi bundles no secrets.
-            </p>
-            {#if oaPreset?.docsUrl}
-              <a
-                class="flex shrink-0 items-center gap-1 text-xs text-accent hover:underline"
-                href={oaPreset.docsUrl}
-                target="_blank"
-                rel="noopener"
-              ><ExternalLink size={12} /> Get credentials</a>
-            {/if}
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="oa-preset">Provider preset</label>
-            <Select
-              id="oa-preset"
-              value={oaPreset?.provider ?? ""}
-              placeholder="Custom…"
-              items={presets.map((p) => ({ value: p.provider, label: p.label }))}
-              onValueChange={applyPreset}
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="oa-provider">Provider id</label>
-            <input
-              id="oa-provider"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"
-              placeholder="notion"
-              bind:value={oaProvider}
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="oa-label">Label</label>
-            <input
-              id="oa-label"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"
-              placeholder="My Notion workspace"
-              bind:value={oaLabel}
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="oa-clientid">Client ID</label>
-            <input
-              id="oa-clientid"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm outline-none focus:border-border-focus"
-              bind:value={oaClientId}
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="oa-secret">
-              Client secret <span class="text-fainter">(leave blank for PKCE public clients)</span>
-            </label>
-            <input
-              id="oa-secret"
-              type="password"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm outline-none focus:border-border-focus"
-              bind:value={oaClientSecret}
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="oa-redirect">Redirect URI</label>
-            <input
-              id="oa-redirect"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm outline-none focus:border-border-focus"
-              bind:value={oaRedirectUri}
-            />
-            <p class="text-[11px] text-fainter">
-              Custom scheme (<code>peachpi://oauth/callback</code>) for providers that
-              accept it; <code>http://localhost:PORT/callback</code> for ones that don't
-              (e.g. Notion).
-            </p>
-          </div>
-          <div class="grid grid-cols-2 gap-2">
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs text-muted" for="oa-auth">Authorize URL</label>
-              <input
-                id="oa-auth"
-                class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-xs outline-none focus:border-border-focus"
-                bind:value={oaAuthorizeUrl}
-              />
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs text-muted" for="oa-token">Token URL</label>
-              <input
-                id="oa-token"
-                class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-xs outline-none focus:border-border-focus"
-                bind:value={oaTokenUrl}
-              />
-            </div>
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-muted" for="oa-scopes">Scopes (comma/space)</label>
-            <input
-              id="oa-scopes"
-              class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"
-              placeholder="read, write"
-              bind:value={oaScopes}
-            />
-          </div>
-          <div class="flex items-center gap-4">
-            <label class="flex items-center gap-1.5 text-xs text-muted">
-              <input type="checkbox" bind:checked={oaUsePkce} /> Use PKCE (S256)
-            </label>
-            <label class="flex items-center gap-1.5 text-xs text-muted">
-              <input type="checkbox" bind:checked={oaUseBasicAuth} /> Send secret as Basic auth
-            </label>
-          </div>
-          <p class="flex items-center gap-1 text-[11px] text-fainter">
-            <ExternalLink size={11} />
-            Notion requires a loopback redirect + Basic auth and does not support PKCE.
-          </p>
-          <div class="flex justify-end gap-2">
-            <button class="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-fg" onclick={resetForms}>Cancel</button>
-            <button
-              class="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg"
-              onclick={saveOAuth}
-            ><Plus size={14} /> Save & connect</button>
-          </div>
-        </div>
-      {/if}
-    </div>
-  </div>
-</main>
 
-<style>
-  code {
-    font-family: ui-monospace, "SF Mono", monospace;
-    font-size: 0.85em;
-  }
-</style>
+        {#if detail.description}
+          <p class="mt-4 text-sm leading-relaxed text-fg-soft">{detail.description}</p>
+        {/if}
+
+        {#if formOpen && isManual}
+          <form
+            class="mt-4 flex flex-col gap-3 rounded-xl border border-border bg-surface p-4"
+            onsubmit={(e) => { e.preventDefault(); void submitFields(); }}
+          >
+            {#each detail.authFields as f (f.name)}
+              <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium text-fg">
+                  {f.label}{#if !f.required}<span class="text-fainter"> (optional)</span>{/if}
+                </span>
+                {#if f.description}
+                  <span class="text-xs text-fainter">{f.description}</span>
+                {/if}
+                <input
+                  type={f.secret ? "password" : "text"}
+                  class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus"
+                  class:font-mono={f.secret}
+                  placeholder={f.secret ? "••••••••" : ""}
+                  bind:value={fieldValues[f.name]}
+                  data-testid={`field-${f.name}`}
+                />
+              </label>
+            {/each}
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-fg"
+                onclick={() => (formOpen = false)}
+              >Cancel</button>
+              <button
+                type="submit"
+                class="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg disabled:opacity-50"
+                disabled={!formValid || busySlug === detail.slug}
+              >{busySlug === detail.slug ? "Connecting…" : "Connect"}</button>
+            </div>
+          </form>
+        {/if}
+
+        <!-- accounts -->
+        {#if connected}
+          <h3 class="mt-7 text-sm font-semibold text-fg">
+            Connected {accountsForSelected.length > 1 ? "accounts" : "account"}
+          </h3>
+          <div class="mt-2 overflow-hidden rounded-xl border border-border bg-surface">
+            {#each accountsForSelected as c, i (c.id)}
+              <div class="group flex items-center gap-3 px-3 py-2.5" class:border-t={i > 0} class:border-border={i > 0}>
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full {STATUS_DOT[c.status]}"></span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm text-fg">{accountLabel(c)}</p>
+                  <p class="text-xs text-fainter">{STATUS_LABEL[c.status]}</p>
+                </div>
+                <button
+                  class="rounded-md px-2 py-1 text-xs text-fainter opacity-0 transition hover:bg-bg hover:text-red-400 group-hover:opacity-100"
+                  onclick={() => disconnect(c)}
+                >Disconnect</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        <!-- tools -->
+        <h3 class="mt-7 text-sm font-semibold text-fg">Tools <span class="text-fainter">{detail.tools.length}</span></h3>
+        <p class="mt-0.5 text-xs text-fainter">Actions the agent can take once connected.</p>
+        {#each toolGroups as g (g.label)}
+          <div class="mt-4">
+            <div class="flex items-center gap-2 px-1">
+              <span class="text-xs font-medium text-muted">{g.label}</span>
+              <span class="rounded bg-surface px-1.5 text-[11px] text-fainter">{g.tools.length}</span>
+            </div>
+            <div class="mt-1.5 flex flex-col">
+              {#each g.tools as tool (tool.slug)}
+                <div class="border-t border-border py-2.5 first:border-t-0">
+                  <p class="text-sm text-fg">{tool.name}</p>
+                  {#if tool.description}
+                    <p class="mt-0.5 line-clamp-2 text-xs text-fainter">{tool.description}</p>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/each}
+        {#if detail.tools.length === 0 && !detailLoading}
+          <p class="mt-3 text-sm text-fainter">No tools listed for this app.</p>
+        {/if}
+      </div>
+    {/if}
+  </section>
+</main>

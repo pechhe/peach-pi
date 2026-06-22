@@ -4,10 +4,12 @@ import { join } from "node:path";
 
 import { AuthScheme, Composio } from "@composio/core";
 import type {
+  AuthField,
   Connection,
   ConnectionStatus,
   ConnectStartResult,
   ToolkitCatalogEntry,
+  ToolkitDetail,
 } from "@peach-pi/shared-types";
 
 import type { Emit } from "../ipc/registry.ts";
@@ -55,6 +57,43 @@ function toStatus(s: string): ConnectionStatus {
   }
 }
 
+/** Composio field names that hold a secret (rendered as password inputs). */
+const SECRET_FIELDS = new Set([
+  "api_key",
+  "generic_api_key",
+  "bearer_token",
+  "token",
+  "password",
+  "basic_encoded",
+]);
+
+/** Extract the manual-connect fields (base URL, API key, …) a non-OAuth
+ *  toolkit asks for, from its Composio auth-config schema. */
+function parseAuthFields(
+  details: unknown,
+  scheme: string,
+): AuthField[] {
+  if (!Array.isArray(details)) return [];
+  // Prefer the config matching the primary scheme; else the first.
+  const cfg =
+    details.find((d) => (d as { mode?: string }).mode === scheme) ?? details[0];
+  const init = (cfg as { fields?: { connectedAccountInitiation?: { required?: unknown[]; optional?: unknown[] } } })
+    ?.fields?.connectedAccountInitiation;
+  if (!init) return [];
+  const map = (arr: unknown[] | undefined, required: boolean): AuthField[] =>
+    (arr ?? []).map((f) => {
+      const x = f as { name: string; displayName?: string; description?: string };
+      return {
+        name: x.name,
+        label: x.displayName ?? x.name,
+        description: x.description ?? "",
+        required,
+        secret: SECRET_FIELDS.has(x.name),
+      };
+    });
+  return [...map(init.required, true), ...map(init.optional, false)];
+}
+
 function primaryScheme(t: {
   authSchemes?: string[];
   composioManagedAuthSchemes?: string[];
@@ -99,9 +138,10 @@ export class ConnectorService {
   async catalogue(query: string): Promise<ToolkitCatalogEntry[]> {
     const c = this.client();
     const page = await c.toolkits.get({ sortBy: "usage", limit: 100 });
-    const connected = new Set(
-      (await this.list()).filter((x) => x.status === "ACTIVE").map((x) => x.toolkitSlug),
-    );
+    const counts = new Map<string, number>();
+    for (const x of await this.list()) {
+      if (x.status === "ACTIVE") counts.set(x.toolkitSlug, (counts.get(x.toolkitSlug) ?? 0) + 1);
+    }
     const q = query.trim().toLowerCase();
     const out: ToolkitCatalogEntry[] = [];
     for (const t of page) {
@@ -113,10 +153,39 @@ export class ConnectorService {
         description: t.meta?.description ?? "",
         logoUrl: t.meta?.logo ?? null,
         authScheme: primaryScheme(t),
-        connected: connected.has(t.slug),
+        connectedCount: counts.get(t.slug) ?? 0,
       });
     }
     return out;
+  }
+
+  /** Full detail for one toolkit: metadata + its tool list (for the detail
+   *  pane). `readOnly` derives from Composio's readOnlyHint tag. */
+  async toolkit(slug: string): Promise<ToolkitDetail> {
+    const c = this.client();
+    const tk = await c.toolkits.get(slug);
+    const raw = await c.tools.getRawComposioTools({ toolkits: [slug], limit: 100 });
+    this.meta.set(slug, { name: tk.name, logo: tk.meta?.logo ?? null });
+    const scheme = primaryScheme(tk);
+    return {
+      slug: tk.slug,
+      name: tk.name,
+      description: tk.meta?.description ?? "",
+      logoUrl: tk.meta?.logo ?? null,
+      authScheme: scheme,
+      categories: (tk.meta?.categories ?? []).map((x) => x.name),
+      // OAuth connects via redirect (no manual form); only non-OAuth toolkits
+      // collect credential fields.
+      authFields: scheme.startsWith("OAUTH")
+        ? []
+        : parseAuthFields((tk as { authConfigDetails?: unknown }).authConfigDetails, scheme),
+      tools: raw.map((t) => ({
+        slug: t.slug,
+        name: t.name,
+        description: t.description ?? "",
+        readOnly: (t.tags ?? []).includes("readOnlyHint"),
+      })),
+    };
   }
 
   async list(): Promise<Connection[]> {
@@ -128,6 +197,7 @@ export class ConnectorService {
         id: a.id,
         toolkitSlug: a.toolkit.slug,
         name: m?.name ?? titleCase(a.toolkit.slug),
+        alias: a.alias ?? null,
         logoUrl: m?.logo ?? null,
         status: toStatus(a.status),
         createdAt: a.createdAt,
@@ -146,13 +216,17 @@ export class ConnectorService {
     return { redirectUrl: req.redirectUrl ?? null, connectionRequestId: req.id };
   }
 
-  /** Connect a non-redirect (API-key / token) toolkit. Completes synchronously. */
-  async connectApiKey(slug: string, apiKey: string): Promise<Connection> {
+  /** Connect a non-redirect toolkit with user-supplied credential fields
+   *  (e.g. Metabase base URL + API key). The `fields` keys are the exact
+   *  Composio field names from ToolkitDetail.authFields. Completes
+   *  synchronously. */
+  async connectFields(slug: string, fields: Record<string, string>): Promise<Connection> {
     const c = this.client();
     const authConfigId = await this.authConfigFor(slug);
-    const req = await c.connectedAccounts.initiate(USER_ID, authConfigId, {
-      config: AuthScheme.APIKey({ api_key: apiKey }),
-    });
+    // BaseConnectionFields has a catch-all, so arbitrary field names (full,
+    // subdomain, generic_api_key, …) pass through to Composio untouched.
+    const config = AuthScheme.APIKey(fields as { generic_api_key?: string });
+    const req = await c.connectedAccounts.initiate(USER_ID, authConfigId, { config });
     const acct = await req.waitForConnection();
     this.emit("event:connectorsChanged", undefined);
     const m = this.meta.get(slug);
@@ -160,6 +234,7 @@ export class ConnectorService {
       id: acct.id,
       toolkitSlug: slug,
       name: m?.name ?? titleCase(slug),
+      alias: acct.alias ?? null,
       logoUrl: m?.logo ?? null,
       status: toStatus(acct.status),
       createdAt: acct.createdAt,

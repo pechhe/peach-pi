@@ -17,6 +17,7 @@ import type {
   GitPushLocalResult,
   GraphifyStatus,
   ToolkitCatalogEntry,
+  ToolkitDetail,
   SubagentAgentInfo,
   SubagentAgentPatch,
   ExtensionStatusPayload,
@@ -422,6 +423,10 @@ export const ipcContracts = {
   // token. OAuth completion is async and reported via event:connectorsChanged.
   /** Search the Composio toolkit catalogue. Empty query → popular toolkits. */
   "connectors:catalogue": invoke<[query: string], ToolkitCatalogEntry[]>(),
+  /** Full detail for one toolkit (metadata + tool list) for the detail pane. */
+  "connectors:toolkit": invoke<[toolkitSlug: string], ToolkitDetail>((s) =>
+    requireNonEmptyString(s, "toolkitSlug"),
+  ),
   /** The local user's connected accounts (ACTIVE + pending). */
   "connectors:list": invoke<[], Connection[]>(),
   /** Begin connecting a toolkit. OAuth → opens the hosted authorize URL via
@@ -431,14 +436,13 @@ export const ipcContracts = {
   "connectors:connect": invoke<[toolkitSlug: string], ConnectStartResult>((s) =>
     requireNonEmptyString(s, "toolkitSlug"),
   ),
-  /** Connect an API-key/token toolkit with a user-supplied secret. Completes
-   *  synchronously and returns the new connection. */
-  "connectors:connectApiKey": invoke<[toolkitSlug: string, apiKey: string], Connection>(
-    (slug, key) => {
-      requireNonEmptyString(slug, "toolkitSlug");
-      requireNonEmptyString(key, "apiKey");
-    },
-  ),
+  /** Connect a non-OAuth toolkit with user-supplied credential fields (e.g.
+   *  Metabase base URL + API key). `fields` keys are the Composio field names
+   *  from ToolkitDetail.authFields. Completes synchronously. */
+  "connectors:connectFields": invoke<
+    [toolkitSlug: string, fields: Record<string, string>],
+    Connection
+  >((slug) => requireNonEmptyString(slug, "toolkitSlug")),
   /** Disconnect: delete the connected account at Composio. */
   "connectors:disconnect": invoke<[connectionId: string], void>((id) =>
     requireNonEmptyString(id, "connectionId"),

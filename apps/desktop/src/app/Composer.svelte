@@ -921,7 +921,7 @@
             />
           {/if}
 
-          <!-- Quick-access drawer: 2×2 grid of custom actions. -->
+          <!-- Quick-access drawer: a row of custom actions. -->
           <QuickSlots
             commands={allCommands}
             cavemanEnabled={caveman.enabled}

@@ -6,7 +6,7 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) MCP tool server that r
 
 ## What it does
 
-1. **Record** — `start_recording` spawns a native macOS helper (Swift) that captures global mouse clicks, keystrokes/typed text, and the **semantic context** of what you interact with: frontmost window title, the clicked element's accessibility label, the focused element's value, and the URL bar when in a browser. Raw pixel coordinates alone are not enough — the helper resolves them to semantic targets via the macOS Accessibility API.
+1. **Record** — `start_recording` spawns a native macOS helper (Swift) that captures global mouse clicks, keystrokes/typed text, and the **semantic context** of what you interact with: frontmost window title, the clicked element's accessibility title/role/value + ancestor path, the focused element's value and role (via an `AXObserver` — not a 1s poll), app activation/deactivation events, and the URL bar when in a browser. Raw pixel coordinates alone are not enough — the helper resolves them to semantic targets via the macOS Accessibility API. On top of that, it captures a **screenshot of the frontmost window** on every click, non-character keypress, focus change, and end-of-typing-burst (deduped to ≥1.5s) via ScreenCaptureKit, so the synthesizer LLM can actually *see* the workflow — not just read brittle AX labels (Electron apps like Notion often expose none).
 2. **Stop → synthesize** — `stop_recording` persists the event stream and returns a compact **digest** + a synthesis system prompt. The running pi agent (your current model) authors the `skill.md` itself — no separate API key.
 3. **Store** — generated skills land in `~/.pi/agent/skills/recorded/`, where pi's skill loader discovers them automatically.
 4. **Match** — `find_skill(message)` ranks saved skills against a new user message (TF-IDF cosine over `description` + `triggers`, plus exact-keyword boost) and returns the best match above a confidence threshold.
@@ -20,6 +20,7 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) MCP tool server that r
 - **Runtime permissions**, granted to the process that launches this server (i.e. pi / your terminal):
   - **System Settings → Privacy & Security → Accessibility** — required to read window titles + click targets via the Accessibility API.
   - **System Settings → Privacy & Security → Input Monitoring** — required for the `CGEventTap` to see global keystrokes/mouse.
+  - **System Settings → Privacy & Security → Screen Recording** — required for `SCScreenshotManager` to capture frontmost-window PNGs. If absent, clicks/keys/focus events are still captured, but each screenshot attempt emits a `SCREENSHOT_FAILED` note into the event stream instead of a PNG — no silent failure.
 
 If permissions are missing, `start_recording` still returns a recording id, and the native helper emits a `PERMISSION_DENIED` note into the event stream and exits — no silent failure.
 
@@ -85,7 +86,8 @@ Files are plain markdown — edit them by hand anytime.
 ~/.pi/agent/
 ├─ recordings/
 │  ├─ <id>.json           # recording manifest (status, duration, skill link)
-│  └─ <id>.events.ndjson  # raw event stream, one JSON per line
+│  ├─ <id>.events.ndjson  # raw event stream, one JSON per line
+│  └─ <id>.shots/         # captured PNGs (00001.png, 00002.png, …)
 └─ skills/recorded/
    └─ <name>.md           # synthesized skill files (pi auto-discovers)
 ```
@@ -107,6 +109,7 @@ manual smoke test on your Mac.
 
 ## Limitations / TODO
 
-- **OCR** is not implemented; semantic text comes from the Accessibility API. Apps that don't expose AX (some games, cross-platform GUIs) won't yield text context. v2: add screen OCR fallback.
+- Capture is macOS-only (requires `CGEventTap`, `AXUIElement`, `SCScreenshotManager`).
+- The URL bar is extracted by a bounded breadth-first AX walk of the front window for browser bundles (Chrome, Safari, Firefox, Edge, Brave, Vivaldi). If a browser reshapes its AX tree the address field may be missed — AX context is still captured.
 - **Auto-matching on every new message** + `@skill` / `/skill` routing are pi-harness behaviors, not MCP. This server exposes `find_skill` for the agent to call; wiring it as an automatic pre-message hook is a pi extension follow-up.
-- Capture is macOS-only.
+- Screenshots are whole-display crops bounded by the front window's reported frame; multi-window or offscreen regions may be clipped. The agent is instructed to batch-read them via `analyze_image` before authoring a skill, mirroring Codex's vision-driven generalization.

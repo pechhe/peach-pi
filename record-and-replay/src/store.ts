@@ -44,6 +44,11 @@ export function recordingEventsPath(root: string, id: string): string {
   return join(recordingsDir(root), `${id}.events.ndjson`);
 }
 
+/** Directory holding screenshots captured during a recording. */
+export function shotsDir(root: string, id: string): string {
+  return join(recordingsDir(root), `${id}.shots`);
+}
+
 export function skillPath(root: string, name: string): string {
   return join(skillsDir(root), `${name}.md`);
 }
@@ -73,8 +78,8 @@ export function readEvents(root: string, id: string): string[] {
 }
 
 export function discardRecording(root: string, id: string): void {
-  for (const p of [recordingManifestPath(root, id), recordingEventsPath(root, id)]) {
-    if (existsSync(p)) rmSync(p, { force: true });
+  for (const p of [recordingManifestPath(root, id), recordingEventsPath(root, id), shotsDir(root, id)]) {
+    if (existsSync(p)) rmSync(p, { force: true, recursive: true });
   }
 }
 

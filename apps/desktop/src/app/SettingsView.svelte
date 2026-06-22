@@ -14,6 +14,7 @@
   } from "../lib/stream-reveal.svelte";
   import { api } from "../lib/ipc";
   import { Select } from "../components/ui/select";
+  import { Switch } from "../components/ui/switch";
   import DoneBurstPlayground from "./DoneBurstPlayground.svelte";
   import { autoCompact } from "../stores/auto-compact.svelte";
   import { caveman } from "../stores/caveman.svelte";
@@ -39,6 +40,7 @@
     retry: "retry on error network drop transient exponential backoff wait doubles",
     messageDelivery: "message delivery steering mode follow-up mode",
     extensions: "extensions auto update packages pi update periodic refresh",
+    insomnia: "insomnia sleep idle caffeinate prevent mac awake while running",
     about: "about peach-pi version",
     utilityModel: "utility model background tasks thread titles commit messages fast inexpensive",
     visionProxy:
@@ -214,6 +216,10 @@
     void piSettings.patch({ autoUpdateExtensions: !piSettings.autoUpdateExtensions });
   }
 
+  function toggleInsomnia() {
+    void piSettings.patch({ insomnia: !piSettings.insomnia });
+  }
+
   let updatingExtensions = $state(false);
   async function updateExtensionsNow() {
     if (updatingExtensions) return;
@@ -375,20 +381,12 @@
             <h2 class="text-sm text-fg">Sounds</h2>
             <p class="text-xs text-faint">Button clicks and the done chime.</p>
           </div>
-          <button
-            class="relative h-5 w-9 rounded-full transition-colors {muted ? 'bg-surface-3' : 'bg-success'}"
-            onclick={toggleSounds}
+          <Switch
+            checked={!muted}
+            onCheckedChange={toggleSounds}
             data-testid="sounds-toggle"
             aria-label="Toggle sounds"
-            role="switch"
-            aria-checked={!muted}
-          >
-            <span
-              class="absolute top-0.5 size-4 rounded-full bg-white transition-transform {muted
-                ? 'translate-x-0.5'
-                : 'translate-x-[1.1rem]'}"
-            ></span>
-          </button>
+          />
         </div>
       </section>
       {/if}
@@ -477,20 +475,12 @@
         <div class="mt-3 flex flex-col gap-3">
           <div class="flex items-center justify-between">
             <span class="text-xs text-fg">Enabled</span>
-            <button
-              class="relative h-5 w-9 rounded-full transition-colors {piSettings.retryEnabled ? 'bg-success' : 'bg-surface-3'}"
-              onclick={toggleRetryEnabled}
+            <Switch
+              checked={piSettings.retryEnabled}
+              onCheckedChange={toggleRetryEnabled}
               data-testid="retry-enabled-toggle"
               aria-label="Toggle retry"
-              role="switch"
-              aria-checked={piSettings.retryEnabled}
-            >
-              <span
-                class="absolute top-0.5 size-4 rounded-full bg-white transition-transform {piSettings.retryEnabled
-                  ? 'translate-x-[1.1rem]'
-                  : 'translate-x-0.5'}"
-              ></span>
-            </button>
+            />
           </div>
           <label class="flex items-center justify-between gap-4">
             <span class="text-xs text-fg">Retries</span>
@@ -584,20 +574,12 @@
         <div class="mt-3 flex flex-col gap-3">
           <div class="flex items-center justify-between">
             <span class="text-xs text-fg">Auto-update</span>
-            <button
-              class="relative h-5 w-9 rounded-full transition-colors {piSettings.autoUpdateExtensions ? 'bg-success' : 'bg-surface-3'}"
-              onclick={toggleAutoUpdateExtensions}
+            <Switch
+              checked={piSettings.autoUpdateExtensions}
+              onCheckedChange={toggleAutoUpdateExtensions}
               data-testid="auto-update-extensions-toggle"
               aria-label="Toggle extension auto-update"
-              role="switch"
-              aria-checked={piSettings.autoUpdateExtensions}
-            >
-              <span
-                class="absolute top-0.5 size-4 rounded-full bg-white transition-transform {piSettings.autoUpdateExtensions
-                  ? 'translate-x-[1.1rem]'
-                  : 'translate-x-0.5'}"
-              ></span>
-            </button>
+            />
           </div>
           <button
             class="self-start rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
@@ -607,6 +589,26 @@
           >
             {updatingExtensions ? "Updating…" : "Update now"}
           </button>
+        </div>
+      </section>
+      {/if}
+
+      {#if hit("insomnia")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-sm text-fg">Keep awake while running</h2>
+            <p class="text-xs text-faint">
+              Prevent macOS idle sleep while an agent run is active. Releases the
+              moment the run goes idle. Mac only.
+            </p>
+          </div>
+          <Switch
+            checked={piSettings.insomnia}
+            onCheckedChange={toggleInsomnia}
+            data-testid="insomnia-toggle"
+            aria-label="Toggle keep awake"
+          />
         </div>
       </section>
       {/if}
