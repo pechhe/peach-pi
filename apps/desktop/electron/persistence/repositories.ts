@@ -251,6 +251,18 @@ export class ThreadRepo {
       .run(status, new Date().toISOString(), id);
   }
 
+  /** At boot, any persisted `running` thread is a ghost — the pi process that
+   *  backed it died with the previous app session. Reap them to `failed` so
+   *  `hasActiveRuns` (which gates skill/extension deletes and `pi update`)
+   *  reflects live state rather than stale DB rows. Returns the reaped count
+   *  for logging. */
+  resetStaleRunning(): number {
+    const result = this.db
+      .prepare("UPDATE threads SET status = 'failed' WHERE status = 'running'")
+      .run();
+    return Number(result.changes);
+  }
+
   /** Clear the "finished, unseen" accent when a thread is opened. Leaves
    *  last_activity_at untouched so opening doesn't reorder the list. */
   markSeen(id: string): void {

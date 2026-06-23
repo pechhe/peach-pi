@@ -13,6 +13,7 @@ import type {
 } from "@peach-pi/shared-types";
 
 import type { Emit } from "../ipc/registry.ts";
+import { AsyncTtl, KeyedAsyncTtl } from "./ttl-cache.ts";
 
 /** Where the Composio API key lives — kept out of the repo and the renderer.
  *  `{ "composio": { "apiKey": "ak_…" } }` */
@@ -117,8 +118,20 @@ export class ConnectorService {
   /** toolkitSlug → display meta, populated from catalogue fetches so `list`
    *  can label connections without a round-trip per slug. */
   private meta = new Map<string, { name: string; logo: string | null }>();
+  // Re-opening the Connectors page re-fires these cloud reads; cache them so
+  // navigation is instant. Cleared on every connectorsChanged emit.
+  private listCache = new AsyncTtl<Connection[]>(60_000);
+  private catalogueCache = new KeyedAsyncTtl<ToolkitCatalogEntry[]>(60_000);
 
   constructor(private emit: Emit) {}
+
+  /** Emit the renderer-facing change event, dropping any stale caches first so
+   *  the reload it triggers re-fetches fresh. */
+  private changed(): void {
+    this.listCache.clear();
+    this.catalogueCache.clear();
+    this.emit("event:connectorsChanged", undefined);
+  }
 
   private client(): Composio {
     if (this.composio) return this.composio;
@@ -136,6 +149,10 @@ export class ConnectorService {
   /** Search the toolkit catalogue. The list endpoint has no text search, so we
    *  fetch a usage-ranked page and filter client-side. Empty query → top page. */
   async catalogue(query: string): Promise<ToolkitCatalogEntry[]> {
+    return this.catalogueCache.run(query.trim().toLowerCase(), () => this.fetchCatalogue(query));
+  }
+
+  private async fetchCatalogue(query: string): Promise<ToolkitCatalogEntry[]> {
     const c = this.client();
     const page = await c.toolkits.get({ sortBy: "usage", limit: 100 });
     const counts = new Map<string, number>();
@@ -189,8 +206,16 @@ export class ConnectorService {
   }
 
   async list(): Promise<Connection[]> {
+    return this.listCache.run(() => this.fetchList());
+  }
+
+  private async fetchList(): Promise<Connection[]> {
     const c = this.client();
     const res = await c.connectedAccounts.list({ userIds: [USER_ID] });
+    // connectedAccounts only carry the toolkit slug, so the logo comes from
+    // `meta`. Backfill any connected toolkit we haven't seen yet (e.g. not on
+    // the catalogue's top page) so its icon isn't stuck on the monogram.
+    await this.ensureMeta([...new Set(res.items.map((a) => a.toolkit.slug))]);
     return res.items.map((a) => {
       const m = this.meta.get(a.toolkit.slug);
       return {
@@ -228,7 +253,7 @@ export class ConnectorService {
     const config = AuthScheme.APIKey(fields as { generic_api_key?: string });
     const req = await c.connectedAccounts.initiate(USER_ID, authConfigId, { config });
     const acct = await req.waitForConnection();
-    this.emit("event:connectorsChanged", undefined);
+    this.changed();
     const m = this.meta.get(slug);
     return {
       id: acct.id,
@@ -243,7 +268,7 @@ export class ConnectorService {
 
   async disconnect(connectionId: string): Promise<void> {
     await this.client().connectedAccounts.delete(connectionId);
-    this.emit("event:connectorsChanged", undefined);
+    this.changed();
   }
 
   // ── agent-facing (proxied over the localhost ConnectorResolver) ────────────
@@ -262,6 +287,24 @@ export class ConnectorService {
     return this.client().tools.execute(slug, { userId: USER_ID, arguments: args });
   }
 
+  /** Populate `meta` (name + logo) for any slugs we don't already know, one
+   *  toolkit fetch each (in parallel). Cached for the process lifetime. */
+  private async ensureMeta(slugs: string[]): Promise<void> {
+    const missing = slugs.filter((s) => !this.meta.has(s));
+    if (missing.length === 0) return;
+    const c = this.client();
+    await Promise.all(
+      missing.map(async (slug) => {
+        try {
+          const tk = await c.toolkits.get(slug);
+          this.meta.set(slug, { name: tk.name, logo: tk.meta?.logo ?? null });
+        } catch {
+          // Leave unset — the renderer falls back to a monogram tile.
+        }
+      }),
+    );
+  }
+
   /** Resolve (or lazily create) a Composio-managed auth config for a toolkit. */
   private async authConfigFor(slug: string): Promise<string> {
     const cached = this.authConfigCache.get(slug);
@@ -278,11 +321,11 @@ export class ConnectorService {
   private pollUntilConnected(connectionRequestId: string): void {
     void this.client()
       .connectedAccounts.waitForConnection(connectionRequestId)
-      .then(() => this.emit("event:connectorsChanged", undefined))
+      .then(() => this.changed())
       .catch(() => {
         // INITIATED expires after ~10m, or the user denied consent. Either way
         // a refresh lets the renderer reflect the terminal state.
-        this.emit("event:connectorsChanged", undefined);
+        this.changed();
       });
   }
 }

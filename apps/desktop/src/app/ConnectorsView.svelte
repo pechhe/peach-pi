@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type {
+    AgentBrowserState,
     Connection,
     CuaDriverStatus,
     CustomConnection,
@@ -14,6 +15,7 @@
   import Search from "@lucide/svelte/icons/search";
 import Server from "@lucide/svelte/icons/server";
   import Monitor from "@lucide/svelte/icons/monitor";
+  import Globe from "@lucide/svelte/icons/globe";
   import Plus from "@lucide/svelte/icons/plus";
   import Link from "@lucide/svelte/icons/link";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -26,6 +28,7 @@ import Server from "@lucide/svelte/icons/server";
   let catalogue = $state<ToolkitCatalogEntry[]>([]);
   let mcpServers = $state<McpServer[]>([]);
   let cuaDriver = $state<CuaDriverStatus | null>(null);
+  let agentBrowser = $state<AgentBrowserState | null>(null);
   // Driver is usable only with both macOS permissions granted.
   const cuaNeedsPerms = $derived(
     !!cuaDriver?.installed &&
@@ -149,6 +152,15 @@ import Server from "@lucide/svelte/icons/server";
     cuaDriver = await api.invoke("cuaDriver:status");
   }
 
+  async function loadAgentBrowser() {
+    agentBrowser = await api.invoke("agentBrowser:state");
+  }
+
+  async function installAgentBrowser() {
+    await api.invoke("agentBrowser:install");
+    void loadAgentBrowser();
+  }
+
   async function grantCuaPermissions() {
     await api.invoke("cuaDriver:grantPermissions");
     // Grant is interactive; re-poll shortly so the badge reflects the result.
@@ -220,6 +232,7 @@ import Server from "@lucide/svelte/icons/server";
     void loadCustom();
     void loadMcp();
     void loadCuaDriver();
+    void loadAgentBrowser();
     return api.on("event:connectorsChanged", () => {
       void loadConnections();
       void loadCatalogue();
@@ -399,6 +412,27 @@ import Server from "@lucide/svelte/icons/server";
       {/if}
 
       <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">Computer use</p>
+      {#if agentBrowser}
+        <div
+          class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left"
+          data-testid="sidebar-agent-browser"
+        >
+          <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Globe size={12} /></span>
+          <span class="flex-1 truncate text-sm text-muted">Agent Browser</span>
+          {#if agentBrowser.installed}
+            <span class="rounded-full bg-bg px-1.5 text-[11px] text-emerald-500" title="Native agent_browser tool installed">ready</span>
+          {:else}
+            <span class="rounded-full bg-bg px-1.5 text-[11px] text-fainter">not installed</span>
+          {/if}
+        </div>
+        {#if !agentBrowser.installed}
+          <button
+            class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
+            onclick={installAgentBrowser}
+            data-testid="agent-browser-install"
+          ><Globe size={13} /> Install native browser tool</button>
+        {/if}
+      {/if}
       {#if cuaDriver}
         <div
           class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left"

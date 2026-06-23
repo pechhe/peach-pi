@@ -8,18 +8,20 @@
     | { type: "item"; item: TranscriptItem }
     | { type: "group"; id: string; items: ToolItem[] };
   import { transcripts } from "../stores/transcripts.svelte";
-  import { drafts } from "../stores/composer.svelte";
+  import { drafts, queues } from "../stores/composer.svelte";
   import { mapTurns } from "../lib/transcript/turns";
   import { playClick } from "../lib/sound/button-click-sound";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import Composer from "./Composer.svelte";
   import GitWidget from "./GitWidget.svelte";
+  import Tooltip from "./Tooltip.svelte";
   import DevTapWidget from "./DevTapWidget.svelte";
   import Workflow from "@lucide/svelte/icons/workflow";
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Circle from "@lucide/svelte/icons/circle";
+  import X from "@lucide/svelte/icons/x";
   import { parseSkillInvocation } from "../lib/composer/skill-message";
   import { skillViewer } from "../stores/skill-viewer.svelte";
   import Markdown from "./Markdown.svelte";
@@ -589,28 +591,31 @@
         <DevTapWidget {thread} {onSelectThread} />
       {/if}
       {#if thread.projectId}
-        <button
-          class="rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft"
-          onclick={onOpenGraph}
-          title="Project knowledge graph"
-          data-testid="graph-toggle"><Workflow size={14} /></button
-        >
+        <Tooltip text="Project knowledge graph">
+          <button
+            class="rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft"
+            onclick={onOpenGraph}
+            data-testid="graph-toggle"><Workflow size={14} /></button
+          >
+        </Tooltip>
       {/if}
-      <button
-        class="rounded px-2 py-0.5 text-faint hover:bg-surface hover:text-fg-soft"
-        onclick={() => api.invoke('app:openFolder', thread.id)}
-        title="Open folder in Finder"
-        data-testid="open-folder"
-      ><FolderOpen size={14} /></button
-      >
-      <button
-        class="rounded px-2 py-0.5 font-mono text-[11px] {terminal.visible
-          ? 'bg-surface-2 text-fg'
-          : 'text-faint hover:bg-surface hover:text-fg-soft'}"
-        onclick={() => terminal.toggle()}
-        title="Toggle terminal (⌃`)"
-        data-testid="terminal-toggle">&gt;_</button
-      >
+      <Tooltip text="Open in Finder">
+        <button
+          class="rounded px-2 py-0.5 text-faint hover:bg-surface hover:text-fg-soft"
+          onclick={() => api.invoke('app:openFolder', thread.id)}
+          data-testid="open-folder"
+        ><FolderOpen size={14} /></button
+        >
+      </Tooltip>
+      <Tooltip text="Terminal (⌃`)">
+        <button
+          class="rounded px-2 py-0.5 font-mono text-[11px] {terminal.visible
+            ? 'bg-surface-2 text-fg'
+            : 'text-faint hover:bg-surface hover:text-fg-soft'}"
+          onclick={() => terminal.toggle()}
+          data-testid="terminal-toggle">&gt;_</button
+        >
+      </Tooltip>
     </div>
     {/if}
   </header>
@@ -850,6 +855,23 @@
           <WorkingLabel label="Working…" />
         </div>
       {/if}
+      {#each queues.for(thread.id).steering as steerText, i ("steer-pending-" + i)}
+        <div class="item-enter flex max-w-[85%] flex-col gap-2 self-end" data-testid="pending-steer">
+          <div class="group/steer relative rounded-2xl rounded-br-md border border-dashed border-border-strong/60 bg-surface-2/40 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg-soft select-text">
+            {steerText}
+            <button
+              type="button"
+              class="absolute -top-2 -right-2 hidden size-5 items-center justify-center rounded-full border border-border-strong bg-surface text-muted group-hover/steer:flex hover:bg-danger hover:text-fg"
+              onclick={() => api.invoke("threads:deleteSteer", thread.id, i).catch(console.error)}
+              title="Cancel this steer"
+              aria-label="Cancel steering message"
+              data-testid="cancel-pending-steer"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        </div>
+      {/each}
     </div>
     </div>
     {#if scrolledUp && didInitialScroll}

@@ -3,6 +3,7 @@
   import type { BwsSecret, BwsStatus } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
+  import ConfirmDialog from "../components/ui/dialog/ConfirmDialog.svelte";
   import CopyButton from "./CopyButton.svelte";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
@@ -218,11 +219,25 @@
   }
 
   async function remove(s: BwsSecret) {
-    if (!confirm(`Delete secret “${s.key}”? This cannot be undone.`)) return;
+    confirmRemove(s);
+  }
+
+  // Confirm-delete dialog (Bits UI AlertDialog).
+  let deleteOpen = $state(false);
+  let deleteTarget = $state<BwsSecret | null>(null);
+
+  function confirmRemove(s: BwsSecret) {
+    deleteTarget = s;
+    deleteOpen = true;
+  }
+
+  async function executeDelete() {
+    if (!deleteTarget) return;
     busy = true;
     error = "";
     try {
-      await api.invoke("bws:deleteSecret", s.id);
+      await api.invoke("bws:deleteSecret", deleteTarget.id);
+      deleteTarget = null;
       await loadSecrets();
     } catch (e) {
       error = msg(e);
@@ -446,6 +461,17 @@
     {/if}
   </div>
 </main>
+
+<ConfirmDialog
+  bind:open={deleteOpen}
+  title="Delete secret?"
+  description={`Permanently deletes “${deleteTarget?.key ?? ""}” from Secrets Manager. This cannot be undone.`}
+  confirmLabel="Delete"
+  cancelLabel="Cancel"
+  destructive
+  error={error}
+  onConfirm={() => void executeDelete()}
+/>
 
 {#snippet fields()}
   <label class="flex flex-col gap-1">

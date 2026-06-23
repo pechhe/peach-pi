@@ -682,53 +682,23 @@
     {/if}
 
     <!-- Queued messages shelf (Codex/Cursor-style chip rail) -->
-    {#if queue.steering.length > 0 || queue.followUp.length > 0}
-      {@const queueTotal = queue.steering.length + queue.followUp.length}
+    {#if queue.followUp.length > 0}
       <section
         class="qq"
         data-testid="queued-shelf"
         role="list"
-        aria-label={queue.steering.length > 0
-          ? `${queue.steering.length} steering, ${queue.followUp.length} queued`
-          : `${queueTotal} queued`}
+        aria-label={`${queue.followUp.length} queued`}
       >
         <header class="qq__head">
           <span class="qq__pulse" aria-hidden="true"></span>
           <span class="qq__head-label">Up next</span>
-          <span class="qq__count" aria-hidden="true">{queueTotal}</span>
+          <span class="qq__count" aria-hidden="true">{queue.followUp.length}</span>
           <span class="qq__head-hint" aria-hidden="true">
-            {#if queue.steering.length > 0}
-              <span class="qq__head-tag qq__head-tag--steer">{queue.steering.length} steer</span>
-            {/if}
-            {#if queue.followUp.length > 0}
-              <span class="qq__head-tag qq__head-tag--queue">{queue.followUp.length} queued</span>
-            {/if}
+            <span class="qq__head-tag qq__head-tag--queue">{queue.followUp.length} queued</span>
           </span>
         </header>
 
         <div class="qq__list">
-          {#if queue.steering.length > 0}
-            <div class="qq__group" role="group" aria-label="Steering messages">
-              <span class="qq__group-label">steer · this turn</span>
-              <div class="qq__items">
-                {#each queue.steering as t, i ("s-" + i)}
-                  <div class="qq-item qq-item--steer" role="listitem">
-                    <span class="qq-item__bar" aria-hidden="true"></span>
-                    <svg class="qq-item__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1.5 3.5 8.5H7l-1 6 6-8.5H9.5L9 1.5z" /></svg>
-                    <span class="qq-item__text" title={t}>{t}</span>
-                    <button
-                      class="qq-item__action qq-item__action--delete"
-                      onclick={() => api.invoke("threads:deleteSteer", thread.id, i).catch(console.error)}
-                      title="Remove"
-                      aria-label="Remove steering message"
-                      data-testid="delete-steer"
-                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg></button>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
-
           {#if queue.followUp.length > 0}
             <div class="qq__group" role="group" aria-label="Queued messages">
               <span class="qq__group-label">queue</span>
@@ -1058,10 +1028,6 @@
     font-weight: 500;
     letter-spacing: 0.02em;
   }
-  .qq__head-tag--steer {
-    color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  }
   .qq__head-tag--queue {
     color: var(--color-muted);
     background: color-mix(in srgb, var(--color-surface-3) 55%, transparent);
@@ -1080,9 +1046,6 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-  }
-  .qq__group + .qq__group {
-    margin-top: 4px;
   }
   .qq__group-label {
     font-size: 9.5px;
@@ -1112,16 +1075,6 @@
     animation: qq-slide 160ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  /* Steer variant — accent-tinted, left bar */
-  .qq-item--steer {
-    border-color: color-mix(in srgb, var(--color-accent) 38%, transparent);
-    background: color-mix(in srgb, var(--color-accent) 9%, var(--color-surface));
-    padding-left: 10px;
-  }
-  .qq-item--steer .qq-item__action--delete {
-    color: var(--color-accent);
-  }
-
   /* Queue variant — neutral */
   .qq-item--queue .qq-item__action--delete:hover {
     background: color-mix(in srgb, var(--color-danger) 22%, transparent);
@@ -1131,30 +1084,6 @@
     background: color-mix(in srgb, var(--color-accent) 22%, transparent);
     color: var(--color-accent);
   }
-  .qq-item--steer .qq-item__action--delete:hover {
-    background: color-mix(in srgb, var(--color-danger) 22%, transparent);
-    color: var(--color-danger);
-  }
-
-  /* Left accent bar (steer) */
-  .qq-item__bar {
-    position: absolute;
-    left: 3px;
-    top: 4px;
-    bottom: 4px;
-    width: 2px;
-    border-radius: 2px;
-    background: var(--color-accent);
-  }
-
-  /* Icon (steer) */
-  .qq-item__icon {
-    flex: none;
-    width: 13px;
-    height: 13px;
-    fill: var(--color-accent);
-  }
-
   /* Position badge (queue) */
   .qq-item__pos {
     flex: none;
@@ -1182,10 +1111,6 @@
     text-overflow: ellipsis;
     user-select: text;
   }
-  .qq-item--steer .qq-item__text {
-    color: var(--color-fg);
-  }
-
   /* Action buttons — subtle at rest, full on hover/focus */
   .qq-item__action {
     flex: none;

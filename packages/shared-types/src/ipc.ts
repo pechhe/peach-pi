@@ -6,6 +6,7 @@ import type {
   BwsSecretInput,
   BwsSecretPatch,
   BwsStatus,
+  AgentBrowserState,
   CavemanState,
   CommandInfo,
   CuaDriverStatus,
@@ -389,6 +390,11 @@ export const ipcContracts = {
     requireNonEmptyString(p, "filePath");
     if (!p.endsWith(".md")) throw new Error("filePath must be a .md file");
   }),
+  /** Delete a local skill's file/dir from disk (validated under a `skills`
+   *  directory). Returns { ok, error? }. */
+  "skills:delete": invoke<[targetPath: string], { ok: boolean; error?: string }>((p) =>
+    requireNonEmptyString(p, "targetPath"),
+  ),
 
   // files
   /** Read a local image file as base64; null if unreadable/unsupported. */
@@ -482,6 +488,15 @@ export const ipcContracts = {
   /** List configured MCP servers with cached tool counts. */
   "mcp:list": invoke<[], McpServer[]>(),
 
+  // Agent Browser (native web computer-use tool; see ADR-0008). The
+  // pi-agent-browser-native package exposes the native `agent_browser` tool,
+  // replacing brittle `agent-browser` shell commands. peach-pi ensures it is
+  // installed; the upstream `agent-browser` binary must be on PATH separately.
+  /** Current install state of the pi-agent-browser-native package. */
+  "agentBrowser:state": invoke<[], AgentBrowserState>(),
+  /** Install the pi-agent-browser-native package (idempotent). */
+  "agentBrowser:install": invoke<[], { ok: boolean; error?: string }>(),
+
   // Cua Driver (native background computer use; see ADR-0007). peach-pi
   // bundles CuaDriver.app, installs it + starts the daemon; the agent drives
   // it via the `cua-driver` CLI. These are status/permission affordances only.
@@ -566,6 +581,9 @@ export const ipcContracts = {
   "event:recordingState": event<RecordingState>(),
   /** bws auth/project/secret state changed — renderer re-reads status/secrets. */
   "event:bwsChanged": event<void>(),
+  /** Skills/extensions/prompts changed on disk (delete/uninstall). Renderer
+   *  re-runs `resources:inspect`. */
+  "event:resourcesChanged": event<void>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

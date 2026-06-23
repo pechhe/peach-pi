@@ -73,12 +73,26 @@ export async function inspectResources(cwd: string): Promise<ResourceInspection>
     merged.set(key, entry);
   }
 
+  // On-disk thing to delete for a local skill: the skill directory (when the
+  // file is SKILL.md) or the single .md file (loose file). Null for packaged
+  // skills (manage via `pi remove`) or anything not directly under `skills`.
+  const skillDeletePath = (s: (typeof skills)[number]): string | null => {
+    if (s.sourceInfo?.origin === "package") return null;
+    const target = path.basename(s.filePath) === "SKILL.md" ? s.baseDir : s.filePath;
+    const extDir = path.dirname(target);
+    if (path.basename(extDir) !== "skills") return null;
+    const rel = path.relative(extDir, target);
+    if (rel.startsWith("..") || path.isAbsolute(rel) || rel === "") return null;
+    return target;
+  };
+
   return {
     skills: skills.map((s) => ({
       name: s.name,
       description: s.description,
       filePath: s.filePath,
       source: s.sourceInfo?.scope ?? "unknown",
+      deletePath: skillDeletePath(s),
     })),
     extensions: [
       ...[...merged.values()].map((e) => ({

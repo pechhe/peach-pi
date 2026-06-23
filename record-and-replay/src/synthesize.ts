@@ -130,7 +130,7 @@ Rules:
 - ABSTRACT away literal coordinates/UI chrome into semantic actions ("open Google Sheets", "navigate to Hacker News", "copy the title of the top story"). Use the screenshot-grounded understanding of what each click was actually doing.
 - Prefer the most robust execution path, in this order, and note the chosen path per step:
   1. Programmatic (CLI, script, API, connector) — always best; no UI at all.
-  2. Web pages → the \`agent-browser\` CLI skill (DOM-aware, web-native).
+  2. Web pages → the native \`agent_browser\` tool (DOM-aware via CDP, web-native).
   3. Native desktop UI → the \`cua-driver\` CLI skill (background native computer use; for macOS apps, system dialogs, menu bar, anything with no web/API surface).
   Only fall back down the list when the path above has no clean route.
 - Capture triggers: natural-language phrases a user might say that should invoke this skill.

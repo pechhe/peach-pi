@@ -657,7 +657,7 @@
 /* Press the keycap down into its cavity (langlink DeviceButton recipe). */
 .composer-device .composer-mode:is(:active, .is-pressed):not(:disabled),
 .composer-device .caveman-selector__select:is(:active, .is-pressed):not(:disabled),
-.composer-device .model-selector__badge:is(:active, .is-pressed, [aria-expanded="true"]):not(:disabled),
+.composer-device .model-selector__badge:is(:active, .is-pressed):not(:disabled),
 .composer-device .new-thread__environment:is(:active, .is-pressed):not(:disabled) {
   transform: translateY(2px);
   box-shadow:
@@ -744,7 +744,7 @@
 /* Press the metal cap down into its socket. */
 .composer-device.composer-device--metal-keys .composer-mode:is(:active, .is-pressed, .composer-mode--plan):not(:disabled),
 .composer-device.composer-device--metal-keys .caveman-selector__select:is(:active, .is-pressed):not(:disabled),
-.composer-device.composer-device--metal-keys .model-selector__badge:is(:active, .is-pressed, [aria-expanded="true"]):not(:disabled),
+.composer-device.composer-device--metal-keys .model-selector__badge:is(:active, .is-pressed):not(:disabled),
 .composer-device.composer-device--metal-keys .new-thread__environment:is(:active, .is-pressed):not(:disabled) {
   transform: translateY(2px);
   box-shadow:
@@ -779,7 +779,7 @@
 
 :root.dark.composer-device.composer-device.composer-device--metal-keys .composer-mode:is(:active, .is-pressed, .composer-mode--plan):not(:disabled),
 :root.dark.composer-device.composer-device.composer-device--metal-keys .caveman-selector__select:is(:active, .is-pressed):not(:disabled),
-:root.dark.composer-device.composer-device.composer-device--metal-keys .model-selector__badge:is(:active, .is-pressed, [aria-expanded="true"]):not(:disabled),
+:root.dark.composer-device.composer-device.composer-device--metal-keys .model-selector__badge:is(:active, .is-pressed):not(:disabled),
 :root.dark.composer-device.composer-device.composer-device--metal-keys .new-thread__environment:is(:active, .is-pressed):not(:disabled) {
   transform: translateY(2px);
   box-shadow:
@@ -834,7 +834,7 @@
 
 :root.dark.composer-device.composer-device .composer-mode:is(:active, .is-pressed):not(:disabled),
 :root.dark.composer-device.composer-device .caveman-selector__select:is(:active, .is-pressed):not(:disabled),
-:root.dark.composer-device.composer-device .model-selector__badge:is(:active, .is-pressed, [aria-expanded="true"]):not(:disabled),
+:root.dark.composer-device.composer-device .model-selector__badge:is(:active, .is-pressed):not(:disabled),
 :root.dark.composer-device.composer-device .new-thread__environment:is(:active, .is-pressed):not(:disabled) {
   transform: translateY(2px);
   box-shadow:

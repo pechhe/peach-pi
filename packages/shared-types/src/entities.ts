@@ -352,6 +352,9 @@ export interface SkillInfo {
   filePath: string;
   /** "global" | "project" | package name etc. — human-readable origin. */
   source: string;
+  /** On-disk file/dir to delete for a skill whose file sits under a `skills`
+   *  directory. For packaged skills this is null (manage via `pi remove`). */
+  deletePath: string | null;
 }
 
 /** A loaded pi extension (or a load failure). */
@@ -685,6 +688,20 @@ export interface BwsStatus {
   projects: BwsProject[];
   /** Last error from the auth probe (e.g. invalid token), for display. */
   error: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent Browser (native web computer-use tool)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Read-only install state of the `pi-agent-browser-native` pi package, which
+ *  exposes the native `agent_browser` tool (ADR-0008). */
+export interface AgentBrowserState {
+  /** Whether `npm:pi-agent-browser-native` is in pi's `packages[]`. */
+  installed: boolean;
+  /** Upstream `agent-browser` engine version on PATH (the native tool is a
+   *  wrapper and shells out to it); null when the binary is missing. */
+  binaryVersion: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -47,6 +47,11 @@ export class AppService {
   }
 
   start(): void {
+    // Reap ghost `running` threads left by a prior crashed/quit session —
+    // their backing pi process is gone, so they must not keep gating skill /
+    // extension deletes or `pi update` (see resetStaleRunning).
+    const reaped = this.threads.resetStaleRunning();
+    if (reaped) console.warn(`[app] reaped ${reaped} stale running thread(s)`);
     // Auto-return snoozed threads to active (60s poll, utility).
     this.snoozeTimer = setInterval(() => this.wakeExpiredSnoozes(), 60_000);
     this.wakeExpiredSnoozes();

@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import type { CuaDriverStatus } from "@peach-pi/shared-types";
 
 import { parseDaemonRunning, parsePermission, parseVersion } from "./cua-driver-parse.ts";
+import { AsyncTtl } from "./ttl-cache.ts";
 
 export { parseDaemonRunning, parsePermission, parseVersion } from "./cua-driver-parse.ts";
 
@@ -32,6 +33,10 @@ const INSTALLED_APP = "/Applications/CuaDriver.app";
  * `cua-driver` CLI as taught by the skill.
  */
 export class CuaDriverService {
+  // status() spawns the CLI 3x; the Connectors page re-fires it on every
+  // mount. Cache so navigation is instant; cleared after a permission grant.
+  private statusCache = new AsyncTtl<CuaDriverStatus>(60_000);
+
   /** CuaDriver.app shipped inside the package (or repo build dir in dev). */
   private bundledApp(): string {
     return app.isPackaged
@@ -81,6 +86,10 @@ export class CuaDriverService {
   }
 
   async status(): Promise<CuaDriverStatus> {
+    return this.statusCache.run(() => this.fetchStatus());
+  }
+
+  private async fetchStatus(): Promise<CuaDriverStatus> {
     const installed = existsSync(this.activeApp());
     if (!installed) {
       return { installed: false, version: null, daemonRunning: false, accessibility: "unknown", screenRecording: "unknown" };
@@ -110,12 +119,20 @@ export class CuaDriverService {
     if (!existsSync(cli)) return;
     await this.startDaemon().catch(() => {});
     void execFileP(cli, ["doctor"]).catch(() => {});
+    // The view re-polls status shortly after; ensure that read is fresh.
+    this.statusCache.clear();
   }
 
-  /** Run the CLI, tolerating non-zero exit (status probes return info on stderr). */
-  private async run(bin: string, args: string[]): Promise<string> {
+  /** Run the CLI with a hard timeout, tolerating non-zero exit (status probes
+   *  return info on stderr). `check_permissions` can hang indefinitely while
+   *  macOS permission prompts are open, so the timeout keeps `status()`
+   *  responsive — a timeout surfaces as empty output → "unknown" perms. */
+  private async run(bin: string, args: string[], timeoutMs = 6000): Promise<string> {
     try {
-      const { stdout, stderr } = await execFileP(bin, args);
+      const { stdout, stderr } = await execFileP(bin, args, {
+        timeout: timeoutMs,
+        maxBuffer: 1 * 1024 * 1024,
+      });
       return `${stdout}${stderr}`;
     } catch (err) {
       const e = err as { stdout?: string; stderr?: string };
@@ -139,7 +156,7 @@ export class CuaDriverService {
 
 const SKILL_BODY = `---
 name: cua-driver
-description: Background native desktop computer-use via the Cua Driver. Use to control native macOS apps (Finder, Calculator, System Settings, Xcode, native dialogs, menu bar) and anything with no web/API/CLI path — click, type, read accessibility trees, capture window screenshots — all in the background without stealing the cursor or focus. NOT for web pages (use agent-browser). NOT when a programmatic path (CLI/API/connector) exists. This skill pairs with the cua_driver_* toolset registered by the peach-cua-driver extension.
+description: Background native desktop computer-use via the Cua Driver. Use to control native macOS apps (Finder, Calculator, System Settings, Xcode, native dialogs, menu bar) and anything with no web/API/CLI path — click, type, read accessibility trees, capture window screenshots — all in the background without stealing the cursor or focus. NOT for web pages (use the agent_browser tool). NOT when a programmatic path (CLI/API/connector) exists. This skill pairs with the cua_driver_* toolset registered by the peach-cua-driver extension.
 ---
 <!-- AUTO-INSTALLED by peach-pi (cua-driver-skill v${SKILL_VERSION}). Source: apps/desktop/electron/services/cua-driver-service.ts -->
 
@@ -162,7 +179,7 @@ The tools available are:
 ## When to use this vs other tools
 
 1. **Programmatic first** — if a CLI, script, API, or connector can do the job, use that. Never drive UI for something with a clean API.
-2. **Web pages → agent-browser** — for websites/web apps (DOM, forms, scraping), use the \`agent-browser\` skill. It is faster and web-native.
+2. **Web pages → the native \`agent_browser\` tool** — for websites/web apps (DOM, forms, scraping). Faster and web-native.
 3. **Native UI → cua-driver (this skill)** — native macOS apps, system dialogs, permission popups, menu bar, anything with no web/API surface.
 
 Only fall back down the list when the path above has no clean route.

@@ -21,6 +21,7 @@ import type {
 } from "@peach-pi/shared-types";
 
 import type { Emit } from "../ipc/registry.ts";
+import { AsyncTtl, KeyedAsyncTtl } from "./ttl-cache.ts";
 
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 60_000;
@@ -118,11 +119,28 @@ interface RawProject {
  * IPC — the BWS view displays and edits them.
  */
 export class BwsService {
+  // Re-opening the Secrets page re-fires status() (CLI spawn + cloud list) and
+  // listSecrets() (cloud list); cache them so navigation is instant. Cleared on
+  // every bwsChanged emit so mutations re-read fresh.
+  private statusCache = new AsyncTtl<BwsStatus>(20_000);
+  private secretsCache = new KeyedAsyncTtl<BwsSecret[]>(20_000);
+
   constructor(private emit: Emit) {}
+
+  /** Emit the renderer-facing change event, dropping stale caches first. */
+  private changed(): void {
+    this.statusCache.clear();
+    this.secretsCache.clear();
+    this.emit("event:bwsChanged", undefined);
+  }
 
   // ── auth + project + status ────────────────────────────────────────────────
 
   async status(): Promise<BwsStatus> {
+    return this.statusCache.run(() => this.fetchStatus());
+  }
+
+  private async fetchStatus(): Promise<BwsStatus> {
     const bin = findBwsBin();
     const installed = bin !== null;
     let version: string | null = null;
@@ -178,7 +196,7 @@ export class BwsService {
     if (trimmed) cfg.accessToken = trimmed;
     else delete cfg.accessToken;
     writeConfig(cfg);
-    this.emit("event:bwsChanged", undefined);
+    this.changed();
     return this.status();
   }
 
@@ -186,7 +204,7 @@ export class BwsService {
     const cfg = readConfig();
     delete cfg.accessToken;
     writeConfig(cfg);
-    this.emit("event:bwsChanged", undefined);
+    this.changed();
     return this.status();
   }
 
@@ -194,7 +212,7 @@ export class BwsService {
     const cfg = readConfig();
     cfg.projectId = projectId;
     writeConfig(cfg);
-    this.emit("event:bwsChanged", undefined);
+    this.changed();
     return this.status();
   }
 
@@ -210,17 +228,19 @@ export class BwsService {
   }
 
   async listSecrets(projectId?: string | null): Promise<BwsSecret[]> {
-    const args = ["secret", "list"];
-    if (projectId) args.push(projectId);
-    const raw = await this.runJson<RawSecret[]>(args);
-    return (raw ?? []).map(toSecret);
+    return this.secretsCache.run(projectId ?? "", async () => {
+      const args = ["secret", "list"];
+      if (projectId) args.push(projectId);
+      const raw = await this.runJson<RawSecret[]>(args);
+      return (raw ?? []).map(toSecret);
+    });
   }
 
   async createSecret(input: BwsSecretInput): Promise<BwsSecret> {
     const args = ["secret", "create", input.key, input.value, input.projectId];
     if (input.note) args.push("--note", input.note);
     const raw = await this.runJson<RawSecret>(args);
-    this.emit("event:bwsChanged", undefined);
+    this.changed();
     return toSecret(raw);
   }
 
@@ -231,13 +251,13 @@ export class BwsService {
     if (patch.note !== undefined) args.push("--note", patch.note);
     if (patch.projectId !== undefined) args.push("--project-id", patch.projectId);
     const raw = await this.runJson<RawSecret>(args);
-    this.emit("event:bwsChanged", undefined);
+    this.changed();
     return toSecret(raw);
   }
 
   async deleteSecret(secretId: string): Promise<void> {
     await this.run(["secret", "delete", secretId]);
-    this.emit("event:bwsChanged", undefined);
+    this.changed();
   }
 
   // ── install ──────────────────────────────────────────────────────────────────
@@ -280,7 +300,7 @@ export class BwsService {
       chmodSync(INSTALL_PATH, 0o755);
       rmSync(work, { recursive: true, force: true });
 
-      this.emit("event:bwsChanged", undefined);
+      this.changed();
       return { ok: true };
     } catch (e) {
       return { ok: false, error: errMessage(e) };

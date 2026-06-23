@@ -64,8 +64,6 @@
       type="button"
       class="flex shrink-0 items-center gap-1 rounded-full border border-border-strong bg-surface px-2 py-0.5 text-[10px] text-muted hover:text-fg-soft"
       onclick={showStatus}
-      title={`DevTap installed${status.tapPath ? `: ${status.tapPath}` : ""}` +
-        (status.extensionInstalled ? "" : "\nReader extension missing (~/.pi/agent/extensions/devtap)")}
       data-testid="devtap-installed"
     >
       <Activity size={11} /> DevTap ✓
@@ -76,7 +74,6 @@
       class="flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft disabled:opacity-50"
       onclick={install}
       disabled={installing}
-      title="DevTap runtime tap not installed in this project — click to install"
       data-testid="devtap-install"
     >
       <Activity size={12} />

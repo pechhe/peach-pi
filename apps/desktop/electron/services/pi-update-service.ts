@@ -89,6 +89,7 @@ export class PiUpdateService {
         maxBuffer: 8 * 1024 * 1024,
       });
       this.emit("event:notice", { message: `Removed ${spec}. Restart to unload.`, level: "info" });
+      this.emit("event:resourcesChanged", undefined);
       return { ok: true };
     } catch (err) {
       const stderr = (err as { stderr?: string }).stderr;
@@ -129,6 +130,46 @@ export class PiUpdateService {
         message: `Deleted ${path.basename(real)}. Restart to unload.`,
         level: "info",
       });
+      this.emit("event:resourcesChanged", undefined);
+      return { ok: true };
+    } catch (err) {
+      const error = String(err);
+      this.emit("event:notice", { message: `Delete failed: ${error}`, level: "error" });
+      return { ok: false, error };
+    }
+  }
+
+  /**
+   * Delete a local skill's file/dir from disk. Validates the target's parent
+   * sits directly inside a real `skills` directory (global or project-local)
+   * so a compromised renderer can't ask us to rm an arbitrary path.
+   */
+  async deleteSkill(targetPath: string): Promise<{ ok: boolean; error?: string }> {
+    if (this.hasActiveRuns()) {
+      return { ok: false, error: "A run is active — try again when idle." };
+    }
+    if (!existsSync(targetPath)) return { ok: false, error: "Path no longer exists." };
+    let real: string;
+    try {
+      real = realpathSync(targetPath);
+    } catch {
+      return { ok: false, error: "Could not resolve path." };
+    }
+    const parent = path.dirname(real);
+    if (path.basename(parent) !== "skills") {
+      return { ok: false, error: "Refusing to delete: not a local skill." };
+    }
+    const allowedRoots = [homedir() + path.sep, ...this.getProjectRoots().map((r) => r + path.sep)];
+    if (!allowedRoots.some((root) => real.startsWith(root))) {
+      return { ok: false, error: "Refusing to delete: path outside known skill dirs." };
+    }
+    try {
+      await rm(real, { recursive: true, force: true });
+      this.emit("event:notice", {
+        message: `Deleted ${path.basename(real)}. Restart to unload.`,
+        level: "info",
+      });
+      this.emit("event:resourcesChanged", undefined);
       return { ok: true };
     } catch (err) {
       const error = String(err);

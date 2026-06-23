@@ -10,7 +10,7 @@ A [pi](https://github.com/earendil-works/pi-coding-agent) MCP tool server that r
 2. **Stop → synthesize** — `stop_recording` persists the event stream and returns a compact **digest** + a synthesis system prompt. The running pi agent (your current model) authors the `skill.md` itself — no separate API key.
 3. **Store** — generated skills land in `~/.pi/agent/skills/recorded/`, where pi's skill loader discovers them automatically.
 4. **Match** — `find_skill(message)` ranks saved skills against a new user message (TF-IDF cosine over `description` + `triggers`, plus exact-keyword boost) and returns the best match above a confidence threshold.
-5. **Execute** — `load_skill(name)` injects the skill's steps into the agent as instructions. The skill is a *description of intent*: the agent picks the most robust execution path, in order — (1) programmatic (scripts, APIs, connectors), then (2) web pages via the `agent-browser` CLI skill, then (3) native desktop UI via the `cua-driver` CLI skill (background native computer use). It only falls back down the list when the path above has no clean route.
+5. **Execute** — `load_skill(name)` injects the skill's steps into the agent as instructions. The skill is a *description of intent*: the agent picks the most robust execution path, in order — (1) programmatic (scripts, APIs, connectors), then (2) web pages via the native `agent_browser` tool, then (3) native desktop UI via the `cua-driver` CLI skill (background native computer use). It only falls back down the list when the path above has no clean route.
 
 ## Requirements
 

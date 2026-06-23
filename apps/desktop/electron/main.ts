@@ -36,9 +36,11 @@ import { BwsService } from "./services/bws-service.ts";
 import { CustomConnectionService } from "./services/custom-connection-service.ts";
 import { McpService } from "./services/mcp-service.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
+import { AgentBrowserService } from "./services/agent-browser-service.ts";
 import { ConnectorResolver } from "./services/connector-resolver.ts";
 import { ensureConnectorExtension } from "./services/connector-extension.ts";
 import { ensureCuaDriverExtension } from "./services/cua-driver-extension.ts";
+import { ensurePeachVisionConsentExtension } from "./services/peach-vision-consent-extension.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import {
   createHudWindow,
@@ -190,9 +192,18 @@ async function boot(): Promise<void> {
   const customConnectionService = new CustomConnectionService(emit);
   const mcpService = new McpService();
   const cuaDriverService = new CuaDriverService();
+  const agentBrowserService = new AgentBrowserService();
   // Install CuaDriver.app + start its background daemon + install the agent
   // skill. Best-effort; never blocks boot (see ADR-0007).
   void cuaDriverService.init();
+  // Ensure the pi-agent-browser-native package is installed so pi exposes the
+  // native `agent_browser` tool (ADR-0008). Idempotent; background; never
+  // blocks boot.
+  void (async () => {
+    if (!(await agentBrowserService.state()).installed) {
+      await agentBrowserService.install((channel, payload) => emit(channel, payload));
+    }
+  })();
 
   // Localhost bridge so a pi extension (in the terminal, no IPC access) can
   // reach Composio through the main process. Started after ready; stopped on quit.
@@ -204,6 +215,10 @@ async function boot(): Promise<void> {
   // Install the cua-driver toolset extension (cua_driver_* tools driving the
   // bundled native driver — ADR-0007). Idempotent; rewrites on bump.
   void ensureCuaDriverExtension();
+  // Make the pi-vision-proxy data-egress consent prompt fire at most once
+  // per 24h per provider (peach-owned extension; survives vision-proxy
+  // reinstalls/upgrades). Idempotent; rewrites on bump.
+  void ensurePeachVisionConsentExtension();
 
   async function pickProject() {
     const result = await dialog.showOpenDialog({
@@ -239,6 +254,7 @@ async function boot(): Promise<void> {
     "app:updateExtensions": () => piUpdateService.updateNow(),
     "extensions:remove": (spec) => piUpdateService.removeExtension(spec),
     "extensions:deleteLocal": (p) => piUpdateService.deleteLocalExtension(p),
+    "skills:delete": (p) => piUpdateService.deleteSkill(p),
     "app:getPiHealth": () => computePiHealth(__dirname),
     "connectors:catalogue": (query) => connectorService.catalogue(query),
     "connectors:toolkit": (slug) => connectorService.toolkit(slug),
@@ -264,6 +280,8 @@ async function boot(): Promise<void> {
     "mcp:list": () => mcpService.list(),
     "cuaDriver:status": () => cuaDriverService.status(),
     "cuaDriver:grantPermissions": () => cuaDriverService.grantPermissions(),
+    "agentBrowser:state": () => agentBrowserService.state(),
+    "agentBrowser:install": () => agentBrowserService.install((channel, payload) => emit(channel, payload)),
     "customConnections:create": (input) => customConnectionService.create(input),
     "customConnections:delete": (id) => customConnectionService.delete(id),
     "devtap:report": (entry) =>

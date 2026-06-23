@@ -91,6 +91,27 @@ test("expired snoozes auto-clear and are returned", () => {
   assert.equal(threads.get("t1")!.wokeFromSnoozeAt, undefined);
 });
 
+test("resetStaleRunning reaps ghost running threads to failed", () => {
+  const db = memoryDb();
+  const threads = new ThreadRepo(db);
+  const now = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO threads (id, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?)",
+  ).run("ghost", "crashed mid-run", "running", now, now);
+  db.prepare(
+    "INSERT INTO threads (id, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?)",
+  ).run("live", "actually running", "running", now, now);
+  db.prepare(
+    "INSERT INTO threads (id, title, status, created_at, last_activity_at) VALUES (?,?,?,?,?)",
+  ).run("done", "finished", "completed", now, now);
+
+  const reaped = threads.resetStaleRunning();
+  assert.equal(reaped, 2); // both running rows, regardless of truth
+  assert.equal(threads.get("ghost")!.status, "failed");
+  assert.equal(threads.get("live")!.status, "failed");
+  assert.equal(threads.get("done")!.status, "completed");
+});
+
 test("kv json round-trip", () => {
   const kv = new KvRepo(memoryDb());
   kv.set("ui", { sidebarWidth: 300 });

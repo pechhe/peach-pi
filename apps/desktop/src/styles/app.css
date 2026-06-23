@@ -547,7 +547,11 @@ details[open] > *:not(summary) {
  * above the indicators; their own backgrounds stay transparent. */
 .sidebar-moving-highlight {
   position: relative;
-  isolation: isolate;
+  /* No isolation: each section is a separate MovingHighlight in tree order.
+     Without isolate, the rows (forced z-index:1 below, z-index:30 when its
+     snooze picker is open) all compete in one shared stacking context, so
+     an open picker can overlay the next section instead of being trapped
+     under it. */
 }
 
 .sidebar-moving-highlight__indicator {
@@ -586,11 +590,10 @@ details[open] > *:not(summary) {
 }
 
 .pp-tooltip__pop {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 50;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
   white-space: nowrap;
   pointer-events: none;
   border-radius: 6px;
@@ -609,11 +612,11 @@ details[open] > *:not(summary) {
 @keyframes pp-tooltip-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(2px);
+    transform: translateY(2px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
 }
 

@@ -5,6 +5,7 @@
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { playButtonSecondary, playRotary } from "../lib/sound/button-click-sound";
   import SnoozePicker from "./SnoozePicker.svelte";
+  import SnoozedPopover from "./SnoozedPopover.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import MovingHighlight from "./MovingHighlight.svelte";
   import Tooltip from "./Tooltip.svelte";
@@ -34,6 +35,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { TAG_META } from "../lib/tag-meta";
+  import ConfirmDialog from "../components/ui/dialog/ConfirmDialog.svelte";
 
   let {
     width = 280,
@@ -69,6 +71,8 @@
 
   let expanded = $state<Record<string, boolean>>({});
   let snoozePickerFor = $state<string | null>(null);
+  let snoozedPopoverFor = $state<string | null>(null);
+  let snoozeAnchor: HTMLElement | null = $state(null);
   let doneAnimFor = $state<string | null>(null);
 
   // ⌘⇧↑/↓ traversal: while the modifiers are held the highlight "hovers"
@@ -269,12 +273,18 @@
     onNewWorktree(projectId);
   }
 
+  let pendingArchiveWorktree = $state<Worktree | null>(null);
+  let archiveDialogOpen = $state(false);
   function archiveWorktree(worktree: Worktree) {
-    if (
-      !confirm(`Archive worktree “${worktree.name}”? All its threads will be archived and the checkout removed.`)
-    )
-      return;
+    pendingArchiveWorktree = worktree;
+    archiveDialogOpen = true;
+  }
+  function confirmArchiveWorktree() {
+    const worktree = pendingArchiveWorktree;
+    if (!worktree) return;
     void api.invoke("worktrees:archive", worktree.id);
+    pendingArchiveWorktree = null;
+    archiveDialogOpen = false;
   }
 
   function newChat() {
@@ -331,12 +341,10 @@
     });
   }
 
-  function snoozeTimeLeft(until: string): string {
-    const ms = new Date(until).getTime() - Date.now();
-    if (ms <= 0) return "soon";
-    const h = Math.floor(ms / 3_600_000);
-    return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${Math.max(1, h)}h`;
-  }
+  const pendingArchiveWorktreeName = $derived(pendingArchiveWorktree?.name ?? "");
+  const archiveWorktreeDescription = $derived(
+    `“${pendingArchiveWorktreeName}” and all its threads will be archived, and the checkout removed.`,
+  );
 </script>
 
 {#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived")}
@@ -388,9 +396,7 @@
             : thread.status === 'completed' && !isActive
               ? 'text-accent'
               : ''}">{thread.title}</span>
-      {#if variant === "snoozed" && thread.snoozedUntil}
-        <span class="ml-auto shrink-0 text-[10px] text-fainter">{snoozeTimeLeft(thread.snoozedUntil)}</span>
-      {:else if thread.status === "running"}
+      {#if thread.status === "running"}
         <BrailleSpinner class="session-spinner ml-auto mr-1 shrink-0" title="Thinking…" />
       {:else if variant === "active"}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{relativeTime(thread.lastActivityAt, now)}</span>
@@ -402,7 +408,10 @@
           <button
             class="rounded p-1 text-faint hover:text-fg"
             data-snooze-toggle
-            onclick={() => (snoozePickerFor = snoozePickerFor === thread.id ? null : thread.id)}
+            onclick={(e) => {
+              snoozePickerFor = snoozePickerFor === thread.id ? null : thread.id;
+              snoozeAnchor = snoozePickerFor ? e.currentTarget : null;
+            }}
           ><Clock size={14} /></button>
         </Tooltip>
         <Tooltip text="Mark to test">
@@ -417,12 +426,6 @@
             onclick={() => archiveThread(thread)}
           ><Check size={14} /></button>
         </Tooltip>
-      {:else if variant === "snoozed"}
-        <button
-          class="rounded p-1 text-faint hover:text-fg"
-          title="Unsnooze"
-          onclick={() => api.invoke("threads:unsnooze", thread.id)}
-        ><AlarmClock size={14} /></button>
       {:else if variant === "toTest"}
         <button
           class="rounded p-1 text-faint hover:text-fg"
@@ -444,11 +447,16 @@
     </div>
     {#if snoozePickerFor === thread.id}
       <SnoozePicker
+        anchor={snoozeAnchor}
         onPick={(until) => {
           snoozePickerFor = null;
+          snoozeAnchor = null;
           snoozeThread(thread, until);
         }}
-        onClose={() => (snoozePickerFor = null)}
+        onClose={() => {
+          snoozePickerFor = null;
+          snoozeAnchor = null;
+        }}
       />
     {/if}
   </div>
@@ -464,33 +472,23 @@
       {#if expanded[key]}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
       {label} · {list.length}
     </button>
-    {#if doneAutos}
-      <div
-        class="done-panel"
-        class:done-panel--open={expanded[key]}
-        class:done-panel--animated={!reduceMotion}
-        onpointerenter={() => expanded[key] && clearDoneHide(key)}
-        onpointerleave={() => expanded[key] && startDoneHide(key)}
-      >
-        <div class="done-panel__inner">
-          {#if expanded[key]}
-            <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
-              {#each list as thread (thread.id)}
-                {@render threadRow(thread, variant)}
-              {/each}
-            </MovingHighlight>
-          {/if}
-        </div>
+    <div
+      class="done-panel"
+      class:done-panel--open={expanded[key]}
+      class:done-panel--animated={!reduceMotion}
+      onpointerenter={() => doneAutos && expanded[key] && clearDoneHide(key)}
+      onpointerleave={() => doneAutos && expanded[key] && startDoneHide(key)}
+    >
+      <div class="done-panel__inner">
+        {#if expanded[key]}
+          <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
+            {#each list as thread (thread.id)}
+              {@render threadRow(thread, variant)}
+            {/each}
+          </MovingHighlight>
+        {/if}
       </div>
-    {:else}
-      {#if expanded[key]}
-        <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active">
-          {#each list as thread (thread.id)}
-            {@render threadRow(thread, variant)}
-          {/each}
-        </MovingHighlight>
-      {/if}
-    {/if}
+    </div>
   {/if}
 {/snippet}
 
@@ -586,12 +584,13 @@
   <!-- Projects -->
   <div class="flex items-center justify-between px-4 pt-2 pb-1.5">
     <span class="text-xs font-semibold tracking-wide text-faint uppercase">Projects</span>
-    <button
-      class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
-      onclick={() => api.invoke("projects:pick")}
-      data-testid="add-project"
-      title="Add project"><Plus size={15} /></button
-    >
+    <Tooltip text="Add project">
+      <button
+        class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
+        onclick={() => api.invoke("projects:pick")}
+        data-testid="add-project"><Plus size={15} /></button
+      >
+    </Tooltip>
   </div>
   <nav class="min-h-0 flex-1 overflow-y-auto px-3 pb-2" style="scrollbar-gutter: stable">
     {#each byProject as group (group.project.id)}
@@ -632,39 +631,74 @@
             {/if}
           </button>
           <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
-            <button
-              class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
-              onclick={() => newThread(group.project.id)}
-              data-testid="new-thread"
-              title="Add thread to master"
-              aria-label="Add thread"><Plus size={14} /></button
-            >
-            <button
-              class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
-              onclick={() => newWorktree(group.project.id)}
-              data-testid="new-worktree-thread"
-              title="New worktree (isolated checkout)"><GitBranchPlus size={14} /></button
-            >
-            <button
-              class="rounded p-1 text-faint hover:bg-surface-2 hover:text-danger"
-              onclick={() => removeProject(group.project)}
-              data-testid="remove-project"
-              title="Remove project"
-              aria-label="Remove project"><Trash2 size={14} /></button
-            >
+            <Tooltip text="Add thread to master">
+              <button
+                class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
+                onclick={() => newThread(group.project.id)}
+                data-testid="new-thread"
+                aria-label="Add thread"><Plus size={14} /></button
+              >
+            </Tooltip>
+            <Tooltip text="New worktree (isolated checkout)">
+              <button
+                class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
+                onclick={() => newWorktree(group.project.id)}
+                data-testid="new-worktree-thread"><GitBranchPlus size={14} /></button
+              >
+            </Tooltip>
+            <Tooltip text="Remove project">
+              <button
+                class="rounded p-1 text-faint hover:bg-surface-2 hover:text-danger"
+                onclick={() => removeProject(group.project)}
+                data-testid="remove-project"
+                aria-label="Remove project"><Trash2 size={14} /></button
+              >
+            </Tooltip>
           </div>
-          {#if group.toTest.length > 0 && !isCollapsed(group.project.id)}
-            <button
-              class="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px]
-                {activeView === 'testing' ? 'text-accent' : 'text-faint hover:text-fg'}"
-              onclick={() => onOpenTesting(group.project.id)}
-              data-testid="project-to-test"
-              title="Open testing area"
-              aria-label="Open testing area"><Eye size={14} /><span>{group.toTest.length}</span></button
-            >
+          {#if group.snoozed.length > 0}
+            <div class="relative shrink-0">
+              <Tooltip text="Snoozed threads">
+                <button
+                  class="flex items-center gap-1 rounded px-1 py-0.5 text-[10px]
+                    {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : ''}
+                    {snoozedPopoverFor === group.project.id ? 'text-accent' : 'text-faint hover:text-fg'}"
+                  data-snooze-list-toggle
+                  onclick={() =>
+                    (snoozedPopoverFor =
+                      snoozedPopoverFor === group.project.id ? null : group.project.id)}
+                  data-testid="project-snoozed"
+                  aria-label="Snoozed threads"><Clock size={14} /><span>{group.snoozed.length}</span></button
+                >
+              </Tooltip>
+              {#if snoozedPopoverFor === group.project.id}
+                <SnoozedPopover
+                  threads={group.snoozed}
+                  onSelect={(id) => selectThread(id)}
+                  onUnsnooze={(id) => void api.invoke("threads:unsnooze", id)}
+                  onClose={() => (snoozedPopoverFor = null)}
+                />
+              {/if}
+            </div>
+          {/if}
+          {#if group.toTest.length > 0}
+            <Tooltip text="Open testing area">
+              <button
+                class="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px]
+                  {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : ''}
+                  {activeView === 'testing' ? 'text-accent' : 'text-faint hover:text-fg'}"
+                onclick={() => onOpenTesting(group.project.id)}
+                data-testid="project-to-test"
+                aria-label="Open testing area"><Eye size={14} /><span>{group.toTest.length}</span></button
+              >
+            </Tooltip>
           {/if}
         </div>
-        {#if !isCollapsed(group.project.id)}
+        <div
+          class="done-panel"
+          class:done-panel--open={!isCollapsed(group.project.id)}
+          class:done-panel--animated={!reduceMotion}
+        >
+          <div class="done-panel__inner--grow">
           <!-- Master (project main checkout). Only nest under a "Master"
                folder header when an active worktree exists; otherwise the
                project's main threads render flat (no extra nesting layer). -->
@@ -676,12 +710,13 @@
                   <span class="text-fainter">· {group.masterActive.length}</span>
                 {/if}
               </span>
-              <button
-                class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
-                onclick={() => newThread(group.project.id)}
-                title="Add thread to master"
-                aria-label="Add thread to master"><Plus size={12} /></button
-              >
+              <Tooltip text="Add thread to master">
+                <button
+                  class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
+                  onclick={() => newThread(group.project.id)}
+                  aria-label="Add thread to master"><Plus size={12} /></button
+                >
+              </Tooltip>
             </div>
           {/if}
           <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
@@ -702,18 +737,20 @@
                 {/if}
               </span>
               <div class="flex items-center gap-0.5 opacity-0 hover:opacity-100">
-                <button
-                  class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
-                  onclick={() => newThread(group.project.id, wg.worktree.id)}
-                  title="Add thread to worktree"
-                  aria-label="Add thread to worktree"><Plus size={12} /></button
-                >
-                <button
-                  class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-danger"
-                  onclick={() => archiveWorktree(wg.worktree)}
-                  title="Archive worktree and its threads"
-                  aria-label="Archive worktree"><Archive size={12} /></button
-                >
+                <Tooltip text="Add thread to worktree">
+                  <button
+                    class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
+                    onclick={() => newThread(group.project.id, wg.worktree.id)}
+                    aria-label="Add thread to worktree"><Plus size={12} /></button
+                  >
+                </Tooltip>
+                <Tooltip text="Archive worktree and its threads">
+                  <button
+                    class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-danger"
+                    onclick={() => archiveWorktree(wg.worktree)}
+                    aria-label="Archive worktree"><Archive size={12} /></button
+                  >
+                </Tooltip>
               </div>
             </div>
             <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
@@ -723,9 +760,9 @@
             </MovingHighlight>
           {/each}
 
-          {@render collapsible(`sn:${group.project.id}`, "Snoozed", group.snoozed, "snoozed")}
           {@render collapsible(`ar:${group.project.id}`, "Done", group.archived, "archived")}
-        {/if}
+          </div>
+        </div>
       </div>
     {:else}
       <p class="px-2 text-xs text-fainter">No projects yet. Add one with +.</p>
@@ -753,6 +790,15 @@
     </div>
   </div>
 </aside>
+
+<ConfirmDialog
+  bind:open={archiveDialogOpen}
+  title="Archive worktree"
+  description={archiveWorktreeDescription}
+  confirmLabel="Archive"
+  destructive
+  onConfirm={confirmArchiveWorktree}
+/>
 
 <style>
   /* ── worktree header: tinted to distinguish from master ───────── */
@@ -836,5 +882,17 @@
        lists scroll inside instead of inflating the panel to thousands of
        px (which made the open transition read as an instant flash). */
     max-height: 16rem;
+    /* Hide the scrollbar: during the 0fr↔1fr grid transition the animating
+       row is shorter than content, so a vertical scrollbar flashes in/out,
+       shifting right-aligned timestamps (snooze countdowns). Long lists
+       still scroll via wheel/trackpad; the parent nav shows its own bar. */
+    scrollbar-width: none;
+  }
+  .done-panel__inner::-webkit-scrollbar { display: none; }
+  /* Uncapped variant for the project body: threads live in the sidebar's
+     scroll container, so the panel must grow to fit (no nested scroll). */
+  .done-panel__inner--grow {
+    min-height: 0;
+    overflow: hidden;
   }
 </style>

@@ -5,6 +5,7 @@ import { theme } from "./lib/theme.svelte";
 import { streamReveal } from "./lib/stream-reveal.svelte";
 import { modelPrefs } from "./lib/model-prefs.svelte";
 import { initDevTapRenderer } from "./devtap-renderer.ts";
+import { suppressNativeTooltips } from "./lib/suppress-native-tooltips.ts";
 import "./styles/app.css";
 import "./styles/composer-device.css";
 import "./styles/composer-device-parts.css";
@@ -14,6 +15,8 @@ import "./styles/composer-device-dark.css";
 // DevTap renderer error capture (dev only; main drops events unless DEV_TAP=1).
 if (import.meta.env.DEV) initDevTapRenderer();
 
+// Hide OS/browser `title` popovers; the app renders its own tooltips.
+suppressNativeTooltips();
 // Apply the persisted theme before mount so there's no flash of the default.
 theme.init();
 streamReveal.init();

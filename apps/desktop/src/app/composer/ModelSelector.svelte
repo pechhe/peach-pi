@@ -346,4 +346,30 @@
     background: var(--accent-soft, rgba(0, 0, 0, 0.08));
     font-weight: 600;
   }
+
+  /* The global :focus-visible ring (app.css) paints a 2px outline with
+     outline-offset around these controls while the dropdown is open.
+     The offset paints outside the box and bleeds onto neighbours, which
+     also made the slider badge look like it shifted. Model-selector
+     controls signal focus via their own hover/active highlight instead. */
+  .model-selector__item:focus-visible,
+  .model-selector__view-tab:focus-visible,
+  .model-selector__show-hidden:focus-visible,
+  .model-selector__slider-label:focus-visible {
+    outline: none;
+  }
+  .model-selector__item:focus-visible {
+    background: var(--surface-muted);
+  }
+  .model-selector__view-tab:focus-visible {
+    background: var(--accent-soft, rgba(0, 0, 0, 0.08));
+    opacity: 1;
+  }
+  .model-selector__show-hidden:focus-visible {
+    background: var(--surface-muted);
+    color: var(--muted-strong);
+  }
+  .model-selector__slider-label:focus-visible {
+    filter: brightness(1.15);
+  }
 </style>

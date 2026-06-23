@@ -66,13 +66,14 @@
    dominates the window nor stretches too wide.
    Width chosen so the post-scale width matches the transcript column
    (max-w-3xl = 768px): 768 / 0.78 ≈ 985px. Wider frame + the footer-row's
-   space-evenly layout also gives the control keys more room to breathe. */
+   space-evenly layout also gives the control keys more room to breathe.
+   zoom (not transform: scale) is used so the scaled frame actually lays
+   out at its visual size — no empty 22% band left above the composer. */
 .composer-device .composer__frame {
   width: 985px;
   max-width: 100%;
   margin-inline: auto;
-  transform: scale(0.78);
-  transform-origin: bottom center;
+  zoom: 0.78;
 }
 
 /* ---------------- Chassis ---------------- */
