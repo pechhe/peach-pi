@@ -110,12 +110,71 @@ export type AppView =
   | "testing"
   | "agents"
   | "graph"
-  | "bws";
+  | "bws"
+  | "remote"
+  | "usage";
 
 /** Base64 image crossing the IPC boundary with a prompt. */
 export interface ImagePayload {
   mimeType: string;
   data: string;
+}
+
+// ── Remote session hosting (ADR-0009) ────────────────────────────────
+// The same app plays two roles: a master serves its sessions over the
+// tailnet (session tap + checkpoint branches), and a laptop attaches
+// read-only and pulls work into a worktree. v1 is observe-only.
+
+/** Host-side config for serving sessions. Off by default. */
+export interface RemoteHostConfig {
+  /** Serving enabled (off by default — never expose a session by accident). */
+  enabled: boolean;
+  /** Shared bearer token a client must present to attach. */
+  token: string;
+  /** Port to serve on (0 = random free port, remembered after first start). */
+  port: number;
+  /** Bind IP auto-resolved from the Tailscale interface; null when offline. */
+  bindIp: string | null;
+}
+
+/** A saved master the laptop can reach + attach to. */
+export interface RemoteHostConnection {
+  id: string;
+  /** Human label, e.g. "master-mac". */
+  name: string;
+  /** Tailnet hostname or IP (no scheme/port). */
+  host: string;
+  port: number;
+  /** Shared bearer token the master generated. */
+  token: string;
+}
+
+/** A session a master is serving (from GET /sessions). */
+export interface RemoteSessionInfo {
+  threadId: ThreadId;
+  title: string;
+  status: ThreadStatus;
+  /** Git origin URL of the session's repo, so the laptop can match a local
+   *  project to fetch checkpoint branches from. */
+  originUrl: string | null;
+  /** Latest checkpoint sha on `wip/<threadId>`, if any. */
+  lastCheckpointSha: string | null;
+  lastCheckpointAt: string | null;
+}
+
+/** A checkpoint snapshot the master recorded for a thread. */
+export interface RemoteCheckpoint {
+  threadId: ThreadId;
+  sha: string;
+  createdAt: string;
+  /** Whether it was pushed to origin. */
+  pushed: boolean;
+}
+
+/** Result of pulling a checkpoint into a worktree on the laptop. */
+export interface RemotePullResult {
+  worktreePath: string;
+  sha: string;
 }
 
 /** Where a slash-menu entry originates, for categorising the menu. */
@@ -828,4 +887,68 @@ export interface RecordingStopResult {
    *  forwards this to the chat thread that started the recording so the agent
    *  authors the skill inline, instead of the user asking manually. */
   synthesisPrompt: string;
+}
+
+// ── Usage tracking ───────────────────────────────────────────────────
+// Tracks provider spend/usage across subscription plans and pay-per-token
+// providers. Subscription providers (Anthropic, Z.ai) surface quota windows
+// (5h + weekly); pay-per-token providers (OpenRouter, NeuralWatt) surface a
+// $ balance / energy used. The same view shows both kinds side by side.
+
+/** A single rolling quota window a subscription plan enforces. */
+export interface UsageWindow {
+  /** Utilized percentage 0–100 (how much of the window is consumed). */
+  usedPct: number;
+  /** ISO 8601 timestamp the window resets at, or null when unknown. */
+  resetAt: string | null;
+}
+
+/** Subscription quota usage (e.g. Anthropic Claude plan, Z.ai coding plan). */
+export interface UsageQuotaSummary {
+  kind: "quota";
+  fiveHours: UsageWindow | null;
+  weekly: UsageWindow | null;
+}
+
+/** Pay-per-token balance / spend (e.g. OpenRouter credits, NeuralWatt $/energy). */
+export interface UsageBalanceSummary {
+  kind: "balance";
+  /** Remaining credit balance in USD, or null when the provider doesn't
+   *  report a dollar balance (e.g. NeuralWatt is energy-based). */
+  balanceUSD: number | null;
+  /** Spend in the current UTC day/week/month, where reported. */
+  spentDay: number | null;
+  spentWeek: number | null;
+  spentMonth: number | null;
+  /** Provider-specific extra metrics (e.g. NeuralWatt energy kWh/J +
+   *  request count) surfaced in the detail view. */
+  extra: UsageMetric[];
+}
+
+/** A single labelled metric (energy, requests, etc.) for the detail view. */
+export interface UsageMetric {
+  label: string;
+  /** Pre-formatted value string (e.g. "0.0234 kWh", "1,523 reqs"). */
+  value: string;
+}
+
+/** How the live usage fetch resolved, for renderer state display. */
+export type UsageFetchState = "ok" | "partial" | "unknown" | "unsupported";
+
+/** One provider's usage summary. The view lists one card per entry. */
+export interface ProviderUsageSummary {
+  /** Provider id, matching `models.json` providers key (or "anthropic"). */
+  provider: string;
+  /** Human-readable name (e.g. "Anthropic", "Z.ai", "OpenRouter"). */
+  label: string;
+  /** Whether this provider is configured with credentials to query. */
+  configured: boolean;
+  /** Quota windows (subscription) or balance/spend (pay-per-token). */
+  summary: UsageQuotaSummary | UsageBalanceSummary | null;
+  /** Live fetch resolution state. */
+  state: UsageFetchState;
+  /** Human-readable note when state isn't "ok" (e.g. auth/instructions). */
+  note: string | null;
+  /** ISO 8601 of the last successful fetch, or null if never fetched. */
+  fetchedAt: string | null;
 }

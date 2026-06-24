@@ -16,6 +16,7 @@
   import BellRing from "@lucide/svelte/icons/bell-ring";
   import Plug from "@lucide/svelte/icons/plug";
   import KeyRound from "@lucide/svelte/icons/key-round";
+  import Radio from "@lucide/svelte/icons/radio";
   import Bot from "@lucide/svelte/icons/bot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
@@ -579,6 +580,14 @@
         data-testid="nav-bws"
       >
         <span class="flex items-center gap-2.5"><KeyRound size={15} /> Secrets</span>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'remote' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("remote")}
+        data-testid="nav-remote"
+      >
+        <span class="flex items-center gap-2.5"><Radio size={15} /> Remote</span>
       </button>
     </MovingHighlight>
   </nav>

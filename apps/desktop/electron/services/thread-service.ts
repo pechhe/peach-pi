@@ -17,6 +17,7 @@ import type {
   ToolMode,
   TranscriptItem,
   TranscriptOp,
+  TranscriptDelta,
   TranscriptSnapshot,
 } from "@peach-pi/shared-types";
 import { isNewThread } from "@peach-pi/shared-types";
@@ -76,6 +77,10 @@ export class ThreadService {
   private gitService: GitService | null = null;
   /** In-memory rewind snapshots: threadId → (prior-turn entryId | "root") → sha. */
   private rewindSnapshots = new Map<string, Map<string, string>>();
+  /** Remote tap hooks (ADR-0009); set after construction. When set, each
+   *  transcript flush and run-idle is forwarded to the remote relay. */
+  private onTranscriptDelta?: (delta: TranscriptDelta) => void;
+  private onRunIdleWithCwd?: (threadId: string, cwd: string | null) => void;
 
   constructor(
     db: AppDb,
@@ -101,6 +106,15 @@ export class ThreadService {
   /** Wire the git boundary after construction (resolves service ordering). */
   setGitService(gitService: GitService): void {
     this.gitService = gitService;
+  }
+
+  /** Wire the remote relay tap (ADR-0009). Optional; a no-op when unset. */
+  setRemoteTap(hooks: {
+    onTranscriptDelta?: (delta: TranscriptDelta) => void;
+    onRunIdleWithCwd?: (threadId: string, cwd: string | null) => void;
+  }): void {
+    this.onTranscriptDelta = hooks.onTranscriptDelta;
+    this.onRunIdleWithCwd = hooks.onRunIdleWithCwd;
   }
 
   /** Snapshot the working tree before a turn runs, keyed by the prior turn's
@@ -596,6 +610,9 @@ export class ThreadService {
       const thread = this.threads.get(threadId);
       if (thread) this.onRunIdle(thread);
     }
+    if (status === "completed" && this.onRunIdleWithCwd) {
+      this.onRunIdleWithCwd(threadId, this.gitService?.cwdFor(threadId) ?? null);
+    }
   }
 
   private queueOps(threadId: string, ops: TranscriptOp[]): void {
@@ -616,7 +633,9 @@ export class ThreadService {
   private flush(): void {
     this.flushTimer = null;
     for (const [threadId, ops] of this.pendingOps) {
-      this.emit("event:transcript", { threadId, ops, seq: ++this.transcriptSeq });
+      const delta = { threadId, ops, seq: ++this.transcriptSeq };
+      this.emit("event:transcript", delta);
+      this.onTranscriptDelta?.(delta);
     }
     this.pendingOps.clear();
   }

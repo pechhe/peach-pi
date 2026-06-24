@@ -62,8 +62,13 @@ import type {
   ThreadSearchHit,
   ToolMode,
   Worktree,
+  RemoteHostConfig,
+  RemoteHostConnection,
+  RemoteSessionInfo,
+  RemotePullResult,
+  ProviderUsageSummary,
 } from "./entities.ts";
-import type { TranscriptDelta, TranscriptSnapshot } from "./transcript.ts";
+import type { RemoteTapFrame, TranscriptDelta, TranscriptSnapshot } from "./transcript.ts";
 
 /**
  * Typed IPC contract registry (pattern carried over from peche-pi's
@@ -587,6 +592,69 @@ export const ipcContracts = {
     requireNonEmptyString(p, "skillPath"),
   ),
 
+  // remote session hosting (ADR-0009). Two roles, same app:
+  //   - master serves its running session over the tailnet + checkpoints
+  //     working trees to disposable `wip/<threadId>` branches.
+  //   - laptop attaches read-only and pulls checkpoints into a worktree.
+  // Transport is plain HTTP + SSE (no `ws` dep); bound to the Tailscale
+  // interface only; shared bearer token; serving off by default.
+  /** Read the host serving config (token, port, enabled, resolved bind IP). */
+  "remote:hostStatus": invoke<[], RemoteHostConfig>(),
+  /** Toggle serving on/off. When turning on, generates a token if none exists
+   *  and resolves+binds the Tailscale interface. */
+  "remote:setHostEnabled": invoke<[enabled: boolean], RemoteHostConfig>(),
+  /** Regenerate the shared bearer token (invalidates attached clients). */
+  "remote:regenerateToken": invoke<[], RemoteHostConfig>(),
+  /** Add a thread to the served set (or remove it when already served). */
+  "remote:setThreadServed": invoke<[threadId: ThreadId, served: boolean], void>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
+  /** List the threads currently being served on this host. */
+  "remote:listServed": invoke<[], ThreadId[]>(),
+
+  /** List saved master connections (the laptop side). */
+  "remote:listHosts": invoke<[], RemoteHostConnection[]>(),
+  /** Add a master connection. */
+  "remote:addHost": invoke<[
+    input: { name: string; host: string; port: number; token: string },
+  ], RemoteHostConnection>((input) => {
+    requireNonEmptyString(input?.name, "name");
+    requireNonEmptyString(input?.host, "host");
+  }),
+  /** Delete a saved master connection. */
+  "remote:removeHost": invoke<[hostId: string], void>((id) =>
+    requireNonEmptyString(id, "hostId"),
+  ),
+  /** Fetch the served-session list from a master. */
+  "remote:listSessions": invoke<[hostId: string], RemoteSessionInfo[]>((id) =>
+    requireNonEmptyString(id, "hostId"),
+  ),
+  /** Attach to a served session (opens an SSE tap; frames via event:remoteTap). */
+  "remote:attach": invoke<[hostId: string, threadId: ThreadId], void>((id, tid) => {
+    requireNonEmptyString(id, "hostId");
+    requireNonEmptyString(tid, "threadId");
+  }),
+  /** Detach from a session tap. */
+  "remote:detach": invoke<[], void>(),
+  /** Fetch a checkpoint branch from a master's origin into a local worktree.
+   *  Matches the session's origin URL to a local project, fetches
+   *  `wip/<threadId>`, and checks it out into an isolated worktree. */
+  "remote:pullToTest": invoke<[hostId: string, threadId: ThreadId], RemotePullResult>(
+    (id, tid) => {
+      requireNonEmptyString(id, "hostId");
+      requireNonEmptyString(tid, "threadId");
+    },
+  ),
+
+  // usage tracking — provider spend (pay-per-token) and subscription quota
+  // windows across OpenRouter, NeuralWatt, Z.ai, and Anthropic. Main process
+  // fetches live status from each provider; raw API keys never reach the
+  // renderer. Refreshed on demand and on a ~60s timer while the view is open.
+  /** All configured providers' usage summaries (subscribed + pay-per-token). */
+  "usage:list": invoke<[], ProviderUsageSummary[]>(),
+  /** Force a fresh fetch now (bypasses cache); returns the new summaries. */
+  "usage:refresh": invoke<[], ProviderUsageSummary[]>(),
+
   // events (main → renderer)
   "event:snapshot": event<AppSnapshot>(),
   "event:threadChanged": event<Thread>(),
@@ -594,6 +662,14 @@ export const ipcContracts = {
   "event:queue": event<QueueState>(),
   "event:sessionMeta": event<SessionMeta>(),
   "event:extensionUi": event<ExtensionUiRequest>(),
+  /** A frame from a remote session tap (see ADR-0009). */
+  "event:remoteTap": event<RemoteTapFrame>(),
+  /** A remote master's served-session list changed — re-list. */
+  "event:remoteSessions": event<{ hostId: string }>(),
+  /** Remote host serving state changed — re-read status. */
+  "event:remoteHostStatus": event<void>(),
+  /** Usage data refreshed — renderer re-reads via `usage:list`. */
+  "event:usageChanged": event<void>(),
   "event:notice": event<NoticePayload>(),
   "event:extensionStatus": event<ExtensionStatusPayload>(),
   "event:sideDelta": event<SideDeltaPayload>(),

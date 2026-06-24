@@ -2,6 +2,7 @@
  *  these ops; renderer applies them to a per-thread item list. */
 
 import type { ImagePayload } from "./entities.ts";
+import type { ThreadId } from "./entities.ts";
 
 export type SubagentStatus =
   | "started"
@@ -110,3 +111,12 @@ export function applyTranscriptOps(
   }
   return next;
 }
+
+/** One frame on the remote session tap wire (SSE). The laptop folds these into
+ *  its existing timeline exactly like the local `event:transcript` stream.
+ *  Defined here because it references the transcript item/op shapes. */
+export type RemoteTapFrame =
+  | { kind: "backfill"; threadId: ThreadId; items: TranscriptItem[]; seq: number }
+  | { kind: "transcript"; threadId: ThreadId; ops: TranscriptOp[]; seq: number }
+  | { kind: "checkpoint"; threadId: ThreadId; sha: string; at: string }
+  | { kind: "bye"; threadId: ThreadId; reason: string };

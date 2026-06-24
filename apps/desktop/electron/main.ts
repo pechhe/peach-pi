@@ -38,6 +38,7 @@ import { ConnectionSetupService } from "./services/connection-setup-service.ts";
 import { McpService } from "./services/mcp-service.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
+import { UsageService } from "./services/usage-service.ts";
 import { ConnectorResolver } from "./services/connector-resolver.ts";
 import { ensureConnectorExtension } from "./services/connector-extension.ts";
 import { ensureCuaDriverExtension } from "./services/cua-driver-extension.ts";
@@ -49,6 +50,9 @@ import {
   HUD_COLLAPSED_HEIGHT,
   HUD_EXPANDED_HEIGHT,
 } from "./windows/hud-window.ts";
+import { RemoteHostService } from "./services/remote-host.ts";
+import { RemoteClientService } from "./services/remote-client.ts";
+import { recordCheckpoint, originUrl as originUrlOf } from "./services/remote-checkpoint.ts";
 
 // TEMP DEBUG: enable CDP for renderer layout inspection.
 app.commandLine.appendSwitch("remote-debugging-port", "9222");
@@ -175,6 +179,39 @@ async function boot(): Promise<void> {
     () => appService.getUtilityModel(),
   );
   threadService.setGitService(gitService);
+
+  // Remote session hosting (ADR-0009). The master relay taps the same
+  // transcript flush the renderer gets; checkpoints fire on run-idle. Both
+  // are off until a thread is served / a host is attached.
+  const remoteHost: RemoteHostService = new RemoteHostService({
+    transcript: (threadId) => threadService.getTranscript(threadId),
+    threadInfo: (threadId) => {
+      const t = appService.snapshot().threads.find((x) => x.id === threadId);
+      return t ? { title: t.title, status: t.status } : null;
+    },
+    threadCwd: (threadId) => gitService.cwdFor(threadId),
+  });
+  void remoteHost.load();
+  threadService.setRemoteTap({
+    onTranscriptDelta: (delta) => remoteHost.forwardTranscript(delta),
+    onRunIdleWithCwd: async (threadId, cwd) => {
+      if (!cwd || !remoteHost.servedList().includes(threadId)) return;
+      const ckpt = await recordCheckpoint(cwd, threadId);
+      if (ckpt) remoteHost.forwardCheckpoint(threadId, ckpt.sha);
+    },
+  });
+  const remoteClient = new RemoteClientService(
+    emit,
+    async (origin) => {
+      for (const p of appService.snapshot().projects) {
+        if ((await originUrlOf(p.path)) === origin) return p.path;
+      }
+      return null;
+    },
+    path.join(app.getPath("userData"), "worktrees"),
+  );
+  void remoteClient.load();
+
   const subagentService = new SubagentService(db);
   const graphifyService = new GraphifyService(db);
   const sideChatService = new SideChatService(db, emit, threadService, gitService);
@@ -199,6 +236,7 @@ async function boot(): Promise<void> {
   const mcpService = new McpService();
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
+  const usageService = new UsageService(emit);
   // Install CuaDriver.app + start its background daemon + install the agent
   // skill. Best-effort; never blocks boot (see ADR-0007).
   void cuaDriverService.init();
@@ -463,6 +501,32 @@ async function boot(): Promise<void> {
     "git:createPr": (id) => gitService.createPr(id),
     "git:mergeToLocal": (id) => gitService.mergeToLocal(id),
     "git:pushLocal": (id) => gitService.pushLocal(id),
+    // remote session hosting (ADR-0009)
+    "remote:hostStatus": () => remoteHost.status(),
+    "remote:setHostEnabled": async (enabled) => {
+      if (enabled) await remoteHost.start();
+      else await remoteHost.stop();
+      emit("event:remoteHostStatus", undefined);
+      return remoteHost.status();
+    },
+    "remote:regenerateToken": async () => {
+      await remoteHost.regenerateToken();
+      return remoteHost.status();
+    },
+    "remote:setThreadServed": (threadId, served) => {
+      remoteHost.setServed(threadId, served);
+      emit("event:remoteHostStatus", undefined);
+    },
+    "remote:listServed": () => remoteHost.servedList(),
+    "remote:listHosts": () => remoteClient.listHosts(),
+    "remote:addHost": (input) => remoteClient.addHost(input),
+    "remote:removeHost": (id) => remoteClient.removeHost(id),
+    "remote:listSessions": (hostId) => remoteClient.listSessions(hostId),
+    "remote:attach": (hostId, threadId) => remoteClient.attach(hostId, threadId),
+    "remote:detach": () => remoteClient.detach(),
+    "remote:pullToTest": (hostId, threadId) => remoteClient.pullToTest(hostId, threadId),
+    "usage:list": () => usageService.list(),
+    "usage:refresh": () => usageService.refresh(),
     "threads:steer": (id, text) => threadService.steer(id, text),
     "threads:promoteFollowUpToSteer": (id, index) => threadService.promoteFollowUpToSteer(id, index),
     "threads:popLastFollowUp": (id) => threadService.popLastFollowUp(id),
@@ -628,6 +692,8 @@ async function boot(): Promise<void> {
     tray?.destroy();
     void connectorResolver.stop();
     threadService.dispose();
+    remoteClient.detach();
+    void remoteHost.stop();
     insomniaService.dispose();
     db.close();
   });

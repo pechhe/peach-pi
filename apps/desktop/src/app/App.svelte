@@ -27,6 +27,7 @@
   import ConnectorsView from "./ConnectorsView.svelte";
   import BwsView from "./BwsView.svelte";
   import TestingView from "./TestingView.svelte";
+  import RemoteView from "./RemoteView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
@@ -316,6 +317,8 @@
       <ConnectorsView />
     {:else if view === "bws"}
       <BwsView />
+    {:else if view === "remote"}
+      <RemoteView />
     {:else if view === "agents"}
       <AgentsView projects={snapshot.current.projects} />
     {:else if view === "graph"}
