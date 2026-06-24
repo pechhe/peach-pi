@@ -1,6 +1,6 @@
 import type { Component } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
-import type { ExtensionUiRequest, NoticePayload, TerminalCustomFrame } from "@peach-pi/shared-types";
+import type { ExtensionUiRequest, ExtUpdatesAvailable, NoticePayload, TerminalCustomFrame } from "@peach-pi/shared-types";
 import { api } from "../lib/ipc";
 
 interface ToastAction {
@@ -34,6 +34,8 @@ class ExtensionUiStore {
   toasts = $state<Toast[]>([]);
   /** Latest frame of a live extension `custom()` TUI, or null when none. */
   terminalCustom = $state<TerminalCustomFrame | null>(null);
+  /** Package names with available updates (shown as badge in sidebar). */
+  extUpdates = $state<string[]>([]);
   /** threadId → (key → text) */
   private statuses = new SvelteMap<string, SvelteMap<string, string>>();
   /** threadId → (key → widget lines) — e.g. pi-subagents fleet feed. */
@@ -45,6 +47,9 @@ class ExtensionUiStore {
       this.dialogs = [...this.dialogs, req];
     });
     api.on("event:notice", (notice) => this.pushToast(notice));
+    api.on("event:extUpdatesAvailable", ({ packages }) => {
+      this.extUpdates = packages;
+    });
     api.on("event:extensionStatus", ({ threadId, key, text }) => {
       let map = this.statuses.get(threadId);
       if (!map) {

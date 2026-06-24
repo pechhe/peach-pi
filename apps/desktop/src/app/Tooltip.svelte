@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { portal } from "../lib/portal";
 
   // Lightweight shadcn-style tooltip (no bits-ui dependency): hover/focus to
   // reveal a dark popover above the trigger after a short delay.
@@ -64,6 +65,6 @@
 >
   {@render children?.()}
   {#if open}
-    <span bind:this={popEl} class="pp-tooltip__pop" role="tooltip">{text}</span>
+    <span bind:this={popEl} use:portal class="pp-tooltip__pop" role="tooltip">{text}</span>
   {/if}
 </span>

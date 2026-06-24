@@ -6,6 +6,7 @@
   import { playButtonSecondary, playRotary } from "../lib/sound/button-click-sound";
   import SnoozePicker from "./SnoozePicker.svelte";
   import SnoozedPopover from "./SnoozedPopover.svelte";
+  import ExtUpdatesPopover from "./ExtUpdatesPopover.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import MovingHighlight from "./MovingHighlight.svelte";
   import Tooltip from "./Tooltip.svelte";
@@ -18,10 +19,10 @@
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Radio from "@lucide/svelte/icons/radio";
   import Gauge from "@lucide/svelte/icons/gauge";
-  import Bot from "@lucide/svelte/icons/bot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import Settings from "@lucide/svelte/icons/settings";
+  import Palette from "@lucide/svelte/icons/palette";
   import Clock from "@lucide/svelte/icons/clock";
   import Check from "@lucide/svelte/icons/check";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
@@ -31,6 +32,7 @@
   import Plus from "@lucide/svelte/icons/plus";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import Folder from "@lucide/svelte/icons/folder";
+  import MessageSquare from "@lucide/svelte/icons/message-square";
   import Archive from "@lucide/svelte/icons/archive";
   import GitBranchPlus from "@lucide/svelte/icons/git-branch-plus";
   import SquarePen from "@lucide/svelte/icons/square-pen";
@@ -38,12 +40,17 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { TAG_META } from "../lib/tag-meta";
   import ConfirmDialog from "../components/ui/dialog/ConfirmDialog.svelte";
+  import { usage } from "../stores/usage.svelte";
+  import { usagePrefs } from "../stores/usage-prefs.svelte";
+  import { featuredMetrics, shortTag, urgencyClass } from "../lib/usage-featured";
+  import UsagePopover from "./UsagePopover.svelte";
 
   let {
     width = 280,
     projects,
     worktrees,
     threads,
+    automationCount = 0,
     selectedThreadId,
     activeView,
     collapsedProjects = [],
@@ -59,6 +66,7 @@
     projects: Project[];
     worktrees: Worktree[];
     threads: Thread[];
+    automationCount?: number;
     selectedThreadId: string | null;
     activeView: AppView;
     collapsedProjects?: string[];
@@ -75,7 +83,12 @@
   let snoozePickerFor = $state<string | null>(null);
   let snoozedPopoverFor = $state<string | null>(null);
   let snoozeAnchor: HTMLElement | null = $state(null);
+  let snoozedListAnchor: HTMLElement | null = $state(null);
   let doneAnimFor = $state<string | null>(null);
+
+  // Available extension-updates popover anchored under the amber badge button.
+  let extUpdatesAnchor: HTMLElement | null = $state(null);
+  let extUpdatesOpen = $state(false);
 
   // ⌘⇧↑/↓ traversal: while the modifiers are held the highlight "hovers"
   // a thread without selecting it; releasing ⌘ or ⇧ "clicks" the previewed
@@ -126,7 +139,33 @@
     dragOverId = null;
   }
 
-  // Re-tick so relative timestamps stay fresh without a reload.
+  // The usage popover anchored under the Usage nav button. Opens on hover
+  // with a small grace delay so moving between the button and the popover
+  // doesn't dismiss it. Click toggles.
+  let usageAnchor: HTMLButtonElement | null = $state(null);
+  let usageOpen = $state(false);
+  let usageTimer: ReturnType<typeof setTimeout> | null = null;
+  function openUsagePopover(): void {
+    if (usageTimer) { clearTimeout(usageTimer); usageTimer = null; }
+    usageOpen = true;
+  }
+  function scheduleCloseUsagePopover(): void {
+    if (usageTimer) clearTimeout(usageTimer);
+    usageTimer = setTimeout(() => (usageOpen = false), 220);
+  }
+  function toggleUsagePopover(): void {
+    playButtonSecondary("click");
+    usageOpen = !usageOpen;
+  }
+
+  // Featured (pinned) metrics for the compact sidebar line, one per provider.
+  const featuredLine = $derived(
+    usage.summaries
+      .filter((s) => !usagePrefs.isHidden(s.provider))
+      .flatMap((s) =>
+        featuredMetrics(s, usagePrefs.keysFor(s.provider)).map((m) => ({ provider: s.provider, key: m.key, m })),
+      ),
+  );
   let now = $state(Date.now());
   $effect(() => {
     const id = setInterval(() => (now = Date.now()), 30_000);
@@ -181,6 +220,14 @@
     }),
   );
   const chatGroups = $derived(partition(chats));
+
+  // The project the active thread belongs to (null for chats / non-thread
+  //  views). Drives the Projects section label glow.
+  const activeProjectId = $derived(
+    activeView === "thread" && selectedThreadId
+      ? threads.find((t) => t.id === selectedThreadId)?.projectId ?? null
+      : null,
+  );
 
   // Flat, top-to-bottom order of the rows ⌘⇧↑/↓ can land on: every visible
   // active row (master threads, then each worktree's threads, per project;
@@ -376,6 +423,7 @@
       class="session-row flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-1.5 text-left text-[13px]
         {isActive ? 'session-row--active text-fg' : 'text-muted hover:text-fg'}"
       class:done-pop={doneAnimFor === thread.id}
+      class:done-pop--archiveSlide={doneAnimFor === thread.id && doneAnim.current === "archiveSlide"}
       class:done-pop--popSpark={doneAnimFor === thread.id && doneAnim.current === "popSpark"}
       class:done-pop--stamp={doneAnimFor === thread.id && doneAnim.current === "stamp"}
       class:done-pop--confetti={doneAnimFor === thread.id && doneAnim.current === "confetti"}
@@ -516,23 +564,52 @@
   class="flex h-full shrink-0 flex-col"
   style="width: {width}px"
 >
-  <div class="titlebar-drag h-10 shrink-0"></div>
-
-  <!-- Search: a distinct, input-like component raised above the nav. -->
-  <div class="px-3 pb-2">
-    <button
-      class="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-2.5 py-2 text-[13px] text-muted shadow-sm shadow-black/5 hover:border-border-strong hover:text-fg"
-      onclick={onOpenSearch}
-      data-testid="nav-search"
-    >
-      <span class="flex items-center gap-2.5"><Search size={15} /> Search</span><kbd class="text-[10px] text-fainter">⌘K</kbd>
-    </button>
+  <!-- Search badge rides up into the titlebar strip, right-aligned to sit
+       next to the page content. It's a launcher (opens ⌘K), not an input —
+       kept as a compact icon + shortcut hint. Top-aligned with the page
+       content card (mt-2 = 8px); the rest of the strip stays a drag region.
+       Strip height clears the traffic lights (via --titlebar-content-top,
+       set at boot from the native config) and divides by --zoom-factor so
+       the gap stays constant under content zoom. -->
+  <div
+    class="titlebar-drag relative shrink-0"
+    style="height: calc(var(--titlebar-content-top, 40px) / var(--zoom-factor, 1))"
+  >
+    <div class="absolute right-3 top-2 flex items-center gap-1">
+      {#if extensionUi.extUpdates.length > 0}
+        <button
+          bind:this={extUpdatesAnchor}
+          class="flex items-center gap-1 rounded-md px-1.5 py-1.5 text-amber-400 hover:bg-surface-2 {extUpdatesOpen ? 'bg-surface-2' : ''}"
+          onclick={() => { extUpdatesOpen = !extUpdatesOpen; }}
+          data-testid="nav-ext-updates"
+          title="{extensionUi.extUpdates.length} extension update{extensionUi.extUpdates.length === 1 ? '' : 's'} available: {extensionUi.extUpdates.join(', ')}"
+        >
+          <span class="flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500/20 px-1 text-[10px] font-bold text-amber-400">{extensionUi.extUpdates.length}</span>
+        </button>
+      {/if}
+      <button
+        class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg"
+        onclick={onOpenSearch}
+        data-testid="nav-search"
+        title="Search (⌘K)"
+      >
+        <Search size={15} /><kbd class="text-[10px] text-fainter">⌘K</kbd>
+      </button>
+    </div>
   </div>
+
+  {#if extUpdatesOpen}
+    <ExtUpdatesPopover
+      anchor={extUpdatesAnchor}
+      onClose={() => (extUpdatesOpen = false)}
+      onManage={() => { extUpdatesOpen = false; onOpenView("extensions"); }}
+    />
+  {/if}
 
   <!-- Nav -->
   <nav class="px-3 pb-2">
     <MovingHighlight
-      class="flex flex-col gap-0.5"
+      class="flex flex-col gap-0.5 moving-highlight--nav"
       itemSelector=".main-nav-item"
       activeSelector=".main-nav-item--active"
     >
@@ -543,14 +620,12 @@
         data-testid="nav-automations"
       >
         <span class="flex items-center gap-2.5"><AlarmClock size={15} /> Automations</span>
-      </button>
-      <button
-        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-          {activeView === 'agents' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-        onclick={() => onOpenView("agents")}
-        data-testid="nav-agents"
-      >
-        <span class="flex items-center gap-2.5"><Bot size={15} /> Agents</span>
+        {#if automationCount > 0}
+          <span
+            class="min-w-[1.25rem] rounded-full bg-surface-3 px-1.5 py-0.5 text-center text-[11px] font-medium text-fg-soft"
+            data-testid="automations-badge">{automationCount}</span
+          >
+        {/if}
       </button>
       <button
         class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
@@ -578,6 +653,14 @@
       </button>
       <button
         class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'playroom' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("playroom")}
+        data-testid="nav-playroom"
+      >
+        <span class="flex items-center gap-2.5"><Palette size={15} /> Playroom</span>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
           {activeView === 'connections' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
         onclick={() => onOpenView("connections")}
         data-testid="nav-connections"
@@ -600,20 +683,40 @@
       >
         <span class="flex items-center gap-2.5"><Radio size={15} /> Remote</span>
       </button>
-      <button
-        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-          {activeView === 'usage' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-        onclick={() => onOpenView("usage")}
-        data-testid="nav-usage"
+      <div
+        class="main-nav-item--usage relative"
+        data-nav-usage-host
+        onmouseenter={openUsagePopover}
+        onmouseleave={scheduleCloseUsagePopover}
       >
-        <span class="flex items-center gap-2.5"><Gauge size={15} /> Usage</span>
-      </button>
+        <button
+          bind:this={usageAnchor}
+          class="main-nav-item flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-fg"
+          onclick={toggleUsagePopover}
+          data-testid="nav-usage"
+        >
+          <span class="flex items-center gap-2.5"><Gauge size={15} /> Usage</span>
+          {#if featuredLine.length > 0}
+            <span class="flex items-center gap-1.5 text-[10px] text-fainter" data-testid="nav-usage-line">
+              {#each featuredLine as { provider, key, m } (provider + key)}
+                <span>
+                  <span class="text-fainter">{shortTag(provider)}</span>
+                  <span class="ml-0.5 {urgencyClass(m.urgency)}">{m.value}</span>
+                </span>
+              {/each}
+            </span>
+          {/if}
+        </button>
+        {#if usageOpen}
+          <UsagePopover anchor={usageAnchor} onEnter={openUsagePopover} onLeave={scheduleCloseUsagePopover} onClose={() => (usageOpen = false)} />
+        {/if}
+      </div>
     </MovingHighlight>
   </nav>
 
   <!-- Projects -->
   <div class="flex items-center justify-between px-4 pt-2 pb-1.5">
-    <span class="engraved text-xs font-semibold tracking-wide text-faint uppercase">Projects</span>
+    <span class="engraved flex items-center gap-1.5 text-xs font-semibold tracking-wide text-faint uppercase {activeProjectId ? 'engraved--active' : ''}"><Folder size={12} /> Projects</span>
     <Tooltip text="Add project">
       <button
         class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
@@ -693,19 +796,25 @@
                     {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : ''}
                     {snoozedPopoverFor === group.project.id ? 'text-accent' : 'text-faint hover:text-fg'}"
                   data-snooze-list-toggle
-                  onclick={() =>
-                    (snoozedPopoverFor =
-                      snoozedPopoverFor === group.project.id ? null : group.project.id)}
+                  onclick={(e) => {
+                    snoozedPopoverFor =
+                      snoozedPopoverFor === group.project.id ? null : group.project.id;
+                    snoozedListAnchor = snoozedPopoverFor ? e.currentTarget : null;
+                  }}
                   data-testid="project-snoozed"
                   aria-label="Snoozed threads"><Clock size={14} /><span>{group.snoozed.length}</span></button
                 >
               </Tooltip>
               {#if snoozedPopoverFor === group.project.id}
                 <SnoozedPopover
+                  anchor={snoozedListAnchor}
                   threads={group.snoozed}
                   onSelect={(id) => selectThread(id)}
                   onUnsnooze={(id) => void api.invoke("threads:unsnooze", id)}
-                  onClose={() => (snoozedPopoverFor = null)}
+                  onClose={() => {
+                    snoozedPopoverFor = null;
+                    snoozedListAnchor = null;
+                  }}
                 />
               {/if}
             </div>
@@ -802,7 +911,7 @@
   <!-- Chats -->
   <div class="border-t border-border/60 px-3 pt-3 pb-3">
     <div class="flex items-center justify-between px-1 pb-1.5">
-      <span class="engraved text-xs font-semibold tracking-wide text-faint uppercase">Chats</span>
+      <span class="engraved flex items-center gap-1.5 text-xs font-semibold tracking-wide text-faint uppercase"><MessageSquare size={12} /> Chats</span>
       <button
         class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
         onclick={newChat}
@@ -840,6 +949,53 @@
 
   /* ── per-variant card pop (hero motion) ────────────────────────── */
   :global(.session-row.done-pop) { transform-origin: center; }
+
+  /* v0 Precision archive slide — press → metallic glint sweep → slide,
+     fade & collapse toward the Done section. Tuned for the premium
+     metallic theme: a narrow white sheen rakes across the row (screen
+     blend reads as polished metal), no particles. */
+  :global(.session-row.done-pop--archiveSlide) {
+    position: relative;
+    overflow: hidden;
+    transform-origin: center top;
+    animation: archive-slide 480ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  :global(.session-row.done-pop--archiveSlide)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background: linear-gradient(
+      105deg,
+      transparent 38%,
+      oklch(1 0 0 / 0.55) 47%,
+      oklch(1 0 0 / 0.95) 50%,
+      oklch(1 0 0 / 0.55) 53%,
+      transparent 62%
+    );
+    mix-blend-mode: screen;
+    transform: translateX(-130%);
+    animation: archive-glint 230ms cubic-bezier(0.4, 0, 0.2, 1) 70ms forwards;
+  }
+  @keyframes archive-slide {
+    /* press (≈80ms) */
+    0%   { transform: translateY(0) scale(1);     box-shadow: none; }
+    16%  { transform: translateY(0) scale(0.985); box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.28); }
+    24%  { transform: translateY(0) scale(0.992); box-shadow: none; }
+    /* glint passes here; row holds full height (move/fade ≈220ms) */
+    62%  { transform: translateY(8px) scale(0.99);  opacity: 0.28; max-height: 2.4rem; }
+    70%  { transform: translateY(10px) scale(0.985); opacity: 0.06; max-height: 2.4rem;
+           padding-top: 0.375rem; padding-bottom: 0.375rem; margin-top: 0; margin-bottom: 0; }
+    /* height collapse (≈120ms) */
+    100% { transform: translateY(10px) scale(0.985); opacity: 0; max-height: 0;
+           padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; }
+  }
+  @keyframes archive-glint {
+    0%   { transform: translateX(-130%); opacity: 0; }
+    25%  { opacity: 1; }
+    100% { transform: translateX(130%);  opacity: 0; }
+  }
 
   /* v1 Pop & sparkle — on-twos stepped, anticipation -> stretch -> settle */
   :global(.session-row.done-pop--popSpark) { animation: pop-spark 420ms steps(1, jump-end); }

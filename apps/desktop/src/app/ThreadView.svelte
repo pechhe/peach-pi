@@ -12,6 +12,7 @@
   import { mapTurns } from "../lib/transcript/turns";
   import { playClick } from "../lib/sound/button-click-sound";
   import Undo2 from "@lucide/svelte/icons/undo-2";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Composer from "./Composer.svelte";
   import GitWidget from "./GitWidget.svelte";
   import Tooltip from "./Tooltip.svelte";
@@ -880,7 +881,17 @@
                 {/if}
               </summary>
               {#if item.error}
-                <p class="mx-1 mt-1.5 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-2 text-xs text-danger" use:clickCopy={item.error}>{item.error}</p>
+                <div class="mx-1 mt-1.5 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-2 text-xs text-danger">
+                  <p use:clickCopy={item.error}>{item.error}</p>
+                  <button
+                    type="button"
+                    class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-border-strong/40 bg-surface/80 px-2.5 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                    onclick={() => api.invoke("threads:retryCompact", thread.id).catch(console.error)}
+                  >
+                    <RotateCw size={12} />
+                    <span>Retry compaction</span>
+                  </button>
+                </div>
               {:else if item.summary}
                 <div class="mx-1 mt-1.5 rounded-lg border border-border/80 bg-surface/40 px-3 py-2 text-xs leading-relaxed text-fg-soft">
                   <Markdown text={item.summary} />

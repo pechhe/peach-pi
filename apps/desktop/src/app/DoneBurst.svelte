@@ -9,6 +9,7 @@
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const DURATIONS: Record<DoneAnimId, number> = {
+    archiveSlide: 480,
     popSpark: 560,
     stamp: 520,
     confetti: 720,
@@ -21,6 +22,9 @@
 
   let variant = $derived(doneAnim.current);
   let duration = $derived(reduce ? 0 : DURATIONS[variant]);
+  // archiveSlide carries its whole effect on the row itself (glint sweep +
+  // slide + collapse); the burst overlay renders no ring/sparks for it.
+  let bare = $derived(variant === "archiveSlide");
 
   // Generate particles. Confetti needs gravity-arc props (cf, spin) and
   // prefers square chips; every other variant uses radial spread (dx, dy).
@@ -49,6 +53,7 @@
 </script>
 
 <div class="burst burst--{variant}" style="--dur:{duration}ms">
+  {#if !bare}
   <span class="ring"></span>
   <span class="ring ring2"></span>
   {#each particles as p, i (i)}
@@ -58,4 +63,5 @@
       style="--dx:{p.dx}px; --dy:{p.dy}px; --cf:{p.cf}px; --spin:{p.spin}deg; width:{p.size}px; height:{p.size}px; background:{p.color};"
     ></span>
   {/each}
+  {/if}
 </div>

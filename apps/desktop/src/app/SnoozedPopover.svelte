@@ -2,13 +2,16 @@
   import type { Thread } from "@peach-pi/shared-types";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import { TAG_META } from "../lib/tag-meta";
+  import { portal } from "../lib/portal";
 
   let {
+    anchor,
     threads,
     onSelect,
     onUnsnooze,
     onClose,
   }: {
+    anchor: HTMLElement | null;
     threads: Thread[];
     onSelect: (threadId: string) => void;
     onUnsnooze: (threadId: string) => void;
@@ -18,12 +21,12 @@
   let popoverEl: HTMLDivElement | null = $state(null);
   let pos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
 
-  // Anchor to the trigger button (the popover's relative wrapper) using fixed
-  // positioning so it escapes the sidebar nav's overflow clipping and can be
-  // wider than the sidebar, opening rightward into the main area.
+  // Anchor to the trigger button using fixed positioning so it escapes the
+  // sidebar nav's overflow clipping and can be wider than the sidebar,
+  // opening rightward into the main area. (Portaled to <body>, so an explicit
+  // anchor element is required rather than relying on parentElement.)
   $effect(() => {
-    const anchor = popoverEl?.parentElement;
-    if (!anchor) return;
+    if (!anchor || !popoverEl) return;
     const r = anchor.getBoundingClientRect();
     pos = { top: r.bottom + 4, left: r.left };
   });
@@ -52,6 +55,7 @@
 
 <div
   bind:this={popoverEl}
+  use:portal
   class="fixed z-40 w-80 overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
   style="top: {pos.top}px; left: {pos.left}px"
   data-testid="snoozed-popover"

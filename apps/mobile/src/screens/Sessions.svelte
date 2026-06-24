@@ -56,8 +56,15 @@
       <Icon name="chevron-left" size={20} sw={2.4} />
       <span class="ml-0.5 text-[15px]">Masters</span>
     </button>
-    <button class="ml-auto text-faint" onclick={refresh} aria-label="Refresh sessions">
+    <button class="ml-auto flex items-center text-faint" onclick={refresh} aria-label="Refresh sessions">
       <Icon name="refresh" size={18} sw={1.8} />
+    </button>
+    <button
+      class="ml-4 flex items-center text-accent"
+      onclick={() => store.push({ name: "new-thread", masterId })}
+      aria-label="New thread"
+    >
+      <Icon name="plus" size={20} sw={2.2} />
     </button>
   </div>
   <div class="px-1 pt-1 pb-3">

@@ -50,3 +50,26 @@ A disposable `wip/<sessionId>` branch the master snapshots the working tree onto
 checkpoint is transport, not endorsement — squash/cherry-pick if good, delete if
 wrong.
 _Avoid_: backup branch, save point.
+
+### Movable execution (CLI)
+
+**Active owner**:
+The single machine that owns a thread at a given moment. Only the owner may
+mutate that thread's workspace. There is no fixed master — "local" is simply
+the machine that currently owns the thread. Distinct from a Host session
+(ADR-0009), which is an implicit master relationship over the GUI; movable
+execution is explicit per-thread ownership via the CLI. See `docs/remote-handoff.md`.
+_Avoid_: master, slave, primary/replica.
+
+**Lease**:
+The time-bounded token a machine holds to prove it is the active owner. Only
+the lease holder may start/resume/write/commit/push a thread. A non-owner can
+read status, request takeover, or force-takeover.
+_Avoid_: lock, reservation.
+
+**Takeover**:
+Transferring ownership to this machine (`peach take`). Cooperative takeover
+asks the current owner to pause + checkpoint + push; `--force` skips the pause
+and captures a **recovery branch** first. **Send** is the inverse (local →
+remote). Both checkpoint dirty work into git before the lease moves.
+_Avoid_: pull, clone, sync (those are transport, not ownership transfer).

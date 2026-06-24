@@ -19,7 +19,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
  */
 const EXTENSIONS_DIR = join(homedir(), ".pi", "agent", "extensions");
 const EXTENSION_PATH = join(EXTENSIONS_DIR, "peach-cua-driver.ts");
-const VERSION = "002";
+const VERSION = "003";
 
 // NOTE: no backticks / no ${} inside this string — keeps embedding clean.
 // Plain TS, run by pi's strip-types loader. Uses @sinclair/typebox for schemas
@@ -125,11 +125,10 @@ const EXTENSION_SOURCE = [
   "    parameters: Type.Object({",
   "      pid: Type.Integer({ description: \"Target process id (from list_apps or launch_app).\" }),",
   "      window_id: Type.Integer({ description: \"CGWindowID of the window to inspect (from list_apps / launch_app).\" }),",
-  "      capture_mode: Type.Optional(Type.Union([",
-  "        Type.Literal(\"som\"),",
-  "        Type.Literal(\"vision\"),",
-  "        Type.Literal(\"none\"),",
-  "      ], { description: \"Screenshot capture. \\\"som\\\" (default) uses ScreenCaptureKit; \\\"vision\\\" also returns the PNG path; \\\"none\\\" skips it.\" }),",
+  // NOTE: keep this Union on one line. jiti 2.7.0 oxc-parser mis-parses a
+  // multi-line Union literal whose description contains escaped double-quotes
+  // (see peach-cua-driver ParseError 106:4). Single-line form parses cleanly.
+  "      capture_mode: Type.Optional(Type.Union([Type.Literal(\"som\"), Type.Literal(\"vision\"), Type.Literal(\"none\")], { description: \"Screenshot capture. \\\"som\\\" (default) uses ScreenCaptureKit; \\\"vision\\\" also returns the PNG path; \\\"none\\\" skips it.\" })),",
   "    }),",
   "    async execute(_id, params): Promise<ToolOut> {",
   "      const args: Record<string, unknown> = { pid: params.pid, window_id: params.window_id };",

@@ -42,6 +42,7 @@ import type {
   ModelInfo,
   ScopedModel,
   NoticePayload,
+  ExtUpdatesAvailable,
   PiHealth,
   PiSettings,
   VisionProxyConfig,
@@ -70,6 +71,8 @@ import type {
   RemoteSessionInfo,
   RemotePullResult,
   ProviderUsageSummary,
+  RemoteFirstMode,
+  ThreadHandoffStatus,
 } from "./entities.ts";
 import type { RemoteTapFrame, TranscriptDelta, TranscriptSnapshot } from "./transcript.ts";
 
@@ -288,6 +291,11 @@ export const ipcContracts = {
   "threads:compact": invoke<[threadId: ThreadId], void>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
+  /** Retry a failed compaction. No-op if compaction is already running or
+   *  no prior failed compaction exists. */
+  "threads:retryCompact": invoke<[threadId: ThreadId], void>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
 
   // side conversations (`/btw` quick side chat; reads main convo, never writes)
   /** Start a fresh side conversation for a thread. modelOverride null = use the
@@ -327,7 +335,15 @@ export const ipcContracts = {
 
   // automations (scheduled prompts)
   "automations:create": invoke<
-    [fields: { name: string; cron: string; projectId: string | null; prompt: string }],
+    [
+      fields: {
+        name: string;
+        cron: string;
+        projectId: string | null;
+        prompt: string;
+        environment: "local" | "worktree";
+      },
+    ],
     Automation
   >((f) => {
     requireNonEmptyString(f?.name, "name");
@@ -666,6 +682,32 @@ export const ipcContracts = {
     },
   ),
 
+  // ── Movable execution (remote-handoff package, docs/remote-handoff.md) ─
+  // Remote-first mode: when on, new threads start on the target remote machine
+  // and messaging a thread hands it off there. Distinct from ADR-0009's host/
+  // attach session hosting. The "Remote" sidebar item pulses red while on.
+  /** Read the remote-first mode (flag + whether a target machine exists). */
+  "handoff:getMode": invoke<[], RemoteFirstMode>(),
+  /** Turn remote-first mode on/off. Inert when no remote machine is registered. */
+  "handoff:setMode": invoke<[enabled: boolean], RemoteFirstMode>(),
+  /** Per-thread handoff status (does this conversation thread have a remote
+   *  owner? is the lease held here?). */
+  "handoff:statusForThread": invoke<[threadId: ThreadId], ThreadHandoffStatus>(
+    (tid) => requireNonEmptyString(tid, "threadId"),
+  ),
+  /** Handoff a conversation thread to the remote machine now (the message →
+   *  handoff path). Returns the handoff status; the prompt then runs locally
+   *  as the controller. Truly relaying the prompt to a remote pi process is a
+   *  future improvement (see docs/remote-handoff.md). */
+  "handoff:message": invoke<[threadId: ThreadId], ThreadHandoffStatus>((tid) =>
+    requireNonEmptyString(tid, "threadId"),
+  ),
+  /** Register (or update) a peer machine so remote-first has a target. */
+  "handoff:registerMachine": invoke<
+    [input: { name: string; sshHost: string | null; repoPath?: string | null }],
+    void
+  >((input) => requireNonEmptyString(input?.name, "name")),
+
   // usage tracking — provider spend (pay-per-token) and subscription quota
   // windows across OpenRouter, NeuralWatt, Z.ai, and Anthropic. Main process
   // fetches live status from each provider; raw API keys never reach the
@@ -688,9 +730,13 @@ export const ipcContracts = {
   "event:remoteSessions": event<{ hostId: string }>(),
   /** Remote host serving state changed — re-read status. */
   "event:remoteHostStatus": event<void>(),
+  /** Remote-first mode or a thread's handoff status changed — re-read. */
+  "event:handoffChanged": event<void>(),
   /** Usage data refreshed — renderer re-reads via `usage:list`. */
   "event:usageChanged": event<void>(),
   "event:notice": event<NoticePayload>(),
+  /** Package updates are available (pi CLI detected newer versions). */
+  "event:extUpdatesAvailable": event<ExtUpdatesAvailable>(),
   "event:extensionStatus": event<ExtensionStatusPayload>(),
   "event:sideDelta": event<SideDeltaPayload>(),
   "event:sideDone": event<SideDonePayload>(),

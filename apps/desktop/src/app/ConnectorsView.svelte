@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type {
-    AgentBrowserState,
     Connection,
-    CuaDriverStatus,
     CustomConnection,
     ProposedConnectionConfig,
     McpServer,
@@ -15,8 +13,6 @@
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import Search from "@lucide/svelte/icons/search";
 import Server from "@lucide/svelte/icons/server";
-  import Monitor from "@lucide/svelte/icons/monitor";
-  import Globe from "@lucide/svelte/icons/globe";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import ConnectorIcon from "./ConnectorIcon.svelte";
@@ -27,13 +23,6 @@ import Server from "@lucide/svelte/icons/server";
   let connections = $state<Connection[]>([]);
   let catalogue = $state<ToolkitCatalogEntry[]>([]);
   let mcpServers = $state<McpServer[]>([]);
-  let cuaDriver = $state<CuaDriverStatus | null>(null);
-  let agentBrowser = $state<AgentBrowserState | null>(null);
-  // Driver is usable only with both macOS permissions granted.
-  const cuaNeedsPerms = $derived(
-    !!cuaDriver?.installed &&
-      (cuaDriver.accessibility !== "granted" || cuaDriver.screenRecording !== "granted"),
-  );
   let query = $state("");
   let error = $state("");
 
@@ -138,14 +127,9 @@ import Server from "@lucide/svelte/icons/server";
     }
   }
 
-  // "+ Add": jump to search so the user can pick any app (incl. manual
-  // url+key ones like Metabase). Composio needs a known toolkit, so there is
-  // no truly generic connection — adding = finding the app.
-  function startAdd() {
-    query = "";
-    void loadCatalogue();
-    searchEl?.focus();
-  }
+  // Add a custom (non-Composio) HTTP connection: name + base URL + API key.
+  // Composio needs a known toolkit, so there is no truly generic Composio
+  // connection — finding an app is done via the search box above.
   let detail = $state<ToolkitDetail | null>(null);
   let detailLoading = $state(false);
   let busySlug = $state<string | null>(null);
@@ -234,25 +218,6 @@ import Server from "@lucide/svelte/icons/server";
     mcpServers = await api.invoke("mcp:list");
   }
 
-  async function loadCuaDriver() {
-    cuaDriver = await api.invoke("cuaDriver:status");
-  }
-
-  async function loadAgentBrowser() {
-    agentBrowser = await api.invoke("agentBrowser:state");
-  }
-
-  async function installAgentBrowser() {
-    await api.invoke("agentBrowser:install");
-    void loadAgentBrowser();
-  }
-
-  async function grantCuaPermissions() {
-    await api.invoke("cuaDriver:grantPermissions");
-    // Grant is interactive; re-poll shortly so the badge reflects the result.
-    setTimeout(() => void loadCuaDriver(), 3000);
-  }
-
   function selectMcp() {
     resetSetup();
     mode = "mcp";
@@ -321,8 +286,6 @@ import Server from "@lucide/svelte/icons/server";
     void loadCatalogue();
     void loadCustom();
     void loadMcp();
-    void loadCuaDriver();
-    void loadAgentBrowser();
     const offs = [
       api.on("event:connectorsChanged", () => {
         void loadConnections();
@@ -426,15 +389,8 @@ import Server from "@lucide/svelte/icons/server";
 <main class="flex h-full flex-1" data-testid="connections-view">
   <!-- ── Sidebar ─────────────────────────────────────────────── -->
   <aside class="flex w-64 shrink-0 flex-col border-r border-border bg-bg">
-    <header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-4">
+    <header class="titlebar-drag flex h-12 shrink-0 items-center px-4">
       <h1 class="text-sm font-semibold text-fg">Connectors</h1>
-      <button
-        class="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-fg"
-        onclick={startAdd}
-        title="Add a connection"
-        aria-label="Add a connection"
-        data-testid="add-connection"
-      ><Plus size={16} /></button>
     </header>
     <div class="px-3 pb-2">
       <div class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 focus-within:border-border-focus">
@@ -451,34 +407,21 @@ import Server from "@lucide/svelte/icons/server";
     </div>
 
     <nav class="flex-1 overflow-y-auto px-2 pb-4">
-      {#if connectedToolkits.length > 0}
-        <p class="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-fainter">Connected</p>
-        {#each connectedToolkits as t (t.slug)}
-          <button
-            class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
-            class:bg-surface={selectedSlug === t.slug}
-            onclick={() => select(t.slug)}
-            data-testid={`sidebar-${t.slug}`}
-          >
-            <ConnectorIcon logoUrl={t.logoUrl} label={t.name} size={20} />
-            <span class="flex-1 truncate text-sm text-fg">{t.name}</span>
-            {#if t.count > 1}
-              <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted">{t.count}</span>
-            {/if}
-          </button>
-        {/each}
-      {/if}
-
-      <div class="flex items-center justify-between px-2 pb-1 pt-3">
-        <p class="text-[11px] font-semibold uppercase tracking-wider text-fainter">Custom</p>
+      <p class="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-fainter">Connected</p>
+      {#each connectedToolkits as t (t.slug)}
         <button
-          class="flex h-5 w-5 items-center justify-center rounded text-fainter transition hover:bg-surface hover:text-fg"
-          onclick={startCustomNew}
-          title="Add a custom connection"
-          aria-label="Add a custom connection"
-          data-testid="add-custom"
-        ><Plus size={13} /></button>
-      </div>
+          class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
+          class:bg-surface={selectedSlug === t.slug}
+          onclick={() => select(t.slug)}
+          data-testid={`sidebar-${t.slug}`}
+        >
+          <ConnectorIcon logoUrl={t.logoUrl} label={t.name} size={20} />
+          <span class="flex-1 truncate text-sm text-fg">{t.name}</span>
+          {#if t.count > 1}
+            <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted">{t.count}</span>
+          {/if}
+        </button>
+      {/each}
       {#each customConnections as c (c.id)}
         <button
           class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
@@ -490,12 +433,6 @@ import Server from "@lucide/svelte/icons/server";
           <span class="flex-1 truncate text-sm text-fg">{c.name}</span>
         </button>
       {/each}
-      {#if customConnections.length === 0}
-        <button
-          class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
-          onclick={startCustomNew}
-        ><Plus size={13} /> Add custom connection</button>
-      {/if}
 
       <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">MCP servers</p>
       {#if mcpServers.length > 0}
@@ -521,55 +458,14 @@ import Server from "@lucide/svelte/icons/server";
         ><Server size={13} /> No MCP servers configured</button>
       {/if}
 
-      <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">Computer use</p>
-      {#if agentBrowser}
-        <div
-          class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left"
-          data-testid="sidebar-agent-browser"
-        >
-          <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Globe size={12} /></span>
-          <span class="flex-1 truncate text-sm text-muted">Agent Browser</span>
-          {#if agentBrowser.installed}
-            <span class="rounded-full bg-bg px-1.5 text-[11px] text-emerald-500" title="Native agent_browser tool installed">ready</span>
-          {:else}
-            <span class="rounded-full bg-bg px-1.5 text-[11px] text-fainter">not installed</span>
-          {/if}
-        </div>
-        {#if !agentBrowser.installed}
-          <button
-            class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
-            onclick={installAgentBrowser}
-            data-testid="agent-browser-install"
-          ><Globe size={13} /> Install native browser tool</button>
-        {/if}
-      {/if}
-      {#if cuaDriver}
-        <div
-          class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left"
-          data-testid="sidebar-cua-driver"
-        >
-          <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Monitor size={12} /></span>
-          <span class="flex-1 truncate text-sm text-muted">Cua Driver</span>
-          {#if !cuaDriver.installed}
-            <span class="rounded-full bg-bg px-1.5 text-[11px] text-fainter">not installed</span>
-          {:else if cuaNeedsPerms}
-            <span class="rounded-full bg-bg px-1.5 text-[11px] text-amber-500" title="Needs Accessibility + Screen Recording">needs access</span>
-          {:else if cuaDriver.daemonRunning}
-            <span class="rounded-full bg-bg px-1.5 text-[11px] text-emerald-500" title="Driver ready{cuaDriver.version ? ` · v${cuaDriver.version}` : ''}">ready</span>
-          {:else}
-            <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted">idle</span>
-          {/if}
-        </div>
-        {#if cuaNeedsPerms}
-          <button
-            class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
-            onclick={grantCuaPermissions}
-            data-testid="cua-grant-permissions"
-          ><Monitor size={13} /> Grant permissions</button>
-        {/if}
-      {/if}
-
       <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">Not connected</p>
+      <button
+        class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
+        onclick={startCustomNew}
+        title="Add a custom connection"
+        aria-label="Add a custom connection"
+        data-testid="add-custom"
+      ><Plus size={13} /> Add custom connection</button>
       {#each notConnected as t (t.slug)}
         <button
           class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"

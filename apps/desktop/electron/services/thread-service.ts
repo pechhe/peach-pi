@@ -91,6 +91,10 @@ export class ThreadService {
    *  transcript flush and run-idle is forwarded to the remote relay. */
   private onTranscriptDelta?: (delta: TranscriptDelta) => void;
   private onRunIdleWithCwd?: (threadId: string, cwd: string | null) => void;
+  /** Remote steer-back tap (ADR-0010): live run-status + queue, so the phone
+   *  composer mirrors the desktop without polling. */
+  private onRemoteStatus?: (threadId: string, status: Thread["status"]) => void;
+  private onRemoteQueue?: (threadId: string, steering: string[], followUp: string[]) => void;
 
   constructor(
     db: AppDb,
@@ -122,9 +126,13 @@ export class ThreadService {
   setRemoteTap(hooks: {
     onTranscriptDelta?: (delta: TranscriptDelta) => void;
     onRunIdleWithCwd?: (threadId: string, cwd: string | null) => void;
+    onRemoteStatus?: (threadId: string, status: Thread["status"]) => void;
+    onRemoteQueue?: (threadId: string, steering: string[], followUp: string[]) => void;
   }): void {
     this.onTranscriptDelta = hooks.onTranscriptDelta;
     this.onRunIdleWithCwd = hooks.onRunIdleWithCwd;
+    this.onRemoteStatus = hooks.onRemoteStatus;
+    this.onRemoteQueue = hooks.onRemoteQueue;
   }
 
   /** Snapshot the working tree before a turn runs, keyed by the prior turn's
@@ -424,6 +432,10 @@ export class ThreadService {
     (await this.sessionFor(threadId)).compact();
   }
 
+  async retryCompact(threadId: string): Promise<void> {
+    (await this.sessionFor(threadId)).retryCompact();
+  }
+
   /** User turns available as rewind targets, in branch order. */
   async listTurns(threadId: string): Promise<{ entryId: string; text: string }[]> {
     return (await this.sessionFor(threadId)).listTurns();
@@ -575,8 +587,10 @@ export class ThreadService {
       {
         onOps: (ops) => this.queueOps(threadId, ops),
         onRunningChange: (running) => this.setStatus(threadId, running ? "running" : "completed"),
-        onQueueChange: (steering, followUp) =>
-          this.emit("event:queue", { threadId, steering, followUp }),
+        onQueueChange: (steering, followUp) => {
+          this.emit("event:queue", { threadId, steering, followUp });
+          this.onRemoteQueue?.(threadId, steering, followUp);
+        },
         onMetaChange: () => {
           const live = this.sessions.get(threadId);
           if (live) this.emit("event:sessionMeta", this.metaFor(threadId, live));
@@ -636,6 +650,7 @@ export class ThreadService {
     const nowRunning = status === "running";
     this.threads.setStatus(threadId, status);
     this.onThreadsChanged();
+    this.onRemoteStatus?.(threadId, status);
     if (wasRunning !== nowRunning && this.onRunningChange) this.onRunningChange(nowRunning);
     if (status === "completed" && this.onRunIdle) {
       const thread = this.threads.get(threadId);

@@ -17,7 +17,14 @@
     | "wifi-off"
     | "face-id"
     | "reconnect"
-    | "trash";
+    | "trash"
+    | "send"
+    | "stop"
+    | "x"
+    | "git-pull-request"
+    | "git-merge"
+    | "folder"
+    | "message";
 
   let { name, size = 16, sw = 1.8 }: { name: Name; size?: number; sw?: number } = $props();
 </script>
@@ -69,5 +76,19 @@
     <path d="M3 12a9 9 0 0 1 14-7.5M21 5v4h-4M21 12a9 9 0 0 1-14 7.5M3 19v-4h4" />
   {:else if name === "trash"}
     <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
+  {:else if name === "send"}
+    <path d="M12 19V5M5 12l7-7 7 7" stroke-width={sw + 0.4} />
+  {:else if name === "stop"}
+    <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" />
+  {:else if name === "x"}
+    <path d="M6 6l12 12M18 6L6 18" />
+  {:else if name === "git-pull-request"}
+    <path d="M6 9v9M6 7a2 2 0 1 0 0-2 2 2 0 0 0 0 2zM18 18a2 2 0 1 0 0-1.9M18 16V9a3 3 0 0 0-3-3h-3M15 9l-3-3 3-3" />
+  {:else if name === "git-merge"}
+    <path d="M6 9v9M6 7a2 2 0 1 0 0-2 2 2 0 0 0 0 2zM18 16a2 2 0 1 0 0-1.9M6 12a6 6 0 0 0 6 4h4" />
+  {:else if name === "folder"}
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+  {:else if name === "message"}
+    <path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z" />
   {/if}
 </svg>

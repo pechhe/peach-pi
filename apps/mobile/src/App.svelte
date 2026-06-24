@@ -3,6 +3,7 @@
   import Masters from "./screens/Masters.svelte";
   import AddMaster from "./screens/AddMaster.svelte";
   import Sessions from "./screens/Sessions.svelte";
+  import NewThread from "./screens/NewThread.svelte";
   import Transcript from "./screens/Transcript.svelte";
 
   const route = $derived(store.route);
@@ -16,6 +17,8 @@
       <AddMaster />
     {:else if route.name === "sessions"}
       <Sessions masterId={route.masterId} />
+    {:else if route.name === "new-thread"}
+      <NewThread masterId={route.masterId} />
     {:else if route.name === "transcript"}
       <Transcript masterId={route.masterId} threadId={route.threadId} title={route.title} />
     {/if}

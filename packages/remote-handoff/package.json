@@ -1,0 +1,20 @@
+{
+  "name": "@peach-pi/remote-handoff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Movable execution: per-thread ownership and safe handoff between machines.",
+  "bin": {
+    "peach": "bin/peach.ts"
+  },
+  "main": "src/handoff.ts",
+  "types": "src/handoff.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types tests/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.1",
+    "typescript": "^5.9.3"
+  }
+}

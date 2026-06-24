@@ -49,7 +49,10 @@ export class PiUpdateService {
 
   /** Schedule the throttled boot run + the periodic re-check. */
   start(): void {
-    this.bootTimer = setTimeout(() => void this.maybeUpdate(), BOOT_DELAY_MS);
+    // Check for available updates shortly after boot (regardless of auto-update setting)
+    this.bootTimer = setTimeout(() => void this.checkAvailable(), BOOT_DELAY_MS);
+    // Also run the auto-update if enabled
+    setTimeout(() => void this.maybeUpdate(), BOOT_DELAY_MS + 1000);
     this.timer = setInterval(() => void this.maybeUpdate(), PERIODIC_MS);
   }
 
@@ -178,6 +181,57 @@ export class PiUpdateService {
     }
   }
 
+  /**
+   * Check for available updates without applying them. Parses `pi list` and
+   * npm outdated to detect packages with newer versions, then emits
+   * `event:extUpdatesAvailable` with the package names.
+   */
+  async checkAvailable(): Promise<void> {
+    if (this.hasActiveRuns()) return;
+    try {
+      const piBin = findPiBin();
+      const { stdout: listOut } = await execFileAsync(piBin, ["list"], {
+        timeout: TIMEOUT_MS,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      // Extract npm package names from `pi list` output (lines like "  npm:pi-agent-browser-native")
+      const npmPackages: string[] = [];
+      for (const line of listOut.split("\n")) {
+        const m = line.trim().match(/^npm:(.+)$/);
+        if (m?.[1]) npmPackages.push(m[1].trim());
+      }
+      if (npmPackages.length === 0) return;
+      // Check npm outdated for globally-installed packages
+      // npm outdated exits non-zero when outdated packages exist; the output is still usable
+      let outdatedOut = "";
+      try {
+        await execFileAsync("npm", ["outdated", "-g"], {
+          timeout: TIMEOUT_MS,
+          maxBuffer: 8 * 1024 * 1024,
+        });
+        // If it exits 0, nothing is outdated
+        return;
+      } catch (err) {
+        // Exit 1 = outdated packages exist; stdout has the table
+        outdatedOut = (err as { stdout?: string }).stdout ?? "";
+      }
+      if (!outdatedOut) return;
+      const outdated: string[] = [];
+      for (const line of outdatedOut.split("\n")) {
+        const parts = line.split(/\s+/);
+        const pkgName = parts[0];
+        if (pkgName && npmPackages.some((p) => p === pkgName || pkgName.endsWith(p))) {
+          outdated.push(pkgName);
+        }
+      }
+      if (outdated.length > 0) {
+        this.emit("event:extUpdatesAvailable", { packages: outdated });
+      }
+    } catch (err) {
+      console.warn("[pi-update] checkAvailable failed:", err);
+    }
+  }
+
   private async run(manual: boolean): Promise<{ ok: boolean; updated: boolean; error?: string }> {
     if (this.running) return { ok: false, updated: false, error: "Already running" };
     this.running = true;
@@ -190,6 +244,8 @@ export class PiUpdateService {
       const updated = /updat|install/i.test(stdout) && !/up to date|nothing to/i.test(stdout);
       if (updated) {
         this.emit("event:notice", { message: "Extensions updated. Restart to load.", level: "info" });
+        // Clear the available-updates badge since we just updated
+        this.emit("event:extUpdatesAvailable", { packages: [] });
       } else if (manual) {
         this.emit("event:notice", { message: "Extensions already up to date.", level: "info" });
       }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { portal } from "../lib/portal";
   let {
     anchor,
     onPick,
@@ -83,6 +84,7 @@
 
 <div
   bind:this={pickerEl}
+  use:portal
   class="fixed z-50 w-32 overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
   style:top={pos ? `${pos.top}px` : "-9999px"}
   style:left={pos ? `${pos.left}px` : undefined}

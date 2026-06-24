@@ -1,5 +1,6 @@
 import { BrowserWindow, shell } from "electron";
 import path from "node:path";
+import { TRAFFIC_LIGHTS } from "@peach-pi/shared-types";
 
 import { isExternalUrl } from "./url-guard";
 
@@ -13,7 +14,7 @@ export function createMainWindow(): BrowserWindow {
     minWidth: 800,
     minHeight: 500,
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 16 },
+    trafficLightPosition: TRAFFIC_LIGHTS.position,
     backgroundColor: "#101012",
     webPreferences: {
       // CJS bundle (Forge vite plugin) — __dirname is .vite/build/

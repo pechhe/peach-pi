@@ -6,6 +6,7 @@ import { streamReveal } from "./lib/stream-reveal.svelte";
 import { modelPrefs } from "./lib/model-prefs.svelte";
 import { initDevTapRenderer } from "./devtap-renderer.ts";
 import { suppressNativeTooltips } from "./lib/suppress-native-tooltips.ts";
+import { TRAFFIC_LIGHT_BOTTOM } from "@peach-pi/shared-types";
 import "./styles/app.css";
 import "./styles/composer-device.css";
 import "./styles/composer-device-parts.css";
@@ -19,6 +20,16 @@ if (import.meta.env.DEV) initDevTapRenderer();
 
 // Hide OS/browser `title` popovers; the app renders its own tooltips.
 suppressNativeTooltips();
+// Expose the vertical traffic-light clearance so sidebar/nav content starts
+// below the OS-drawn buttons. Only macOS draws hiddenInset traffic lights;
+// elsewhere a plain drag strip height is kept. Expressed in 100%-zoom CSS px
+// and divided by --zoom-factor (defaults to 1) so the physical gap stays
+// constant under renderer content zoom — the native buttons don't scale.
+const isMac = navigator.userAgent.includes("Mac");
+document.documentElement.style.setProperty(
+  "--titlebar-content-top",
+  `${isMac ? TRAFFIC_LIGHT_BOTTOM : 40}px`,
+);
 // Apply the persisted theme before mount so there's no flash of the default.
 theme.init();
 streamReveal.init();

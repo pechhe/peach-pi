@@ -108,11 +108,10 @@ export type AppView =
   | "automations"
   | "connections"
   | "testing"
-  | "agents"
   | "graph"
   | "bws"
   | "remote"
-  | "usage";
+  | "playroom";
 
 /** Base64 image crossing the IPC boundary with a prompt. */
 export interface ImagePayload {
@@ -186,6 +185,12 @@ export interface RemoteSessionInfo {
   /** Latest checkpoint sha on `wip/<threadId>`, if any. */
   lastCheckpointSha: string | null;
   lastCheckpointAt: string | null;
+}
+
+/** A served project the phone can start a new thread in (from GET /projects). */
+export interface RemoteProjectInfo {
+  id: ProjectId;
+  name: string;
 }
 
 /** A checkpoint snapshot the master recorded for a thread. */
@@ -380,6 +385,9 @@ export interface Automation {
   cron: string;
   projectId: ProjectId | null;
   prompt: string;
+  /** Where the fired thread runs: the project's checkout, or a fresh
+   *  isolated worktree. Ignored for chats (null projectId). */
+  environment: "local" | "worktree";
   enabled: boolean;
   lastFiredAt?: string;
   nextFireAt?: string;
@@ -525,6 +533,11 @@ export interface NoticePayload {
   threadId?: ThreadId;
   message: string;
   level: "info" | "warning" | "error";
+}
+
+/** Package names with available updates (emitted by PiUpdateService). */
+export interface ExtUpdatesAvailable {
+  packages: string[];
 }
 
 /** Extension status-bar text for a thread (key = extension-chosen slot). */
@@ -990,4 +1003,37 @@ export interface ProviderUsageSummary {
   dashboardUrl: string | null;
   /** ISO 8601 of the last successful fetch, or null if never fetched. */
   fetchedAt: string | null;
+}
+
+// ── Movable execution (remote-handoff package) ───────────────────────
+// Per-thread ownership with safe handoff between machines (see
+// docs/remote-handoff.md). Distinct from ADR-0009's host/attach session
+// hosting: this is the "remote-first mode" toggle + per-thread owner.
+
+/** Remote-first mode makes new threads start on a remote machine, and makes
+ *  messaging a thread hand it off to the remote machine. Off by default —
+ *  the user must opt in. Drives the pulsing sidebar indicator. */
+export interface RemoteFirstMode {
+  /** Whether remote-first mode is on. */
+  enabled: boolean;
+  /** The machine name threads are handed TO ("home", "travel-laptop"…).
+   *  Null when no remote machine is registered — remote-first is inert then. */
+  targetMachine: string | null;
+  /** Whether at least one remote machine is configured (so the toggle can warn). */
+  hasRemoteMachine: boolean;
+}
+
+/** Per-conversation-thread handoff status surfaced to the renderer. A thread
+ *  that has never been handed off has status "none." */
+export interface ThreadHandoffStatus {
+  threadId: ThreadId;
+  /** "none" = this thread has no handoff thread; "remote" = owned by a remote
+   *  machine; "local" = owned by this machine. */
+  owner: "none" | "local" | "remote";
+  /** The handoff thread id (peach/thread_…), or null. */
+  handoffThreadId: string | null;
+  /** Owner machine name when remote, else null. */
+  remoteMachine: string | null;
+  /** Whether this machine currently holds the lease (may mutate the workspace). */
+  leaseHeldHere: boolean;
 }

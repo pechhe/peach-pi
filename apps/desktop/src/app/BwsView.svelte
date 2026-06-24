@@ -28,6 +28,11 @@
   // Auth form.
   let tokenInput = $state("");
 
+  // User opted out of BWS for this session and wants to manage keys locally
+  // (env vars / shell) instead. Shown instead of the auth form until they
+  // click through to set BWS back up.
+  let localMode = $state(false);
+
   // Secret filter (mirrors the Settings search bar).
   let query = $state("");
   let searchInput = $state<HTMLInputElement | null>(null);
@@ -322,40 +327,103 @@
       </section>
 
     {:else if !status.authenticated}
-      <!-- ── Authenticate ────────────────────────────────────── -->
-      <section class="rounded-xl border border-border bg-surface p-6">
-        <div class="flex items-center gap-2">
-          <ShieldCheck size={18} class="text-muted" />
-          <h2 class="text-base font-semibold text-fg">Authenticate</h2>
-        </div>
-        <p class="mt-1 text-sm text-fg-soft">
-          Paste a machine-account <strong>access token</strong> from Secrets Manager.
-          It's stored on this device and used to run <code class="rounded bg-bg px-1 text-xs">bws</code>
-          — it's never sent to the model or the renderer.
-        </p>
-        <p class="mt-2 text-xs text-fainter">
-          No <code class="rounded bg-bg px-1">BWS_ACCESS_TOKEN</code> was found in your login
-          shell. If you export one in <code class="rounded bg-bg px-1">~/.zshrc</code>, restart
-          the app to pick it up automatically — or just paste it here.
-        </p>
-        <form class="mt-4 flex flex-col gap-3" onsubmit={(e) => { e.preventDefault(); void saveToken(); }}>
-          <input
-            type="password"
-            class="rounded-lg border border-border-strong bg-bg px-3 py-2 font-mono text-sm text-fg outline-none focus:border-border-focus"
-            placeholder="0.48c78342-… : B3h5D+…"
-            bind:value={tokenInput}
-            data-testid="bws-token"
-          />
-          <div class="flex justify-end">
-            <button
-              type="submit"
-              class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-fg disabled:opacity-50"
-              disabled={!tokenInput.trim() || busy}
-              data-testid="bws-authenticate"
-            >{busy ? "Checking…" : "Authenticate"}</button>
+      {#if localMode}
+        <!-- ── Local keys only ─────────────────────────────────── -->
+        <section class="rounded-xl border border-border bg-surface p-6">
+          <div class="flex items-center gap-2">
+            <KeyRound size={18} class="text-muted" />
+            <h2 class="text-base font-semibold text-fg">Using your own keys</h2>
           </div>
-        </form>
-      </section>
+          <p class="mt-1 text-sm text-fg-soft">
+            No Bitwarden account needed. peach-pi reads provider keys the same way
+            pi does — straight from your environment. Export them in your shell rc
+            file and restart the app, and every <code class="rounded bg-bg px-1 text-xs">$VAR</code>
+            reference in a provider config or custom connection resolves automatically.
+          </p>
+          <div class="mt-3 rounded-lg border border-border-strong/60 bg-bg/50 p-3 text-xs text-fg-soft">
+            <p class="font-semibold text-fg">Put your keys in <code class="rounded bg-bg px-1">~/.zshrc</code> (or a file you source from it):</p>
+            <pre class="mt-2 overflow-x-auto rounded bg-bg p-2 font-mono text-[11px] text-fg-soft">export OPENAI_API_KEY="sk-…"
+export ANTHROPIC_API_KEY="sk-ant-…"
+export BWS_ACCESS_TOKEN="0.48…"   # optional</pre>
+            <p class="mt-2 text-fainter">Then <strong>restart peach-pi</strong> so it picks up the new environment. You can also add HTTP credentials without env vars under <strong>Connectors</strong>.</p>
+          </div>
+          <div class="mt-4 flex justify-between gap-2">
+            <button
+              class="text-xs text-muted hover:text-fg"
+              onclick={() => (localMode = false)}
+              data-testid="bws-setup-anyway"
+            >← Back to Bitwarden setup</button>
+            <span class="text-xs text-fainter">You can always come back to this tab later.</span>
+          </div>
+        </section>
+      {:else}
+        <!-- ── Authenticate ────────────────────────────────────── -->
+        <section class="rounded-xl border border-border bg-surface p-6">
+          <div class="flex items-center gap-2">
+            <ShieldCheck size={18} class="text-muted" />
+            <h2 class="text-base font-semibold text-fg">Authenticate</h2>
+          </div>
+          <p class="mt-1 text-sm text-fg-soft">
+            Paste a machine-account <strong>access token</strong> from Secrets Manager.
+            It's stored on this device and used to run <code class="rounded bg-bg px-1 text-xs">bws</code>
+            — it's never sent to the model or the renderer.
+          </p>
+          <details class="mt-3 rounded-lg border border-border-strong/60 bg-bg/40 px-3 py-2 text-xs text-fg-soft" data-testid="bws-token-guide">
+            <summary class="cursor-pointer font-semibold text-fg">How to get an access token →</summary>
+            <ol class="mt-2 list-decimal space-y-1 pl-4">
+              <li>Sign in to the Bitwarden web app (or create a free account) and open <strong>Secrets Manager</strong> from the product switcher.</li>
+              <li>Go to <strong>Machine accounts</strong> → create one (or pick an existing), scoped to the project(s) peach-pi should read/write.</li>
+              <li>On the machine account's <strong>Access tokens</strong> tab, select <strong>Create access token</strong> and copy it immediately — Bitwarden only shows it once.</li>
+              <li>Paste it below.</li>
+            </ol>
+            <p class="mt-2 text-fainter">
+              Docs:
+              <a class="text-primary hover:underline" href="https://bitwarden.com/help/secrets-manager-quick-start" target="_blank" rel="noreferrer">Quick start</a>
+              ·
+              <a class="text-primary hover:underline" href="https://bitwarden.com/help/access-tokens" target="_blank" rel="noreferrer">Access tokens</a>
+            </p>
+          </details>
+          <p class="mt-2 text-xs text-fainter">
+            No <code class="rounded bg-bg px-1">BWS_ACCESS_TOKEN</code> was found in your login
+            shell. If you export one in <code class="rounded bg-bg px-1">~/.zshrc</code>, restart
+            the app to pick it up automatically — or just paste it here.
+          </p>
+          <form class="mt-4 flex flex-col gap-3" onsubmit={(e) => { e.preventDefault(); void saveToken(); }}>
+            <input
+              type="password"
+              class="rounded-lg border border-border-strong bg-bg px-3 py-2 font-mono text-sm text-fg outline-none focus:border-border-focus"
+              placeholder="0.48c78342-… : B3h5D+…"
+              bind:value={tokenInput}
+              data-testid="bws-token"
+            />
+            <div class="flex justify-end">
+              <button
+                type="submit"
+                class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-fg disabled:opacity-50"
+                disabled={!tokenInput.trim() || busy}
+                data-testid="bws-authenticate"
+              >{busy ? "Checking…" : "Authenticate"}</button>
+            </div>
+          </form>
+          <div class="mt-4 border-t border-border-strong/60 pt-3 text-xs">
+            <p class="text-fainter">Don't want a Bitwarden account?</p>
+            <div class="mt-2 flex flex-wrap gap-3">
+              <button
+                class="text-primary hover:underline"
+                onclick={() => (localMode = true)}
+                data-testid="bws-use-own-keys"
+              >I'll use my own keys (env vars)</button>
+              <span class="text-faint">·</span>
+              <button
+                class="text-muted hover:text-fg"
+                onclick={() => (localMode = true)}
+                data-testid="bws-skip"
+                title="Skip BWS — you can set it up any time from the Secrets tab"
+              >Not now</button>
+            </div>
+          </div>
+        </section>
+      {/if}
 
     {:else}
       <!-- ── Project + secrets ───────────────────────────────── -->

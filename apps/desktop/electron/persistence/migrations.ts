@@ -189,4 +189,14 @@ export const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 9,
+    up: (db) => {
+      // Automations can now fire into a fresh isolated worktree instead of the
+      // project's main checkout. Existing rows default to 'local'.
+      db.exec(
+        "ALTER TABLE automations ADD COLUMN environment TEXT NOT NULL DEFAULT 'local'",
+      );
+    },
+  },
 ];

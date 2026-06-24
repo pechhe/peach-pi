@@ -5,6 +5,11 @@
 
   type Variant = { id: DoneAnimId; label: string; desc: string };
   const VARIANTS: Variant[] = [
+    {
+      id: "archiveSlide",
+      label: "Precision archive slide",
+      desc: "Press · metallic glint sweep · slide, fade & collapse (no particles)",
+    },
     { id: "popSpark", label: "Pop & sparkle", desc: "Stepped pop · smooth radial sparks" },
     { id: "stamp", label: "Approval stamp", desc: "Hard stepped stamp · smooth shockwave rings" },
     { id: "confetti", label: "Confetti", desc: "Bouncy smooth pop · arcing confetti with gravity" },
@@ -72,7 +77,7 @@
 
       <!-- right: preview + play -->
       <div class="relative flex shrink-0 items-center">
-        <div class="mock-row" class:popping={popping[v.id]} class:pop--popSpark={popping[v.id] && v.id === "popSpark"} class:pop--stamp={popping[v.id] && v.id === "stamp"} class:pop--confetti={popping[v.id] && v.id === "confetti"} class:pop--twos={popping[v.id] && v.id === "twos"} class:pop--spring={popping[v.id] && v.id === "spring"}>
+        <div class="mock-row" class:popping={popping[v.id]} class:pop--archiveSlide={popping[v.id] && v.id === "archiveSlide"} class:pop--popSpark={popping[v.id] && v.id === "popSpark"} class:pop--stamp={popping[v.id] && v.id === "stamp"} class:pop--confetti={popping[v.id] && v.id === "confetti"} class:pop--twos={popping[v.id] && v.id === "twos"} class:pop--spring={popping[v.id] && v.id === "spring"}>
           <Check size={13} class="shrink-0 text-accent" />
           <span class="truncate">Mock thread</span>
         </div>
@@ -80,6 +85,7 @@
         {#key runs[v.id]}
           {#if runs[v.id]}
             <div class="burst burst--{v.id}">
+              {#if v.id !== "archiveSlide"}
               <span class="ring"></span>
               <span class="ring ring2"></span>
               {#each particles as p, i (i)}
@@ -89,6 +95,7 @@
                   style="--dx:{p.dx}px; --dy:{p.dy}px; --cf:{p.cf}px; --spin:{p.spin}deg; width:{p.size}px; height:{p.size}px; background:{p.color};"
                 ></span>
               {/each}
+              {/if}
             </div>
           {/if}
         {/key}
@@ -106,6 +113,8 @@
 
 <style>
   .mock-row {
+    position: relative;
+    overflow: hidden;
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -116,6 +125,40 @@
     color: var(--color-fg);
     background: var(--color-selected);
     transform-origin: center;
+  }
+
+  /* v0 Precision archive slide — preview keeps height (resets on replay);
+     the signature is the metallic glint sweep + slide/fade. */
+  .popping.pop--archiveSlide { animation: pop-archive 480ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .popping.pop--archiveSlide::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      105deg,
+      transparent 38%,
+      oklch(1 0 0 / 0.55) 47%,
+      oklch(1 0 0 / 0.95) 50%,
+      oklch(1 0 0 / 0.55) 53%,
+      transparent 62%
+    );
+    mix-blend-mode: screen;
+    transform: translateX(-130%);
+    animation: pop-archive-glint 230ms cubic-bezier(0.4, 0, 0.2, 1) 70ms;
+  }
+  @keyframes pop-archive {
+    0%   { transform: translateY(0) scale(1);     }
+    16%  { transform: translateY(0) scale(0.985); }
+    24%  { transform: translateY(0) scale(0.992); }
+    62%  { transform: translateY(8px) scale(0.99);  opacity: 0.28; }
+    80%  { transform: translateY(10px) scale(0.985); opacity: 0.06; }
+    100% { transform: translateY(10px) scale(0.985); opacity: 0; }
+  }
+  @keyframes pop-archive-glint {
+    0%   { transform: translateX(-130%); opacity: 0; }
+    25%  { opacity: 1; }
+    100% { transform: translateX(130%);  opacity: 0; }
   }
 
   .burst { inset: 0 calc(0.75rem + 52px) 0 0; }

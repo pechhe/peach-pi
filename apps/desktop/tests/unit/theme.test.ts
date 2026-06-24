@@ -45,6 +45,27 @@ test("buildCustomCss: only the families of SET primaries ship (accent-only doesn
   assert.match(css, /--color-border-focus/); // accent family ships
 });
 
+test("buildCustomCss: warning/danger each emit base + derived border/surface", () => {
+  const warn = buildCustomCss({ warning: "#fbbf24" });
+  assert.match(warn, /--color-warning: #fbbf24;/);
+  assert.match(warn, /--color-warning-border: color-mix\(in srgb, var\(--color-warning\), var\(--color-bg\) 58%\);/);
+  assert.match(warn, /--color-warning-surface: color-mix\(in srgb, var\(--color-warning\), var\(--color-bg\) 86%\);/);
+  // danger untouched when only warning is set
+  assert.doesNotMatch(warn, /--color-danger/);
+
+  const err = buildCustomCss({ danger: "#ff5555" });
+  assert.match(err, /--color-danger: #ff5555;/);
+  assert.match(err, /--color-danger-border: color-mix\(in srgb, var\(--color-danger\), var\(--color-bg\) 58%\);/);
+  assert.match(err, /--color-danger-surface: color-mix\(in srgb, var\(--color-danger\), var\(--color-bg\) 86%\);/);
+  assert.doesNotMatch(err, /--color-warning/);
+});
+
+test("buildCustomCss: invalid warning/danger are dropped (base + family skipped)", () => {
+  const css = buildCustomCss({ warning: "nope", accent: "#38bdf8" });
+  assert.doesNotMatch(css, /--color-warning/);
+  assert.match(css, /--color-accent/);
+});
+
 test("buildCustomCss: metalDye emits the chassis tint tokens, independent of the color primaries", () => {
   const css = buildCustomCss({ metalDye: "#7c3aed" });
   assert.match(css, /--metal-dye: #7c3aed;/);
@@ -64,6 +85,65 @@ test("buildCustomCss: invalid metalDye is dropped", () => {
   const css = buildCustomCss({ metalDye: "not-a-color", accent: "#38bdf8" });
   assert.doesNotMatch(css, /--metal-dye/);
   assert.match(css, /--color-accent/);
+});
+
+test("buildCustomCss: screen emits a preview token on :root + a device block mapping cream tokens", () => {
+  const css = buildCustomCss({ screen: "#1a1a2e" });
+  // preview token on :root (so settings swatch resolves)
+  assert.match(css, /--color-screen: #1a1a2e;/);
+  // device-scoped block remaps the cream background tokens
+  assert.match(css, /:root\[data-custom="true"\] \.composer-device \{/);
+  assert.match(css, /--cream-bg: var\(--color-screen\);/);
+  assert.match(css, /--cream-bg-hi: color-mix\(in oklch, var\(--color-screen\), white 8%\);/);
+  assert.match(css, /--cream-bg-lo: color-mix\(in oklch, var\(--color-screen\), black 8%\);/);
+});
+
+test("buildCustomCss: screenText emits a preview token + cream-ink device tokens", () => {
+  const css = buildCustomCss({ screenText: "#e8e8f0" });
+  assert.match(css, /--color-screen-text: #e8e8f0;/);
+  assert.match(css, /--cream-ink: var\(--color-screen-text\);/);
+  // muted fades toward the screen bg (var(--cream-bg) resolves at use site)
+  assert.match(css, /--cream-ink-muted: color-mix\(in oklch, var\(--color-screen-text\), white 30%\);/);
+});
+
+test("buildCustomCss: engraveActive emits the --engrave-active token on :root (no device block)", () => {
+  const css = buildCustomCss({ engraveActive: "#e8932b" });
+  assert.match(css, /--engrave-active: #e8932b;/);
+  // it's a :root token, not a .composer-device mapping
+  assert.ok(!css.includes(".composer-device"), "engraveActive must not emit a device block");
+});
+
+test("buildCustomCss: invalid engraveActive is dropped", () => {
+  const css = buildCustomCss({ engraveActive: "nope", accent: "#38bdf8" });
+  assert.ok(!css.includes("--engrave-active"), "invalid engraveActive should be dropped");
+});
+
+test("buildCustomCss: device block only emitted when a device color is set", () => {
+  // primaries-only → no .composer-device block at all
+  const noDevice = buildCustomCss({ bg: "#101012", accent: "#38bdf8" });
+  assert.doesNotMatch(noDevice, /\.composer-device/);
+  // a device color adds the block while keeping the :root block
+  const withDevice = buildCustomCss({ bg: "#101012", screen: "#20202c" });
+  assert.match(withDevice, /:root\[data-custom="true"\] \{/);
+  assert.match(withDevice, /:root\[data-custom="true"\] \.composer-device \{/);
+});
+
+test("buildCustomCss: invalid screen/screenText are dropped", () => {
+  const css = buildCustomCss({ screen: "nope", screenText: "also-no", accent: "#38bdf8" });
+  assert.doesNotMatch(css, /--color-screen/);
+  assert.doesNotMatch(css, /cream-bg/);
+  assert.doesNotMatch(css, /cream-ink/);
+  assert.doesNotMatch(css, /\.composer-device/);
+  assert.match(css, /--color-accent/);
+});
+
+test("buildCustomCss: ink-muted mixes toward WHITE (achromatic), never the screen bg", () => {
+  // Regression guard for the OKLCH hue short-path bug: mixing a red ink toward
+  // a blue/cream screen bg detours through purple. The muted stop must lighten
+  // toward white instead, so the hue can't flip.
+  const css = buildCustomCss({ screenText: "#c0392b" });
+  assert.match(css, /--cream-ink-muted: color-mix\(in oklch, var\(--color-screen-text\), white 30%\);/);
+  assert.doesNotMatch(css, /cream-ink-muted.*var\(--cream-bg\)/);
 });
 
 test("buildCustomCss: invalid hex is dropped (primary + its family)", () => {

@@ -1,4 +1,11 @@
-import type { RemoteSessionInfo, RemoteTapFrame } from "@peach-pi/shared-types";
+import type {
+  GitCommitPushResult,
+  GitMergeResult,
+  GitPrResult,
+  RemoteProjectInfo,
+  RemoteSessionInfo,
+  RemoteTapFrame,
+} from "@peach-pi/shared-types";
 import type { Master } from "./store.svelte.ts";
 
 /** Base URL for a master's relay.
@@ -35,13 +42,86 @@ export async function health(m: Master, timeoutMs = 4000): Promise<boolean> {
   }
 }
 
-export async function listSessions(m: Master): Promise<RemoteSessionInfo[]> {
-  const res = await fetch(`${baseUrl(m)}/sessions`, {
+async function get<T>(m: Master, path: string): Promise<T> {
+  const res = await fetch(`${baseUrl(m)}${path}`, {
     headers: { Authorization: `Bearer ${m.token}` },
   });
   if (res.status === 401) throw new Error("Unauthorized — check the token.");
   if (!res.ok) throw new Error(`Master returned ${res.status}.`);
-  return (await res.json()) as RemoteSessionInfo[];
+  return (await res.json()) as T;
+}
+
+/** Token-gated write (ADR-0010). Throws on auth / transport / 4xx-5xx so the
+ *  caller can surface a single error string. */
+async function post<T>(m: Master, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${baseUrl(m)}${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${m.token}`,
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (res.status === 401) throw new Error("Unauthorized — check the token.");
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error((detail as { error?: string } | null)?.error ?? `Master returned ${res.status}.`);
+  }
+  return (await res.json()) as T;
+}
+
+export function listSessions(m: Master): Promise<RemoteSessionInfo[]> {
+  return get<RemoteSessionInfo[]>(m, "/sessions");
+}
+
+export function listProjects(m: Master): Promise<RemoteProjectInfo[]> {
+  return get<RemoteProjectInfo[]>(m, "/projects");
+}
+
+/** Send text: prompt when idle, follow-up queue while running (master decides). */
+export function sendMessage(m: Master, threadId: string, text: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/message`, { text });
+}
+
+export function steerMessage(m: Master, threadId: string, text: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/steer`, { text });
+}
+
+export function abortRun(m: Master, threadId: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/abort`);
+}
+
+export function deleteQueued(
+  m: Master,
+  threadId: string,
+  kind: "steer" | "followUp",
+  index: number,
+): Promise<void> {
+  return post(m, `/sessions/${threadId}/queue/delete`, { kind, index });
+}
+
+export function createThread(m: Master, projectId: string): Promise<RemoteSessionInfo> {
+  return post<RemoteSessionInfo>(m, "/threads", { projectId });
+}
+
+export function createChat(m: Master): Promise<RemoteSessionInfo> {
+  return post<RemoteSessionInfo>(m, "/chats");
+}
+
+export function gitCommitPush(
+  m: Master,
+  threadId: string,
+  message?: string,
+): Promise<GitCommitPushResult> {
+  return post<GitCommitPushResult>(m, `/sessions/${threadId}/git/commit-push`, { message });
+}
+
+export function gitPr(m: Master, threadId: string): Promise<GitPrResult> {
+  return post<GitPrResult>(m, `/sessions/${threadId}/git/pr`);
+}
+
+export function gitMerge(m: Master, threadId: string): Promise<GitMergeResult> {
+  return post<GitMergeResult>(m, `/sessions/${threadId}/git/merge`);
 }
 
 export type TapStatus =

@@ -5,6 +5,8 @@
   import { TapClient, type TapStatus } from "../lib/api.ts";
   import Icon from "../components/Icon.svelte";
   import TranscriptItemView from "../components/TranscriptItem.svelte";
+  import Composer from "../components/Composer.svelte";
+  import GitActions from "../components/GitActions.svelte";
 
   let { masterId, threadId, title }: { masterId: string; threadId: string; title: string } = $props();
   const master = $derived(store.master(masterId));
@@ -16,6 +18,18 @@
   let checkpoints = $state<{ sha: string; after: number }[]>([]);
   let status = $state<TapStatus>({ kind: "connecting" });
   let copied = $state(false);
+  // Live run/queue state (ADR-0010) folded from the tap, driving the composer.
+  let running = $state(false);
+  let followUp = $state<string[]>([]);
+  let showGit = $state(false);
+  let toast = $state<{ msg: string; kind: "ok" | "err" } | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function flash(msg: string, kind: "ok" | "err"): void {
+    toast = { msg, kind };
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toast = null), 3200);
+  }
 
   let client: TapClient | null = null;
   let scroller = $state<HTMLDivElement | null>(null);
@@ -32,6 +46,10 @@
     } else if (frame.kind === "checkpoint") {
       lastCheckpointSha = frame.sha;
       checkpoints = [...checkpoints, { sha: frame.sha, after: items.length }];
+    } else if (frame.kind === "status") {
+      running = frame.status === "running";
+    } else if (frame.kind === "queue") {
+      followUp = frame.followUp;
     }
     store.setSeq(masterId, threadId, remoteSeq);
     client?.setLastSeq(remoteSeq);
@@ -96,10 +114,14 @@
       <Icon name="chevron-left" size={18} sw={2.4} />
     </button>
     <div class="min-w-0 flex-1 truncate text-[15px] font-semibold">{title}</div>
-    <span class="flex shrink-0 items-center gap-1 font-mono text-[11px] text-faint">
+    <button
+      class="flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-2 py-1 font-mono text-[11px] text-faint"
+      onclick={() => (showGit = true)}
+      aria-label="Git actions"
+    >
       <Icon name="git-branch" size={11} sw={1.8} />
-      {lastCheckpointSha ? lastCheckpointSha.slice(0, 7) : "—"}
-    </span>
+      {lastCheckpointSha ? lastCheckpointSha.slice(0, 7) : "git"}
+    </button>
   </div>
   <div class="mt-1.5 flex items-center gap-1.5 text-[11px]">
     {#if status.kind === "live"}
@@ -169,6 +191,33 @@
       holding stream · retry in {Math.round(status.retryInMs / 1000)}s
     </div>
   </div>
+{/if}
+
+{#if toast}
+  <div
+    class="pp-banner-in pointer-events-none fixed inset-x-0 bottom-24 z-30 flex justify-center px-4"
+  >
+    <div
+      class="max-w-[90%] truncate rounded-full px-3.5 py-2 text-[12.5px] font-medium {toast.kind === 'ok'
+        ? 'bg-success/15 text-success'
+        : 'bg-danger/15 text-danger'}"
+    >
+      {toast.msg}
+    </div>
+  </div>
+{/if}
+
+{#if master && !ended}
+  <Composer {master} {threadId} {running} {followUp} onError={(m) => flash(m, "err")} />
+{/if}
+
+{#if showGit && master}
+  <GitActions
+    {master}
+    {threadId}
+    onClose={() => (showGit = false)}
+    onToast={(m, k) => flash(m, k)}
+  />
 {/if}
 
 {#if ended}

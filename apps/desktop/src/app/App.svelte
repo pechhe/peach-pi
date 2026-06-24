@@ -11,6 +11,8 @@
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { scopedModels } from "../stores/scoped-models.svelte";
   import { sideChat } from "../stores/side-chat.svelte";
+  import { usage } from "../stores/usage.svelte";
+  import { usagePrefs } from "../stores/usage-prefs.svelte";
   import { preloadSounds } from "../lib/sound/button-click-sound";
   import { playDoneSound } from "../lib/sound/done-sound";
   import Sidebar from "./Sidebar.svelte";
@@ -22,14 +24,13 @@
   import SkillsView from "./SkillsView.svelte";
   import ExtensionsView from "./ExtensionsView.svelte";
   import AutomationsView from "./AutomationsView.svelte";
-  import AgentsView from "./AgentsView.svelte";
+  import PlayroomView from "./PlayroomView.svelte";
   import GraphView from "./GraphView.svelte";
   import RecordingBar from "./RecordingBar.svelte";
   import ConnectorsView from "./ConnectorsView.svelte";
   import BwsView from "./BwsView.svelte";
   import TestingView from "./TestingView.svelte";
   import RemoteView from "./RemoteView.svelte";
-  import UsageView from "./UsageView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
@@ -139,10 +140,55 @@
   let sidebarRevealed = $state(false);
   // Suppress slide/morph transitions while the user is dragging the resizer.
   let resizingSidebar = $state(false);
+  // Content card node — used for the FLIP animation on ⌘S so the card's
+  // resting layout stays real (centre-correct) and only the in-flight slide
+  // is composited. Transformed only mid-animation, cleared at rest.
+  let contentEl: HTMLDivElement | null = $state(null);
+  let animatingContent = $state(false);
+
+  // FLIP the content card from its previous (pre-toggle) box to its new one.
+  // `margin-left` jumps to the resting value instantly (correct centre) and a
+  // `transform` glide on the compositor eases the eye from old → new, then is
+  // cleared so the card (and its fixed popovers) rest transform-free.
+  // Translate only (no scaleX): scaling text/content reads as a smeary
+  // stretch, so we keep the card at its new width and just glide the position.
+  // The transition is armed only during the play (the `.sidebar-device--animating`
+  // class) so the invert frame (none → translateX(dx)) is instant, not eased.
+  function flipContentToRest(prevLeft: number) {
+    const el = contentEl;
+    if (!el) return;
+    const next = el.getBoundingClientRect();
+    const dx = prevLeft - next.left;
+    if (!dx) return;
+    el.style.transform = `translateX(${dx}px)`;
+    // Two rAFs commit the invert frame, then arm the transition and play.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        animatingContent = true;
+        el.style.transform = "translateX(0)";
+      }),
+    );
+    const cleanup = () => {
+      animatingContent = false;
+      el.style.transform = "";
+      el.removeEventListener("transitionend", onEnd);
+      el.removeEventListener("transitioncancel", onEnd);
+    };
+    const onEnd = (e: TransitionEvent) => {
+      if (e.target !== el || e.propertyName !== "transform") return;
+      cleanup();
+    };
+    el.addEventListener("transitionend", onEnd);
+    el.addEventListener("transitioncancel", onEnd);
+  }
+
   function toggleSidebarCollapsed() {
+    const el = contentEl;
+    const prevLeft = el ? el.getBoundingClientRect().left : null;
     sidebarCollapsed = !sidebarCollapsed;
     sidebarRevealed = false;
     void api.invoke("ui:setSidebarCollapsed", sidebarCollapsed);
+    if (prevLeft != null) flipContentToRest(prevLeft);
   }
 
   // The content's left edge: flush against the sidebar when expanded, an even
@@ -156,6 +202,10 @@
   function startSidebarResize(e: PointerEvent) {
     e.preventDefault();
     resizingSidebar = true;
+    // If a FLIP glide is mid-flight, cancel it: no `transitionend` will fire
+    // once transitions are suppressed, so clear the in-line transform by hand.
+    animatingContent = false;
+    if (contentEl) contentEl.style.transform = "";
     const startX = e.clientX;
     const startW = sidebarWidth;
     const move = (ev: PointerEvent) => {
@@ -334,6 +384,8 @@
     sessionMetas.init();
     extensionUi.init();
     sideChat.init();
+    usage.init();
+    usagePrefs.init();
     scopedModels.init();
     void snapshot.init();
     preloadSounds();
@@ -348,6 +400,7 @@
     projects={snapshot.current!.projects}
     worktrees={snapshot.current!.worktrees}
     threads={snapshot.current!.threads}
+    automationCount={snapshot.current!.automations.length}
     collapsedProjects={snapshot.current!.ui.collapsedProjects}
     {selectedThreadId}
     activeView={view}
@@ -361,7 +414,7 @@
   />
 {/snippet}
 
-<div class="sidebar-device relative flex h-full" class:sidebar-device--no-anim={resizingSidebar}>
+<div class="sidebar-device relative flex h-full" class:sidebar-device--no-anim={resizingSidebar} class:sidebar-device--animating={animatingContent}>
   {#if snapshot.current}
     <!-- The sidebar lives in a hover host pinned to the window's left edge.
          When expanded the host is the full sidebar width and the rail sits
@@ -402,7 +455,7 @@
         ></div>
       </div>
     {/if}
-    <div class="sidebar-content relative z-10 mb-2 mr-2 mt-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[16px] bg-surface shadow-[-4px_7px_18px_-6px_rgba(0,0,0,0.14),-4px_6px_10px_-4px_rgba(0,0,0,0.18)]" style="margin-left: {contentLeft}px">
+    <div bind:this={contentEl} class="sidebar-content relative z-10 mb-2 mr-2 mt-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[16px] bg-surface shadow-[-4px_7px_18px_-6px_rgba(0,0,0,0.14),-4px_6px_10px_-4px_rgba(0,0,0,0.18)]" style="margin-left: {contentLeft}px">
     {#key view === "thread" ? `thread:${selectedThreadId}` : view === "testing" ? `testing:${testingProjectId}` : view}
     <div class="view-enter flex min-h-0 flex-1">
     {#if view === "settings"}
@@ -429,10 +482,8 @@
       <BwsView />
     {:else if view === "remote"}
       <RemoteView />
-    {:else if view === "usage"}
-      <UsageView />
-    {:else if view === "agents"}
-      <AgentsView projects={snapshot.current.projects} />
+    {:else if view === "playroom"}
+      <PlayroomView />
     {:else if view === "graph"}
       <GraphView projectId={selectedThread?.projectId ?? null} />
     {:else if view === "testing"}

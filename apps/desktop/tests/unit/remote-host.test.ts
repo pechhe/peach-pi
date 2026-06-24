@@ -97,6 +97,29 @@ test("forwardTranscript drops frames for threads whose project is not served", (
   );
 });
 
+// ── write path (ADR-0010) ──────────────────────────────────────
+test("isServedProject tracks toggles and serveAll", () => {
+  const h = new RemoteHostService(
+    deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+  );
+  assert.equal(h.isServedProject("p1"), false);
+  h.setProjectServed("p1", true);
+  assert.equal(h.isServedProject("p1"), true);
+  assert.equal(h.isServedProject("p2"), false);
+  h.setServeAll(true); // serveAll opts into every project, incl. unknown ids
+  assert.equal(h.isServedProject("p2"), true);
+});
+
+test("forwardStatus/forwardQueue are no-ops before the server binds", () => {
+  const h = new RemoteHostService(
+    deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+  );
+  h.setProjectServed("p1", true);
+  // Gated on `this.server` (only set after start()): never throws when offline.
+  assert.doesNotThrow(() => h.forwardStatus("t1", "running"));
+  assert.doesNotThrow(() => h.forwardQueue("t1", [], ["a follow-up"]));
+});
+
 // ── authorizeRequest: the pure auth gate the browser PWA relies on ──────
 const TOKEN = "a".repeat(32); // long enough to pass isValidToken
 

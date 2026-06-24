@@ -2,7 +2,7 @@
  *  these ops; renderer applies them to a per-thread item list. */
 
 import type { ImagePayload } from "./entities.ts";
-import type { ThreadId } from "./entities.ts";
+import type { ThreadId, ThreadStatus } from "./entities.ts";
 
 export type SubagentStatus =
   | "started"
@@ -119,4 +119,8 @@ export type RemoteTapFrame =
   | { kind: "backfill"; threadId: ThreadId; items: TranscriptItem[]; seq: number }
   | { kind: "transcript"; threadId: ThreadId; ops: TranscriptOp[]; seq: number }
   | { kind: "checkpoint"; threadId: ThreadId; sha: string; at: string }
+  // Live run/queue state (ADR-0010), so the phone composer can morph send↔stop
+  // and show the queued backlog without polling.
+  | { kind: "status"; threadId: ThreadId; status: ThreadStatus }
+  | { kind: "queue"; threadId: ThreadId; steering: string[]; followUp: string[] }
   | { kind: "bye"; threadId: ThreadId; reason: string };

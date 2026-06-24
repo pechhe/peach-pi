@@ -50,8 +50,6 @@ export interface PiSessionMeta {
 /** Tools allowed while plan mode runs. Mutating tools stay disabled. */
 const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
 
-/** Fallback thresholds when no config provider is supplied. */
-const DEFAULT_AUTO_COMPACT: AutoCompactSettings = { percent: 80, tokens: null };
 
 /**
  * One live pi session bound to a thread. Owns the SDK session, the
@@ -92,7 +90,6 @@ export class PiSession {
       if (event.type === "agent_end" && !event.willRetry) {
         this.callbacks.onRunningChange(false);
         this.callbacks.onMetaChange?.();
-        this.maybeAutoCompact();
       }
       if (event.type === "compaction_start") {
         // Finalise any orphaned still-running card from a prior overlapping
@@ -511,14 +508,10 @@ export class PiSession {
     );
   }
 
-  /** Compact when usage crosses either threshold — whichever is reached first. */
-  private maybeAutoCompact(): void {
-    const usage = this.session.getContextUsage();
-    if (!usage) return;
-    const { percent, tokens } = this.callbacks.getAutoCompact?.() ?? DEFAULT_AUTO_COMPACT;
-    const hitPercent = usage.percent != null && usage.percent >= percent;
-    const hitTokens = tokens != null && usage.tokens != null && usage.tokens >= tokens;
-    if (hitPercent || hitTokens) this.compact();
+  /** Retry a failed compaction. Alias for compact(); the guard in compact()
+   *  prevents double-starts while one is already running. */
+  retryCompact(): void {
+    this.compact();
   }
 
   async abort(): Promise<void> {

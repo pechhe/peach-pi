@@ -11,15 +11,8 @@
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import { DONE_SOUND_OPTIONS, playDoneSound, type DoneSoundVariant } from "../lib/sound/done-sound";
   import {
-    THEMES,
-    PRIMARY_SLOTS,
-    METAL_DYE_SLOT,
-    CUSTOM_THEME_ID,
-    isSavedId,
-    isValidThemeName,
     theme,
     type ComposerStyle,
-    type CustomPrimaries,
   } from "../lib/theme.svelte";
   import { clickCopy } from "../lib/code-copy";
   import {
@@ -34,9 +27,10 @@
   import { Switch } from "../components/ui/switch";
   import ModelScopeSelect from "../components/ui/model-scope-select/model-scope-select.svelte";
   import DoneBurstPlayground from "./DoneBurstPlayground.svelte";
+  import ThemeControls from "./ThemeControls.svelte";
+  import SubagentsSection from "./SubagentsSection.svelte";
   import Check from "@lucide/svelte/icons/check";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
-  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { autoCompact } from "../stores/auto-compact.svelte";
   import { caveman } from "../stores/caveman.svelte";
   import { piSettings } from "../stores/pi-settings.svelte";
@@ -65,6 +59,8 @@
     insomnia: "insomnia sleep idle caffeinate prevent mac awake while running",
     about: "about peach-pi version",
     utilityModel: "utility model background tasks thread titles commit messages fast inexpensive",
+    subagents:
+      "subagents agents scouting research verification cheap model roster subagent roster",
     scopedModels:
       "scoped models scopedmodels enable disable model scope composer selector enabled models available list",
     computerUse:
@@ -77,28 +73,86 @@
   let searchInput = $state<HTMLInputElement | null>(null);
   // Deep-link anchor for the theme section.
   let themeSection = $state<HTMLElement | null>(null);
-  // Inline name field for save / rename. `showNameField` gates the row;
-  // `nameDraft` is just the text the user is typing.
-  let nameDraft = $state("");
-  let showNameField = $state(false);
-  let nameInput = $state<HTMLInputElement | null>(null);
 
-  /** True when the color editor should render (custom draft or a saved theme). */
-  const editing = $derived(
-    theme.current === CUSTOM_THEME_ID || isSavedId(theme.current),
-  );
-  /** Primaries bound to the swatches: the active saved theme's, or the draft. */
-  const activePrimaries = $derived(
-    isSavedId(theme.current)
-      ? (theme.savedThemes.find((t) => t.id === theme.current)?.primaries ?? {})
-      : theme.customPrimaries,
-  );
-  /** Name of the active saved theme ("” for the draft). */
-  const activeName = $derived(
-    isSavedId(theme.current)
-      ? (theme.savedThemes.find((t) => t.id === theme.current)?.name ?? "")
-      : "",
-  );
+  /* ------------------------------------------------------------------ */
+  /* Sidebar engraving overrides (live-tuned via sliders in Settings).   */
+  /* ------------------------------------------------------------------ */
+  let engrave = $state({
+    angle: 78, metalL: 0.79, metalR: 0.92,
+    lipPx: 2, lipOp: 0.8, inkL: 0.20, inkC: 0.005, inkH: 250,
+  });
+  let engraveStyleEl: HTMLStyleElement | undefined;
+  function buildEngraveCSS(a: number, mL: number, mR: number, px: number, op: number, iL: number, iC: number, iH: number) {
+    const mRDark = 0.135 + (mR - mL) * 0.4;
+    const mLDark = 0.135;
+    return `
+.sidebar-device {
+  background:
+    linear-gradient(180deg, oklch(1 0.002 ${iH} / 0.14), transparent 18%, transparent 82%, oklch(0.3 0.004 ${iH} / 0.08)),
+    repeating-linear-gradient(180deg, oklch(0 0 0 / 0.03) 0 1px, oklch(1 0 0 / 0.03) 1px 2px),
+    linear-gradient(${a}deg, oklch(${mL} 0.003 ${iH}) 0px, oklch(${(mL + mR) / 2} 0.003 ${iH}) 170px, oklch(${mR} 0.002 ${iH}) 340px);
+  background-blend-mode: overlay, soft-light, normal;
+}
+:root[data-composer="dark"] .sidebar-device {
+  background:
+    linear-gradient(180deg, oklch(1 0.002 ${iH + 15} / 0.08), transparent 18%, transparent 82%, oklch(0 0 0 / 0.12)),
+    repeating-linear-gradient(180deg, oklch(1 0 0 / 0.02) 0 1px, oklch(0 0 0 / 0.04) 1px 2px),
+    linear-gradient(${a}deg, oklch(${mLDark} 0.004 ${iH + 15}) 0px, oklch(${(mLDark + mRDark) / 2} 0.004 ${iH + 15}) 170px, oklch(${mRDark} 0.004 ${iH + 15}) 340px);
+  background-blend-mode: overlay, soft-light, normal;
+}
+.sidebar-device .main-nav-item > span,
+.sidebar-device .engraved {
+  color: oklch(${iL} ${iC} ${iH});
+  text-shadow: 0 ${px}px 0 oklch(1 0.002 ${iH} / ${op});
+}
+.sidebar-device .main-nav-item > span svg,
+.sidebar-device .engraved svg {
+  filter: drop-shadow(0 ${px}px 0 oklch(1 0.002 ${iH} / ${op}));
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > span,
+:root[data-composer="dark"] .sidebar-device .engraved {
+  color: oklch(${1 - iL} ${iC} ${iH + 15});
+  text-shadow: 0 -${px}px 0 oklch(0 0 0 / ${op});
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > span svg,
+:root[data-composer="dark"] .sidebar-device .engraved svg {
+  filter: drop-shadow(0 -${px}px 0 oklch(0 0 0 / ${op}));
+}
+/* Active engraved label lights up (one colour, both schemes) — overrides the
+   machined-ink repaint above for the active nav item + Projects header. */
+.sidebar-device .main-nav-item--active > span,
+.sidebar-device .engraved--active {
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  text-shadow: 0 ${px}px 0 oklch(1 0.002 ${iH} / ${op}), 0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+}
+.sidebar-device .main-nav-item--active > span svg,
+.sidebar-device .engraved--active svg {
+  filter: drop-shadow(0 ${px}px 0 oklch(1 0.002 ${iH} / ${op})) drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item--active > span,
+:root[data-composer="dark"] .sidebar-device .engraved--active {
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  text-shadow: 0 -${px}px 0 oklch(0 0 0 / ${op}), 0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item--active > span svg,
+:root[data-composer="dark"] .sidebar-device .engraved--active svg {
+  filter: drop-shadow(0 -${px}px 0 oklch(0 0 0 / ${op})) drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+}
+`;
+  }
+  function injectEngraveCSS() {
+    if (!engraveStyleEl) return;
+    const { angle, metalL, metalR, lipPx, lipOp, inkL, inkC, inkH } = engrave;
+    engraveStyleEl.textContent = buildEngraveCSS(angle, metalL, metalR, lipPx, lipOp, inkL, inkC, inkH);
+  }
+  $effect(() => { engrave.angle; engrave.metalL; engrave.metalR; engrave.lipPx; engrave.lipOp; engrave.inkL; engrave.inkC; engrave.inkH; injectEngraveCSS(); });
+  onMount(() => {
+    engraveStyleEl = document.createElement('style');
+    engraveStyleEl.dataset.engraveControls = 'true';
+    document.head.appendChild(engraveStyleEl);
+    injectEngraveCSS();
+    return () => engraveStyleEl?.remove();
+  });
   // Follow palette deep-links ("Settings: Theme") that arrive after mount.
   $effect(() => {
     query = initialQuery;
@@ -380,161 +434,9 @@
       {/if}
       {#if hit("theme")}
       <section class="rounded-lg border border-border bg-surface/50 p-4" bind:this={themeSection}>
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Theme</h2>
-            <p class="text-xs text-faint">Pick a preset, or set your own core colors. Applies to every window.</p>
-          </div>
-          <Select
-            class="rounded-md bg-surface-2"
-            value={theme.current}
-            onValueChange={(v) => {
-              theme.set(v);
-              showNameField = false;
-              nameDraft = "";
-            }}
-            items={[
-              ...THEMES.map((t) => ({ value: t.id, label: t.label })),
-              ...theme.savedThemes.map((t) => ({ value: t.id, label: t.name, group: "Saved" })),
-              { value: CUSTOM_THEME_ID, label: "Custom…", group: "Your colors" },
-            ]}
-            data-testid="theme-select"
-            aria-label="Theme"
-          />
-        </div>
-
-        {#if editing}
-        <div class="mt-4 space-y-4 border-t border-border pt-4">
-          <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <label class="flex items-center gap-2 text-xs text-muted">
-              Base
-              <Select
-                class="rounded-md bg-surface-2"
-                value={isSavedId(theme.current) ? (theme.savedThemes.find((t) => t.id === theme.current)?.scheme ?? "dark") : theme.customScheme}
-                onValueChange={(v) => theme.setCustomScheme(v as "dark" | "light")}
-                items={[
-                  { value: "dark", label: "Dark" },
-                  { value: "light", label: "Light" },
-                ]}
-                data-testid="custom-scheme-select"
-                aria-label="Theme base"
-              />
-            </label>
-
-            {#if isSavedId(theme.current)}
-              <button
-                type="button"
-                class="ml-auto rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg"
-                onclick={() => { showNameField = true; nameDraft = activeName; requestAnimationFrame(() => nameInput?.select()); }}
-                data-testid="theme-rename"
-              >Rename</button>
-              <button
-                type="button"
-                class="rounded-md px-2 py-1 text-xs text-danger transition-colors hover:bg-danger-surface hover:text-danger"
-                onclick={() => theme.deleteSaved(theme.current)}
-                data-testid="theme-delete"
-              >Delete</button>
-            {:else}
-              <button
-                type="button"
-                class="ml-auto rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-border-focus hover:text-fg"
-                onclick={() => { showNameField = true; nameDraft = ""; requestAnimationFrame(() => nameInput?.focus()); }}
-                data-testid="theme-save"
-              >Save as…</button>
-              <button
-                type="button"
-                class="rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg"
-                onclick={() => theme.resetAll()}
-                data-testid="custom-reset-all"
-              >Reset to base</button>
-            {/if}
-          </div>
-
-          {#if showNameField}
-          <form
-            class="flex items-center gap-2"
-            onsubmit={(e) => {
-              e.preventDefault();
-              if (!isValidThemeName(nameDraft)) return;
-              if (isSavedId(theme.current)) {
-                theme.renameActive(nameDraft);
-              } else {
-                theme.save(nameDraft);
-              }
-              showNameField = false;
-              nameDraft = "";
-            }}
-          >
-            <input
-              bind:this={nameInput}
-              type="text"
-              class="w-48 rounded border border-border bg-bg px-2 py-1 text-xs text-fg outline-none transition-colors focus:border-border-focus"
-              placeholder="Theme name"
-              bind:value={nameDraft}
-              aria-label="Theme name"
-              data-testid="theme-name"
-            />
-            <button
-              type="submit"
-              class="rounded-md bg-surface-2 px-3 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-40"
-              disabled={!isValidThemeName(nameDraft)}
-              data-testid="theme-name-confirm"
-            >{isSavedId(theme.current) ? "Save" : "Create"}</button>
-            <button
-              type="button"
-              class="rounded-md px-2 py-1 text-xs text-faint transition-colors hover:text-fg"
-              onclick={() => { showNameField = false; nameDraft = ""; }}
-            >Cancel</button>
-          </form>
-          {/if}
-
-          <div class="flex flex-wrap gap-x-8 gap-y-3">
-            {#each PRIMARY_SLOTS as slot (slot.id)}
-              {@render primarySwatch({ slot, primaries: activePrimaries })}
-            {/each}
-            {@render primarySwatch({ slot: METAL_DYE_SLOT, primaries: activePrimaries })}
-          </div>
-          <p class="text-xs text-fainter">
-            Surfaces, borders, and text shades are derived from your three colors. Metal tints the chassis; status colors follow the base.
-          </p>
-        </div>
-        {/if}
+        <ThemeControls />
       </section>
       {/if}
-
-      {#snippet primarySwatch({ slot, primaries }: { slot: { id: "bg" | "fg" | "accent" | "metalDye"; label: string }; primaries: CustomPrimaries })}
-        {@const value = primaries[slot.id] ?? ""}
-        {@const swatchVar = value ? `var(--color-${slot.id === "metalDye" ? "metal-dye" : slot.id})` : "transparent"}
-        <div class="flex items-center gap-2">
-          <label
-            class="relative flex size-6 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-border-strong"
-            title={value || "Inherit from base"}
-            style="background: {swatchVar};"
-          >
-            <input
-              type="color"
-              class="absolute inset-0 size-full cursor-pointer opacity-0"
-              value={value || "#000000"}
-              oninput={(e) => theme.setPrimary(slot.id, e.currentTarget.value)}
-              aria-label={`${slot.label} color`}
-              data-testid={`primary-input-${slot.id}`}
-            />
-          </label>
-          <span class="min-w-0 text-xs text-fg-soft">{slot.label}</span>
-          {#if value}
-            <button
-              type="button"
-              class="shrink-0 rounded p-1 text-faint transition-colors hover:bg-surface-2 hover:text-fg"
-              title="Inherit from base"
-              aria-label="Inherit {slot.label} from base"
-              onclick={() => theme.resetPrimary(slot.id)}
-              data-testid={`primary-reset-${slot.id}`}
-            >
-              <RotateCcw class="size-3.5" />
-            </button>
-          {/if}
-        </div>
-      {/snippet}
 
       {#if hit("composer")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">
@@ -551,6 +453,49 @@
             data-testid="composer-style-select"
             aria-label="Composer appearance"
           />
+        </div>
+      </section>
+      {/if}
+
+      {#if hit("sidebar")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="mb-3">
+          <h2 class="text-sm text-fg">Sidebar engraving</h2>
+          <p class="text-xs text-faint">Tune the sidebar metal surface and letterpress text. Values override sidebar-device.css in real time.</p>
+        </div>
+        <div class="grid grid-cols-2 gap-x-6 gap-y-3">
+          <label class="flex flex-col gap-0.5">
+            <span class="text-[11px] text-fainter">Gradient angle: {engrave.angle}°</span>
+            <input type="range" class="accent-primary" min="0" max="90" step="1" bind:value={engrave.angle} />
+          </label>
+          <label class="flex flex-col gap-0.5">
+            <span class="text-[11px] text-fainter">Metal left L: {engrave.metalL.toFixed(3)}</span>
+            <input type="range" class="accent-primary" min="0.5" max="0.95" step="0.005" bind:value={engrave.metalL} />
+          </label>
+          <label class="flex flex-col gap-0.5">
+            <span class="text-[11px] text-fainter">Metal right L: {engrave.metalR.toFixed(3)}</span>
+            <input type="range" class="accent-primary" min="0.6" max="0.98" step="0.005" bind:value={engrave.metalR} />
+          </label>
+          <label class="flex flex-col gap-0.5">
+            <span class="text-[11px] text-fainter">Lip size: {engrave.lipPx}px</span>
+            <input type="range" class="accent-primary" min="0" max="6" step="0.5" bind:value={engrave.lipPx} />
+          </label>
+          <label class="flex flex-col gap-0.5">
+            <span class="text-[11px] text-fainter">Lip opacity: {engrave.lipOp.toFixed(2)}</span>
+            <input type="range" class="accent-primary" min="0" max="1" step="0.05" bind:value={engrave.lipOp} />
+          </label>
+          <label class="flex flex-col gap-0.5">
+            <span class="text-[11px] text-fainter">Ink lightness: {engrave.inkL.toFixed(3)}</span>
+            <input type="range" class="accent-primary" min="0.08" max="0.55" step="0.005" bind:value={engrave.inkL} />
+          </label>
+          <label class="flex flex-col gap-0.5">
+            <span class="text-[11px] text-fainter">Ink chroma: {engrave.inkC.toFixed(3)}</span>
+            <input type="range" class="accent-primary" min="0" max="0.08" step="0.001" bind:value={engrave.inkC} />
+          </label>
+          <label class="flex flex-col gap-0.5">
+            <span class="text-[11px] text-fainter">Ink hue: {engrave.inkH.toFixed(0)}°</span>
+            <input type="range" class="accent-primary" min="0" max="360" step="1" bind:value={engrave.inkH} />
+          </label>
         </div>
       </section>
       {/if}
@@ -869,6 +814,12 @@
             aria-label="Toggle keep awake"
           />
         </div>
+      </section>
+      {/if}
+
+      {#if hit("subagents")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4" data-testid="subagents-section">
+        <SubagentsSection projects={snapshot.current?.projects ?? []} />
       </section>
       {/if}
 

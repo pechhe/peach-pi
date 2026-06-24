@@ -12,12 +12,16 @@ class UsageStore {
   refreshing = $state(false);
   error = $state("");
   private poll: ReturnType<typeof setInterval> | null = null;
+  private loaded = false;
+  private started = false;
 
   async load(): Promise<void> {
+    if (this.loaded && this.summaries.length > 0 && !this.loading) return;
     this.loading = true;
     this.error = "";
     try {
       this.summaries = await api.invoke("usage:list");
+      this.loaded = true;
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -48,6 +52,17 @@ class UsageStore {
       clearInterval(this.poll);
       this.poll = null;
     }
+  }
+
+  /** App-wide init: load once, listen for live updates, start polling.
+   *  Call from App onMount so the sidebar metric line has data without
+   *  opening the Usage view. Idempotent. */
+  init(): void {
+    if (this.started) return;
+    this.started = true;
+    void this.load();
+    api.on("event:usageChanged", () => void this.load());
+    this.startPolling();
   }
 }
 

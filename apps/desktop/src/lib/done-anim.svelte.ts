@@ -5,14 +5,29 @@
  * DoneBurstPlayground provides the picker and preview.
  */
 
-export type DoneAnimId = "popSpark" | "stamp" | "confetti" | "twos" | "spring";
+export type DoneAnimId =
+  | "archiveSlide"
+  | "popSpark"
+  | "stamp"
+  | "confetti"
+  | "twos"
+  | "spring";
 
 const STORAGE_KEY = "peachpi:doneAnim";
 
+const VALID: readonly DoneAnimId[] = [
+  "archiveSlide",
+  "popSpark",
+  "stamp",
+  "confetti",
+  "twos",
+  "spring",
+];
+
 function load(): DoneAnimId {
-  if (typeof localStorage === "undefined") return "popSpark";
-  const v = localStorage.getItem(STORAGE_KEY);
-  return v === "stamp" || v === "confetti" || v === "twos" || v === "spring" ? v : "popSpark";
+  if (typeof localStorage === "undefined") return "archiveSlide";
+  const v = localStorage.getItem(STORAGE_KEY) as DoneAnimId | null;
+  return v && VALID.includes(v) ? v : "archiveSlide";
 }
 
 class DoneAnimStore {

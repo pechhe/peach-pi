@@ -166,8 +166,16 @@ async function boot(): Promise<void> {
       else insomniaService.onRunEnd();
     },
   );
-  const automationService = new AutomationService(db, threadService, () =>
-    emit("event:snapshot", appService.snapshot()),
+  const automationService = new AutomationService(
+    db,
+    threadService,
+    () => emit("event:snapshot", appService.snapshot()),
+    // Fires after start(), by which point gitService is initialized below.
+    async (projectId) => {
+      const dir = await gitService.createWorktree(projectId);
+      const wt = appService.addWorktree(projectId, dir);
+      return { worktreeId: wt.id, worktreeDir: wt.dir };
+    },
   );
   const terminalService = new TerminalService(db, emit);
   const recordingService = new RecordingService(emit);
@@ -195,10 +203,35 @@ async function boot(): Promise<void> {
         archivedAt: t.archivedAt,
       })),
     threadCwd: (threadId) => gitService.cwdFor(threadId),
+    projects: () =>
+      appService
+        .snapshot()
+        .projects.filter((p) => !p.archivedAt)
+        .map((p) => ({ id: p.id, name: p.name })),
+    // Steer-back verbs (ADR-0010): thin forwarders to the same services the
+    // desktop renderer drives. `message` mirrors the desktop composer's plain
+    // send — prompt when idle, follow-up queue while running.
+    actions: {
+      message: (threadId, text) => threadService.prompt(threadId, text),
+      steer: (threadId, text) => threadService.steer(threadId, text),
+      abort: (threadId) => threadService.abort(threadId),
+      deleteQueued: (threadId, kind, index) =>
+        kind === "steer"
+          ? threadService.deleteSteer(threadId, index)
+          : threadService.deleteFollowUp(threadId, index),
+      createThread: async (projectId) => (await threadService.createThread(projectId)).id,
+      createChat: async () => (await threadService.createChat()).id,
+      gitCommitPush: (threadId, message) => gitService.commitPush(threadId, message),
+      gitPr: (threadId) => gitService.createPr(threadId),
+      gitMerge: (threadId) => gitService.mergeToLocal(threadId),
+    },
   });
   void remoteHost.load();
   threadService.setRemoteTap({
     onTranscriptDelta: (delta) => remoteHost.forwardTranscript(delta),
+    onRemoteStatus: (threadId, status) => remoteHost.forwardStatus(threadId, status),
+    onRemoteQueue: (threadId, steering, followUp) =>
+      remoteHost.forwardQueue(threadId, steering, followUp),
     onRunIdleWithCwd: async (threadId, cwd) => {
       if (!cwd || !remoteHost.isServedThread(threadId)) return;
       const ckpt = await recordCheckpoint(cwd, threadId);
@@ -429,6 +462,7 @@ async function boot(): Promise<void> {
     "threads:terminalCustomCancel": (id, requestId) =>
       threadService.terminalCustomCancel(id, requestId),
     "threads:compact": (id) => threadService.compact(id),
+    "threads:retryCompact": (id) => threadService.retryCompact(id),
     "side:start": (threadId, modelOverride) => sideChatService.start(threadId, modelOverride),
     "side:ask": (convId, question) => sideChatService.ask(convId, question),
     "side:list": (threadId) => sideChatService.list(threadId),

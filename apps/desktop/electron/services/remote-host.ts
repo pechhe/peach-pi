@@ -9,11 +9,16 @@ import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
+  GitCommitPushResult,
+  GitMergeResult,
+  GitPrResult,
   ProjectId,
   RemoteHostConfig,
+  RemoteProjectInfo,
   RemoteSessionInfo,
   RemoteTapFrame,
   ThreadId,
+  ThreadStatus,
   TranscriptDelta,
   TranscriptSnapshot,
 } from "@peach-pi/shared-types";
@@ -26,7 +31,7 @@ const CONFIG_PATH = join(homedir(), ".pi", "agent", "peach-remote-host.json");
  *  Responses stay token-gated, so this widens reachability, not trust. */
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
 } as const;
 
@@ -41,10 +46,22 @@ const CORS_HEADERS = {
  * shared bearer token, and is OFF by default. Transcripts cannot be redacted,
  * so the tailnet boundary is the entire security model (ADR-0009).
  *
- * Surface:
+ * Surface (read path, ADR-0009):
  *   GET  /health                     → { ok: true }
  *   GET  /sessions                   → RemoteSessionInfo[]
+ *   GET  /projects                   → RemoteProjectInfo[]
  *   GET  /tap?threadId=&lastSeq=     → SSE stream of RemoteTapFrame
+ *
+ * Write path (ADR-0010, token-gated, same boundary as reads):
+ *   POST /sessions/:id/message  { text }  → prompt (idle) | follow-up (running)
+ *   POST /sessions/:id/steer    { text }  → immediate steer
+ *   POST /sessions/:id/abort              → stop the running turn
+ *   POST /sessions/:id/queue/delete { kind, index }
+ *   POST /threads               { projectId } → RemoteSessionInfo
+ *   POST /chats                           → RemoteSessionInfo
+ *   POST /sessions/:id/git/commit-push { message? } → GitCommitPushResult
+ *   POST /sessions/:id/git/pr             → GitPrResult
+ *   POST /sessions/:id/git/merge          → GitMergeResult
  *
  * Browser clients (the mobile PWA, ADR-0009 follow-up): EventSource cannot set
  * an Authorization header, so the token may ALSO be passed as a `?token=` query
@@ -65,8 +82,33 @@ export interface RelayDeps {
   }[];
   /** Working dir for a thread (to read checkpoint + origin). */
   threadCwd: (threadId: ThreadId) => string | null;
+  /** Served projects, for the phone's new-thread picker. */
+  projects: () => RemoteProjectInfo[];
+  /** Write-path verbs (ADR-0010). Thin forwarders to thread/git services. */
+  actions: RelayActions;
   /** Override interface lookup for tests. */
   interfaces?: () => Record<string, IfaceAddress[]>;
+}
+
+/** The steer-back verbs (ADR-0010). The relay holds no logic of its own; it
+ *  forwards to the same thread-service / git-service the desktop renderer uses.
+ *  Each returns a JSON-serialisable result the phone renders. */
+export interface RelayActions {
+  /** Send text: prompt when idle, queue a follow-up while running. */
+  message: (threadId: ThreadId, text: string) => Promise<void>;
+  /** Immediate steer of a running turn. */
+  steer: (threadId: ThreadId, text: string) => Promise<void>;
+  /** Stop the running turn. */
+  abort: (threadId: ThreadId) => Promise<void>;
+  /** Drop a queued message by lane + index. */
+  deleteQueued: (threadId: ThreadId, kind: "steer" | "followUp", index: number) => Promise<void>;
+  /** Start a new thread in a served project; returns its id. */
+  createThread: (projectId: ProjectId) => Promise<ThreadId>;
+  /** Start a new chat (no repo); returns its id. */
+  createChat: () => Promise<ThreadId>;
+  gitCommitPush: (threadId: ThreadId, message?: string) => Promise<GitCommitPushResult>;
+  gitPr: (threadId: ThreadId) => Promise<GitPrResult>;
+  gitMerge: (threadId: ThreadId) => Promise<GitMergeResult>;
 }
 
 export class RemoteHostService {
@@ -147,7 +189,12 @@ export class RemoteHostService {
   isServedThread(threadId: ThreadId): boolean {
     const t = this.deps.threads().find((x) => x.id === threadId);
     if (!t || !t.projectId) return false;
-    return this.serveAll || this.servedProjects.has(t.projectId);
+    return this.isServedProject(t.projectId);
+  }
+
+  /** Is a project currently served? `serveAll` opts into every project. */
+  isServedProject(projectId: ProjectId): boolean {
+    return this.serveAll || this.servedProjects.has(projectId);
   }
 
   /** Toggle the "serve all projects" shortcut. Disabling it re-evaluates
@@ -256,6 +303,18 @@ export class RemoteHostService {
     });
   }
 
+  /** Inject a run-status frame so the phone composer morphs send↔stop. */
+  forwardStatus(threadId: ThreadId, status: ThreadStatus): void {
+    if (!this.server || !this.isServedThread(threadId)) return;
+    this.broadcast(threadId, { kind: "status", threadId, status });
+  }
+
+  /** Inject a queue frame so the phone shows the steer/follow-up backlog. */
+  forwardQueue(threadId: ThreadId, steering: string[], followUp: string[]): void {
+    if (!this.server || !this.isServedThread(threadId)) return;
+    this.broadcast(threadId, { kind: "queue", threadId, steering, followUp });
+  }
+
   private broadcast(threadId: ThreadId, frame: RemoteTapFrame): void {
     const set = this.listeners.get(threadId);
     if (!set) return;
@@ -288,22 +347,23 @@ export class RemoteHostService {
         for (const t of this.deps.threads()) {
           if (t.archivedAt) continue;
           if (!this.isServedThread(t.id)) continue;
-          const cwd = this.deps.threadCwd(t.id);
-          const sha = cwd ? await checkpointTip(cwd, t.id) : null;
-          sessions.push({
-            threadId: t.id,
-            title: t.title,
-            status: t.status as RemoteSessionInfo["status"],
-            originUrl: cwd ? await originUrl(cwd) : null,
-            lastCheckpointSha: sha,
-            lastCheckpointAt: null,
-          });
+          const info = await this.sessionInfo(t.id);
+          if (info) sessions.push(info);
         }
         return this.send(res, 200, sessions);
       }
 
+      if (req.method === "GET" && url.pathname === "/projects") {
+        const served = this.deps.projects().filter((p) => this.isServedProject(p.id));
+        return this.send(res, 200, served);
+      }
+
       if (req.method === "GET" && url.pathname === "/tap") {
         return this.handleTap(req, res, url);
+      }
+
+      if (req.method === "POST") {
+        return this.handlePost(req, res, url);
       }
 
       return this.send(res, 404, { error: "not found" });
@@ -347,6 +407,18 @@ export class RemoteHostService {
       // No session yet — stream starts empty; live frames will arrive.
     }
 
+    // Seed the current run-status so the phone composer renders send/stop
+    // correctly before any transition fires (status frames are edge-triggered).
+    const t = this.deps.threads().find((x) => x.id === threadId);
+    if (t) {
+      const seed: RemoteTapFrame = {
+        kind: "status",
+        threadId,
+        status: t.status as ThreadStatus,
+      };
+      res.write(`data: ${JSON.stringify(seed)}\n\n`);
+    }
+
     const set = this.listeners.get(threadId) ?? new Set<ServerResponse>();
     set.add(res);
     this.listeners.set(threadId, set);
@@ -359,6 +431,89 @@ export class RemoteHostService {
         // already closed
       }
     });
+  }
+
+  /** Build the public session info for one thread (shared by /sessions and the
+   *  POST /threads + /chats responses). Null when the thread vanished. */
+  private async sessionInfo(threadId: ThreadId): Promise<RemoteSessionInfo | null> {
+    const t = this.deps.threads().find((x) => x.id === threadId);
+    if (!t) return null;
+    const cwd = this.deps.threadCwd(threadId);
+    const sha = cwd ? await checkpointTip(cwd, threadId) : null;
+    return {
+      threadId: t.id,
+      title: t.title,
+      status: t.status as RemoteSessionInfo["status"],
+      originUrl: cwd ? await originUrl(cwd) : null,
+      lastCheckpointSha: sha,
+      lastCheckpointAt: null,
+    };
+  }
+
+  /** Write path (ADR-0010). Routes a token-gated POST to a RelayActions verb.
+   *  Per-thread routes require the thread's project to be served, mirroring the
+   *  read path's gate. */
+  private async handlePost(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const a = this.deps.actions;
+    const seg = url.pathname.split("/").filter(Boolean); // e.g. ["sessions","<id>","git","pr"]
+    const body = await readJsonBody(req);
+
+    // Create routes (no thread to gate on — project membership checked inside).
+    if (seg.length === 1 && seg[0] === "threads") {
+      const projectId = String(body.projectId ?? "");
+      if (!projectId) return this.send(res, 400, { error: "projectId required" });
+      if (!this.isServedProject(projectId as ProjectId))
+        return this.send(res, 404, { error: "project is not served" });
+      const id = await a.createThread(projectId as ProjectId);
+      return this.send(res, 200, await this.sessionInfo(id));
+    }
+    if (seg.length === 1 && seg[0] === "chats") {
+      const id = await a.createChat();
+      return this.send(res, 200, await this.sessionInfo(id));
+    }
+
+    // Per-thread routes: /sessions/:id/...
+    if (seg[0] !== "sessions" || seg.length < 3) {
+      return this.send(res, 404, { error: "not found" });
+    }
+    const threadId = seg[1] as ThreadId;
+    if (!this.isServedThread(threadId))
+      return this.send(res, 404, { error: "thread's project is not served" });
+    const rest = seg.slice(2).join("/");
+
+    switch (rest) {
+      case "message": {
+        const text = String(body.text ?? "").trim();
+        if (!text) return this.send(res, 400, { error: "text required" });
+        await a.message(threadId, text);
+        return this.send(res, 200, { ok: true });
+      }
+      case "steer": {
+        const text = String(body.text ?? "").trim();
+        if (!text) return this.send(res, 400, { error: "text required" });
+        await a.steer(threadId, text);
+        return this.send(res, 200, { ok: true });
+      }
+      case "abort":
+        await a.abort(threadId);
+        return this.send(res, 200, { ok: true });
+      case "queue/delete": {
+        const kind = body.kind === "steer" ? "steer" : "followUp";
+        const index = Number(body.index);
+        if (!Number.isInteger(index) || index < 0)
+          return this.send(res, 400, { error: "index required" });
+        await a.deleteQueued(threadId, kind, index);
+        return this.send(res, 200, { ok: true });
+      }
+      case "git/commit-push":
+        return this.send(res, 200, await a.gitCommitPush(threadId, body.message ? String(body.message) : undefined));
+      case "git/pr":
+        return this.send(res, 200, await a.gitPr(threadId));
+      case "git/merge":
+        return this.send(res, 200, await a.gitMerge(threadId));
+      default:
+        return this.send(res, 404, { error: "not found" });
+    }
   }
 
   private checkAuth(req: IncomingMessage, url: URL): boolean {
@@ -383,6 +538,26 @@ export class RemoteHostService {
 
 function reqCloseHandler(req: IncomingMessage, fn: () => void): void {
   req.on("close", fn);
+}
+
+/** Read a small JSON request body. Returns {} on empty / malformed input so
+ *  route handlers can treat missing fields uniformly. Caps at 64 KiB — prompts
+ *  are text, not uploads. */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > 64 * 1024) break;
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) return {};
+  try {
+    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Pure auth gate (so it's testable without binding the tailnet socket).

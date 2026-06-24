@@ -306,9 +306,12 @@
 }
 .composer-device .composer__slots {
   display: grid;
-  grid-template-columns: repeat(3, auto);
+  /* Fixed equal columns so the square caps keep an even pitch regardless of
+     caption width (e.g. wide "CAVEMAN" vs narrow "ADD"); auto columns made
+     wide labels push their centred cap off-centre, skewing the gaps. */
+  grid-template-columns: repeat(3, 56px);
   /* Single row of three keys with room to breathe; labels sit below. */
-  gap: 0 16px;
+  gap: 0 6px;
   align-items: center;
 }
 /* No LED on slot keys; the engraved section label (used by single keys) is

@@ -342,6 +342,7 @@ interface AutomationRow {
   cron: string;
   project_id: string | null;
   prompt: string;
+  environment: string;
   enabled: number;
   last_fired_at: string | null;
   next_fire_at: string | null;
@@ -354,6 +355,7 @@ const toAutomation = (r: AutomationRow): Automation => ({
   cron: r.cron,
   projectId: r.project_id,
   prompt: r.prompt,
+  environment: r.environment === "worktree" ? "worktree" : "local",
   enabled: r.enabled === 1,
   lastFiredAt: r.last_fired_at ?? undefined,
   nextFireAt: r.next_fire_at ?? undefined,
@@ -385,15 +387,25 @@ export class AutomationRepo {
     cron: string;
     projectId: string | null;
     prompt: string;
+    environment: "local" | "worktree";
     nextFireAt: string | null;
   }): Automation {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
       .prepare(
-        "INSERT INTO automations (id, name, cron, project_id, prompt, enabled, next_fire_at, created_at) VALUES (?,?,?,?,?,1,?,?)",
+        "INSERT INTO automations (id, name, cron, project_id, prompt, environment, enabled, next_fire_at, created_at) VALUES (?,?,?,?,?,?,1,?,?)",
       )
-      .run(id, fields.name, fields.cron, fields.projectId, fields.prompt, fields.nextFireAt, now);
+      .run(
+        id,
+        fields.name,
+        fields.cron,
+        fields.projectId,
+        fields.prompt,
+        fields.environment,
+        fields.nextFireAt,
+        now,
+      );
     return this.get(id)!;
   }
 

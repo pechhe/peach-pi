@@ -23,7 +23,8 @@ export {
   THEMES,
   CUSTOM_THEME_ID,
   PRIMARY_SLOTS,
-  METAL_DYE_SLOT,
+  STATUS_SLOTS,
+  DEVICE_SLOTS,
   HEX_RE,
   buildCustomCss,
   isSavedId,
@@ -104,7 +105,7 @@ function readStoredSaved(): SavedTheme[] {
 function sanitizePrimaries(inP: unknown): CustomPrimaries {
   const out: CustomPrimaries = {};
   if (inP && typeof inP === "object") {
-    for (const k of ["bg", "fg", "accent", "metalDye"] as (keyof CustomPrimaries)[]) {
+    for (const k of ["bg", "fg", "accent", "warning", "danger", "metalDye", "screen", "screenText", "engraveActive"] as (keyof CustomPrimaries)[]) {
       const v = (inP as Record<string, unknown>)[k];
       if (typeof v === "string" && v) out[k] = v;
     }
@@ -123,7 +124,7 @@ function readStoredCustom(): StoredCustom {
     const parsed = JSON.parse(raw) as Partial<StoredCustom>;
     const inP = parsed.primaries ?? {};
     const primaries: CustomPrimaries = {};
-    for (const k of ["bg", "fg", "accent", "metalDye"] as (keyof CustomPrimaries)[]) {
+    for (const k of ["bg", "fg", "accent", "warning", "danger", "metalDye", "screen", "screenText", "engraveActive"] as (keyof CustomPrimaries)[]) {
       const v = (inP as Record<string, unknown>)[k];
       if (typeof v === "string" && v) primaries[k] = v;
     }

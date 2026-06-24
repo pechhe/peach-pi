@@ -65,16 +65,21 @@ export function isValidThemeName(name: string): boolean {
 /** The colors a custom theme is defined by. Each is optional; an unset
  *  primary falls through to the base preset (and its derived family is skipped,
  *  so e.g. an accent-only custom changes nothing but the accent + focus ring).
- *  `metalDye` is a separate surface effect: it tints the skeuomorphic metal of
- *  the sidebar rail + composer chassis (not the screen/knobs/LEDs), via the
- *  `--metal-dye` / `--metal-tint-amount` tokens consumed by the device CSS. */
+ *  `metalDye` tints the skeuomorphic chassis metal; `screen` / `screenText`
+ *  recolor the composer's CRT screen background and ink. All three are device
+ *  effects driven by token pairs consumed by the device CSS. */
 export type PrimaryKey = "bg" | "fg" | "accent";
 
 export interface CustomPrimaries {
   bg?: string;
   fg?: string;
   accent?: string;
+  warning?: string;
+  danger?: string;
   metalDye?: string;
+  screen?: string;
+  screenText?: string;
+  engraveActive?: string;
 }
 
 /** User-facing primary color slots, in display order. `family` lists the token
@@ -95,14 +100,32 @@ export const PRIMARY_SLOTS: PrimarySlot[] = [
   { id: "accent", label: "Accent", family: ["border-focus"] },
 ];
 
-/** Metal dye is surfaced as a fourth swatch but is NOT a `PrimaryKey`: it
- *  drives a separate token pair (`--metal-dye` / `--metal-tint-amount`) for
- *  the skeuomorphic chassis, so it has no derived color family. Listed
- *  separately so the UI can render it alongside the primaries. */
-export const METAL_DYE_SLOT: { id: "metalDye"; label: string } = {
-  id: "metalDye",
-  label: "Metal",
-};
+/** Semantic status colors. Same shape/derivation as primaries (base + a
+ *  derived border/surface), but their own slots so the custom theme isn't
+ *  stuck with the base preset's red/amber. Border + surface mix toward
+ *  `--color-bg`, so they read correctly on light or dark backgrounds. */
+export const STATUS_SLOTS: { id: "warning" | "danger"; label: string; family: string[] }[] = [
+  { id: "warning", label: "Warning", family: ["warning-border", "warning-surface"] },
+  { id: "danger", label: "Error", family: ["danger-border", "danger-surface"] },
+];
+
+/** Device color slots surfaced as extra swatches (after the primaries). They
+ *  drive token pairs consumed by the device CSS, so — unlike primaries — they
+ *  have no derived color family. Each carries the `token` its swatch preview
+ *  reads (`var(token)`); the buildCustomCss device block maps these to the
+ *  device's own token names (`--cream-*` / etc.). */
+export interface DeviceSlot {
+  id: "metalDye" | "screen" | "screenText" | "engraveActive";
+  label: string;
+  token: string;
+}
+
+export const DEVICE_SLOTS: DeviceSlot[] = [
+  { id: "metalDye", label: "Metal", token: "--metal-dye" },
+  { id: "screen", label: "Screen", token: "--color-screen" },
+  { id: "screenText", label: "Screen text", token: "--color-screen-text" },
+  { id: "engraveActive", label: "Active label", token: "--engrave-active" },
+];
 
 /** Hex color (3–8 hex digits, optional leading #). Used to validate inputs and
  *  filter stored overrides, so corrupt/legacy values can't paint. */
@@ -138,6 +161,10 @@ const DERIVED_FORMULAS: Record<string, string> = {
   fainter: "color-mix(in srgb, var(--color-fg), var(--color-bg) 69%)",
   primary: "var(--color-fg)",
   "primary-fg": "var(--color-bg)",
+  "warning-border": "color-mix(in srgb, var(--color-warning), var(--color-bg) 58%)",
+  "warning-surface": "color-mix(in srgb, var(--color-warning), var(--color-bg) 86%)",
+  "danger-border": "color-mix(in srgb, var(--color-danger), var(--color-bg) 58%)",
+  "danger-surface": "color-mix(in srgb, var(--color-danger), var(--color-bg) 86%)",
 };
 
 /** Mix weight of the metal dye into each neutral chassis stop. Low enough to
@@ -146,28 +173,66 @@ const DERIVED_FORMULAS: Record<string, string> = {
  *  flat color. */
 const METAL_TINT_AMOUNT = "40%";
 
-/** Pure: build the `:root[data-custom="true"] { … }` rule from the 3 primaries.
- *  Invalid hex is dropped; an entirely-empty custom theme emits nothing (so the
- *  base preset shows through untouched). Derived families ship only for the
- *  primaries the user actually set, so e.g. an accent-only custom never
- *  disturbs the hand-tuned surfaces of a preset like Dracula. The optional
- *  `metalDye` emits the device-tint tokens. Exported so the derivation can be
- *  unit-tested without a DOM. */
+/** Pure: build the custom-theme CSS from the primaries + device colors.
+ *  Emits up to two rules:
+ *   1. `:root[data-custom="true"]` — color primaries, derived families, the
+ *      metal-dye tokens, and the `--color-screen` / `--color-screen-text`
+ *      preview tokens (on :root so the settings swatches can preview them).
+ *   2. `:root[data-custom="true"] .composer-device` — maps the device's own
+ *      token names (`--cream-*`) onto the preview tokens, with derived
+ *      highlight/shadow/muted stops. Scoped to `.composer-device` because the
+ *      device defines those tokens there (not on :root); higher specificity
+ *      than the base `.composer-device` block so it wins.
+ *  Invalid hex is dropped; an entirely-empty theme emits nothing. Exported so
+ *  the derivation is unit-tested without a DOM. */
 export function buildCustomCss(p: CustomPrimaries): string {
-  const lines: string[] = [];
-  for (const slot of PRIMARY_SLOTS) {
+  const rootLines: string[] = [];
+  const deviceLines: string[] = [];
+
+  for (const slot of [...PRIMARY_SLOTS, ...STATUS_SLOTS] as {
+    id: keyof CustomPrimaries;
+    label: string;
+    family: string[];
+  }[]) {
     const v = p[slot.id];
     if (v && HEX_RE.test(v)) {
-      lines.push(`  --color-${slot.id}: ${normHex(v)};`);
+      rootLines.push(`  --color-${slot.id}: ${normHex(v)};`);
       for (const id of slot.family) {
         const formula = DERIVED_FORMULAS[id];
-        if (formula) lines.push(`  --color-${id}: ${formula};`);
+        if (formula) rootLines.push(`  --color-${id}: ${formula};`);
       }
     }
   }
   if (p.metalDye && HEX_RE.test(p.metalDye)) {
-    lines.push(`  --metal-dye: ${normHex(p.metalDye)};`);
-    lines.push(`  --metal-tint-amount: ${METAL_TINT_AMOUNT};`);
+    rootLines.push(`  --metal-dye: ${normHex(p.metalDye)};`);
+    rootLines.push(`  --metal-tint-amount: ${METAL_TINT_AMOUNT};`);
   }
-  return lines.length ? `:root[data-custom="true"] {\n${lines.join("\n")}\n}` : "";
+  // Composer CRT screen background. The device reads `--cream-bg*`; we set a
+  // preview token on :root and remap the cream tokens to it on the device.
+  if (p.screen && HEX_RE.test(p.screen)) {
+    rootLines.push(`  --color-screen: ${normHex(p.screen)};`);
+    deviceLines.push("  --cream-bg: var(--color-screen);");
+    deviceLines.push("  --cream-bg-hi: color-mix(in oklch, var(--color-screen), white 8%);");
+    deviceLines.push("  --cream-bg-lo: color-mix(in oklch, var(--color-screen), black 8%);");
+  }
+  // Composer CRT ink (typed text). `--cream-ink-muted` is the ink lightened
+  //  toward white (matches the base palette's "same hue, higher L" muted),
+  //  NOT mixed toward the screen bg: an achromatic endpoint can't detour
+  //  through a foreign hue (the OKLCH short-path bug that turns red→purple).
+  if (p.screenText && HEX_RE.test(p.screenText)) {
+    rootLines.push(`  --color-screen-text: ${normHex(p.screenText)};`);
+    deviceLines.push("  --cream-ink: var(--color-screen-text);");
+    deviceLines.push("  --cream-ink-muted: color-mix(in oklch, var(--color-screen-text), white 30%);");
+  }
+  // Sidebar active engraved label ink. A single lit colour (same in light
+  //  and dark) so the active nav item reads as "lit" against the machined
+  //  metal. Consumed by .main-nav-item--active in sidebar-device.css.
+  if (p.engraveActive && HEX_RE.test(p.engraveActive)) {
+    rootLines.push(`  --engrave-active: ${normHex(p.engraveActive)};`);
+  }
+
+  const blocks: string[] = [];
+  if (rootLines.length) blocks.push(`:root[data-custom="true"] {\n${rootLines.join("\n")}\n}`);
+  if (deviceLines.length) blocks.push(`:root[data-custom="true"] .composer-device {\n${deviceLines.join("\n")}\n}`);
+  return blocks.join("\n");
 }

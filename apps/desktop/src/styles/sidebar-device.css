@@ -96,56 +96,122 @@
      mid-silver metal this reads as a clean letterpress cut. No gradient text
      fill — that made the glyphs look hollow / white-centred. */
   color: oklch(0.2 0.005 250);
-  text-shadow: 0 1px 0 oklch(1 0.002 250 / 0.9);
+  text-shadow: 0 2px 0 oklch(1 0.002 250 / 0.7);
 }
 /* Icons share the engraved plane: same ink (currentColor) + the same crisp
    lower-lip drop-shadow (text-shadow doesn't apply to SVG strokes). */
 .sidebar-device .main-nav-item > span svg,
 .sidebar-device .engraved svg {
-  filter: drop-shadow(0 1px 0 oklch(1 0.002 250 / 0.9));
+  filter: drop-shadow(0 2px 0 oklch(1 0.002 250 / 0.7));
 }
 :root[data-composer="dark"] .sidebar-device .main-nav-item > span,
 :root[data-composer="dark"] .sidebar-device .engraved {
   /* light ink on anodized black + crisp dark upper wall */
   color: oklch(0.84 0.004 265);
-  text-shadow: 0 -1px 0 oklch(0 0 0 / 0.7);
+  text-shadow: 0 -2px 0 oklch(0 0 0 / 0.7);
 }
 :root[data-composer="dark"] .sidebar-device .main-nav-item > span svg,
 :root[data-composer="dark"] .sidebar-device .engraved svg {
-  filter: drop-shadow(0 -1px 0 oklch(0 0 0 / 0.7));
+  filter: drop-shadow(0 -2px 0 oklch(0 0 0 / 0.7));
 }
 
 /* ================================================================ */
-/* Collapsed sidebar — reveal-on-hover floating panel (⌘S).            */
-/*                                                                       */
-/* The host is a thin invisible strip pinned to the window's left edge   */
-/* that catches the pointer; once revealed it grows to cover the panel   */
-/* so the hover persists while the sidebar is in use. The panel itself   */
-/* is the same brushed-metal chassis as .sidebar-device, lifted into a    */
-/* rounded card that slides in/out with an even margin all the way round. */
+/* Active engraved label — the ink lights up (one colour, same in        */
+/* light + dark) so the selected area reads as "lit", mirroring the      */
+/* ready send-dial orange. No selector pill: the text + icon glow.        */
+/* Overrideable via the theme builder's "Active label" swatch            */
+/* (--engrave-active). Applies to the active nav item and the Projects    */
+/* section header when the selected thread lives in a project.            */
 /* ================================================================ */
-.sidebar-float-host {
+.sidebar-device .main-nav-item--active > span,
+.sidebar-device .engraved--active {
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  text-shadow: 0 2px 0 oklch(1 0.002 250 / 0.7),
+               0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+}
+.sidebar-device .main-nav-item--active > span svg,
+.sidebar-device .engraved--active svg {
+  filter: drop-shadow(0 2px 0 oklch(1 0.002 250 / 0.7))
+          drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item--active > span,
+:root[data-composer="dark"] .sidebar-device .engraved--active {
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  text-shadow: 0 -2px 0 oklch(0 0 0 / 0.7),
+               0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item--active > span svg,
+:root[data-composer="dark"] .sidebar-device .engraved--active svg {
+  filter: drop-shadow(0 -2px 0 oklch(0 0 0 / 0.7))
+          drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+}
+/* No selector pill behind the active nav item — just the glow. */
+.sidebar-device .moving-highlight--nav .sidebar-moving-highlight__indicator--active {
+  background: transparent;
+}
+
+/* ================================================================ */
+/* Collapsible sidebar — flush rail <-> floating card (⌘S + hover).      */
+/*                                                                       */
+/* The rail is always absolutely positioned inside a host pinned to the   */
+/* window's left edge:                                                    */
+/*   • expanded  — host = full sidebar width; rail sits flush on the       */
+/*     chassis (no card, no gap), content butts against its right edge.    */
+/*   • collapsed — host shrinks to a thin trigger strip; the rail morphs   */
+/*     into a brushed-metal card (rounded, shadowed, inset 8px all round)  */
+/*     slid off-screen. Hovering the strip grows the host to cover the     */
+/*     card so the pointer stays "inside" while the sidebar is in use.     */
+/* Motion is composited: the rail slide and the content slide both run on */
+/* `transform` (GPU) — never `left`/`margin-left`, which reflow the heavy  */
+/* content tree every frame (jitter) and drift the centring. The sidebar's*/
+/* fixed popovers are portaled to <body>, so a transform on the rail is    */
+/* safe (no new containing block clips them).                             */
+/* ================================================================ */
+.sidebar-host {
   position: absolute;
   top: 0;
   left: 0;
   bottom: 0;
-  width: 14px;
+  width: var(--float-width);
   z-index: 40;
 }
-.sidebar-float-host--revealed {
-  /* cover the panel (8px margin + width + a little slack) so leaving the
-     panel — not merely the strip — is what dismisses it. */
+.sidebar-host--collapsed {
+  width: 14px;
+}
+.sidebar-host--collapsed.sidebar-host--revealed {
+  /* cover the card (8px margin + width + a little slack) so leaving the
+     card — not merely the strip — is what dismisses it. */
   width: calc(var(--float-width) + 24px);
 }
 
-.sidebar-float {
+.sidebar-rail {
   position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  transform: translateX(0);
+  opacity: 1;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    top 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    left 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    bottom 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    border-radius 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    opacity 180ms ease;
+  will-change: transform;
+}
+
+/* Floating card: same brushed-silver chassis as .sidebar-device (light). */
+.sidebar-rail--floating {
   top: 8px;
   left: 8px;
   bottom: 8px;
   border-radius: 16px;
-  overflow: hidden;
-  /* same brushed-silver chassis as .sidebar-device (light) */
   background:
     radial-gradient(ellipse 34% 55% at 86% 12%, oklch(1 0.002 250 / 0.26), transparent 60%),
     radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0.35 0.004 250 / 0.05), transparent 64%),
@@ -156,21 +222,18 @@
     0 18px 40px -10px rgba(0, 0, 0, 0.32),
     0 4px 12px -4px rgba(0, 0, 0, 0.22),
     inset 0 0 0 0.5px oklch(0.92 0.002 250 / 0.25);
-  /* hidden: slid fully off-screen past its own left margin */
+  /* hidden: slid fully off-screen, past its own left margin */
   transform: translateX(calc(-100% - 8px));
   opacity: 0;
   pointer-events: none;
-  transition:
-    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 200ms ease;
 }
-.sidebar-float--in {
+.sidebar-rail--floating.sidebar-rail--shown {
   transform: translateX(0);
   opacity: 1;
   pointer-events: auto;
 }
 
-:root[data-composer="dark"] .sidebar-float {
+:root[data-composer="dark"] .sidebar-rail--floating {
   background:
     radial-gradient(ellipse 34% 55% at 86% 12%, oklch(0.62 0.004 265 / 0.22), transparent 60%),
     radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0 0 0 / 0.1), transparent 64%),
@@ -183,8 +246,29 @@
     inset 0 0 0 0.5px oklch(0 0 0 / 0.25);
 }
 
+/* The content card rests on a REAL left margin (= sidebar reserve when
+   expanded, an even 8px when collapsed) so its inner, centred content
+   (`mx-auto max-w-3xl`, composer) is always centred in the space it actually
+   occupies. The ⌘S toggle uses a FLIP: `margin-left` jumps to the new resting
+   value instantly and a composited `transform` glide eases the eye from the
+   previous box; the transform is cleared at rest so the card (and any fixed
+   popovers inside it) rest transform-free. The glide runs only while
+   `.sidebar-device--animating` is set — the invert frame and resting changes
+   never tween. */
+.sidebar-content {
+  will-change: transform;
+}
+.sidebar-device--animating .sidebar-content {
+  transition: transform 220ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.sidebar-device--no-anim .sidebar-rail,
+.sidebar-device--no-anim .sidebar-content {
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-float {
+  .sidebar-rail,
+  .sidebar-content {
     transition: opacity 120ms ease;
   }
 }

@@ -1,4 +1,4 @@
-import type { RemoteSessionInfo } from "@peach-pi/shared-types";
+import type { RemoteProjectInfo, RemoteSessionInfo } from "@peach-pi/shared-types";
 
 /** A saved master connection. Mirrors `RemoteHostConnection` from shared-types,
  *  minus the desktop-only `id` semantics — we generate one per device. */
@@ -28,6 +28,7 @@ export type Route =
   | { name: "masters" }
   | { name: "add-master" }
   | { name: "sessions"; masterId: string }
+  | { name: "new-thread"; masterId: string }
   | { name: "transcript"; masterId: string; threadId: string; title: string };
 
 const MASTERS_KEY = "peach-remote.masters";
@@ -51,6 +52,8 @@ class Store {
   reach = $state<Record<string, Reachability>>({});
   /** Cached `/sessions` per master. */
   sessions = $state<Record<string, RemoteSessionInfo[]>>({});
+  /** Cached `/projects` per master (for the new-thread picker). */
+  projects = $state<Record<string, RemoteProjectInfo[]>>({});
   /** Navigation stack; last entry is the visible screen. */
   stack = $state<Route[]>([{ name: "masters" }]);
 
@@ -135,6 +138,10 @@ class Store {
 
   setSessions(id: string, list: RemoteSessionInfo[]): void {
     this.sessions = { ...this.sessions, [id]: list };
+  }
+
+  setProjects(id: string, list: RemoteProjectInfo[]): void {
+    this.projects = { ...this.projects, [id]: list };
   }
 
   /** Persisted tap watermark — survives a cold relaunch so reconnect can
