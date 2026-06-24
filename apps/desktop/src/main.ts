@@ -11,6 +11,7 @@ import "./styles/composer-device.css";
 import "./styles/composer-device-parts.css";
 import "./styles/composer-device-overrides.css";
 import "./styles/composer-device-dark.css";
+import "./styles/sidebar-device.css";
 
 // DevTap renderer error capture (dev only; main drops events unless DEV_TAP=1).
 if (import.meta.env.DEV) initDevTapRenderer();
@@ -22,6 +23,18 @@ theme.init();
 streamReveal.init();
 // Load global model-selector prefs (pinned slots, hidden models).
 modelPrefs.init();
+
+// Auto-hide scrollbar thumb: reveal only while actively scrolling.
+// Matches the Composer textarea's `.is-scrolling` pattern, applied globally.
+const scrollTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
+document.addEventListener("scroll", (e) => {
+  const el = e.target as Element;
+  if (!(el instanceof HTMLElement)) return;
+  el.classList.add("is-scrolling");
+  const existing = scrollTimers.get(el);
+  if (existing) clearTimeout(existing);
+  scrollTimers.set(el, setTimeout(() => el.classList.remove("is-scrolling"), 700));
+}, true);
 
 // Same bundle serves both windows; the HUD window loads with #hud.
 const isHud = window.location.hash === "#hud";

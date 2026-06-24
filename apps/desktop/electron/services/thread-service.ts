@@ -191,10 +191,11 @@ export class ThreadService {
     // that failed silently (e.g. while offline). Retry on every prompt until
     // it lands; once tagged it never re-enters here.
     if (!thread.tag) {
-      // Instant truncated placeholder on a genuinely-new thread only. On a
-      // retry the title is already the truncated opening prompt.
+      // Instant placeholder on a genuinely-new thread only. On a retry the
+      // title is already the opening prompt. Store the full text; the sidebar
+      // truncates for display (so widening the sidebar reveals more).
       if (isNewThread(thread.title)) {
-        this.threads.setTitle(threadId, text.length > 60 ? `${text.slice(0, 60)}…` : text);
+        this.threads.setTitle(threadId, text);
         this.onThreadsChanged();
       }
       void this.generateTitleAndTag(threadId, text);

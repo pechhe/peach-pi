@@ -91,6 +91,24 @@ test("expired snoozes auto-clear and are returned", () => {
   assert.equal(threads.get("t1")!.wokeFromSnoozeAt, undefined);
 });
 
+test("woken thread bumps last_activity_at so it stays near the top after open", () => {
+  // Regression: a long-snoozed thread kept its stale pre-snooze
+  // last_activity_at. While pinned by wokeFromSnoozeAt it showed at the top,
+  // but opening it cleared the pin and the thread sank to the bottom (the
+  // Sidebar sort falls back to last_activity_at DESC).
+  const db = memoryDb();
+  const threads = new ThreadRepo(db);
+  const oldActivity = "2020-01-01T00:00:00.000Z"; // long before the snooze
+  const wakeAt = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO threads (id, title, created_at, last_activity_at, snoozed_until) VALUES ('t1','x',?,?,?)",
+  ).run(wakeAt, oldActivity, "2000-01-01T00:00:00.000Z");
+
+  const woken = threads.clearExpiredSnoozes(wakeAt);
+  assert.equal(woken[0]!.lastActivityAt, wakeAt);
+  assert.equal(threads.get("t1")!.lastActivityAt, wakeAt);
+});
+
 test("resetStaleRunning reaps ghost running threads to failed", () => {
   const db = memoryDb();
   const threads = new ThreadRepo(db);

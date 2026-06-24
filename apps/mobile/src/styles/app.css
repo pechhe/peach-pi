@@ -1,0 +1,250 @@
+@import "tailwindcss";
+
+/* ---------- semantic color tokens (mirrors apps/desktop/src/styles/app.css) ----------
+ * Components reference these via Tailwind utilities (bg-surface, text-muted, …).
+ * Default is the dark theme; `:root[data-theme="light"]` flips the same tokens. */
+@theme {
+  --color-bg: #101012;
+  --color-surface: #18181b;
+  --color-surface-2: #27272a;
+  --color-surface-3: #3f3f46;
+  --color-border: #27272a;
+  --color-border-strong: #3f3f46;
+  --color-fg: #e7e7ea;
+  --color-fg-soft: #d4d4d8;
+  --color-muted: #a1a1aa;
+  --color-faint: #71717a;
+  --color-fainter: #52525b;
+  --color-accent: #38bdf8;
+  --color-danger: #f87171;
+  --color-success: #10b981;
+  --color-warning: #fbbf24;
+  --color-warning-surface: #451a03;
+  --color-warning-border: #b45309;
+  --color-warning-fg: #fbbf24;
+  /* The user bubble surface differs subtly from surface-2 in the design. */
+  --color-bubble: #27272a;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #f4f4f6;
+  --color-surface: #ffffff;
+  --color-surface-2: #e9e9ed;
+  --color-surface-3: #dcdce1;
+  --color-border: #e6e6ea;
+  --color-border-strong: #d6d6dc;
+  --color-fg: #1f2024;
+  --color-fg-soft: #3a3b40;
+  --color-muted: #6b6c74;
+  --color-faint: #9a9ba3;
+  --color-fainter: #b6b7be;
+  --color-accent: #6d5ef0;
+  --color-danger: #dc2626;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-warning-surface: #fdf3e2;
+  --color-warning-border: #f1d9a8;
+  --color-warning-fg: #b45309;
+  --color-bubble: #f0f0f1;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: -apple-system, "SF Pro Text", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  cursor: pointer;
+  font: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* ---------- prototype animations (handoff README) ---------- */
+@keyframes pp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pp-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes pp-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@keyframes pp-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+@keyframes pp-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pp-banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pp-spin {
+  animation: pp-spin 1s linear infinite;
+}
+.pp-pulse {
+  animation: pp-pulse 1.6s ease-in-out infinite;
+}
+.pp-blink {
+  animation: pp-blink 1s steps(2, start) infinite;
+}
+.pp-item-in {
+  animation: pp-item-in 0.18s ease-out;
+}
+.pp-banner-in {
+  animation: pp-banner-in 0.14s ease-out;
+}
+
+/* Streaming "writing…" shimmer label. */
+.pp-shimmer-text {
+  color: var(--color-accent);
+  background-image: linear-gradient(
+    100deg,
+    currentColor 0%,
+    currentColor 45%,
+    color-mix(in srgb, currentColor 14%, white 86%) 50%,
+    currentColor 55%,
+    currentColor 100%
+  );
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: pp-shimmer 2.2s linear infinite;
+}
+
+/* Streaming caret (assistant text). */
+.pp-caret {
+  display: inline-block;
+  width: 6px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--color-accent);
+  animation: pp-blink 1s steps(2, start) infinite;
+}
+
+/* ---------- markdown typography for assistant text (subset of desktop) ---------- */
+.md {
+  font-size: 14.5px;
+  line-height: 1.62;
+  color: var(--color-fg);
+  word-break: break-word;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 0.6em;
+}
+.md ul,
+.md ol {
+  margin: 0 0 0.6em;
+  padding-left: 1.3em;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin: 0.15em 0;
+}
+.md li::marker {
+  color: var(--color-faint);
+}
+.md a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.md strong {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.84em;
+  background: var(--color-surface-2);
+  border-radius: 4px;
+  padding: 0.12em 0.38em;
+}
+.md pre {
+  margin: 0.6em 0;
+  padding: 11px 13px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-fg-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pp-spin,
+  .pp-pulse,
+  .pp-blink,
+  .pp-shimmer-text,
+  .pp-caret {
+    animation: none;
+  }
+}

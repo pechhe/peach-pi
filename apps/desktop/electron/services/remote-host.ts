@@ -22,6 +22,14 @@ import { checkpointTip, originUrl } from "./remote-checkpoint.ts";
 
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "peach-remote-host.json");
 
+/** Open CORS so the mobile PWA (a different origin) can read responses.
+ *  Responses stay token-gated, so this widens reachability, not trust. */
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+} as const;
+
 /**
  * Master-side relay (ADR-0009). Serves served sessions over the tailnet via
  * plain HTTP + Server-Sent Events (no `ws` dependency; same node:http precedent
@@ -37,6 +45,12 @@ const CONFIG_PATH = join(homedir(), ".pi", "agent", "peach-remote-host.json");
  *   GET  /health                     → { ok: true }
  *   GET  /sessions                   → RemoteSessionInfo[]
  *   GET  /tap?threadId=&lastSeq=     → SSE stream of RemoteTapFrame
+ *
+ * Browser clients (the mobile PWA, ADR-0009 follow-up): EventSource cannot set
+ * an Authorization header, so the token may ALSO be passed as a `?token=` query
+ * param, and CORS is opened (`Access-Control-Allow-Origin: *`). Responses stay
+ * token-gated, so this widens reachability, not trust — the tailnet + token are
+ * still the entire security model.
  */
 export interface RelayDeps {
   /** Authoritative transcript snapshot for a thread (backfill on attach). */
@@ -231,8 +245,13 @@ export class RemoteHostService {
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
-      if (!this.checkAuth(req)) return this.send(res, 401, { error: "unauthorized" });
       const url = new URL(req.url ?? "/", `http://${this.bindIp ?? "127.0.0.1"}`);
+      // CORS preflight carries no credentials — answer it before the auth gate.
+      if (req.method === "OPTIONS") {
+        res.writeHead(204, CORS_HEADERS);
+        return void res.end();
+      }
+      if (!this.checkAuth(req, url)) return this.send(res, 401, { error: "unauthorized" });
 
       if (req.method === "GET" && url.pathname === "/health") {
         return this.send(res, 200, { ok: true });
@@ -282,6 +301,7 @@ export class RemoteHostService {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      ...CORS_HEADERS,
     });
     res.write(": connected\n\n");
 
@@ -315,13 +335,16 @@ export class RemoteHostService {
     });
   }
 
-  private checkAuth(req: IncomingMessage): boolean {
-    const header = req.headers.authorization ?? "";
-    return isValidToken(this.token) && header === `Bearer ${this.token}`;
+  private checkAuth(req: IncomingMessage, url: URL): boolean {
+    return authorizeRequest(
+      this.token,
+      req.headers.authorization,
+      url.searchParams.get("token"),
+    );
   }
 
   private send(res: ServerResponse, status: number, body: unknown): void {
-    res.writeHead(status, { "Content-Type": "application/json" });
+    res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS });
     res.end(JSON.stringify(body));
   }
 
@@ -334,4 +357,19 @@ export class RemoteHostService {
 
 function reqCloseHandler(req: IncomingMessage, fn: () => void): void {
   req.on("close", fn);
+}
+
+/** Pure auth gate (so it's testable without binding the tailnet socket).
+ *  A request is authorized iff the relay has a valid token AND the caller
+ *  presents it — either as `Authorization: Bearer <token>` (native/desktop
+ *  clients) or as a `?token=<token>` query param (browser EventSource, which
+ *  cannot set headers). Both carry the same token over the same tailnet. */
+export function authorizeRequest(
+  token: string,
+  authHeader: string | undefined,
+  queryToken: string | null,
+): boolean {
+  if (!isValidToken(token)) return false;
+  if ((authHeader ?? "") === `Bearer ${token}`) return true;
+  return queryToken === token;
 }

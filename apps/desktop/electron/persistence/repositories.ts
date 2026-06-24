@@ -317,15 +317,22 @@ export class ThreadRepo {
     this.db.prepare("UPDATE threads SET to_test_at = ?, to_test_note = ? WHERE id = ?").run(at, note, id);
   }
 
-  /** Threads whose snooze expired — auto-return to active (decision #5). */
+  /** Threads whose snooze expired — auto-return to active (decision #5).
+   *  `last_activity_at` is bumped to the wake time so a long-snoozed thread
+   *  stays near the top of the active list after the transient
+   *  `wokeFromSnoozeAt` pin is cleared on open; otherwise it would sink back
+   *  to the bottom the moment the user clicks it (its pre-snooze activity is
+   *  stale). */
   clearExpiredSnoozes(now: string): Thread[] {
     const rows = this.db
       .prepare("SELECT * FROM threads WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?")
       .all(now) as unknown as ThreadRow[];
     this.db
-      .prepare("UPDATE threads SET snoozed_until = NULL, woke_from_snooze_at = ? WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?")
-      .run(now, now);
-    return rows.map((r) => toThread({ ...r, snoozed_until: null, woke_from_snooze_at: now }));
+      .prepare("UPDATE threads SET snoozed_until = NULL, woke_from_snooze_at = ?, last_activity_at = ? WHERE snoozed_until IS NOT NULL AND snoozed_until <= ?")
+      .run(now, now, now);
+    return rows.map((r) =>
+      toThread({ ...r, snoozed_until: null, woke_from_snooze_at: now, last_activity_at: now }),
+    );
   }
 }
 

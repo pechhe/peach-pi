@@ -54,11 +54,26 @@
       spaceBelow < h + GAP && r.top >= h + GAP ? r.top - h - GAP : r.bottom + GAP;
     const left = Math.max(8, Math.min(r.right - WIDTH, window.innerWidth - WIDTH - 8));
     pos = { top, left };
+    // Only dismiss when a scroll actually moves the anchor — i.e. the anchor
+    // itself or one of its scroll-container ancestors. Scrolls elsewhere must
+    // not close the menu: notably the main thread view re-pinning
+    // `scrollTop = scrollHeight` while *another* thread streams fires window
+    // scroll events that have nothing to do with this picker's anchor.
     const close = () => onClose();
-    window.addEventListener("scroll", close, true);
+    const onWindowScroll = (e: Event) => {
+      if (!pickerEl) return;
+      const scrolled = e.target;
+      if (scrolled === document) {
+        onClose();
+        return;
+      }
+      if (!(scrolled instanceof Element)) return;
+      if (anchor && (scrolled === anchor || scrolled.contains(anchor))) onClose();
+    };
+    window.addEventListener("scroll", onWindowScroll, true);
     window.addEventListener("resize", close);
     return () => {
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onWindowScroll, true);
       window.removeEventListener("resize", close);
     };
   });

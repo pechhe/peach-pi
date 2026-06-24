@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import type {
-  ProviderUsageSummary,
   UsageBalanceSummary,
   UsageMetric,
   UsageQuotaSummary,
@@ -13,30 +10,15 @@ import type {
 } from "@peach-pi/shared-types";
 
 import { isConfigValueConfigured, resolveConfigValueOrThrow } from "./resolve-config-value.ts";
+import {
+  FETCH_TIMEOUT_MS,
+  failureNote,
+  type FetchResult,
+  type UsageAdapter,
+} from "./usage-shared.ts";
 
-const execFileAsync = promisify(execFile);
-export const FETCH_TIMEOUT_MS = 10_000;
 const AGENT_DIR = join(homedir(), ".pi", "agent");
 const MODELS_PATH = join(AGENT_DIR, "models.json");
-const SETTINGS_PATH = join(AGENT_DIR, "settings.json");
-const AUTH_PATH = join(AGENT_DIR, "auth.json");
-const QUOTA_STATUS_SPEC = "npm:@mjfuertesf/pi-quota-status";
-
-/** A typed adapter turns a provider's credentials into a usage summary. */
-export interface UsageAdapter {
-  label: string;
-  /** Whether the agent has configured the provider (key/cookie present). */
-  configured(): Promise<boolean>;
-  /** Fetch the live usage; returns null summary on unrecoverable failure and
-   *  a state explaining why (unsupported / unknown / partial / ok). */
-  fetch(): Promise<FetchResult>;
-}
-
-export type FetchResult = {
-  summary: ProviderUsageSummary["summary"];
-  state: ProviderUsageSummary["state"];
-  note: string | null;
-};
 
 // ── credential access ───────────────────────────────────────────────────
 // Provider API keys live in ~/.pi/agent/models.json providers.<id>.apiKey
@@ -107,12 +89,6 @@ async function safeBody(res: Response): Promise<string> {
   } catch {
     return `HTTP ${res.status}`;
   }
-}
-
-/** Short, non-sensitive note from a fetch failure (no key ever included). */
-export function failureNote(e: unknown): string {
-  if (e instanceof Error && e.message) return `Fetch failed: ${e.message.slice(0, 140)}`;
-  return "Fetch failed — check your network and key.";
 }
 
 function asFiniteNumber(v: unknown): number | null {
@@ -277,118 +253,5 @@ export class NeuralWattAdapter implements UsageAdapter {
   }
 }
 
-// ── Anthropic (Claude subscription via pi-quota-status extension) ─────────
-// Reuses the @mjfuertesf/pi-quota-status extension's cookie-based claude.ai
-// usage fetch (no point re-scraping the brittlest provider). It exposes a
-// JSON command; we shell out to `pi --print` and parse the normalized result.
-
-interface QuotaStatusUsageResult {
-  status: "ok" | "partial" | "unknown" | "unsupported";
-  provider: string;
-  display?: string;
-  usage?: { fiveHour?: { remainingPct?: number; resetAt?: string | null } | null; weekly?: { remainingPct?: number; resetAt?: string | null } | null };
-}
-
-function findPiBin(): string {
-  const candidates = [
-    join(homedir(), ".npm-global", "bin", "pi"),
-    join(homedir(), ".local", "bin", "pi"),
-    "/opt/homebrew/bin/pi",
-    "/usr/local/bin/pi",
-  ];
-  for (const c of candidates) if (existsSync(c)) return c;
-  return "pi";
-}
-
-type AnthropicConfig = { ok: true } | { ok: false; reason: string };
-
-/** Cheap on-disk check: is the pi-quota-status extension installed AND has it
- *  saved a claude.ai subscription cookie? No network — avoids a real quota
- *  fetch on every `configured()` probe. Returns a human-readable reason. */
-function anthropicConfig(): AnthropicConfig {
-  let installed = false;
-  try {
-    const parsed = JSON.parse(readFileSync(SETTINGS_PATH, "utf8")) as { packages?: unknown[] };
-    installed =
-      Array.isArray(parsed.packages) &&
-      parsed.packages.some((p) => typeof p === "string" && p.includes("pi-quota-status"));
-  } catch {
-    installed = false;
-  }
-  if (!installed) {
-    return {
-      ok: false,
-      reason: "Install @mjfuertesf/pi-quota-status, then run /quota-status-extract with a claude.ai cookie/HAR.",
-    };
-  }
-  try {
-    const auth = JSON.parse(readFileSync(AUTH_PATH, "utf8")) as {
-      "quota-status"?: { "anthropic-subscription"?: { authCookie?: string; organizationUuid?: string } };
-    };
-    const sub = auth?.["quota-status"]?.["anthropic-subscription"];
-    if (sub?.authCookie && sub?.organizationUuid) return { ok: true };
-    return {
-      ok: false,
-      reason: "pi-quota-status is installed but no claude.ai cookie saved — run /quota-status-extract.",
-    };
-  } catch {
-    return {
-      ok: false,
-      reason: "pi-quota-status is installed but no claude.ai cookie saved — run /quota-status-extract.",
-    };
-  }
-}
-
-export class AnthropicAdapter implements UsageAdapter {
-  label = "Anthropic · Claude Plan";
-  async configured(): Promise<boolean> {
-    return anthropicConfig().ok;
-  }
-  async fetch(): Promise<FetchResult> {
-    const cfg = anthropicConfig();
-    if (!cfg.ok) {
-      return { summary: null, state: "unsupported", note: cfg.reason };
-    }
-    try {
-      const { stdout } = await execFileAsync(
-        findPiBin(),
-        ["--print", "--no-session", "--no-context-files", "/quota-status-usage", "--json"],
-        { timeout: FETCH_TIMEOUT_MS * 2, maxBuffer: 4 * 1024 * 1024 },
-      );
-      const result = JSON.parse(stdout) as QuotaStatusUsageResult;
-      if (result.status === "unsupported") {
-        return { summary: null, state: "unsupported", note: "Install pi-quota-status + run /quota-status-extract." };
-      }
-      if (result.status === "unknown") {
-        return { summary: null, state: "unknown", note: "Re-run /quota-status-extract with a fresh claude.ai HAR." };
-      }
-      const fh = result.usage?.fiveHour;
-      const wk = result.usage?.weekly;
-      const fiveHours: UsageWindow | null =
-        fh && typeof fh.remainingPct === "number"
-          ? { usedPct: 100 - fh.remainingPct, resetAt: fh.resetAt ?? null }
-          : null;
-      const weekly: UsageWindow | null =
-        wk && typeof wk.remainingPct === "number"
-          ? { usedPct: 100 - wk.remainingPct, resetAt: wk.resetAt ?? null }
-          : null;
-      if (!fiveHours && !weekly) return { summary: null, state: "unknown", note: null };
-      const summary: UsageQuotaSummary = { kind: "quota", fiveHours, weekly };
-      return { summary, state: result.status, note: null };
-    } catch (e) {
-      return { summary: null, state: "unsupported", note: failureNote(e) };
-    }
-  }
-}
-
-// ── registry ─────────────────────────────────────────────────────────────
-
-export type AdapterCtor = new () => UsageAdapter;
-
-/** Provider id → adapter constructor, in display order. */
-export const ADAPTERS: { provider: string; ctor: AdapterCtor }[] = [
-  { provider: "anthropic", ctor: AnthropicAdapter },
-  { provider: "zai", ctor: ZaiAdapter },
-  { provider: "openrouter", ctor: OpenRouterAdapter },
-  { provider: "neuralwatt", ctor: NeuralWattAdapter },
-];
+// ── Anthropic adapter lives in usage-anthropic-adapter.ts (uses OAuth, not
+//    HTTP), and the provider→adapter registry lives in usage-service.ts.

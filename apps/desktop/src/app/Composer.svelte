@@ -36,17 +36,16 @@
   import BwsSecretPrompt from "./BwsSecretPrompt.svelte";
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSelector from "./composer/ModelSelector.svelte";
+  import ModelScopeSelect from "../components/ui/model-scope-select/model-scope-select.svelte";
   import QuickSlots from "./composer/QuickSlots.svelte";
   import ConnectorIcon from "./ConnectorIcon.svelte";
 
-  let { thread, onRewind, onNewThread, onOpenSettings, centered = false }: {
+  let { thread, onRewind, onNewThread, centered = false }: {
     thread: Thread;
     /** `/rewind [n]` from the composer — rewind the n-th turn from the end. */
     onRewind?: (n: number) => void;
     /** `/new` system command — start a new thread in the current project. */
     onNewThread?: () => void;
-    /** `/scoped-models` system command — open Settings scoped-models section. */
-    onOpenSettings?: (query?: string) => void;
     /** Centered "new thread" state (composer in the middle, no messages yet). */
     centered?: boolean;
   } = $props();
@@ -143,6 +142,8 @@
   });
   // Imperative handle into ModelSelector for ⌘1–4 keyboard shortcuts.
   let modelSelector = $state<{ selectSlot: (index: number) => void; openMenu: () => void } | null>(null);
+  // Imperative handle for the inline `/scoped-models` floating panel.
+  let scopedModelsPanel = $state<{ openScopedModels: () => Promise<void> } | null>(null);
   // Esc-to-stop is a two-press confirm to avoid accidental aborts.
   let abortArmed = $state(false);
   let dragActive = $state(false);
@@ -194,7 +195,7 @@
     { name: "plan", description: "Switch to Plan mode", kind: "system" },
     { name: "build", description: "Switch to Build mode", kind: "system" },
     { name: "new", description: "Start a new thread in this project", kind: "system" },
-    { name: "scoped-models", description: "Open the Scoped models settings", kind: "system" },
+    { name: "scoped-models", description: "Pick which models appear in the composer", kind: "system" },
   ];
   const systemCommandNames = new Set(systemCommandList.map((c) => c.name));
   const allCommands = $derived<CommandInfo[]>([...systemCommandList, ...commands]);
@@ -334,7 +335,7 @@
         onNewThread?.();
         break;
       case "scoped-models":
-        onOpenSettings?.("open:scopedModels");
+        void scopedModelsPanel?.openScopedModels();
         break;
     }
   }
@@ -880,6 +881,25 @@
       void submit(e.metaKey && running);
       return;
     }
+    // Escape dismisses the open slash / @ menu: drop the `/…` or `@…` token
+    // before the caret (cancel the in-progress command/pin) without arming a
+    // model abort. The two-press Esc-to-stop safeguard still applies once the
+    // menu is gone.
+    const menuCtx = slashQuery !== null ? slashContext : atQuery !== null ? atContext : null;
+    if (e.key === "Escape" && menuCtx) {
+      e.preventDefault();
+      drafts.update(
+        thread.id,
+        { text: draft.text.slice(0, menuCtx.start) + draft.text.slice(cursor) },
+      );
+      requestAnimationFrame(() => {
+        if (textareaEl) {
+          textareaEl.selectionStart = textareaEl.selectionEnd = menuCtx.start;
+          syncCursor();
+        }
+      });
+      return;
+    }
     if (e.key === "Escape" && running) {
       if (abortArmed) {
         abortArmed = false;
@@ -1360,6 +1380,8 @@
     <span class="btw-btn__label">BTW</span>
   </button>
   {/if}
+
+  <ModelScopeSelect bind:this={scopedModelsPanel} floating />
 </footer>
 
 <style>

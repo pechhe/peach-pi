@@ -1,0 +1,67 @@
+/* ================================================================ */
+/* Skeuomorphic metal sidebar — mirrors the composer device chassis  */
+/* so the left rail reads as the same machined-panel family.          */
+/*                                                                    */
+/* Keyed off <html data-composer> (resolved by the theme store) so it */
+/* always tracks the composer's variant: brushed silver when the      */
+/* composer is light, anodized black when it is dark.                 */
+/*                                                                    */
+/* The sidebar is a tall, narrow column, so the brushed-metal grain   */
+/* runs LEFT→RIGHT (not top→bottom like the composer panel): the        */
+/* luminance ramp and specular highlights read as horizontally-       */
+/* brushed aluminium, which is what a vertically-tall machined rail   */
+/* would actually show. The vertical box-shadow is kept light so the  */
+/* panel sits flat in the chrome frame instead of punching a deep hole. */
+/* ================================================================ */
+
+.sidebar-device {
+  position: relative;
+  isolation: isolate;
+  /* Horizontal brushed metal: the body ramp + corner light/shade are all
+     laid along the X axis so the sheen travels across the rail's width. */
+  background:
+    linear-gradient(90deg, oklch(1 0.002 250 / 0.42), oklch(0.9 0.003 250 / 0.1) 46%, oklch(0.64 0.003 250 / 0.09) 100%),
+    radial-gradient(ellipse 56% 95% at 20% 24%, oklch(1 0.002 250 / 0.13), transparent 64%),
+    radial-gradient(ellipse 56% 95% at 82% 80%, oklch(0.42 0.003 250 / 0.03), transparent 70%),
+    linear-gradient(90deg, oklch(0.985 0.002 250) 0%, oklch(0.94 0.003 250) 54%, oklch(0.9 0.003 250) 100%);
+  background-blend-mode: normal, soft-light, multiply, normal;
+  box-shadow: inset 0 0 0 0.5px oklch(0.92 0.002 250 / 0.12);
+}
+
+/* Sheen / edge vignette — the same overlay language as the composer
+   chassis, but its hard stops run vertically (left/right edges) so the
+   left and right rims catch light while the body stays an even brushed
+   plane. Parked at z-index:-1; isolation keeps the negative layer
+   contained above the metal background. */
+.sidebar-device::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.16;
+  background:
+    linear-gradient(90deg, oklch(1 0.002 250 / 0.1), transparent 9%, transparent 91%, oklch(0.3 0.004 250 / 0.03)),
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.07), transparent 14%, transparent 86%, oklch(0.3 0.004 250 / 0.025)),
+    radial-gradient(ellipse 70% 50% at 45% 0%, oklch(1 0.002 250 / 0.02), transparent 62%);
+}
+
+/* ---------------- Dark: anodized black (tracks composer) ---------------- */
+:root[data-composer="dark"] .sidebar-device {
+  background:
+    linear-gradient(90deg, oklch(0.6 0.004 265 / 0.16), oklch(0.3 0.004 265 / 0.05) 46%, oklch(0.05 0.004 265 / 0.07) 100%),
+    radial-gradient(ellipse 56% 95% at 20% 24%, oklch(0.62 0.004 265 / 0.1), transparent 64%),
+    radial-gradient(ellipse 56% 95% at 82% 80%, oklch(0 0 0 / 0.12), transparent 70%),
+    repeating-linear-gradient(90deg, oklch(0.6 0.004 265 / 0.022) 0 1px, transparent 1px 3px),
+    linear-gradient(90deg, oklch(0.235 0.004 265) 0%, oklch(0.205 0.004 265) 54%, oklch(0.185 0.004 265) 100%);
+  background-blend-mode: normal, soft-light, multiply, overlay, normal;
+  box-shadow: inset 0 0 0 0.5px oklch(0 0 0 / 0.14);
+}
+
+:root[data-composer="dark"] .sidebar-device::before {
+  opacity: 0.12;
+  background:
+    linear-gradient(90deg, oklch(0.62 0.004 265 / 0.06), transparent 9%, transparent 91%, oklch(0 0 0 / 0.06)),
+    linear-gradient(180deg, oklch(0.62 0.004 265 / 0.05), transparent 14%, transparent 86%, oklch(0 0 0 / 0.05)),
+    radial-gradient(ellipse 70% 50% at 45% 0%, oklch(0.6 0.004 265 / 0.02), transparent 62%);
+}

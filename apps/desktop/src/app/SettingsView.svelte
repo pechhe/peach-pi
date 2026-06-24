@@ -10,7 +10,14 @@
   import { setSoundsMuted, soundsMuted, setDoneSoundVariant, getDoneSoundVariant } from "../lib/sound/sound-prefs";
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import { DONE_SOUND_OPTIONS, playDoneSound, type DoneSoundVariant } from "../lib/sound/done-sound";
-  import { THEMES, theme, type ComposerStyle } from "../lib/theme.svelte";
+  import {
+    THEMES,
+    THEME_TOKENS,
+    THEME_TOKEN_GROUPS,
+    CUSTOM_THEME_ID,
+    theme,
+    type ComposerStyle,
+  } from "../lib/theme.svelte";
   import { clickCopy } from "../lib/code-copy";
   import {
     STREAM_LOOKS,
@@ -26,6 +33,7 @@
   import DoneBurstPlayground from "./DoneBurstPlayground.svelte";
   import Check from "@lucide/svelte/icons/check";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { autoCompact } from "../stores/auto-compact.svelte";
   import { caveman } from "../stores/caveman.svelte";
   import { piSettings } from "../stores/pi-settings.svelte";
@@ -64,6 +72,9 @@
 
   let query = $state(initialQuery);
   let searchInput = $state<HTMLInputElement | null>(null);
+  // Custom-color editor expansion + deep-link anchor for the theme section.
+  let editingColors = $state(false);
+  let themeSection = $state<HTMLElement | null>(null);
   // Follow palette deep-links ("Settings: Theme") that arrive after mount.
   $effect(() => {
     query = initialQuery;
@@ -344,23 +355,128 @@
         </p>
       {/if}
       {#if hit("theme")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
+      <section class="rounded-lg border border-border bg-surface/50 p-4" bind:this={themeSection}>
         <div class="flex items-center justify-between gap-4">
           <div>
             <h2 class="text-sm text-fg">Theme</h2>
-            <p class="text-xs text-faint">Applies to every window.</p>
+            <p class="text-xs text-faint">Pick a preset, or customize each color. Applies to every window.</p>
           </div>
           <Select
             class="rounded-md bg-surface-2"
             value={theme.current}
-            onValueChange={(v) => theme.set(v)}
-            items={THEMES.map((t) => ({ value: t.id, label: t.label }))}
+            onValueChange={(v) => {
+              theme.set(v);
+              if (v !== CUSTOM_THEME_ID) editingColors = false;
+            }}
+            items={[
+              ...THEMES.map((t) => ({ value: t.id, label: t.label })),
+              { value: CUSTOM_THEME_ID, label: "Custom…", group: "Your colors" },
+            ]}
             data-testid="theme-select"
             aria-label="Theme"
           />
         </div>
+
+        {#if theme.current === CUSTOM_THEME_ID}
+        <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-border pt-4">
+          <label class="flex items-center gap-2 text-xs text-muted">
+            Base scheme
+            <Select
+              class="rounded-md bg-surface-2"
+              value={theme.customScheme}
+              onValueChange={(v) => theme.setCustomScheme(v as "dark" | "light")}
+              items={[
+                { value: "dark", label: "Dark" },
+                { value: "light", label: "Light" },
+              ]}
+              data-testid="custom-scheme-select"
+              aria-label="Custom theme base scheme"
+            />
+          </label>
+          <button
+            type="button"
+            class="rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+            onclick={() => theme.resetAll()}
+            data-testid="custom-reset-all"
+          >Reset all colors</button>
+          <button
+            type="button"
+            class="ml-auto rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-border-focus hover:text-fg"
+            onclick={() => (editingColors = !editingColors)}
+            aria-expanded={editingColors}
+            data-testid="custom-toggle-editor"
+          >{editingColors ? "Done editing" : "Edit colors"}</button>
+        </div>
+        {/if}
+
+        {#if theme.current === CUSTOM_THEME_ID && editingColors}
+        <div class="mt-4 grid gap-x-6 gap-y-5 border-t border-border pt-4 sm:grid-cols-2">
+          {#each THEME_TOKEN_GROUPS as group (group)}
+            <div>
+              <h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-faint">{group}</h3>
+              <ul class="flex flex-col gap-1.5">
+                {#each THEME_TOKENS.filter((t) => t.group === group) as token (token.id)}
+                  {@render colorRow({ token })}
+                {/each}
+              </ul>
+            </div>
+          {/each}
+        </div>
+        <p class="mt-3 text-xs text-fainter">
+          Some decorative accents (terminals, agent identity colors, celebration effects) keep fixed colors.
+        </p>
+        {/if}
       </section>
       {/if}
+
+      {#snippet colorRow({ token }: { token: { id: string; label: string; group: string } })}
+        {@const value = theme.customColors[token.id] ?? ""}
+        {@const swatchVar = value ? `var(--color-${token.id})` : "transparent"}
+        <li class="flex items-center gap-2">
+          <label
+            class="relative flex size-5 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded border border-border-strong"
+            title={value || "Not set"}
+            style="background: {swatchVar};"
+          >
+            <input
+              type="color"
+              class="absolute inset-0 size-full cursor-pointer opacity-0"
+              value={value || "#000000"}
+              oninput={(e) => theme.setToken(token.id, e.currentTarget.value)}
+              aria-label={`${token.label} color`}
+              data-testid={`color-input-${token.id}`}
+            />
+          </label>
+          <span class="min-w-0 flex-1 text-xs text-fg-soft">{token.label}</span>
+          <input
+            type="text"
+            class="w-20 rounded border border-border bg-bg px-1.5 py-0.5 font-mono text-[11px] text-muted outline-none transition-colors focus:border-border-focus"
+            placeholder="inherit"
+            value="{value}"
+            oninput={(e) => {
+              const v = e.currentTarget.value.trim();
+              if (/^#?[0-9a-fA-F]{3,8}$/.test(v)) {
+                theme.setToken(token.id, v.startsWith("#") ? v : `#${v}`);
+              } else if (v === "") {
+                theme.resetToken(token.id);
+              }
+            }}
+            data-testid={`color-hex-${token.id}`}
+          />
+          {#if value}
+            <button
+              type="button"
+              class="shrink-0 rounded p-1 text-faint transition-colors hover:bg-surface-2 hover:text-fg"
+              title="Reset this color"
+              aria-label="Reset {token.label} color"
+              onclick={() => theme.resetToken(token.id)}
+              data-testid={`color-reset-${token.id}`}
+            >
+              <RotateCcw class="size-3.5" />
+            </button>
+          {/if}
+        </li>
+      {/snippet}
 
       {#if hit("composer")}
       <section class="rounded-lg border border-border bg-surface/50 p-4">

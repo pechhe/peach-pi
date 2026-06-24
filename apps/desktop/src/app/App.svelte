@@ -39,8 +39,43 @@
   import SidePanel from "./SidePanel.svelte";
   import PiHealthBanner from "./PiHealthBanner.svelte";
   import { Agentation } from "sv-agentation";
+  // After copying annotations, automatically exit inspect mode and collapse the toolbar.
+  // The controller is internal, so we dispatch synthetic events to trigger its handlers.
+  function handleAgentationCopy() {
+    setTimeout(() => {
+      // Close any open panel (settings, preview).
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }),
+      );
+      // Toggle off inspect mode.
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'i',
+          code: 'KeyI',
+          metaKey: true,
+          bubbles: true,
+        }),
+      );
+      // Collapse the toolbar back to the pill.
+      const toolbar = document.querySelector<HTMLElement>('.toolbar-shell.toolbar-expanded');
+      toolbar?.click();
+    }, 100);
+  }
+
   const agentationProps = import.meta.env.DEV
-    ? { workspaceRoot: null, includeComponentContext: true, includeComputedStyles: false }
+    ? {
+        workspaceRoot: null,
+        includeComponentContext: true,
+        includeComputedStyles: false,
+        keyBindings: {
+          inspect: 'Meta+I',
+          copy: 'Meta+Shift+C',
+          reset: 'Meta+Shift+R',
+          open: 'Meta+Shift+O',
+          delete: 'Meta+Shift+D',
+        },
+        onCopy: handleAgentationCopy,
+      }
     : null;
 
   let selectedThreadId = $state<string | null>(null);
@@ -77,7 +112,6 @@
   // (Re-syncing on every snapshot would revert the drag, since the persisted
   //  value only catches up a tick after pointerup.)
   let sidebarWidth = $state(280);
-  let resizing = $state(false);
   let widthSeeded = false;
   $effect(() => {
     if (widthSeeded) return;
@@ -94,14 +128,12 @@
   });
   function startSidebarResize(e: PointerEvent) {
     e.preventDefault();
-    resizing = true;
     const startX = e.clientX;
     const startW = sidebarWidth;
     const move = (ev: PointerEvent) => {
       sidebarWidth = Math.min(560, Math.max(200, startW + (ev.clientX - startX)));
     };
     const up = () => {
-      resizing = false;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       void api.invoke("ui:setSidebarWidth", sidebarWidth);
@@ -275,7 +307,7 @@
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
-<div class="relative flex h-full bg-sidebar">
+<div class="sidebar-device relative flex h-full">
   {#if snapshot.current}
     <Sidebar
       width={sidebarWidth}
@@ -303,12 +335,10 @@
       aria-label="Resize sidebar"
     >
       <div
-        class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors {resizing
-          ? 'bg-border-focus'
-          : 'bg-transparent group-hover:bg-border-strong'}"
+        class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent"
       ></div>
     </div>
-    <div class="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-[22px] bg-surface shadow-[-4px_0_16px_-5px_rgba(0,0,0,0.22)]">
+    <div class="relative z-10 mb-2 mr-2 mt-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[16px] bg-surface shadow-[-4px_7px_18px_-6px_rgba(0,0,0,0.14),-4px_6px_10px_-4px_rgba(0,0,0,0.18)]">
     {#key view === "thread" ? `thread:${selectedThreadId}` : view === "testing" ? `testing:${testingProjectId}` : view}
     <div class="view-enter flex min-h-0 flex-1">
     {#if view === "settings"}
@@ -353,7 +383,6 @@
         thread={selectedThread}
         onSetEnvironment={setThreadEnvironment}
         onOpenGraph={() => openView("graph")}
-        onOpenSettings={openSettings}
         onSelectThread={selectThread}
         onNewThread={newThreadForCurrentProject}
         pendingFind={pendingFindQuery}

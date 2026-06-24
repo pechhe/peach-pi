@@ -513,7 +513,7 @@
 />
 
 <aside
-  class="flex h-full shrink-0 flex-col bg-sidebar"
+  class="flex h-full shrink-0 flex-col"
   style="width: {width}px"
 >
   <div class="titlebar-drag h-10 shrink-0"></div>

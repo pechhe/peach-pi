@@ -2,9 +2,22 @@ import type { ProviderUsageSummary } from "@peach-pi/shared-types";
 
 import type { Emit } from "../ipc/registry.ts";
 import { KeyedAsyncTtl } from "./ttl-cache.ts";
-import { ADAPTERS, type UsageAdapter } from "./usage-adapters.ts";
+import { failureNote, type UsageAdapter, type AdapterCtor } from "./usage-shared.ts";
+import { ZaiAdapter, OpenRouterAdapter, NeuralWattAdapter } from "./usage-adapters.ts";
+import { AnthropicAdapter } from "./usage-anthropic-adapter.ts";
 
 const CACHE_TTL_MS = 60_000;
+
+/** Provider id → adapter constructor, in display order. Defined here (not in
+ *  usage-adapters.ts) to avoid a circular import: usage-anthropic-adapter.ts
+ *  imports shared helpers from usage-shared.ts, while usage-adapters.ts holds
+ *  the HTTP adapters. */
+const ADAPTERS: { provider: string; ctor: AdapterCtor }[] = [
+  { provider: "anthropic", ctor: AnthropicAdapter },
+  { provider: "zai", ctor: ZaiAdapter },
+  { provider: "openrouter", ctor: OpenRouterAdapter },
+  { provider: "neuralwatt", ctor: NeuralWattAdapter },
+];
 
 /**
  * Tracks provider spend/usage across subscription plans and pay-per-token
@@ -44,18 +57,22 @@ export class UsageService {
 
   private async buildSummary(provider: string, adapter: UsageAdapter): Promise<ProviderUsageSummary> {
     const configured = await adapter.configured();
-    if (!configured) {
-      return { provider, label: adapter.label, configured: false, summary: null, state: "unknown", note: null, fetchedAt: null };
-    }
+    // Even when not configured, call fetch() so the adapter returns its
+    // actionable set-up note ("run pi login", "add an API key", ...). Adapters
+    // short-circuit cheaply in that case and never touch the network.
     try {
       const result = await adapter.fetch();
       return {
-        provider, label: adapter.label, configured: true,
+        provider, label: adapter.label, configured,
         summary: result.summary, state: result.state, note: result.note,
         fetchedAt: result.summary ? new Date().toISOString() : null,
       };
-    } catch {
-      return { provider, label: adapter.label, configured: true, summary: null, state: "unknown", note: null, fetchedAt: null };
+    } catch (e) {
+      return {
+        provider, label: adapter.label, configured,
+        summary: null, state: "unknown",
+        note: failureNote(e), fetchedAt: null,
+      };
     }
   }
 }

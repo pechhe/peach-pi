@@ -166,24 +166,40 @@ html.hud-window #app {
 
 /* ---------- polish: motion, scrollbars, focus ---------- */
 
-/* Thin overlay scrollbars everywhere. */
+/* Thin overlay scrollbars everywhere — thumb hidden by default, revealed
+   only while actively scrolling via the global `.is-scrolling` class
+   toggled in main.ts (mirrors the Composer textarea's pattern).
+   Uses scrollbar-color with transition for a smooth fade-out. */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 ::-webkit-scrollbar-thumb {
-  background: var(--color-surface-3);
+  background: transparent;
   border-radius: 99px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-faint);
-  border: 2px solid transparent;
-  background-clip: padding-box;
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* scrollbar-color for the fade transition (standard property, Chromium 121+).
+   Falls back to the webkit pseudo-elements above if scrollbar-color is unsupported.
+   Scoped to known scrollable containers so we don't override transitions on
+   buttons and other interactive elements. */
+nav,
+aside,
+.overflow-y-auto {
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.3s ease;
+}
+.is-scrolling {
+  scrollbar-color: var(--color-surface-3) transparent;
 }
 
 /* Keyboard focus ring without mouse-click rings. */
