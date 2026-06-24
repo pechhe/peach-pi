@@ -1,6 +1,11 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
+import { store } from "./lib/store.svelte.ts";
 import "./styles/app.css";
+
+// QR pairing: if opened via a `#connect?…` deep link, fold it into a saved
+// master and land on its sessions before the first render.
+store.consumeConnectLink();
 
 // Follow the system theme (the desktop ships both; the prototype mirrors them).
 function applyTheme(): void {

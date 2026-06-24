@@ -12,11 +12,14 @@
   import { DONE_SOUND_OPTIONS, playDoneSound, type DoneSoundVariant } from "../lib/sound/done-sound";
   import {
     THEMES,
-    THEME_TOKENS,
-    THEME_TOKEN_GROUPS,
+    PRIMARY_SLOTS,
+    METAL_DYE_SLOT,
     CUSTOM_THEME_ID,
+    isSavedId,
+    isValidThemeName,
     theme,
     type ComposerStyle,
+    type CustomPrimaries,
   } from "../lib/theme.svelte";
   import { clickCopy } from "../lib/code-copy";
   import {
@@ -72,9 +75,30 @@
 
   let query = $state(initialQuery);
   let searchInput = $state<HTMLInputElement | null>(null);
-  // Custom-color editor expansion + deep-link anchor for the theme section.
-  let editingColors = $state(false);
+  // Deep-link anchor for the theme section.
   let themeSection = $state<HTMLElement | null>(null);
+  // Inline name field for save / rename. `showNameField` gates the row;
+  // `nameDraft` is just the text the user is typing.
+  let nameDraft = $state("");
+  let showNameField = $state(false);
+  let nameInput = $state<HTMLInputElement | null>(null);
+
+  /** True when the color editor should render (custom draft or a saved theme). */
+  const editing = $derived(
+    theme.current === CUSTOM_THEME_ID || isSavedId(theme.current),
+  );
+  /** Primaries bound to the swatches: the active saved theme's, or the draft. */
+  const activePrimaries = $derived(
+    isSavedId(theme.current)
+      ? (theme.savedThemes.find((t) => t.id === theme.current)?.primaries ?? {})
+      : theme.customPrimaries,
+  );
+  /** Name of the active saved theme ("” for the draft). */
+  const activeName = $derived(
+    isSavedId(theme.current)
+      ? (theme.savedThemes.find((t) => t.id === theme.current)?.name ?? "")
+      : "",
+  );
   // Follow palette deep-links ("Settings: Theme") that arrive after mount.
   $effect(() => {
     query = initialQuery;
@@ -359,17 +383,19 @@
         <div class="flex items-center justify-between gap-4">
           <div>
             <h2 class="text-sm text-fg">Theme</h2>
-            <p class="text-xs text-faint">Pick a preset, or customize each color. Applies to every window.</p>
+            <p class="text-xs text-faint">Pick a preset, or set your own core colors. Applies to every window.</p>
           </div>
           <Select
             class="rounded-md bg-surface-2"
             value={theme.current}
             onValueChange={(v) => {
               theme.set(v);
-              if (v !== CUSTOM_THEME_ID) editingColors = false;
+              showNameField = false;
+              nameDraft = "";
             }}
             items={[
               ...THEMES.map((t) => ({ value: t.id, label: t.label })),
+              ...theme.savedThemes.map((t) => ({ value: t.id, label: t.name, group: "Saved" })),
               { value: CUSTOM_THEME_ID, label: "Custom…", group: "Your colors" },
             ]}
             data-testid="theme-select"
@@ -377,105 +403,137 @@
           />
         </div>
 
-        {#if theme.current === CUSTOM_THEME_ID}
-        <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-border pt-4">
-          <label class="flex items-center gap-2 text-xs text-muted">
-            Base scheme
-            <Select
-              class="rounded-md bg-surface-2"
-              value={theme.customScheme}
-              onValueChange={(v) => theme.setCustomScheme(v as "dark" | "light")}
-              items={[
-                { value: "dark", label: "Dark" },
-                { value: "light", label: "Light" },
-              ]}
-              data-testid="custom-scheme-select"
-              aria-label="Custom theme base scheme"
-            />
-          </label>
-          <button
-            type="button"
-            class="rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg"
-            onclick={() => theme.resetAll()}
-            data-testid="custom-reset-all"
-          >Reset all colors</button>
-          <button
-            type="button"
-            class="ml-auto rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-border-focus hover:text-fg"
-            onclick={() => (editingColors = !editingColors)}
-            aria-expanded={editingColors}
-            data-testid="custom-toggle-editor"
-          >{editingColors ? "Done editing" : "Edit colors"}</button>
-        </div>
-        {/if}
+        {#if editing}
+        <div class="mt-4 space-y-4 border-t border-border pt-4">
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <label class="flex items-center gap-2 text-xs text-muted">
+              Base
+              <Select
+                class="rounded-md bg-surface-2"
+                value={isSavedId(theme.current) ? (theme.savedThemes.find((t) => t.id === theme.current)?.scheme ?? "dark") : theme.customScheme}
+                onValueChange={(v) => theme.setCustomScheme(v as "dark" | "light")}
+                items={[
+                  { value: "dark", label: "Dark" },
+                  { value: "light", label: "Light" },
+                ]}
+                data-testid="custom-scheme-select"
+                aria-label="Theme base"
+              />
+            </label>
 
-        {#if theme.current === CUSTOM_THEME_ID && editingColors}
-        <div class="mt-4 grid gap-x-6 gap-y-5 border-t border-border pt-4 sm:grid-cols-2">
-          {#each THEME_TOKEN_GROUPS as group (group)}
-            <div>
-              <h3 class="mb-2 text-xs font-medium uppercase tracking-wide text-faint">{group}</h3>
-              <ul class="flex flex-col gap-1.5">
-                {#each THEME_TOKENS.filter((t) => t.group === group) as token (token.id)}
-                  {@render colorRow({ token })}
-                {/each}
-              </ul>
-            </div>
-          {/each}
+            {#if isSavedId(theme.current)}
+              <button
+                type="button"
+                class="ml-auto rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                onclick={() => { showNameField = true; nameDraft = activeName; requestAnimationFrame(() => nameInput?.select()); }}
+                data-testid="theme-rename"
+              >Rename</button>
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-xs text-danger transition-colors hover:bg-danger-surface hover:text-danger"
+                onclick={() => theme.deleteSaved(theme.current)}
+                data-testid="theme-delete"
+              >Delete</button>
+            {:else}
+              <button
+                type="button"
+                class="ml-auto rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-border-focus hover:text-fg"
+                onclick={() => { showNameField = true; nameDraft = ""; requestAnimationFrame(() => nameInput?.focus()); }}
+                data-testid="theme-save"
+              >Save as…</button>
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                onclick={() => theme.resetAll()}
+                data-testid="custom-reset-all"
+              >Reset to base</button>
+            {/if}
+          </div>
+
+          {#if showNameField}
+          <form
+            class="flex items-center gap-2"
+            onsubmit={(e) => {
+              e.preventDefault();
+              if (!isValidThemeName(nameDraft)) return;
+              if (isSavedId(theme.current)) {
+                theme.renameActive(nameDraft);
+              } else {
+                theme.save(nameDraft);
+              }
+              showNameField = false;
+              nameDraft = "";
+            }}
+          >
+            <input
+              bind:this={nameInput}
+              type="text"
+              class="w-48 rounded border border-border bg-bg px-2 py-1 text-xs text-fg outline-none transition-colors focus:border-border-focus"
+              placeholder="Theme name"
+              bind:value={nameDraft}
+              aria-label="Theme name"
+              data-testid="theme-name"
+            />
+            <button
+              type="submit"
+              class="rounded-md bg-surface-2 px-3 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-40"
+              disabled={!isValidThemeName(nameDraft)}
+              data-testid="theme-name-confirm"
+            >{isSavedId(theme.current) ? "Save" : "Create"}</button>
+            <button
+              type="button"
+              class="rounded-md px-2 py-1 text-xs text-faint transition-colors hover:text-fg"
+              onclick={() => { showNameField = false; nameDraft = ""; }}
+            >Cancel</button>
+          </form>
+          {/if}
+
+          <div class="flex flex-wrap gap-x-8 gap-y-3">
+            {#each PRIMARY_SLOTS as slot (slot.id)}
+              {@render primarySwatch({ slot, primaries: activePrimaries })}
+            {/each}
+            {@render primarySwatch({ slot: METAL_DYE_SLOT, primaries: activePrimaries })}
+          </div>
+          <p class="text-xs text-fainter">
+            Surfaces, borders, and text shades are derived from your three colors. Metal tints the chassis; status colors follow the base.
+          </p>
         </div>
-        <p class="mt-3 text-xs text-fainter">
-          Some decorative accents (terminals, agent identity colors, celebration effects) keep fixed colors.
-        </p>
         {/if}
       </section>
       {/if}
 
-      {#snippet colorRow({ token }: { token: { id: string; label: string; group: string } })}
-        {@const value = theme.customColors[token.id] ?? ""}
-        {@const swatchVar = value ? `var(--color-${token.id})` : "transparent"}
-        <li class="flex items-center gap-2">
+      {#snippet primarySwatch({ slot, primaries }: { slot: { id: "bg" | "fg" | "accent" | "metalDye"; label: string }; primaries: CustomPrimaries })}
+        {@const value = primaries[slot.id] ?? ""}
+        {@const swatchVar = value ? `var(--color-${slot.id === "metalDye" ? "metal-dye" : slot.id})` : "transparent"}
+        <div class="flex items-center gap-2">
           <label
-            class="relative flex size-5 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded border border-border-strong"
-            title={value || "Not set"}
+            class="relative flex size-6 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-border-strong"
+            title={value || "Inherit from base"}
             style="background: {swatchVar};"
           >
             <input
               type="color"
               class="absolute inset-0 size-full cursor-pointer opacity-0"
               value={value || "#000000"}
-              oninput={(e) => theme.setToken(token.id, e.currentTarget.value)}
-              aria-label={`${token.label} color`}
-              data-testid={`color-input-${token.id}`}
+              oninput={(e) => theme.setPrimary(slot.id, e.currentTarget.value)}
+              aria-label={`${slot.label} color`}
+              data-testid={`primary-input-${slot.id}`}
             />
           </label>
-          <span class="min-w-0 flex-1 text-xs text-fg-soft">{token.label}</span>
-          <input
-            type="text"
-            class="w-20 rounded border border-border bg-bg px-1.5 py-0.5 font-mono text-[11px] text-muted outline-none transition-colors focus:border-border-focus"
-            placeholder="inherit"
-            value="{value}"
-            oninput={(e) => {
-              const v = e.currentTarget.value.trim();
-              if (/^#?[0-9a-fA-F]{3,8}$/.test(v)) {
-                theme.setToken(token.id, v.startsWith("#") ? v : `#${v}`);
-              } else if (v === "") {
-                theme.resetToken(token.id);
-              }
-            }}
-            data-testid={`color-hex-${token.id}`}
-          />
+          <span class="min-w-0 text-xs text-fg-soft">{slot.label}</span>
           {#if value}
             <button
               type="button"
               class="shrink-0 rounded p-1 text-faint transition-colors hover:bg-surface-2 hover:text-fg"
-              title="Reset this color"
-              aria-label="Reset {token.label} color"
-              onclick={() => theme.resetToken(token.id)}
-              data-testid={`color-reset-${token.id}`}
+              title="Inherit from base"
+              aria-label="Inherit {slot.label} from base"
+              onclick={() => theme.resetPrimary(slot.id)}
+              data-testid={`primary-reset-${slot.id}`}
             >
               <RotateCcw class="size-3.5" />
             </button>
           {/if}
-        </li>
+        </div>
       {/snippet}
 
       {#if hit("composer")}

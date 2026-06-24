@@ -12,6 +12,7 @@ import "./styles/composer-device-parts.css";
 import "./styles/composer-device-overrides.css";
 import "./styles/composer-device-dark.css";
 import "./styles/sidebar-device.css";
+import "./styles/metal-dye.css";
 
 // DevTap renderer error capture (dev only; main drops events unless DEV_TAP=1).
 if (import.meta.env.DEV) initDevTapRenderer();

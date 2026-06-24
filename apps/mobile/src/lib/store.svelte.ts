@@ -10,6 +10,14 @@ export interface Master {
   token: string;
 }
 
+/** Display label for a master's endpoint. A full URL (Tailscale Serve) shows as
+ *  entered; a bare host shows `host:port`. Avoids a stray ":0" for URL hosts. */
+export function hostLabel(m: Pick<Master, "host" | "port">): string {
+  const host = m.host.trim();
+  if (/^https?:\/\//i.test(host)) return host.replace(/\/+$/, "");
+  return m.port ? `${host}:${m.port}` : host;
+}
+
 export type Reachability =
   | { state: "unknown" }
   | { state: "online"; at: number }
@@ -75,6 +83,43 @@ class Store {
     this.masters = [...this.masters, m];
     this.persistMasters();
     return m;
+  }
+
+  /** Add or update a master keyed by host (so re-scanning a QR refreshes the
+   *  token/name instead of duplicating the connection). */
+  upsertByHost(input: Omit<Master, "id">): Master {
+    const existing = this.masters.find((m) => m.host === input.host);
+    if (existing) {
+      const updated = { ...existing, ...input };
+      this.masters = this.masters.map((m) => (m.id === existing.id ? updated : m));
+      this.persistMasters();
+      return updated;
+    }
+    return this.addMaster(input);
+  }
+
+  /** If launched via a `?pair=1&host=&token=&name=` deep link (QR pairing on
+   *  the desktop), fold it into a saved master and jump to its sessions. The
+   *  query is cleared immediately so the token doesn't linger in the URL bar or
+   *  browser history. Also accepts the legacy `#connect?…` fragment form.
+   *  Returns true when a link was consumed. */
+  consumeConnectLink(): boolean {
+    const search = new URLSearchParams(location.search);
+    let p: URLSearchParams | null = search.get("pair") === "1" ? search : null;
+    if (!p) {
+      const m = (location.hash || "").match(/^#connect\?(.*)$/);
+      if (m) p = new URLSearchParams(m[1]);
+    }
+    // Strip both query and hash so the token isn't left in the address bar.
+    history.replaceState(null, "", location.pathname);
+    if (!p) return false;
+    const host = (p.get("host") ?? "").trim();
+    const token = (p.get("token") ?? "").trim();
+    const name = (p.get("name") ?? host).trim() || host;
+    if (!host || !token) return false;
+    const master = this.upsertByHost({ name, host, port: 0, token });
+    this.stack = [{ name: "masters" }, { name: "sessions", masterId: master.id }];
+    return true;
   }
 
   removeMaster(id: string): void {

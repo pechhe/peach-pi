@@ -51,7 +51,7 @@ function apiKeyFor(id: string): string {
 }
 
 /** Configured WITHOUT executing shell commands — for the cheap `configured()` probe. */
-function hasApiKey(id: string): boolean {
+export function hasApiKey(id: string): boolean {
   return isConfigValueConfigured(rawApiKey(id));
 }
 
@@ -220,33 +220,42 @@ export class OpenRouterAdapter implements UsageAdapter {
   }
 }
 
-// ── NeuralWatt (pay-per-token, energy-based) ────────────────────────────
-// GET /v1/usage/energy → { totals: { requests, energy_kwh, energy_joules } }.
-// No $ balance from the API; energy + request count are surfaced as metrics.
+// ── NeuralWatt (pay-per-token, energy-based) ────────────────────────────────
+// GET /v1/quota → { balance: { credits_remaining_usd, total_credits_usd,
+//   credits_used_usd }, usage: { current_month: { cost_usd, requests, tokens,
+//   energy_kwh } } }. Flat $5/kWh pricing across all models.
 
-interface NwEnergy { totals?: { requests?: number; energy_kwh?: number; energy_joules?: number } }
+interface NwQuota {
+  balance?: { credits_remaining_usd?: number; total_credits_usd?: number; credits_used_usd?: number };
+  usage?: { current_month?: { cost_usd?: number; requests?: number; tokens?: number; energy_kwh?: number } };
+}
 
 export class NeuralWattAdapter implements UsageAdapter {
-  label = "NeuralWatt";
+  label = "NeuralWatt · Energy Billing";
   async configured(): Promise<boolean> {
     return hasApiKey("neuralwatt");
   }
   async fetch(): Promise<FetchResult> {
     const apiKey = apiKeyFor("neuralwatt");
     try {
-      const data = (await fetchJson("https://api.neuralwatt.com/v1/usage/energy", {
+      const data = (await fetchJson("https://api.neuralwatt.com/v1/quota", {
         Authorization: `Bearer ${apiKey}`,
-      })) as NwEnergy;
-      const totals = data?.totals ?? {};
-      const reqs = asFiniteNumber(totals.requests);
-      const kwh = asFiniteNumber(totals.energy_kwh);
+      })) as NwQuota;
+      const bal = data?.balance ?? {};
+      const mo = data?.usage?.current_month ?? {};
+      const balanceUSD = asFiniteNumber(bal.credits_remaining_usd);
+      const spentMonth = asFiniteNumber(mo.cost_usd);
+      const reqs = asFiniteNumber(mo.requests);
+      const kwh = asFiniteNumber(mo.energy_kwh);
+      const totalCredits = asFiniteNumber(bal.total_credits_usd);
       const extra: UsageMetric[] = [];
-      if (reqs !== null) extra.push({ label: "Requests", value: `${reqs.toLocaleString()} reqs` });
-      if (kwh !== null) extra.push({ label: "Energy", value: `${kwh.toFixed(4)} kWh` });
+      if (kwh !== null) extra.push({ label: "Energy (this month)", value: `${kwh.toFixed(4)} kWh` });
+      if (reqs !== null) extra.push({ label: "Requests (this month)", value: `${reqs.toLocaleString()} reqs` });
+      if (totalCredits !== null) extra.push({ label: "Total credits", value: `$${totalCredits.toFixed(2)}` });
       const summary: UsageBalanceSummary = {
-        kind: "balance", balanceUSD: null, spentDay: null, spentWeek: null, spentMonth: null, extra,
+        kind: "balance", balanceUSD, spentDay: null, spentWeek: null, spentMonth, extra,
       };
-      return { summary, state: extra.length > 0 ? "ok" : "unknown", note: null };
+      return { summary, state: "ok", note: null };
     } catch (e) {
       return { summary: null, state: "unknown", note: failureNote(e) };
     }

@@ -613,7 +613,7 @@
 
   <!-- Projects -->
   <div class="flex items-center justify-between px-4 pt-2 pb-1.5">
-    <span class="text-xs font-semibold tracking-wide text-faint uppercase">Projects</span>
+    <span class="engraved text-xs font-semibold tracking-wide text-faint uppercase">Projects</span>
     <Tooltip text="Add project">
       <button
         class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
@@ -802,7 +802,7 @@
   <!-- Chats -->
   <div class="border-t border-border/60 px-3 pt-3 pb-3">
     <div class="flex items-center justify-between px-1 pb-1.5">
-      <span class="text-xs font-semibold tracking-wide text-faint uppercase">Chats</span>
+      <span class="engraved text-xs font-semibold tracking-wide text-faint uppercase">Chats</span>
       <button
         class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
         onclick={newChat}

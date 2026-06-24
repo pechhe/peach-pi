@@ -121,13 +121,41 @@
       widthSeeded = true;
     }
   });
-  // Expose the content area's left edge so overlays (including portaled
-  // dialogs) can centre over the page content rather than the whole window.
+
+  // Collapsed mode: the sidebar morphs from a flush rail into a floating card
+  // that slides off-screen, leaving the content with an even margin. It slides
+  // back in on left-edge hover. ⌘S toggles it (animated); choice is persisted.
+  let sidebarCollapsed = $state(false);
+  let collapsedSeeded = false;
   $effect(() => {
-    document.documentElement.style.setProperty("--content-left", `${sidebarWidth}px`);
+    if (collapsedSeeded) return;
+    const c = snapshot.current?.ui.sidebarCollapsed;
+    if (typeof c === "boolean") {
+      sidebarCollapsed = c;
+      collapsedSeeded = true;
+    }
+  });
+  // Whether the floating sidebar is currently revealed by hover.
+  let sidebarRevealed = $state(false);
+  // Suppress slide/morph transitions while the user is dragging the resizer.
+  let resizingSidebar = $state(false);
+  function toggleSidebarCollapsed() {
+    sidebarCollapsed = !sidebarCollapsed;
+    sidebarRevealed = false;
+    void api.invoke("ui:setSidebarCollapsed", sidebarCollapsed);
+  }
+
+  // The content's left edge: flush against the sidebar when expanded, an even
+  // margin (matching the card's other sides) when collapsed.
+  const contentLeft = $derived(sidebarCollapsed ? 8 : sidebarWidth);
+  // Expose it so overlays (including portaled dialogs) centre over the page
+  // content rather than the whole window.
+  $effect(() => {
+    document.documentElement.style.setProperty("--content-left", `${contentLeft}px`);
   });
   function startSidebarResize(e: PointerEvent) {
     e.preventDefault();
+    resizingSidebar = true;
     const startX = e.clientX;
     const startW = sidebarWidth;
     const move = (ev: PointerEvent) => {
@@ -136,6 +164,7 @@
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      resizingSidebar = false;
       void api.invoke("ui:setSidebarWidth", sidebarWidth);
     };
     window.addEventListener("pointermove", move);
@@ -291,6 +320,12 @@
       terminal.toggle();
       return;
     }
+    // ⌘S collapses/expands the sidebar (collapsed = reveal-on-hover).
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      e.preventDefault();
+      toggleSidebarCollapsed();
+      return;
+    }
   }
 
   onMount(() => {
@@ -307,38 +342,67 @@
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
-<div class="sidebar-device relative flex h-full">
+{#snippet sidebarBody()}
+  <Sidebar
+    width={sidebarWidth}
+    projects={snapshot.current!.projects}
+    worktrees={snapshot.current!.worktrees}
+    threads={snapshot.current!.threads}
+    collapsedProjects={snapshot.current!.ui.collapsedProjects}
+    {selectedThreadId}
+    activeView={view}
+    onSelect={selectThread}
+    onNewChat={() => startNewThread(null)}
+    onOpenView={openView}
+    onOpenTesting={openTesting}
+    onNewThread={newThreadInProject}
+    onNewWorktree={newWorktreeInProject}
+    onOpenSearch={() => (searchOpen = true)}
+  />
+{/snippet}
+
+<div class="sidebar-device relative flex h-full" class:sidebar-device--no-anim={resizingSidebar}>
   {#if snapshot.current}
-    <Sidebar
-      width={sidebarWidth}
-      projects={snapshot.current.projects}
-      worktrees={snapshot.current.worktrees}
-      threads={snapshot.current.threads}
-      collapsedProjects={snapshot.current.ui.collapsedProjects}
-      {selectedThreadId}
-      activeView={view}
-      onSelect={selectThread}
-      onNewChat={() => startNewThread(null)}
-      onOpenView={openView}
-      onOpenTesting={openTesting}
-      onNewThread={newThreadInProject}
-      onNewWorktree={newWorktreeInProject}
-      onOpenSearch={() => (searchOpen = true)}
-    />
-    <!-- Drag handle straddling the sidebar/content seam (no layout footprint). -->
+    <!-- The sidebar lives in a hover host pinned to the window's left edge.
+         When expanded the host is the full sidebar width and the rail sits
+         flush on the chassis. When collapsed the host shrinks to a thin
+         trigger strip and the rail morphs into a floating card slid off-screen;
+         hovering grows the host to cover the card so it stays revealed. ⌘S
+         toggles between the two states and the rail/content animate across. -->
     <div
-      class="group absolute inset-y-0 z-20 w-1.5 cursor-col-resize"
-      style="left: {sidebarWidth - 3}px"
-      onpointerdown={startSidebarResize}
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize sidebar"
+      class="sidebar-host"
+      class:sidebar-host--collapsed={sidebarCollapsed}
+      class:sidebar-host--revealed={sidebarRevealed}
+      style="--float-width: {sidebarWidth}px"
+      role="presentation"
+      onpointerenter={sidebarCollapsed ? () => (sidebarRevealed = true) : undefined}
+      onpointerleave={sidebarCollapsed ? () => (sidebarRevealed = false) : undefined}
     >
       <div
-        class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent"
-      ></div>
+        class="sidebar-rail"
+        class:sidebar-rail--floating={sidebarCollapsed}
+        class:sidebar-rail--shown={!sidebarCollapsed || sidebarRevealed}
+        style="width: {sidebarWidth}px"
+      >
+        {@render sidebarBody()}
+      </div>
     </div>
-    <div class="relative z-10 mb-2 mr-2 mt-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[16px] bg-surface shadow-[-4px_7px_18px_-6px_rgba(0,0,0,0.14),-4px_6px_10px_-4px_rgba(0,0,0,0.18)]">
+    {#if !sidebarCollapsed}
+      <!-- Drag handle straddling the sidebar/content seam (no layout footprint). -->
+      <div
+        class="group absolute inset-y-0 z-[50] w-1.5 cursor-col-resize"
+        style="left: {sidebarWidth - 3}px"
+        onpointerdown={startSidebarResize}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+      >
+        <div
+          class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent"
+        ></div>
+      </div>
+    {/if}
+    <div class="sidebar-content relative z-10 mb-2 mr-2 mt-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[16px] bg-surface shadow-[-4px_7px_18px_-6px_rgba(0,0,0,0.14),-4px_6px_10px_-4px_rgba(0,0,0,0.18)]" style="margin-left: {contentLeft}px">
     {#key view === "thread" ? `thread:${selectedThreadId}` : view === "testing" ? `testing:${testingProjectId}` : view}
     <div class="view-enter flex min-h-0 flex-1">
     {#if view === "settings"}
@@ -432,7 +496,7 @@
   <ImageLightbox />
   <TextAttachmentViewer />
   <SkillDialog />
-  <Toasts {sidebarWidth} />
+  <Toasts sidebarWidth={sidebarCollapsed ? 0 : sidebarWidth} />
   <PiHealthBanner />
 </div>
 

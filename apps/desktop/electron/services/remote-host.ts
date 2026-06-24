@@ -71,6 +71,11 @@ export interface RelayDeps {
 
 export class RemoteHostService {
   private server: Server | null = null;
+  /** Loopback twin of `server`, on the same port. Tailscale Serve on macOS can
+   *  only proxy to a localhost target (not the node's own tailnet IP), so we
+   *  also listen on 127.0.0.1 to let Serve front the relay with HTTPS. Local
+   *  only — never an off-machine exposure, so it doesn't widen the boundary. */
+  private loopback: Server | null = null;
   private port = 0;
   private bindIp: string | null = null;
   private token = randomBytes(24).toString("hex");
@@ -195,15 +200,36 @@ export class RemoteHostService {
         resolve();
       });
     });
+    // Loopback twin on the same port (best-effort) for Tailscale Serve to proxy.
+    await this.startLoopback();
     return this.status();
+  }
+
+  /** Bind a localhost-only twin of the relay on the resolved port so Tailscale
+   *  Serve (which can't target the tailnet IP on macOS) can proxy HTTPS to it.
+   *  Best-effort: a failure here never blocks plain-HTTP tailnet serving. */
+  private async startLoopback(): Promise<void> {
+    if (this.loopback || !this.port) return;
+    const lo = createServer((req, res) => this.handle(req, res));
+    await new Promise<void>((resolve) => {
+      lo.once("error", () => resolve()); // port busy / sandboxed — skip silently
+      lo.listen(this.port, "127.0.0.1", () => {
+        lo.removeAllListeners("error");
+        this.loopback = lo;
+        resolve();
+      });
+    });
   }
 
   async stop(): Promise<void> {
     const s = this.server;
+    const lo = this.loopback;
     this.server = null;
+    this.loopback = null;
     this.enabled = false;
     this.listeners.forEach((set) => set.forEach((res) => res.end()));
     this.listeners.clear();
+    if (lo) await new Promise<void>((r) => lo.close(() => r()));
     if (s) await new Promise<void>((r) => s.close(() => r()));
   }
 

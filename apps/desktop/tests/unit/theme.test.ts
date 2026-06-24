@@ -1,58 +1,83 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import {
   buildCustomCss,
   CUSTOM_THEME_ID,
   HEX_RE,
+  isSavedId,
+  isValidThemeName,
+  makeSavedId,
+  PRIMARY_SLOTS,
+  SAVED_PREFIX,
   THEMES,
-  THEME_TOKENS,
-  THEME_TOKEN_GROUPS,
 } from "../../src/lib/theme-tokens.ts";
 
-const cssPath = fileURLToPath(
-  new URL("../../src/styles/app.css", import.meta.url),
-);
-const appCss = readFileSync(cssPath, "utf8");
-
-// The `@theme` block in app.css defines all valid `--color-<id>` tokens. The
-// token catalog is the editor's source of truth, so its ids must match.
-function extractThemeTokenIds(css: string): string[] {
-  const body = css.slice(css.indexOf("@theme"), css.indexOf("}"));
-  return [...body.matchAll(/--color-([a-z0-9-]+)\s*:/g)]
-    .map((m) => m[1])
-    .filter((id): id is string => typeof id === "string");
-}
-
-test("buildCustomCss: empty / falsy maps produce no rule", () => {
+test("buildCustomCss: empty primaries emit nothing", () => {
   assert.equal(buildCustomCss({}), "");
-  assert.equal(buildCustomCss({ "": "#fff" }), "");
+  assert.equal(buildCustomCss({ bg: "", fg: undefined }), "");
 });
 
-test("buildCustomCss: valid hex (with/without #) emits a rule per token", () => {
-  const css = buildCustomCss({ bg: "#101012", accent: "38bdf8" });
-  assert.match(css, /:root\[data-custom="true"\]/);
-  assert.match(css, /--color-bg: #101012;/);
-  assert.match(css, /--color-accent: #38bdf8;/); // leading # added
+test("buildCustomCss: each primary emits itself + its derived family", () => {
+  // bg set → surface/border family derived via color-mix
+  const bg = buildCustomCss({ bg: "#101012" });
+  assert.match(bg, /:root\[data-custom="true"\]/);
+  assert.match(bg, /--color-bg: #101012;/);
+  assert.match(bg, /--color-surface: color-mix\(in srgb, var\(--color-bg\), var\(--color-fg\) 4%\);/);
+  assert.match(bg, /--color-border: color-mix\(in srgb, var\(--color-bg\), var\(--color-fg\) 11%\);/);
+
+  // fg set → text-shade family derived toward bg
+  const fg = buildCustomCss({ fg: "#e7e7ea" });
+  assert.match(fg, /--color-fg: #e7e7ea;/);
+  assert.match(fg, /--color-muted: color-mix\(in srgb, var\(--color-fg\), var\(--color-bg\) 33%\);/);
+  assert.match(fg, /--color-primary: var\(--color-fg\);/);
+  assert.match(fg, /--color-primary-fg: var\(--color-bg\);/);
+
+  // accent set → border-focus mirrors accent
+  const accent = buildCustomCss({ accent: "#38bdf8" });
+  assert.match(accent, /--color-accent: #38bdf8;/);
+  assert.match(accent, /--color-border-focus: var\(--color-accent\);/);
 });
 
-test("buildCustomCss: 3/6/8-digit hex all accepted; invalid values dropped", () => {
-  const css = buildCustomCss({
-    fg: "#abc", // 3-digit ok
-    border: "#11223344", // 8-digit ok
-    bad: "not-a-color", // dropped
-    "border-focus": "abcDEF", // 6-digit ok
-  });
-  assert.match(css, /--color-fg: #abc;/);
-  assert.match(css, /--color-border: #11223344;/);
-  assert.match(css, /--color-border-focus: #abcDEF;/);
-  assert.doesNotMatch(css, /not-a-color/);
+test("buildCustomCss: only the families of SET primaries ship (accent-only doesn't touch surfaces)", () => {
+  const css = buildCustomCss({ accent: "#38bdf8" });
+  assert.doesNotMatch(css, /--color-surface/); // bg family stays with base preset
+  assert.doesNotMatch(css, /--color-muted/); // fg family stays with base preset
+  assert.match(css, /--color-border-focus/); // accent family ships
+});
+
+test("buildCustomCss: metalDye emits the chassis tint tokens, independent of the color primaries", () => {
+  const css = buildCustomCss({ metalDye: "#7c3aed" });
+  assert.match(css, /--metal-dye: #7c3aed;/);
+  assert.match(css, /--metal-tint-amount: \d+%;/);
+  // No color primaries set → no --color-* overrides, only the metal tokens.
+  assert.doesNotMatch(css, /--color-bg:/);
+  assert.doesNotMatch(css, /--color-accent:/);
+});
+
+test("buildCustomCss: metalDye + primaries compose in one rule", () => {
+  const css = buildCustomCss({ bg: "#101012", metalDye: "#0ea5e9" });
+  assert.match(css, /--color-bg:/);
+  assert.match(css, /--metal-dye:/);
+});
+
+test("buildCustomCss: invalid metalDye is dropped", () => {
+  const css = buildCustomCss({ metalDye: "not-a-color", accent: "#38bdf8" });
+  assert.doesNotMatch(css, /--metal-dye/);
+  assert.match(css, /--color-accent/);
+});
+
+test("buildCustomCss: invalid hex is dropped (primary + its family)", () => {
+  const css = buildCustomCss({ bg: "not-a-color", accent: "#38bdf8" });
+  assert.doesNotMatch(css, /--color-bg:/);
+  assert.doesNotMatch(css, /--color-surface/); // family skipped too
+  assert.match(css, /--color-accent: #38bdf8;/);
+});
+
+test("buildCustomCss: hex without leading # is normalized", () => {
+  assert.match(buildCustomCss({ accent: "38bdf8" }), /--color-accent: #38bdf8;/);
 });
 
 test("HEX_RE: accepts 3–8 hex with optional #, rejects non-hex / empty", () => {
-  // 3, 4, 5, 6, 8 hex digits are all accepted (real-world hex is 3/6/8;
-  // looser upper bound is harmless and lenient on user typing).
   for (const ok of ["#fff", "fff", "#abcd", "abcdef", "#11223344", "abcDEF", "12345"]) {
     assert.ok(HEX_RE.test(ok), `expected ok: ${ok}`);
   }
@@ -61,27 +86,56 @@ test("HEX_RE: accepts 3–8 hex with optional #, rejects non-hex / empty", () =>
   }
 });
 
-test("THEME_TOKENS ids match the @theme tokens in app.css exactly", () => {
-  const cssIds = extractThemeTokenIds(appCss);
-  const catalogIds = THEME_TOKENS.map((t) => t.id);
-  assert.deepEqual([...catalogIds].sort(), [...cssIds].sort());
-});
-
-test("THEME_TOKENS: every token belongs to a known, ordered group", () => {
-  for (const t of THEME_TOKENS) {
-    assert.ok(
-      THEME_TOKEN_GROUPS.includes(t.group),
-      `token ${t.id} has unknown group ${t.group}`,
-    );
+test("PRIMARY_SLOTS: exactly 3 primaries (bg / fg / accent), all labelled, families non-empty", () => {
+  assert.equal(PRIMARY_SLOTS.length, 3);
+  const ids = PRIMARY_SLOTS.map((s) => s.id);
+  assert.deepEqual(ids, ["bg", "fg", "accent"]);
+  for (const s of PRIMARY_SLOTS) {
+    assert.ok(s.label.length > 0);
+    assert.ok(s.family.length > 0, `${s.id} family empty`);
   }
-  assert.ok(THEME_TOKEN_GROUPS.length === new Set(THEME_TOKEN_GROUPS).size);
 });
 
 test("THEMES + CUSTOM_THEME_ID are consistent", () => {
-  // Custom id must not collide with a preset id.
   assert.ok(!THEMES.some((t) => t.id === CUSTOM_THEME_ID));
-  // Each preset carries an explicit scheme.
   for (const t of THEMES) {
     assert.ok(t.scheme === "dark" || t.scheme === "light");
   }
+});
+
+test("isSavedId: true only for the saved: prefix", () => {
+  assert.ok(isSavedId("saved:midnight-ab12"));
+  assert.ok(isSavedId(SAVED_PREFIX + "x"));
+  assert.ok(!isSavedId("custom"));
+  assert.ok(!isSavedId("default"));
+  assert.ok(!isSavedId("dracula"));
+  assert.ok(!isSavedId(""));
+});
+
+test("isValidThemeName: requires non-whitespace", () => {
+  assert.ok(isValidThemeName("Midnight"));
+  assert.ok(isValidThemeName("  Ocean Blue  "));
+  assert.ok(!isValidThemeName(""));
+  assert.ok(!isValidThemeName("   "));
+  assert.ok(!isValidThemeName("\t\n"));
+});
+
+test("makeSavedId: saved: prefix + slug + random, no collision-free structure", () => {
+  const id = makeSavedId("Midnight Blue!");
+  assert.ok(isSavedId(id), `${id} should be a saved id`);
+  assert.ok(id.startsWith(SAVED_PREFIX));
+  // slug is lowercased, non-alphanumerics collapsed to dashes.
+  assert.match(id, /saved:midnight-blue-[a-z0-9]{4}$/);
+});
+
+test("makeSavedId: empty/whitespace name falls back to a generic slug", () => {
+  const id = makeSavedId("   !!!   ");
+  assert.ok(id.startsWith(SAVED_PREFIX));
+  assert.match(id, /saved:theme-[a-z0-9]{4}$/);
+});
+
+test("makeSavedId: generates distinct ids across calls (random suffix)", () => {
+  const ids = new Set(Array.from({ length: 30 }, () => makeSavedId("same")));
+  // Not guaranteed unique, but 30 draws are extremely unlikely to all collide.
+  assert.ok(ids.size > 1, `expected variation, got ${ids.size}`);
 });

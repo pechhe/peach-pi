@@ -3,6 +3,7 @@
   import {
     applyTranscriptOps,
     type RemoteHostConfig,
+    type RemoteConnectInfo,
     type RemoteHostConnection,
     type RemoteSessionInfo,
     type RemoteTapFrame,
@@ -16,6 +17,8 @@
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Download from "@lucide/svelte/icons/download";
+  import Smartphone from "@lucide/svelte/icons/smartphone";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import CopyButton from "./CopyButton.svelte";
   import StreamingText from "./StreamingText.svelte";
 
@@ -23,6 +26,10 @@
   let hostStatus = $state<RemoteHostConfig | null>(null);
   let localProjects = $state<{ id: string; name: string; path: string }[]>([]);
   let togglingHost = $state(false);
+
+  // ── Phone pairing: Tailscale Serve (HTTPS) + QR connect deep link ───
+  let connect = $state<RemoteConnectInfo | null>(null);
+  let enablingServe = $state(false);
 
   // ── Client side: saved master connections ───────────────────────────
   let hosts = $state<RemoteHostConnection[]>([]);
@@ -52,6 +59,29 @@
       api.invoke("remote:hostStatus"),
       api.invoke("remote:listHosts"),
     ]);
+    void loadConnect();
+  }
+
+  /** Refresh phone-pairing info (MagicDNS, Serve status, QR). Only meaningful
+   *  while serving; cheap enough to call alongside loadHost. */
+  async function loadConnect() {
+    try {
+      connect = hostStatus?.enabled ? await api.invoke("remote:connectInfo") : null;
+    } catch {
+      connect = null;
+    }
+  }
+
+  async function enableServeNow() {
+    enablingServe = true;
+    try {
+      connect = await api.invoke("remote:enableServe");
+      error = "";
+    } catch (e) {
+      error = String((e as Error).message ?? e);
+    } finally {
+      enablingServe = false;
+    }
   }
 
   async function loadLocalProjects() {
@@ -64,6 +94,7 @@
     try {
       hostStatus = await api.invoke("remote:setHostEnabled", on);
       error = "";
+      await loadConnect();
     } catch (e) {
       error = String((e as Error).message ?? e);
     } finally {
@@ -225,6 +256,60 @@
               </code>
               <CopyButton text={hostStatus.token} />
               <button class="text-xs text-muted hover:text-fg" onclick={regenerateToken}>regenerate</button>
+            </div>
+          {/if}
+
+          <!-- ── Phone pairing over Tailscale Serve (HTTPS) ───────── -->
+          {#if hostStatus.enabled}
+            <div class="mb-3 rounded-md border border-border bg-surface p-3">
+              <div class="mb-2 flex items-center gap-1.5 text-xs font-semibold text-fg">
+                <Smartphone size={13} /> Watch on your phone
+              </div>
+
+              {#if connect?.connectUrl && connect.qrSvg}
+                <div class="flex items-start gap-3">
+                  <!-- QR encodes the watch-app deep link (host + token prefilled) -->
+                  <div class="size-32 shrink-0 rounded-md bg-white p-1.5 [&>svg]:size-full">
+                    {@html connect.qrSvg}
+                  </div>
+                  <div class="min-w-0 flex-1 text-xs text-faint">
+                    <p class="mb-1.5 text-fg">Scan to open the watch app and connect in one tap.</p>
+                    <div class="mb-2 flex items-center gap-1 text-green-400">
+                      <ShieldCheck size={12} />
+                      <span class="truncate font-mono text-[11px]">{connect.httpsUrl}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <CopyButton text={connect.connectUrl} />
+                      <span class="text-[11px]">Copy link</span>
+                    </div>
+                    <p class="mt-2 text-[10px] leading-relaxed text-faint">
+                      The link carries the bearer token — only open it on your own device.
+                    </p>
+                  </div>
+                </div>
+              {:else if connect && !connect.serveActive}
+                <p class="mb-2 text-xs text-faint">
+                  {#if connect.httpsUrl}
+                    Front the relay with HTTPS so the (HTTPS-hosted) watch app can reach it.
+                  {:else}
+                    Tailscale isn't reachable — start it, then enable HTTPS access.
+                  {/if}
+                </p>
+                <button
+                  class="rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                  onclick={enableServeNow}
+                  disabled={enablingServe || !connect.httpsUrl}
+                >
+                  {enablingServe ? "Enabling…" : "Enable phone access (HTTPS)"}
+                </button>
+                {#if connect.serveHint}
+                  <p class="mt-2 font-mono text-[10px] text-faint">
+                    or run: {connect.serveHint}
+                  </p>
+                {/if}
+              {:else}
+                <p class="text-xs text-faint">Resolving Tailscale endpoint…</p>
+              {/if}
             </div>
           {/if}
 

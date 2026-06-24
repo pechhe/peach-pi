@@ -5,6 +5,7 @@ import { KeyedAsyncTtl } from "./ttl-cache.ts";
 import { failureNote, type UsageAdapter, type AdapterCtor } from "./usage-shared.ts";
 import { ZaiAdapter, OpenRouterAdapter, NeuralWattAdapter } from "./usage-adapters.ts";
 import { AnthropicAdapter } from "./usage-anthropic-adapter.ts";
+import { XiaomiMiMoAdapter } from "./usage-mimo-adapter.ts";
 
 const CACHE_TTL_MS = 60_000;
 
@@ -15,6 +16,7 @@ const CACHE_TTL_MS = 60_000;
 const ADAPTERS: { provider: string; ctor: AdapterCtor }[] = [
   { provider: "anthropic", ctor: AnthropicAdapter },
   { provider: "zai", ctor: ZaiAdapter },
+  { provider: "xiaomi", ctor: XiaomiMiMoAdapter },
   { provider: "openrouter", ctor: OpenRouterAdapter },
   { provider: "neuralwatt", ctor: NeuralWattAdapter },
 ];
@@ -65,13 +67,15 @@ export class UsageService {
       return {
         provider, label: adapter.label, configured,
         summary: result.summary, state: result.state, note: result.note,
+        dashboardUrl: adapter.dashboardUrl?.() ?? null,
         fetchedAt: result.summary ? new Date().toISOString() : null,
       };
     } catch (e) {
       return {
         provider, label: adapter.label, configured,
         summary: null, state: "unknown",
-        note: failureNote(e), fetchedAt: null,
+        note: failureNote(e), dashboardUrl: adapter.dashboardUrl?.() ?? null,
+        fetchedAt: null,
       };
     }
   }

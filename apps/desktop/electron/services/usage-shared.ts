@@ -10,8 +10,11 @@ export interface UsageAdapter {
   /** Whether the agent has configured the provider (key/cookie present). */
   configured(): Promise<boolean>;
   /** Fetch the live usage; returns null summary on unrecoverable failure and
-   *  a state explaining why (unsupported / unknown / partial / ok). */
+   *  a state explaining why (unsupported / unknown / partial / ok / manual). */
   fetch(): Promise<FetchResult>;
+  /** When set, the provider's usage is only viewable on a dashboard
+   *  (state "manual"); the view offers this as a link. Optional. */
+  dashboardUrl?(): string;
 }
 
 export type FetchResult = {

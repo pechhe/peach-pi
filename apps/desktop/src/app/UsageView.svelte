@@ -143,6 +143,8 @@
           <span class="h-1.5 w-1.5 rounded-full bg-emerald-400" title="Live" />
         {:else if s.state === "partial"}
           <span class="h-1.5 w-1.5 rounded-full bg-amber-400" title="Partial" />
+        {:else if s.state === "manual"}
+          <span class="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] text-muted">dashboard</span>
         {:else}
           <span class="h-1.5 w-1.5 rounded-full bg-red-400" title="Unknown" />
         {/if}
@@ -155,6 +157,16 @@
     <div class="mt-3">
       {#if !s.configured}
         <p class="text-xs text-fainter">{s.note ?? "No credentials configured for this provider."}</p>
+      {:else if s.state === "manual"}
+        <p class="text-xs text-muted">{s.note ?? "Usage is only viewable on the provider dashboard."}</p>
+        {#if s.dashboardUrl}
+          <a
+            href={s.dashboardUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="mt-2 inline-flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1 text-xs font-medium text-fg-soft transition hover:bg-surface"
+          >Open dashboard →</a>
+        {/if}
       {:else if !s.summary}
         <p class="text-xs text-muted">{s.note ?? "Could not fetch usage right now."}</p>
       {:else if s.summary.kind === "quota"}

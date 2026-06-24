@@ -65,6 +65,7 @@ import type {
   ToolMode,
   Worktree,
   RemoteHostConfig,
+  RemoteConnectInfo,
   RemoteHostConnection,
   RemoteSessionInfo,
   RemotePullResult,
@@ -177,6 +178,11 @@ export const ipcContracts = {
     if (typeof w !== "number" || !Number.isFinite(w)) {
       throw new Error("width must be a finite number");
     }
+  }),
+
+  /** Persist whether the sidebar is collapsed (hidden, reveal-on-hover). */
+  "ui:setSidebarCollapsed": invoke<[collapsed: boolean], void>((c) => {
+    if (typeof c !== "boolean") throw new Error("collapsed must be a boolean");
   }),
 
   // projects
@@ -618,6 +624,13 @@ export const ipcContracts = {
   /** Toggle the "serve all projects" shortcut (includes future projects).
    *  Returns the updated host config. */
   "remote:setServeAll": invoke<[serveAll: boolean], RemoteHostConfig>(),
+
+  /** Phone-pairing info: MagicDNS name, Serve status, and a QR/deep link that
+   *  opens the watch PWA pre-filled with this master's HTTPS endpoint + token. */
+  "remote:connectInfo": invoke<[], RemoteConnectInfo>(),
+  /** Front the relay with Tailscale Serve (HTTPS on the MagicDNS name) so the
+   *  HTTPS-served watch PWA can reach it. Returns refreshed connect info. */
+  "remote:enableServe": invoke<[], RemoteConnectInfo>(),
 
   /** List saved master connections (the laptop side). */
   "remote:listHosts": invoke<[], RemoteHostConnection[]>(),

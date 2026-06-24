@@ -1,10 +1,20 @@
 import type { RemoteSessionInfo, RemoteTapFrame } from "@peach-pi/shared-types";
 import type { Master } from "./store.svelte.ts";
 
-/** Base URL for a master's relay. The relay speaks plain HTTP on the tailnet
- *  (ADR-0009 — the tailnet is the security boundary, not TLS). */
+/** Base URL for a master's relay.
+ *
+ * Two shapes are supported:
+ * - A full origin (e.g. `https://pche.taila712b2.ts.net`) — used verbatim. This
+ *   is the Tailscale Serve path: Serve terminates TLS on the node's MagicDNS
+ *   name and proxies to the relay, so the PWA (served over HTTPS) can reach it
+ *   without a mixed-content block. Port/scheme are already baked in (443).
+ * - A bare host/IP — plain HTTP on the tailnet with the given port (ADR-0009:
+ *   the tailnet is the security boundary, not TLS). Works only when the PWA is
+ *   itself served over HTTP. */
 export function baseUrl(m: Master): string {
-  return `http://${m.host}:${m.port}`;
+  const host = m.host.trim().replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(host)) return host;
+  return `http://${host}:${m.port}`;
 }
 
 /** Liveness probe. Uses a Bearer header (allowed by the relay's CORS) and a

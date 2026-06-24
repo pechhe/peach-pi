@@ -52,6 +52,7 @@ import {
 } from "./windows/hud-window.ts";
 import { RemoteHostService } from "./services/remote-host.ts";
 import { RemoteClientService } from "./services/remote-client.ts";
+import { getConnectInfo, enableServe } from "./services/remote-serve.ts";
 import { recordCheckpoint, originUrl as originUrlOf } from "./services/remote-checkpoint.ts";
 
 // TEMP DEBUG: enable CDP for renderer layout inspection.
@@ -369,6 +370,7 @@ async function boot(): Promise<void> {
       }
     },
     "ui:setSidebarWidth": (width) => appService.setSidebarWidth(width),
+    "ui:setSidebarCollapsed": (collapsed) => appService.setSidebarCollapsed(collapsed),
     "projects:add": (p) => appService.addProject(p),
     "projects:remove": (id) => appService.removeProject(id),
     "projects:pick": () => pickProject(),
@@ -542,6 +544,15 @@ async function boot(): Promise<void> {
       void remoteHost.persist();
       emit("event:remoteHostStatus", undefined);
       return remoteHost.status();
+    },
+    "remote:connectInfo": async () => {
+      const s = await remoteHost.status();
+      return getConnectInfo({ token: s.token, relayPort: s.port, enabled: s.enabled });
+    },
+    "remote:enableServe": async () => {
+      const s = await remoteHost.status();
+      await enableServe(s.port);
+      return getConnectInfo({ token: s.token, relayPort: s.port, enabled: s.enabled });
     },
     "remote:listHosts": () => remoteClient.listHosts(),
     "remote:addHost": (input) => remoteClient.addHost(input),

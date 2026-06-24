@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { store, type Master } from "../lib/store.svelte.ts";
+  import { store, hostLabel, type Master } from "../lib/store.svelte.ts";
   import { health } from "../lib/api.ts";
   import Icon from "../components/Icon.svelte";
 
@@ -123,7 +123,7 @@
               </span>
             {/if}
           </div>
-          <div class="mt-1.5 font-mono text-[12px] text-faint">{m.host}:{m.port}</div>
+          <div class="mt-1.5 font-mono text-[12px] text-faint">{hostLabel(m)}</div>
           <div class="mt-2.5 flex items-center gap-2 border-t border-border/60 pt-2.5">
             {#if r.state === "unreachable"}
               <span class="text-[12px] text-faint">last seen {sinceLabel(r.at)}</span>

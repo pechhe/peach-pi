@@ -118,6 +118,12 @@ export class AppService {
     this.publish();
   }
 
+  /** Persist whether the sidebar is collapsed (hidden, reveal-on-hover). */
+  setSidebarCollapsed(collapsed: boolean): void {
+    this.saveUiState({ sidebarCollapsed: collapsed });
+    this.publish();
+  }
+
   addWorktree(projectId: string, dir: string): Worktree {
     const wt = this.worktrees.insert({ projectId, dir, name: this.worktrees.nextName(projectId) });
     this.publish();

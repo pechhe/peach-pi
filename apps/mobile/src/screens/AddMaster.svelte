@@ -8,8 +8,14 @@
   let token = $state("");
   let faceId = $state(false);
 
+  // A full origin (https://name.ts.net via Tailscale Serve) carries its own
+  // port; only a bare host/IP needs the explicit port field.
+  const hasScheme = $derived(/^https?:\/\//i.test(host.trim()));
   const valid = $derived(
-    name.trim().length > 0 && host.trim().length > 0 && Number(port) > 0 && token.trim().length > 0,
+    name.trim().length > 0 &&
+      host.trim().length > 0 &&
+      (hasScheme || Number(port) > 0) &&
+      token.trim().length > 0,
   );
 
   async function paste(): Promise<void> {
@@ -59,23 +65,28 @@
       <span class="w-16 text-[14px] text-muted">Host</span>
       <input
         class="flex-1 bg-transparent font-mono text-[14px] text-fg outline-none placeholder:text-fainter"
-        placeholder="100.84.21.3"
+        placeholder="https://name.your-tailnet.ts.net"
         bind:value={host}
         autocapitalize="off"
         autocorrect="off"
-        inputmode="decimal"
+        inputmode="url"
       />
     </label>
-    <label class="flex items-center px-3.5 py-3">
+    <label class="flex items-center px-3.5 py-3 {hasScheme ? 'opacity-40' : ''}">
       <span class="w-16 text-[14px] text-muted">Port</span>
       <input
         class="flex-1 bg-transparent font-mono text-[14px] text-fg outline-none placeholder:text-fainter"
-        placeholder="8787"
+        placeholder={hasScheme ? "—" : "8787"}
         bind:value={port}
         inputmode="numeric"
+        disabled={hasScheme}
       />
     </label>
   </div>
+  <p class="mx-3 mt-2 text-[11.5px] leading-[1.5] text-faint">
+    Use the Tailscale Serve HTTPS URL (no port). A bare IP + port only works when
+    this app is opened over plain HTTP.
+  </p>
 
   <div class="mx-3 mt-[18px] mb-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-faint">
     Bearer token

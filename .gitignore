@@ -12,3 +12,4 @@ apps/desktop/out/
 apps/desktop/build/cua-driver/
 .pi/devtap.jsonl
 .pi/devtap/
+.vercel

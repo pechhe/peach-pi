@@ -1,7 +1,7 @@
 // Minimal service worker: an app-shell cache so "Add to Home Screen" launches
 // offline-tolerantly. We deliberately do NOT cache API/tap responses — those
 // are live, token-gated, and must always hit the master over the tailnet.
-const SHELL = "remote-shell-v1";
+const SHELL = "remote-shell-v2";
 const SHELL_URLS = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {

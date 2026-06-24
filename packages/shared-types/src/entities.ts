@@ -142,6 +142,27 @@ export interface RemoteHostConfig {
   servedProjects: ProjectId[];
 }
 
+/** Phone-pairing info for the watch PWA. The master fronts its relay with
+ *  Tailscale Serve (HTTPS on its MagicDNS name) so the HTTPS-served PWA can
+ *  reach it without a mixed-content block, then hands the phone a deep link +
+ *  QR that pre-fills the connection. */
+export interface RemoteConnectInfo {
+  /** This machine's Tailscale MagicDNS name (no trailing dot), or null when the
+   *  tailnet / `tailscale` CLI is unavailable. */
+  magicDnsName: string | null;
+  /** HTTPS origin the watch app should hit (Tailscale Serve), or null. */
+  httpsUrl: string | null;
+  /** Whether `tailscale serve` is actively proxying HTTPS to the relay. */
+  serveActive: boolean;
+  /** Deep link that opens the watch PWA and pre-fills this connection. Null
+   *  until serving + Serve are both up and the HTTPS endpoint is known. */
+  connectUrl: string | null;
+  /** Inline SVG QR code for `connectUrl` (scan to connect), or null. */
+  qrSvg: string | null;
+  /** The CLI command to enable Serve, shown when auto-enable isn't possible. */
+  serveHint: string | null;
+}
+
 /** A saved master the laptop can reach + attach to. */
 export interface RemoteHostConnection {
   id: string;
@@ -948,7 +969,7 @@ export interface UsageMetric {
 }
 
 /** How the live usage fetch resolved, for renderer state display. */
-export type UsageFetchState = "ok" | "partial" | "unknown" | "unsupported";
+export type UsageFetchState = "ok" | "partial" | "unknown" | "unsupported" | "manual";
 
 /** One provider's usage summary. The view lists one card per entry. */
 export interface ProviderUsageSummary {
@@ -964,6 +985,9 @@ export interface ProviderUsageSummary {
   state: UsageFetchState;
   /** Human-readable note when state isn't "ok" (e.g. auth/instructions). */
   note: string | null;
+  /** When non-null, the provider's usage is only viewable on a dashboard
+   *  (state "manual"); the view offers this as a one-click link. */
+  dashboardUrl: string | null;
   /** ISO 8601 of the last successful fetch, or null if never fetched. */
   fetchedAt: string | null;
 }

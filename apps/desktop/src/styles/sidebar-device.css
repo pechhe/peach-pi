@@ -1,67 +1,190 @@
 /* ================================================================ */
-/* Skeuomorphic metal sidebar — mirrors the composer device chassis  */
-/* so the left rail reads as the same machined-panel family.          */
-/*                                                                    */
-/* Keyed off <html data-composer> (resolved by the theme store) so it */
-/* always tracks the composer's variant: brushed silver when the      */
-/* composer is light, anodized black when it is dark.                 */
-/*                                                                    */
-/* The sidebar is a tall, narrow column, so the brushed-metal grain   */
-/* runs LEFT→RIGHT (not top→bottom like the composer panel): the        */
-/* luminance ramp and specular highlights read as horizontally-       */
-/* brushed aluminium, which is what a vertically-tall machined rail   */
-/* would actually show. The vertical box-shadow is kept light so the  */
-/* panel sits flat in the chrome frame instead of punching a deep hole. */
+/* Skeuomorphic metal base layer — the app chrome that the page sits   */
+/* on top of (mirrors the composer device chassis so the rail and the     */
+/* composer read as one machined-panel family).                           */
+/*                                                                       */
+/* Keyed off <html data-composer> (resolved by the theme store): brushed */
+/* silver when the composer is light, anodized black when it is dark.    */
+/*                                                                       */
+/* This is a full-window base sheet, so the recipe is tuned to read as    */
+/* metal at *any* size:                                                   */
+/*   • the body sits in the composer chassis' silver range (light ~0.82→   */
+/*     0.9, dark ~0.13→0.225) — NOT near-white, so it reads as brushed     */
+/*     metal and the engraved labels' crisp highlight stays visible;       */
+/*   • the luminance ramp runs diagonally (45deg) — darkest at the         */
+/*     bottom-left corner, lifting toward the top-right, so the metal reads  */
+/*     as angled rather than a flat wash; with px stops the peak lands       */
+/*     around the sidebar's right edge, then holds across the page;          */
+/*   • the fine brushed grain (repeating-linear-gradient, ~1px) is width-  */
+/*     independent — this is the real "brushed metal" tell, applied to     */
+/*     both light and dark;                                                 */
+/*   • soft localized catchlights sit in the visible corner.               */
+/* Shadows/bevels stay minimal — the metal reads via body+grain, not via   */
+/* heavy drop shadows.                                                      */
 /* ================================================================ */
 
 .sidebar-device {
   position: relative;
   isolation: isolate;
-  /* Horizontal brushed metal: the body ramp + corner light/shade are all
-     laid along the X axis so the sheen travels across the rail's width. */
   background:
-    linear-gradient(90deg, oklch(1 0.002 250 / 0.42), oklch(0.9 0.003 250 / 0.1) 46%, oklch(0.64 0.003 250 / 0.09) 100%),
-    radial-gradient(ellipse 56% 95% at 20% 24%, oklch(1 0.002 250 / 0.13), transparent 64%),
-    radial-gradient(ellipse 56% 95% at 82% 80%, oklch(0.42 0.003 250 / 0.03), transparent 70%),
-    linear-gradient(90deg, oklch(0.985 0.002 250) 0%, oklch(0.94 0.003 250) 54%, oklch(0.9 0.003 250) 100%);
-  background-blend-mode: normal, soft-light, multiply, normal;
-  box-shadow: inset 0 0 0 0.5px oklch(0.92 0.002 250 / 0.12);
+    /* ambient catchlight, upper-right */
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(1 0.002 250 / 0.26), transparent 60%),
+    /* subtle shade pooled lower-left (kept gentle so the bottom-left corner isn't over-darkened) */
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0.35 0.004 250 / 0.05), transparent 64%),
+    /* fine brushed grain — width-independent metal striations */
+    repeating-linear-gradient(90deg, oklch(0.35 0.004 250 / 0.06) 0 1px, transparent 1px 3px),
+    /* diagonal body ramp in the composer chassis' brushed-silver range
+       (0.985→0.9→0.79 vertical on the composer; here ~0.82→0.9 diagonal):
+       darkest at the bottom-left corner, lifts toward the top-right and
+       holds the silver mid-tone across the page. Staying off near-white is
+       what lets the engraved labels' highlight read. */
+    linear-gradient(78deg, oklch(0.79 0.003 250) 0px, oklch(0.85 0.003 250) 170px, oklch(0.92 0.002 250) 340px);
+  background-blend-mode: normal, normal, soft-light, normal;
+  box-shadow: inset 0 0 0 0.5px oklch(0.92 0.002 250 / 0.18);
 }
 
-/* Sheen / edge vignette — the same overlay language as the composer
-   chassis, but its hard stops run vertically (left/right edges) so the
-   left and right rims catch light while the body stays an even brushed
-   plane. Parked at z-index:-1; isolation keeps the negative layer
-   contained above the metal background. */
+/* Faint top sheen so the rail catches a little overhead light without        */
+/* reintroducing a heavy shadow band. Low opacity, gentle stops.                */
 .sidebar-device::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: 0.16;
+  opacity: 0.2;
   background:
-    linear-gradient(90deg, oklch(1 0.002 250 / 0.1), transparent 9%, transparent 91%, oklch(0.3 0.004 250 / 0.03)),
-    linear-gradient(180deg, oklch(1 0.002 250 / 0.07), transparent 14%, transparent 86%, oklch(0.3 0.004 250 / 0.025)),
-    radial-gradient(ellipse 70% 50% at 45% 0%, oklch(1 0.002 250 / 0.02), transparent 62%);
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.22), transparent 18%, transparent 82%, oklch(0.3 0.004 250 / 0.08));
 }
 
 /* ---------------- Dark: anodized black (tracks composer) ---------------- */
 :root[data-composer="dark"] .sidebar-device {
   background:
-    linear-gradient(90deg, oklch(0.6 0.004 265 / 0.16), oklch(0.3 0.004 265 / 0.05) 46%, oklch(0.05 0.004 265 / 0.07) 100%),
-    radial-gradient(ellipse 56% 95% at 20% 24%, oklch(0.62 0.004 265 / 0.1), transparent 64%),
-    radial-gradient(ellipse 56% 95% at 82% 80%, oklch(0 0 0 / 0.12), transparent 70%),
-    repeating-linear-gradient(90deg, oklch(0.6 0.004 265 / 0.022) 0 1px, transparent 1px 3px),
-    linear-gradient(90deg, oklch(0.235 0.004 265) 0%, oklch(0.205 0.004 265) 54%, oklch(0.185 0.004 265) 100%);
-  background-blend-mode: normal, soft-light, multiply, overlay, normal;
-  box-shadow: inset 0 0 0 0.5px oklch(0 0 0 / 0.14);
+    /* ambient catchlight, upper-right */
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(0.62 0.004 265 / 0.22), transparent 60%),
+    /* shade pooled lower-left (kept gentle so the corner isn't over-darkened) */
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0 0 0 / 0.1), transparent 64%),
+    /* fine anodized brushed grain */
+    repeating-linear-gradient(90deg, oklch(0.7 0.004 265 / 0.04) 0 1px, transparent 1px 3px),
+    /* diagonal body ramp in the composer's anodized-black range
+       (0.235→0.17→0.115 vertical on the composer): darkest at the
+       bottom-left corner, lifting toward the top-right then holding. */
+    linear-gradient(78deg, oklch(0.135 0.004 265) 0px, oklch(0.185 0.004 265) 170px, oklch(0.235 0.004 265) 340px);
+  background-blend-mode: normal, normal, soft-light, normal;
+  box-shadow: inset 0 0 0 0.5px oklch(0 0 0 / 0.2);
 }
 
 :root[data-composer="dark"] .sidebar-device::before {
-  opacity: 0.12;
+  opacity: 0.28;
   background:
-    linear-gradient(90deg, oklch(0.62 0.004 265 / 0.06), transparent 9%, transparent 91%, oklch(0 0 0 / 0.06)),
-    linear-gradient(180deg, oklch(0.62 0.004 265 / 0.05), transparent 14%, transparent 86%, oklch(0 0 0 / 0.05)),
-    radial-gradient(ellipse 70% 50% at 45% 0%, oklch(0.6 0.004 265 / 0.02), transparent 62%);
+    linear-gradient(180deg, oklch(0.62 0.004 265 / 0.2), transparent 18%, transparent 82%, oklch(0 0 0 / 0.12));
+}
+
+/* ================================================================ */
+/* Engraved labels — dark machined ink + a single CRISP hairline shadow   */
+/* (zero blur), copied from the composer keycap (.device-key). In light   */
+/* mode a lit lower lip of the cut (white below); in dark mode a dark top  */
+/* edge (black above). A blurred shadow reads as a glow, not an engraving, */
+/* so there is none. The active row gets the MovingHighlight pill.        */
+/* ================================================================ */
+.sidebar-device .main-nav-item > span,
+.sidebar-device .engraved {
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  /* Solid dark machined ink + a crisp lit lower lip (zero blur). On the
+     mid-silver metal this reads as a clean letterpress cut. No gradient text
+     fill — that made the glyphs look hollow / white-centred. */
+  color: oklch(0.2 0.005 250);
+  text-shadow: 0 1px 0 oklch(1 0.002 250 / 0.9);
+}
+/* Icons share the engraved plane: same ink (currentColor) + the same crisp
+   lower-lip drop-shadow (text-shadow doesn't apply to SVG strokes). */
+.sidebar-device .main-nav-item > span svg,
+.sidebar-device .engraved svg {
+  filter: drop-shadow(0 1px 0 oklch(1 0.002 250 / 0.9));
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > span,
+:root[data-composer="dark"] .sidebar-device .engraved {
+  /* light ink on anodized black + crisp dark upper wall */
+  color: oklch(0.84 0.004 265);
+  text-shadow: 0 -1px 0 oklch(0 0 0 / 0.7);
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > span svg,
+:root[data-composer="dark"] .sidebar-device .engraved svg {
+  filter: drop-shadow(0 -1px 0 oklch(0 0 0 / 0.7));
+}
+
+/* ================================================================ */
+/* Collapsed sidebar — reveal-on-hover floating panel (⌘S).            */
+/*                                                                       */
+/* The host is a thin invisible strip pinned to the window's left edge   */
+/* that catches the pointer; once revealed it grows to cover the panel   */
+/* so the hover persists while the sidebar is in use. The panel itself   */
+/* is the same brushed-metal chassis as .sidebar-device, lifted into a    */
+/* rounded card that slides in/out with an even margin all the way round. */
+/* ================================================================ */
+.sidebar-float-host {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 14px;
+  z-index: 40;
+}
+.sidebar-float-host--revealed {
+  /* cover the panel (8px margin + width + a little slack) so leaving the
+     panel — not merely the strip — is what dismisses it. */
+  width: calc(var(--float-width) + 24px);
+}
+
+.sidebar-float {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  bottom: 8px;
+  border-radius: 16px;
+  overflow: hidden;
+  /* same brushed-silver chassis as .sidebar-device (light) */
+  background:
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(1 0.002 250 / 0.26), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0.35 0.004 250 / 0.05), transparent 64%),
+    repeating-linear-gradient(90deg, oklch(0.35 0.004 250 / 0.06) 0 1px, transparent 1px 3px),
+    linear-gradient(78deg, oklch(0.79 0.003 250) 0px, oklch(0.85 0.003 250) 170px, oklch(0.92 0.002 250) 340px);
+  background-blend-mode: normal, normal, soft-light, normal;
+  box-shadow:
+    0 18px 40px -10px rgba(0, 0, 0, 0.32),
+    0 4px 12px -4px rgba(0, 0, 0, 0.22),
+    inset 0 0 0 0.5px oklch(0.92 0.002 250 / 0.25);
+  /* hidden: slid fully off-screen past its own left margin */
+  transform: translateX(calc(-100% - 8px));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 200ms ease;
+}
+.sidebar-float--in {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+:root[data-composer="dark"] .sidebar-float {
+  background:
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(0.62 0.004 265 / 0.22), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0 0 0 / 0.1), transparent 64%),
+    repeating-linear-gradient(90deg, oklch(0.7 0.004 265 / 0.04) 0 1px, transparent 1px 3px),
+    linear-gradient(78deg, oklch(0.135 0.004 265) 0px, oklch(0.185 0.004 265) 170px, oklch(0.235 0.004 265) 340px);
+  background-blend-mode: normal, normal, soft-light, normal;
+  box-shadow:
+    0 18px 40px -10px rgba(0, 0, 0, 0.6),
+    0 4px 12px -4px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 0.5px oklch(0 0 0 / 0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-float {
+    transition: opacity 120ms ease;
+  }
 }

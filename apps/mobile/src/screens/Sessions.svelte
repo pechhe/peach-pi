@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { RemoteSessionInfo } from "@peach-pi/shared-types";
-  import { store } from "../lib/store.svelte.ts";
+  import { store, hostLabel } from "../lib/store.svelte.ts";
   import { listSessions } from "../lib/api.ts";
   import Icon from "../components/Icon.svelte";
 
@@ -63,7 +63,7 @@
   <div class="px-1 pt-1 pb-3">
     <h1 class="text-[24px] font-bold tracking-[-0.02em]">{master?.name ?? "Master"}</h1>
     <div class="mt-0.5 font-mono text-[12px] text-faint">
-      {master?.host}:{master?.port}{#if sessions.length} · {sessions.length} served{/if}
+      {master ? hostLabel(master) : ""}{#if sessions.length} · {sessions.length} served{/if}
     </div>
   </div>
 </header>
