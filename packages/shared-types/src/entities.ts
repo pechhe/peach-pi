@@ -507,7 +507,73 @@ export interface CustomConnection {
   headerPrefix: string;
   /** Masked tail of the key for display, e.g. "••••7f3a". */
   keyPreview: string;
+  /** Favicon URL for the row icon (derived from baseUrl); null = monogram. */
+  logoUrl: string | null;
   createdAt: string;
+}
+
+/** A connection the user pinned in the composer with `@` so the model prefers
+ *  it for that task. The hint is prepended to the outgoing prompt; the underlying
+ *  tools (custom_request / connector_execute) are always available regardless. */
+export interface ReferencedConnection {
+  /** "custom" = saved HTTP connection; "composio" = connected Composio toolkit. */
+  kind: "custom" | "composio";
+  /** Display name (custom connection name or Composio toolkit name). */
+  name: string;
+  /** Base URL (kind === "custom" only). */
+  baseUrl?: string;
+  /** Composio toolkit slug (kind === "composio" only); filters connectors_search_tools. */
+  toolkitSlug?: string;
+  /** Favicon/logo for the chip. */
+  logoUrl?: string | null;
+}
+
+/** A Bitwarden Secrets Manager secret the user pinned with `@` so the model
+ *  knows it is available for this task. Only the secret *name* + *id* are
+ *  stored here — never the value. The model fetches the value at runtime via
+ *  the `bws_get_secret` tool; the cleartext never enters the prompt text. */
+export interface ReferencedSecret {
+  /** BWS secret id (used by `bws_get_secret` to fetch the value). */
+  id: string;
+  /** Secret key/name (display + nudge). */
+  name: string;
+  /** BWS project id the secret lives in. */
+  projectId: string;
+}
+
+/** A connection config the setup assistant proposes after verifying it; the
+ *  user reviews + saves it. The held API key is never echoed here. */
+export interface ProposedConnectionConfig {
+  name: string;
+  baseUrl: string;
+  headerName: string;
+  headerPrefix: string;
+}
+
+/** Streaming assistant text from the connection-setup assistant. */
+export interface ConnSetupDeltaPayload {
+  sessionId: string;
+  text: string;
+}
+
+/** A read-only verification probe the assistant ran against the user's API. */
+export interface ConnSetupProbePayload {
+  sessionId: string;
+  /** e.g. "GET /api/user/current → 200". */
+  summary: string;
+  ok: boolean;
+}
+
+/** The assistant proposed a final, verified config to prefill the save form. */
+export interface ConnSetupConfigPayload {
+  sessionId: string;
+  config: ProposedConnectionConfig;
+}
+
+/** A setup-assistant turn finished (now idle, awaiting the user) or errored. */
+export interface ConnSetupDonePayload {
+  sessionId: string;
+  error?: string;
 }
 
 /** Params for creating a custom connection (includes the raw key). */
@@ -517,6 +583,7 @@ export interface CustomConnectionInput {
   apiKey: string;
   headerName?: string;
   headerPrefix?: string;
+  logoUrl?: string | null;
 }
 
 /** Connection status as reported by Composio for a connected account. */

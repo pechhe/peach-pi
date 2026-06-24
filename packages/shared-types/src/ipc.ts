@@ -25,6 +25,11 @@ import type {
   GraphifyStatus,
   CustomConnection,
   CustomConnectionInput,
+  ProposedConnectionConfig,
+  ConnSetupDeltaPayload,
+  ConnSetupProbePayload,
+  ConnSetupConfigPayload,
+  ConnSetupDonePayload,
   McpServer,
   ToolkitCatalogEntry,
   ToolkitDetail,
@@ -481,6 +486,34 @@ export const ipcContracts = {
     requireNonEmptyString(id, "id"),
   ),
 
+  // connection setup assistant (interactive, utility-model driven). The raw
+  // key is held in the main process for the session and injected into probe
+  // requests; it never reaches the model. Activity streams via event:connSetup*.
+  /** Start a setup session: fetch the docs URL (or accept pasted docs text),
+   *  hold the key, and kick off the first assistant turn. */
+  "connectionSetup:start": invoke<
+    [input: { docs: string; apiKey: string; name?: string }],
+    { sessionId: string }
+  >((input) => {
+    requireNonEmptyString(input?.docs, "docs");
+    requireNonEmptyString(input?.apiKey, "apiKey");
+  }),
+  /** Send a user reply into a setup session; the answer streams back. */
+  "connectionSetup:send": invoke<[sessionId: string, text: string], void>((id, t) => {
+    requireNonEmptyString(id, "sessionId");
+    requireNonEmptyString(t, "text");
+  }),
+  /** Save the proposed config using the session's held key; returns the saved
+   *  connection and ends the session. */
+  "connectionSetup:save": invoke<
+    [sessionId: string, config: ProposedConnectionConfig],
+    CustomConnection
+  >((id) => requireNonEmptyString(id, "sessionId")),
+  /** Discard a setup session and wipe its held key from memory. */
+  "connectionSetup:close": invoke<[sessionId: string], void>((id) =>
+    requireNonEmptyString(id, "sessionId"),
+  ),
+
   // MCP servers (read-only display). Configuration lives in
   // ~/.pi/agent/mcp.json and is managed by the pi-mcp-adapter extension
   // (`/mcp` commands). peach-pi surfaces them in the Connections view; it
@@ -565,6 +598,11 @@ export const ipcContracts = {
   "event:extensionStatus": event<ExtensionStatusPayload>(),
   "event:sideDelta": event<SideDeltaPayload>(),
   "event:sideDone": event<SideDonePayload>(),
+  /** Connection-setup assistant streaming + activity. */
+  "event:connSetupDelta": event<ConnSetupDeltaPayload>(),
+  "event:connSetupProbe": event<ConnSetupProbePayload>(),
+  "event:connSetupConfig": event<ConnSetupConfigPayload>(),
+  "event:connSetupDone": event<ConnSetupDonePayload>(),
   /** Notification click — main window should select this thread. */
   "event:focusThread": event<ThreadId>(),
   /** A run finished while the HUD is up — renderer turns this into an ambient cue. */

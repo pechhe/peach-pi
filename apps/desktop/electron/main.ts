@@ -34,6 +34,7 @@ import {
 import { ConnectorService } from "./services/connector-service.ts";
 import { BwsService } from "./services/bws-service.ts";
 import { CustomConnectionService } from "./services/custom-connection-service.ts";
+import { ConnectionSetupService } from "./services/connection-setup-service.ts";
 import { McpService } from "./services/mcp-service.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
@@ -190,6 +191,11 @@ async function boot(): Promise<void> {
   const connectorService = new ConnectorService(emit);
   const bwsService = new BwsService(emit);
   const customConnectionService = new CustomConnectionService(emit);
+  const connectionSetupService = new ConnectionSetupService(
+    emit,
+    () => appService.getUtilityModel(),
+    customConnectionService,
+  );
   const mcpService = new McpService();
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
@@ -207,7 +213,7 @@ async function boot(): Promise<void> {
 
   // Localhost bridge so a pi extension (in the terminal, no IPC access) can
   // reach Composio through the main process. Started after ready; stopped on quit.
-  const connectorResolver = new ConnectorResolver(connectorService, customConnectionService);
+  const connectorResolver = new ConnectorResolver(connectorService, customConnectionService, bwsService);
   void connectorResolver.start().then(() => connectorResolver.writeBootstrap());
   // Write the pi extension (auto-discovered by pi) so the agent gets the
   // connectors_search_tools / connector_execute tools. Idempotent; rewrites on bump.
@@ -284,6 +290,10 @@ async function boot(): Promise<void> {
     "agentBrowser:install": () => agentBrowserService.install((channel, payload) => emit(channel, payload)),
     "customConnections:create": (input) => customConnectionService.create(input),
     "customConnections:delete": (id) => customConnectionService.delete(id),
+    "connectionSetup:start": (input) => connectionSetupService.start(input),
+    "connectionSetup:send": (sessionId, text) => connectionSetupService.send(sessionId, text),
+    "connectionSetup:save": (sessionId, config) => connectionSetupService.save(sessionId, config),
+    "connectionSetup:close": (sessionId) => connectionSetupService.close(sessionId),
     "devtap:report": (entry) =>
       emitDevTapEvent({
         level: entry.error ? "error" : "info",

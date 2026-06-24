@@ -30,6 +30,7 @@
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
+  import TextAttachmentViewer from "./TextAttachmentViewer.svelte";
   import SkillDialog from "./SkillDialog.svelte";
   import Toasts from "./Toasts.svelte";
   import SidePanel from "./SidePanel.svelte";
@@ -257,7 +258,7 @@
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
-<div class="relative flex h-full">
+<div class="relative flex h-full bg-sidebar">
   {#if snapshot.current}
     <Sidebar
       width={sidebarWidth}
@@ -290,7 +291,7 @@
           : 'bg-transparent group-hover:bg-border-strong'}"
       ></div>
     </div>
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-[22px] bg-surface shadow-[-4px_0_16px_-5px_rgba(0,0,0,0.22)]">
     {#key view === "thread" ? `thread:${selectedThreadId}` : view === "testing" ? `testing:${testingProjectId}` : view}
     <div class="view-enter flex min-h-0 flex-1">
     {#if view === "settings"}
@@ -378,6 +379,7 @@
     <TerminalCustomOverlay frame={extensionUi.terminalCustom} threadId={extensionUi.terminalCustom.threadId} />
   {/if}
   <ImageLightbox />
+  <TextAttachmentViewer />
   <SkillDialog />
   <Toasts {sidebarWidth} />
   <PiHealthBanner />

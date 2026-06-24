@@ -236,6 +236,14 @@ export class BwsService {
     });
   }
 
+  /** Fetch one secret by id. Returns the cleartext value; used by the
+   *  `bws_get_secret` model tool so the agent can use a credential without it
+   *  ever appearing in prompt text. Not cached — reads are one-shot. */
+  async getSecret(secretId: string): Promise<BwsSecret> {
+    const raw = await this.runJson<RawSecret>(["secret", "get", secretId]);
+    return toSecret(raw);
+  }
+
   async createSecret(input: BwsSecretInput): Promise<BwsSecret> {
     const args = ["secret", "create", input.key, input.value, input.projectId];
     if (input.note) args.push("--note", input.note);

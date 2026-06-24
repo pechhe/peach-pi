@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { AuthScheme, Composio } from "@composio/core";
+import type { AuthSchemeType } from "@composio/core";
 import type {
   AuthField,
   Connection,
@@ -305,15 +306,33 @@ export class ConnectorService {
     );
   }
 
-  /** Resolve (or lazily create) a Composio-managed auth config for a toolkit. */
+  /** Resolve (or lazily create) a Composio-managed auth config for a toolkit.
+   *  Composio doesn't manage OAuth creds for every toolkit (e.g. PostHog is
+   *  API_KEY). For those, `use_composio_managed_auth` create 400s with
+   *  "Default auth config not found"; fall back to a custom auth config whose
+   *  scheme matches the toolkit's real one. The user then supplies credentials
+   *  at Composio's hosted connect link (same redirect flow as OAuth). */
   private async authConfigFor(slug: string): Promise<string> {
     const cached = this.authConfigCache.get(slug);
     if (cached) return cached;
     const c = this.client();
     const existing = await c.authConfigs.list({ toolkit: slug });
-    const id =
-      existing.items[0]?.id ??
-      (await c.authConfigs.create(slug, { type: "use_composio_managed_auth" })).id;
+    let id = existing.items[0]?.id;
+    if (!id) {
+      try {
+        id = (await c.authConfigs.create(slug, { type: "use_composio_managed_auth" })).id;
+      } catch {
+        const tk = await c.toolkits.get(slug);
+        const scheme = (tk.authConfigDetails?.[0]?.mode ?? "OAUTH2") as AuthSchemeType;
+        id = (
+          await c.authConfigs.create(slug, {
+            type: "use_custom_auth",
+            authScheme: scheme,
+            credentials: {},
+          })
+        ).id;
+      }
+    }
     this.authConfigCache.set(slug, id);
     return id;
   }

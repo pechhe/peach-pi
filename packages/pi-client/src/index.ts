@@ -7,5 +7,12 @@ export { generateCommitMessage } from "./commit-message.ts";
 export { generateTitleAndTag, type ThreadTitleAndTag } from "./thread-title.ts";
 export { resolveUtilityModel, completeUtility, listAvailableModels, type UtilityModelConfig, type UtilityCompletionOptions } from "./utility-model.ts";
 export { streamSideChat, type SideChatRequest, type SideChatTurn } from "./side-chat.ts";
+export {
+  runConnectionSetupTurn,
+  buildSetupSystemPrompt,
+  type ConnSetupCallbacks,
+  type ProbeArgs,
+  type ProposedConfig,
+} from "./connection-setup.ts";
 export { scopeModels, THINKING_SUFFIXES } from "./scope-models.ts";
 export { createUiBridge, type UiBridgeCallbacks } from "./extension-ui-bridge.ts";

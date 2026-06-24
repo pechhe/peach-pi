@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import type { ConnectorService } from "./connector-service.ts";
 import type { CustomConnectionService } from "./custom-connection-service.ts";
+import type { BwsService } from "./bws-service.ts";
 
 /**
  * Localhost-only HTTP bridge that lets a pi extension (running in the terminal,
@@ -24,6 +25,8 @@ import type { CustomConnectionService } from "./custom-connection-service.ts";
  *   GET  /custom-connections               → saved custom connections (names+URLs)
  *   POST /custom-request { connection, method, path, body, headers }
  *                                          → authenticated HTTP call via a saved key
+ *   GET  /secrets?projectId=               → BWS secrets (names+ids; values redacted)
+ *   POST /secret-get { secretId }          → one BWS secret including cleartext value
  */
 const BOOTSTRAP_DIR = join(homedir(), ".pi", "agent");
 const BOOTSTRAP_PATH = join(BOOTSTRAP_DIR, "peach-connectors.json");
@@ -36,6 +39,7 @@ export class ConnectorResolver {
   constructor(
     private service: ConnectorService,
     private custom: CustomConnectionService,
+    private bws: BwsService,
   ) {}
 
   async start(): Promise<void> {
@@ -118,6 +122,30 @@ export class ConnectorResolver {
           body.headers,
         );
         return this.send(res, 200, result);
+      }
+
+      // BWS secrets. /secrets returns names + ids only (never values) so the
+      // model can discover what's available; /secret-get returns the cleartext
+      // value on demand so it never lands in the prompt text.
+      if (req.method === "GET" && url.pathname === "/secrets") {
+        const status = await this.bws.status();
+        if (!status.authenticated) {
+          return this.send(res, 409, { error: "BWS not authenticated", status });
+        }
+        const projectId = url.searchParams.get("projectId") ?? status.projectId;
+        const secrets = await this.bws.listSecrets(projectId);
+        return this.send(
+          res,
+          200,
+          secrets.map((s) => ({ id: s.id, key: s.key, projectId: s.projectId })),
+        );
+      }
+
+      if (req.method === "POST" && url.pathname === "/secret-get") {
+        const body = (await this.readJson(req)) as { secretId?: string };
+        if (!body.secretId) return this.send(res, 400, { error: "secretId required" });
+        const secret = await this.bws.getSecret(body.secretId);
+        return this.send(res, 200, secret);
       }
 
       return this.send(res, 404, { error: "not found" });

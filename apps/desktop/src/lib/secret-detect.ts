@@ -7,6 +7,11 @@ export interface DetectedSecret {
   value: string;
   /** A suggested, editable env-style name for the secret. */
   suggestedName: string;
+  /** Provider/family token derived from the matched prefix, e.g. "OPENAI",
+   *  "GITHUB". Used by the store prompt to surface related existing secrets
+   *  (same provider) so the user can spot a likely duplicate before saving.
+   *  Null for the generic high-entropy fallback (no known provider). */
+  family: string | null;
 }
 
 /** Known provider prefixes → a sensible default secret name. */
@@ -34,7 +39,7 @@ export function detectSecret(text: string): DetectedSecret | null {
   if (/:\/\//.test(v) || v.startsWith("/") || v.startsWith("~") || v.startsWith(".")) return null; // url / path
   if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return null; // email
 
-  for (const p of PREFIXES) if (p.re.test(v)) return { value: v, suggestedName: p.name };
+  for (const p of PREFIXES) if (p.re.test(v)) return { value: v, suggestedName: p.name, family: p.name.split("_")[0] ?? null };
 
   // Generic high-entropy fallback: long, mixed-case + digits, base64/hex charset.
   const generic =
@@ -43,7 +48,7 @@ export function detectSecret(text: string): DetectedSecret | null {
     /[A-Z]/.test(v) &&
     /[0-9]/.test(v) &&
     /^[A-Za-z0-9._+/=-]+$/.test(v);
-  if (generic) return { value: v, suggestedName: "API_KEY" };
+  if (generic) return { value: v, suggestedName: "API_KEY", family: null };
 
   return null;
 }

@@ -21,6 +21,15 @@ interface StoredConnection extends CustomConnection {
 const mask = (key: string): string =>
   "••••" + (key.length > 4 ? key.slice(-4) : "");
 
+/** Favicon for the connection's host, so custom rows render like the others. */
+function faviconFor(baseUrl: string): string | null {
+  try {
+    return `https://www.google.com/s2/favicons?domain=${new URL(baseUrl).hostname}&sz=64`;
+  } catch {
+    return null;
+  }
+}
+
 export class CustomConnectionService {
   // Reuse the same change event the renderer already listens to.
   constructor(private emit: (channel: "event:connectorsChanged", payload: undefined) => void) {}
@@ -47,6 +56,7 @@ export class CustomConnectionService {
       headerName: c.headerName,
       headerPrefix: c.headerPrefix,
       keyPreview: c.keyPreview,
+      logoUrl: c.logoUrl ?? faviconFor(c.baseUrl),
       createdAt: c.createdAt,
     };
   }
@@ -72,6 +82,7 @@ export class CustomConnectionService {
       headerName: (input.headerName ?? "Authorization").trim() || "Authorization",
       headerPrefix: input.headerPrefix ?? "Bearer ",
       keyPreview: mask(apiKey),
+      logoUrl: input.logoUrl ?? faviconFor(baseUrl),
       createdAt: new Date().toISOString(),
       apiKey,
     };
@@ -103,10 +114,23 @@ export class CustomConnectionService {
   ): Promise<{ status: number; body: string }> {
     const conn = (await this.read()).find((c) => c.name === connection);
     if (!conn) throw new Error(`No custom connection named "${connection}"`);
+    return this.requestWith(conn, method, path, body, extraHeaders);
+  }
+
+  /** Make a request with explicit credentials (used by the setup assistant to
+   *  probe a not-yet-saved connection). */
+  async requestWith(
+    creds: { baseUrl: string; headerName: string; headerPrefix: string; apiKey: string },
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<{ status: number; body: string }> {
     const m = (method || "GET").toUpperCase();
-    const url = conn.baseUrl + (path.startsWith("/") ? path : "/" + path);
+    const base = creds.baseUrl.replace(/\/+$/, "");
+    const url = base + (path.startsWith("/") ? path : "/" + path);
     const headers: Record<string, string> = { ...extraHeaders };
-    headers[conn.headerName] = conn.headerPrefix + conn.apiKey;
+    headers[creds.headerName] = creds.headerPrefix + creds.apiKey;
     const hasBody = body != null && m !== "GET" && m !== "HEAD";
     if (hasBody && !Object.keys(headers).some((k) => k.toLowerCase() === "content-type")) {
       headers["content-type"] = "application/json";

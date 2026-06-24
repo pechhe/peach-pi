@@ -1,5 +1,5 @@
 import { SvelteMap } from "svelte/reactivity";
-import type { CommandKind, QueueState } from "@peach-pi/shared-types";
+import type { CommandKind, QueueState, ReferencedConnection, ReferencedSecret } from "@peach-pi/shared-types";
 import type { ComposerMode } from "../lib/composer/mode";
 import type { ComposerAttachment } from "../lib/composer/attachments";
 import { api } from "../lib/ipc";
@@ -10,6 +10,10 @@ export interface ComposerDraft {
   mode: ComposerMode;
   /** Selected slash command (skill/prompt/extension), shown as a chip and prepended on send. */
   command: { name: string; kind: CommandKind } | null;
+  /** Connections pinned with `@`, shown as chips and hinted in the outgoing prompt. */
+  connections: ReferencedConnection[];
+  /** BWS secrets pinned with `@`, shown as chips and hinted (names+ids only). */
+  secrets: ReferencedSecret[];
   /** Plan-mode full instructions already sent once in this thread. */
   planPromptSent: boolean;
 }
@@ -19,6 +23,8 @@ const emptyDraft = (): ComposerDraft => ({
   attachments: [],
   mode: "build",
   command: null,
+  connections: [],
+  secrets: [],
   planPromptSent: false,
 });
 
@@ -36,7 +42,7 @@ class DraftStore {
   }
 
   clearText(threadId: string): void {
-    this.update(threadId, { text: "", attachments: [], command: null });
+    this.update(threadId, { text: "", attachments: [], command: null, connections: [], secrets: [] });
   }
 }
 

@@ -22,7 +22,10 @@
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Circle from "@lucide/svelte/icons/circle";
   import X from "@lucide/svelte/icons/x";
+  import KeyRound from "@lucide/svelte/icons/key-round";
   import { parseSkillInvocation } from "../lib/composer/skill-message";
+  import { parseConnectionsHint, parseSecretsHint } from "../lib/composer/connections-message";
+  import ConnectorIcon from "./ConnectorIcon.svelte";
   import { skillViewer } from "../stores/skill-viewer.svelte";
   import Markdown from "./Markdown.svelte";
   import StreamingText from "./StreamingText.svelte";
@@ -39,6 +42,30 @@
   import { lightbox } from "../stores/lightbox.svelte";
   import { terminal } from "../stores/terminal.svelte";
   import FindBar from "./FindBar.svelte";
+
+  // Logo lookup for @-connection badges. The hint text only carries names, so we
+  // map name → logoUrl from the live connection lists (favicon, monogram
+  // fallback handled by ConnectorIcon). Refreshed when connections change.
+  let connLogos = $state<Map<string, string | null>>(new Map());
+  async function loadConnLogos() {
+    try {
+      const [composio, custom] = await Promise.all([
+        api.invoke("connectors:list"),
+        api.invoke("customConnections:list"),
+      ]);
+      const m = new Map<string, string | null>();
+      for (const c of composio) m.set(c.name, c.logoUrl);
+      for (const c of custom) m.set(c.name, c.logoUrl);
+      connLogos = m;
+    } catch {
+      // Best-effort: badges fall back to a monogram without a logo.
+    }
+  }
+  $effect(() => {
+    void loadConnLogos();
+    const off = api.on("event:connectorsChanged", () => void loadConnLogos());
+    return off;
+  });
 
   let { thread, onSetEnvironment, onOpenGraph, onSelectThread, onNewThread, pendingFind, onFindConsumed }: {
     thread: Thread;
@@ -635,7 +662,7 @@
     {/if}
     <div
       bind:this={scrollEl}
-      class="flex flex-1 flex-col overflow-y-auto px-6 py-5"
+      class="transcript-scroll flex flex-1 flex-col overflow-y-auto px-6 pt-5 pb-26"
       data-testid="transcript"
       onscroll={onScroll}
       onwheel={onWheel}
@@ -704,7 +731,36 @@
               </div>
             {/if}
             {#if item.text}
-              {@const skill = parseSkillInvocation(item.text)}
+              {@const conn = parseConnectionsHint(item.text)}
+              {@const sec = parseSecretsHint(conn ? conn.body : item.text)}
+              {@const displayText = sec ? sec.body : conn ? conn.body : item.text}
+              {#if conn}
+                <div class="flex flex-wrap justify-end gap-1.5" data-testid="connection-badges">
+                  {#each conn.connections as c (c.kind + ":" + c.name)}
+                    <span
+                      class="inline-flex items-center gap-1.5 rounded-full border border-border-strong/50 bg-surface-2/80 py-0.5 pl-1 pr-2.5 text-[11.5px] font-medium text-fg-soft"
+                      title={`${c.kind === "custom" ? "Custom connection" : "Composio toolkit"}: ${c.name}`}
+                    >
+                      <ConnectorIcon logoUrl={connLogos.get(c.name) ?? null} label={c.name} size={16} />
+                      <span>@{c.name}</span>
+                    </span>
+                  {/each}
+                </div>
+              {/if}
+              {#if sec}
+                <div class="flex flex-wrap justify-end gap-1.5" data-testid="secret-badges">
+                  {#each sec.secrets as s (s.id)}
+                    <span
+                      class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 py-0.5 pl-1 pr-2.5 text-[11.5px] font-medium text-amber-700"
+                      title={`BWS secret: ${s.name}`}
+                    >
+                      <KeyRound size={14} class="shrink-0" />
+                      <span class="font-mono">@{s.name}</span>
+                    </span>
+                  {/each}
+                </div>
+              {/if}
+              {@const skill = parseSkillInvocation(displayText)}
               {#if skill}
                 <button
                   type="button"
@@ -721,9 +777,9 @@
                     {skill.args}
                   </div>
                 {/if}
-              {:else}
+              {:else if displayText}
                 <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">
-                  {item.text}
+                  {displayText}
                 </div>
               {/if}
             {/if}
@@ -945,6 +1001,13 @@
   .composer-dock {
     flex-shrink: 0;
     will-change: transform;
+  }
+  /* Soften the transcript's bottom edge so text dissolves into the composer
+     instead of meeting it at a hard straight line that clashes with the
+     composer's rounded top corners. */
+  .transcript-scroll {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
   }
   .composer-dock--centered {
     margin-block: auto;

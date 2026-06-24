@@ -5,6 +5,7 @@
     Connection,
     CuaDriverStatus,
     CustomConnection,
+    ProposedConnectionConfig,
     McpServer,
     ToolkitCatalogEntry,
     ToolkitDetail,
@@ -17,7 +18,6 @@ import Server from "@lucide/svelte/icons/server";
   import Monitor from "@lucide/svelte/icons/monitor";
   import Globe from "@lucide/svelte/icons/globe";
   import Plus from "@lucide/svelte/icons/plus";
-  import Link from "@lucide/svelte/icons/link";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import ConnectorIcon from "./ConnectorIcon.svelte";
 
@@ -52,6 +52,91 @@ import Server from "@lucide/svelte/icons/server";
   let cHeaderPrefix = $state("Bearer ");
   let cBusy = $state(false);
   const cValid = $derived(!!cName.trim() && !!cBaseUrl.trim() && !!cKey.trim());
+
+  // ── Assisted setup (utility model reads docs, verifies, proposes config) ──
+  type SetupEntry = { kind: "user" | "assistant" | "probe" | "error"; text: string; ok?: boolean };
+  let setupTab = $state<"assisted" | "manual">("assisted");
+  let sDocs = $state("");
+  let sKey = $state("");
+  let sName = $state("");
+  let setupSessionId = $state<string | null>(null);
+  let setupLog = $state<SetupEntry[]>([]);
+  let setupStream = $state("");
+  let setupBusy = $state(false);
+  let setupConfig = $state<ProposedConnectionConfig | null>(null);
+  let setupReply = $state("");
+  const sValid = $derived(!!sDocs.trim() && !!sKey.trim());
+
+  function flushStream() {
+    if (setupStream.trim()) setupLog = [...setupLog, { kind: "assistant", text: setupStream }];
+    setupStream = "";
+  }
+
+  function resetSetup() {
+    if (setupSessionId) void api.invoke("connectionSetup:close", setupSessionId);
+    setupSessionId = null;
+    setupLog = [];
+    setupStream = "";
+    setupConfig = null;
+    setupBusy = false;
+    setupReply = "";
+  }
+
+  async function startSetup() {
+    if (!sValid || setupBusy) return;
+    error = "";
+    setupLog = [];
+    setupStream = "";
+    setupConfig = null;
+    setupBusy = true;
+    try {
+      const { sessionId } = await api.invoke("connectionSetup:start", {
+        docs: sDocs.trim(),
+        apiKey: sKey.trim(),
+        name: sName.trim() || undefined,
+      });
+      setupSessionId = sessionId;
+    } catch (e) {
+      setupBusy = false;
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function sendSetupReply() {
+    const text = setupReply.trim();
+    if (!setupSessionId || !text || setupBusy) return;
+    setupLog = [...setupLog, { kind: "user", text }];
+    setupReply = "";
+    setupBusy = true;
+    try {
+      await api.invoke("connectionSetup:send", setupSessionId, text);
+    } catch (e) {
+      setupBusy = false;
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function saveSetup() {
+    if (!setupSessionId || !setupConfig) return;
+    error = "";
+    // setupConfig is a Svelte $state proxy; send a plain copy so Electron's
+    // structured clone (IPC) doesn't choke ("An object could not be cloned").
+    const config = {
+      name: setupConfig.name,
+      baseUrl: setupConfig.baseUrl,
+      headerName: setupConfig.headerName,
+      headerPrefix: setupConfig.headerPrefix,
+    };
+    try {
+      const created = await api.invoke("connectionSetup:save", setupSessionId, config);
+      setupSessionId = null;
+      resetSetup();
+      await loadCustom();
+      selectCustom(created);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
 
   // "+ Add": jump to search so the user can pick any app (incl. manual
   // url+key ones like Metabase). Composio needs a known toolkit, so there is
@@ -123,6 +208,7 @@ import Server from "@lucide/svelte/icons/server";
   }
 
   async function select(slug: string) {
+    resetSetup();
     mode = "toolkit";
     selectedSlug = slug;
     selectedCustom = null;
@@ -168,18 +254,22 @@ import Server from "@lucide/svelte/icons/server";
   }
 
   function selectMcp() {
+    resetSetup();
     mode = "mcp";
     selectedSlug = null;
     selectedCustom = null;
   }
 
   function selectCustom(c: CustomConnection) {
+    resetSetup();
     mode = "custom";
     selectedCustom = c;
     selectedSlug = null;
   }
 
   function startCustomNew() {
+    resetSetup();
+    setupTab = "assisted";
     mode = "custom-new";
     selectedSlug = null;
     selectedCustom = null;
@@ -233,12 +323,32 @@ import Server from "@lucide/svelte/icons/server";
     void loadMcp();
     void loadCuaDriver();
     void loadAgentBrowser();
-    return api.on("event:connectorsChanged", () => {
-      void loadConnections();
-      void loadCatalogue();
-      void loadCustom();
-      void loadMcp();
-    });
+    const offs = [
+      api.on("event:connectorsChanged", () => {
+        void loadConnections();
+        void loadCatalogue();
+        void loadCustom();
+        void loadMcp();
+      }),
+      api.on("event:connSetupDelta", (p) => {
+        if (p.sessionId === setupSessionId) setupStream += p.text;
+      }),
+      api.on("event:connSetupProbe", (p) => {
+        if (p.sessionId !== setupSessionId) return;
+        flushStream();
+        setupLog = [...setupLog, { kind: "probe", text: p.summary, ok: p.ok }];
+      }),
+      api.on("event:connSetupConfig", (p) => {
+        if (p.sessionId === setupSessionId) setupConfig = p.config;
+      }),
+      api.on("event:connSetupDone", (p) => {
+        if (p.sessionId !== setupSessionId) return;
+        flushStream();
+        if (p.error) setupLog = [...setupLog, { kind: "error", text: p.error }];
+        setupBusy = false;
+      }),
+    ];
+    return () => offs.forEach((off) => off());
   });
 
   async function connect() {
@@ -376,7 +486,7 @@ import Server from "@lucide/svelte/icons/server";
           onclick={() => selectCustom(c)}
           data-testid={`sidebar-custom-${c.id}`}
         >
-          <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Link size={12} /></span>
+          <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={20} />
           <span class="flex-1 truncate text-sm text-fg">{c.name}</span>
         </button>
       {/each}
@@ -490,7 +600,114 @@ import Server from "@lucide/svelte/icons/server";
     {:else if mode === "custom-new"}
       <div class="mx-auto w-full max-w-xl px-8 py-6">
         <h2 class="text-lg font-semibold text-fg">New custom connection</h2>
-        <p class="mt-1 text-sm text-fg-soft">
+        {#if !setupSessionId}
+          <div class="mt-3 flex w-fit gap-1 rounded-lg bg-surface p-1 text-sm">
+            <button
+              class="rounded-md px-3 py-1 transition {setupTab === 'assisted' ? 'bg-bg text-fg shadow-sm' : 'text-muted hover:text-fg'}"
+              onclick={() => (setupTab = "assisted")}
+            >Assisted</button>
+            <button
+              class="rounded-md px-3 py-1 transition {setupTab === 'manual' ? 'bg-bg text-fg shadow-sm' : 'text-muted hover:text-fg'}"
+              onclick={() => (setupTab = "manual")}
+            >Manual</button>
+          </div>
+        {/if}
+
+        {#if setupSessionId}
+          <!-- ── Assisted chat: model reads docs, probes, proposes config ── -->
+          <div class="mt-4 flex flex-col gap-3" data-testid="setup-chat">
+            {#each setupLog as e, i (i)}
+              {#if e.kind === "probe"}
+                <div class="flex items-center gap-2 self-start rounded-lg border border-border bg-surface px-2.5 py-1 text-xs">
+                  <span class="h-1.5 w-1.5 rounded-full {e.ok ? 'bg-emerald-500' : 'bg-red-500'}"></span>
+                  <span class="font-mono text-muted">{e.text}</span>
+                </div>
+              {:else if e.kind === "error"}
+                <p class="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">{e.text}</p>
+              {:else if e.kind === "user"}
+                <div class="max-w-[85%] self-end rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-fg">{e.text}</div>
+              {:else}
+                <div class="max-w-[85%] self-start whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-surface px-3 py-2 text-sm text-fg">{e.text}</div>
+              {/if}
+            {/each}
+            {#if setupStream.trim()}
+              <div class="max-w-[85%] self-start whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-surface px-3 py-2 text-sm text-fg">{setupStream}</div>
+            {/if}
+            {#if setupBusy && !setupStream.trim()}
+              <div class="self-start text-xs text-fainter">Working…</div>
+            {/if}
+          </div>
+
+          {#if setupConfig}
+            <div class="mt-4 rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-4" data-testid="setup-config">
+              <p class="text-sm font-semibold text-fg">Proposed connection</p>
+              <div class="mt-2 flex flex-col gap-2">
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-muted">Name</span>
+                  <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus" bind:value={setupConfig.name} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-muted">Base URL</span>
+                  <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus" bind:value={setupConfig.baseUrl} />
+                </label>
+                <div class="flex gap-2">
+                  <label class="flex flex-1 flex-col gap-1">
+                    <span class="text-xs text-muted">Header name</span>
+                    <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus" bind:value={setupConfig.headerName} />
+                  </label>
+                  <label class="flex flex-1 flex-col gap-1">
+                    <span class="text-xs text-muted">Value prefix</span>
+                    <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus" bind:value={setupConfig.headerPrefix} />
+                  </label>
+                </div>
+              </div>
+              <div class="mt-3 flex justify-end">
+                <button class="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg" onclick={() => void saveSetup()} data-testid="setup-save">Save connection</button>
+              </div>
+            </div>
+          {/if}
+
+          <form class="mt-4 flex items-center gap-2" onsubmit={(e) => { e.preventDefault(); void sendSetupReply(); }}>
+            <input
+              class="flex-1 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus disabled:opacity-50"
+              placeholder="Reply or answer a question…"
+              bind:value={setupReply}
+              disabled={setupBusy}
+              data-testid="setup-reply"
+            />
+            <button type="submit" class="rounded-lg bg-surface px-3 py-1.5 text-sm text-fg disabled:opacity-50" disabled={setupBusy || !setupReply.trim()}>Send</button>
+            <button type="button" class="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-fg" onclick={() => { resetSetup(); mode = "none"; }}>Cancel</button>
+          </form>
+        {:else if setupTab === "assisted"}
+          <p class="mt-3 text-sm text-fg-soft">
+            Paste a link to the API docs and your API key. The utility model reads the
+            docs, figures out the base URL + auth header, and verifies it with a
+            read-only request — it never sees your key.
+          </p>
+          <form class="mt-5 flex flex-col gap-4" onsubmit={(e) => { e.preventDefault(); void startSetup(); }}>
+            <label class="flex flex-col gap-1">
+              <span class="text-sm font-medium text-fg">Name <span class="text-fainter">(optional)</span></span>
+              <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus"
+                placeholder="e.g. Stripe" bind:value={sName} data-testid="setup-name" />
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-sm font-medium text-fg">API docs URL</span>
+              <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus"
+                placeholder="https://docs.example.com/api  (or paste docs text)" bind:value={sDocs} data-testid="setup-docs" />
+            </label>
+            <label class="flex flex-col gap-1">
+              <span class="text-sm font-medium text-fg">API key</span>
+              <input type="password" class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm text-fg outline-none focus:border-border-focus"
+                placeholder="••••••••" bind:value={sKey} data-testid="setup-key" />
+            </label>
+            <div class="flex justify-end gap-2">
+              <button type="button" class="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-fg" onclick={() => (mode = "none")}>Cancel</button>
+              <button type="submit" class="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-fg disabled:opacity-50"
+                disabled={!sValid || setupBusy}>{setupBusy ? "Setting up…" : "Set up with AI"}</button>
+            </div>
+          </form>
+        {:else}
+        <p class="mt-3 text-sm text-fg-soft">
           Save an API key for any HTTP service. The agent calls it with the
           <code class="rounded bg-surface px-1 text-xs">custom_request</code> tool;
           the key is stored on this device and never sent to the model.
@@ -533,12 +750,13 @@ import Server from "@lucide/svelte/icons/server";
               disabled={!cValid || cBusy}>{cBusy ? "Saving…" : "Save connection"}</button>
           </div>
         </form>
+        {/if}
       </div>
     {:else if mode === "custom" && selectedCustom}
       {@const c = selectedCustom}
       <div class="mx-auto w-full max-w-3xl px-8 py-6">
         <div class="flex items-start gap-3">
-          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-muted"><Link size={16} /></span>
+          <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={32} />
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
               <h2 class="truncate text-lg font-semibold text-fg">{c.name}</h2>

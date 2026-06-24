@@ -147,7 +147,9 @@
       active: list.filter((t) => !t.archivedAt && !t.snoozedUntil && !t.toTestAt),
       snoozed: list.filter((t) => !t.archivedAt && t.snoozedUntil),
       toTest: list.filter((t) => !t.archivedAt && !t.snoozedUntil && t.toTestAt),
-      archived: list.filter((t) => t.archivedAt),
+      archived: list
+        .filter((t) => t.archivedAt)
+        .sort((a, b) => (b.archivedAt! < a.archivedAt! ? -1 : 1)),
     };
   }
 
@@ -499,7 +501,7 @@
 />
 
 <aside
-  class="flex h-full shrink-0 flex-col rounded-r-3xl bg-sidebar shadow-[inset_-5px_0_8px_-8px_rgba(0,0,0,0.1)]"
+  class="flex h-full shrink-0 flex-col bg-sidebar"
   style="width: {width}px"
 >
   <div class="titlebar-drag h-10 shrink-0"></div>
@@ -656,7 +658,7 @@
             </Tooltip>
           </div>
           {#if group.snoozed.length > 0}
-            <div class="relative shrink-0">
+            <div class="relative flex shrink-0 items-center">
               <Tooltip text="Snoozed threads">
                 <button
                   class="flex items-center gap-1 rounded px-1 py-0.5 text-[10px]
@@ -780,7 +782,7 @@
         title="New chat"><SquarePen size={14} /></button
       >
     </div>
-    <div class="max-h-48 overflow-y-auto">
+    <div class="chats-scroll max-h-48 overflow-y-auto">
       <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
         {#each chatGroups.active as thread (thread.id)}
           {@render threadRow(thread, "active")}
@@ -889,6 +891,16 @@
     scrollbar-width: none;
   }
   .done-panel__inner::-webkit-scrollbar { display: none; }
+  /* Chats list: same scrollbar-hide guard as .done-panel__inner. When a chat
+     is archived or a new one is added, the .done-panel grid transition (and
+     the height change of the list itself) momentarily overflows this 12rem
+     cap, flashing vertical + horizontal scrollbars. Hide them; long lists
+     still scroll via wheel/trackpad and overflow-x is clamped. */
+  .chats-scroll {
+    overflow-x: hidden;
+    scrollbar-width: none;
+  }
+  .chats-scroll::-webkit-scrollbar { display: none; }
   /* Uncapped variant for the project body: threads live in the sidebar's
      scroll container, so the panel must grow to fit (no nested scroll). */
   .done-panel__inner--grow {

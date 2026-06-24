@@ -19,7 +19,44 @@ export interface ComposerFileAttachment {
   sizeBytes?: number;
 }
 
-export type ComposerAttachment = ComposerImageAttachment | ComposerFileAttachment;
+/** Large pasted text held in-memory; inlined back into the message on submit. */
+export interface ComposerTextAttachment {
+  id: string;
+  kind: "text";
+  name: string;
+  content: string;
+}
+
+export type ComposerAttachment =
+  | ComposerImageAttachment
+  | ComposerFileAttachment
+  | ComposerTextAttachment;
+
+/**
+ * Paste a text blob this big (or this many lines) as an attachment chip instead
+ * of dumping raw text into the composer (ChatGPT-style).
+ */
+export const PASTE_AS_ATTACHMENT_MIN_CHARS = 2000;
+export const PASTE_AS_ATTACHMENT_MIN_LINES = 15;
+
+export function shouldPasteAsAttachment(text: string): boolean {
+  return (
+    text.length >= PASTE_AS_ATTACHMENT_MIN_CHARS ||
+    text.split(/\r\n|\r|\n/).length >= PASTE_AS_ATTACHMENT_MIN_LINES
+  );
+}
+
+/** First non-empty line (or a type label) as a chip label. */
+export function makeTextAttachment(content: string): ComposerTextAttachment {
+  return { id: crypto.randomUUID(), kind: "text", name: textAttachmentLabel(content), content };
+}
+
+function textAttachmentLabel(content: string): string {
+  if (/^\s*<(?:!doctype html|html[\s>]|\?xml)/i.test(content)) return "Pasted HTML";
+  const firstLine = content.split(/\r\n|\r|\n/).find((l) => l.trim().length > 0)?.trim() ?? "";
+  const stripped = firstLine.replace(/^#+\s*/, "");
+  return stripped.length > 40 ? `${stripped.slice(0, 40)}…` : stripped || "Pasted text";
+}
 
 export const SUPPORTED_COMPOSER_IMAGE_TYPES = [
   { extension: "png", mimeType: "image/png" },

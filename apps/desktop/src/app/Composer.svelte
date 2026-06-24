@@ -1,13 +1,15 @@
 <script lang="ts">
-  import type { CommandInfo, Thread } from "@peach-pi/shared-types";
-  import { composeOutgoingPrompt } from "../lib/composer/mode";
+  import type { CommandInfo, Connection, CustomConnection, ReferencedConnection, ReferencedSecret, Thread } from "@peach-pi/shared-types";
+  import { buildConnectionsHint, buildSecretsHint, composeOutgoingPrompt } from "../lib/composer/mode";
   import {
     extractFilesFromDataTransfer,
     extractImageFilePathsFromClipboardData,
     extractImageFilesFromClipboardData,
     hasFilesInDataTransfer,
+    makeTextAttachment,
     readComposerAttachmentsFromFiles,
     readImageAttachmentsFromPaths,
+    shouldPasteAsAttachment,
   } from "../lib/composer/attachments";
   import { playButtonClick, playClick, playRotary } from "../lib/sound/button-click-sound";
   import FileText from "@lucide/svelte/icons/file-text";
@@ -16,10 +18,12 @@
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import Star from "@lucide/svelte/icons/star";
+  import KeyRound from "@lucide/svelte/icons/key-round";
   import X from "@lucide/svelte/icons/x";
   import Tooltip from "./Tooltip.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
   import { lightbox } from "../stores/lightbox.svelte";
+  import { textViewer } from "../stores/text-viewer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { caveman } from "../stores/caveman.svelte";
   import { autoCompact } from "../stores/auto-compact.svelte";
@@ -33,6 +37,7 @@
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSelector from "./composer/ModelSelector.svelte";
   import QuickSlots from "./composer/QuickSlots.svelte";
+  import ConnectorIcon from "./ConnectorIcon.svelte";
 
   let { thread, onRewind, onNewThread, centered = false }: {
     thread: Thread;
@@ -153,6 +158,14 @@
 
   function syncCursor() {
     cursor = textareaEl?.selectionStart ?? 0;
+    // Auto-dismiss the BWS store prompt once the pasted secret value is no
+    // longer in the textarea (backspace / cut / select-all-delete). We read
+    // textareaEl.value directly (always current at input time) rather than
+    // draft.text, which can lag a flush and prematurely clear the prompt.
+    const ps = pastedSecret;
+    if (ps && textareaEl && !textareaEl.value.includes(ps.value)) {
+      pastedSecret = null;
+    }
   }
 
   // ── Slash menu ─────────────────────────────────────────────────────────
@@ -359,6 +372,198 @@
     textareaEl?.focus();
   });
 
+  // ── @-connections menu ────────────────────────────────────────────────
+  // Typing `@` opens a picker of available connections (custom HTTP + connected
+  // Composio toolkits). Picking one pins a chip to the composer and prepends a
+  // hint to the outgoing prompt so the model prefers it. The underlying tools
+  // (custom_request / connector_execute) are always available; @ is a nudge +
+  // an exact-name handoff that skips a discovery round-trip.
+  type ConnMenuItem = {
+    kind: "custom" | "composio";
+    name: string;
+    toolkitSlug?: string;
+    baseUrl?: string;
+    logoUrl: string | null;
+  };
+  let connectionsCatalog = $state<ConnMenuItem[]>([]);
+  let connectionsLoaded = $state(false);
+
+  // Connections are global, not per-thread; load once on first `@` and refresh
+  // when the connector set changes.
+  async function ensureConnections() {
+    if (connectionsLoaded) return;
+    connectionsLoaded = true;
+    try {
+      const [composio, custom] = await Promise.all([
+        api.invoke("connectors:list"),
+        api.invoke("customConnections:list"),
+      ]);
+      const bySlug = new Map<string, ConnMenuItem>();
+      for (const c of composio as Connection[]) {
+        if (c.status !== "ACTIVE") continue; // pending/expired aren't callable yet
+        if (bySlug.has(c.toolkitSlug)) continue; // one row per toolkit (N accounts)
+        bySlug.set(c.toolkitSlug, {
+          kind: "composio",
+          name: c.name,
+          toolkitSlug: c.toolkitSlug,
+          logoUrl: c.logoUrl,
+        });
+      }
+      const customs = (custom as CustomConnection[]).map((c) => ({
+        kind: "custom" as const,
+        name: c.name,
+        baseUrl: c.baseUrl,
+        logoUrl: c.logoUrl,
+      }));
+      connectionsCatalog = [...customs, ...bySlug.values()];
+    } catch {
+      connectionsLoaded = false; // allow retry on next `@`
+    }
+  }
+
+  /** Refresh the cached catalog when connections change elsewhere in the app
+   *  (ConnectorsView add/remove/reconnect) so the `@` picker stays current. */
+  $effect(() => {
+    const off = api.on("event:connectorsChanged", () => {
+      connectionsLoaded = false;
+      connectionsCatalog = [];
+    });
+    return off;
+  });
+
+  // BWS secrets available to pin with `@`. Values are never loaded — only
+  // names + ids + project, so the picker (and any future transcript) shows no
+  // cleartext. Refreshed when the Secrets view mutates the set.
+  type SecMenuItem = { id: string; name: string; projectId: string };
+  let secretsCatalog = $state<SecMenuItem[]>([]);
+  let secretsLoaded = $state(false);
+
+  async function ensureSecrets() {
+    if (secretsLoaded) return;
+    secretsLoaded = true;
+    try {
+      const status = await api.invoke("bws:status");
+      if (!status.authenticated || !status.projectId) {
+        secretsCatalog = [];
+        return;
+      }
+      const list = await api.invoke("bws:listSecrets", status.projectId);
+      secretsCatalog = (list as { id: string; key: string; projectId: string }[]).map((s) => ({
+        id: s.id,
+        name: s.key,
+        projectId: s.projectId,
+      }));
+    } catch {
+      secretsLoaded = false;
+    }
+  }
+
+  $effect(() => {
+    const off = api.on("event:bwsChanged", () => {
+      secretsLoaded = false;
+      secretsCatalog = [];
+    });
+    return off;
+  });
+
+  // Active `@token` immediately left of the caret (same framing rules as the
+  // slash menu: must start a line or follow whitespace, no whitespace inside).
+  const atContext = $derived.by(() => {
+    void draft.text; // re-evaluate as the text changes
+    const before = draft.text.slice(0, cursor);
+    const at = before.lastIndexOf("@");
+    if (at === -1) return null;
+    if (at > 0 && !/\s/.test(before[at - 1]!)) return null;
+    const token = before.slice(at + 1);
+    if (/\s/.test(token)) return null;
+    return { start: at, query: token.toLowerCase() };
+  });
+  const atQuery = $derived(atContext?.query ?? null);
+  const atMatches = $derived.by(() => {
+    if (atQuery === null) return [];
+    const q = atQuery;
+    return connectionsCatalog
+      .filter((c) => c.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+        return ap - bp;
+      })
+      .slice(0, 20);
+  });
+  let atIndex = $state(0);
+  $effect(() => {
+    if (atQuery !== null) {
+      void ensureConnections();
+      void ensureSecrets();
+    }
+  });
+  $effect(() => {
+    void atMatches;
+    atIndex = 0;
+  });
+
+  // Same framing as atMatches but for BWS secrets.
+  const secretMatches = $derived.by(() => {
+    if (atQuery === null) return [];
+    const q = atQuery;
+    return secretsCatalog
+      .filter((s) => s.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+        return ap - bp;
+      })
+      .slice(0, 20);
+  });
+
+  function pickConnection(c: ConnMenuItem) {
+    const ctx = atContext;
+    const text = draft.text;
+    // Strip the `@query` token so it doesn't leak into the message text.
+    const stripped = ctx ? text.slice(0, ctx.start) + text.slice(cursor) : "";
+    const ref: ReferencedConnection =
+      c.kind === "custom"
+        ? { kind: "custom", name: c.name, baseUrl: c.baseUrl, logoUrl: c.logoUrl }
+        : { kind: "composio", name: c.name, toolkitSlug: c.toolkitSlug, logoUrl: c.logoUrl };
+    // Dedupe by kind+name: pinning a connection twice is meaningless.
+    if (!draft.connections.some((r) => r.kind === ref.kind && r.name === ref.name)) {
+      drafts.update(thread.id, { text: stripped, connections: [...draft.connections, ref] });
+    } else {
+      drafts.update(thread.id, { text: stripped });
+    }
+    textareaEl?.focus();
+    requestAnimationFrame(syncCursor);
+  }
+
+  function removeConnection(i: number) {
+    drafts.update(thread.id, {
+      connections: draft.connections.filter((_, idx) => idx !== i),
+    });
+    textareaEl?.focus();
+  }
+
+  function pickSecret(s: SecMenuItem) {
+    const ctx = atContext;
+    const text = draft.text;
+    const stripped = ctx ? text.slice(0, ctx.start) + text.slice(cursor) : "";
+    const ref: ReferencedSecret = { id: s.id, name: s.name, projectId: s.projectId };
+    if (!draft.secrets.some((r) => r.id === ref.id)) {
+      drafts.update(thread.id, { text: stripped, secrets: [...draft.secrets, ref] });
+    } else {
+      drafts.update(thread.id, { text: stripped });
+    }
+    textareaEl?.focus();
+    requestAnimationFrame(syncCursor);
+  }
+
+  function removeSecret(i: number) {
+    drafts.update(thread.id, {
+      secrets: draft.secrets.filter((_, idx) => idx !== i),
+    });
+    textareaEl?.focus();
+  }
+
   // ── Textarea auto-grow ────────────────────────────────────────────────
   function autoGrow() {
     if (!textareaEl) return;
@@ -410,9 +615,20 @@
       }
       return;
     }
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    // Large text blobs paste as an attachment chip (ChatGPT-style) instead of
+    // flooding the textarea. The content is inlined back into the message on
+    // submit, so the model still sees it.
+    if (shouldPasteAsAttachment(text)) {
+      e.preventDefault();
+      drafts.update(thread.id, {
+        attachments: [...draft.attachments, makeTextAttachment(text)],
+      });
+      return;
+    }
     // Plain-text paste still lands in the textarea as normal; if it looks like a
     // credential, offer to stash it in BWS instead of leaving it in the chat.
-    const found = detectSecret(e.clipboardData?.getData("text/plain") ?? "");
+    const found = detectSecret(text);
     if (found) pastedSecret = found;
   }
 
@@ -462,13 +678,16 @@
     const fileRefs = draft.attachments
       .filter((a) => a.kind === "file")
       .map((a) => `Attached file: ${a.kind === "file" ? a.fsPath : ""}`);
+    const textBlocks = draft.attachments
+      .filter((a) => a.kind === "text")
+      .map((a) => (a.kind === "text" ? `${a.name}:\n\n${a.content}` : ""));
     const images = draft.attachments
       .filter((a) => a.kind === "image")
       .map((a) => (a.kind === "image" ? { mimeType: a.mimeType, data: a.data } : null!))
       .filter(Boolean);
 
     const isSlashCommand = !!draft.command || raw.startsWith("/");
-    const body = [raw, ...fileRefs].filter(Boolean).join("\n\n");
+    const body = [raw, ...textBlocks, ...fileRefs].filter(Boolean).join("\n\n");
     const outgoing = draft.command
       ? [`/${draft.command.name}`, body].filter(Boolean).join(" ")
       : isSlashCommand
@@ -477,11 +696,21 @@
             mode: draft.mode,
             isFirst: !draft.planPromptSent,
           });
+    // Prepend the @-connections + @-secrets hints (nudges + exact names/ids)
+    // before anything; the hints are orthogonal to mode/slash-wrapping.
+    // clearText() runs below, so draft.connections/secrets still hold the
+    // pinned sets here.
+    const connectionsHint = buildConnectionsHint(draft.connections);
+    const secretsHint = buildSecretsHint(draft.secrets);
+    const hints = [connectionsHint, secretsHint].filter(Boolean).join("\n\n");
+    const outgoingWithHints = hints ? `${hints}\n\n${outgoing}` : outgoing;
     const toolMode = draft.mode === "plan" && !isSlashCommand ? "readOnly" : "all";
 
     const snapshotText = draft.text;
     const snapshotAttachments = draft.attachments;
     const snapshotCommand = draft.command;
+    const snapshotConnections = draft.connections;
+    const snapshotSecrets = draft.secrets;
     drafts.clearText(thread.id);
     if (draft.mode === "plan" && !isSlashCommand) {
       drafts.update(thread.id, { planPromptSent: true });
@@ -489,9 +718,9 @@
 
     try {
       if (asSteer && running) {
-        await api.invoke("threads:steer", thread.id, outgoing);
+        await api.invoke("threads:steer", thread.id, outgoingWithHints);
       } else {
-        await api.invoke("threads:prompt", thread.id, outgoing, images, toolMode);
+        await api.invoke("threads:prompt", thread.id, outgoingWithHints, images, toolMode);
       }
     } catch (err) {
       // Restore draft on failure.
@@ -499,6 +728,8 @@
         text: snapshotText,
         attachments: snapshotAttachments,
         command: snapshotCommand,
+        connections: snapshotConnections,
+        secrets: snapshotSecrets,
       });
       console.error("submit failed", err);
     }
@@ -554,12 +785,64 @@
       removeCommand();
       return;
     }
+    // Backspace at the start of an empty composer removes the last pinned
+    // @-connection chip (mirrors the skill-chip behaviour above).
+    if (
+      e.key === "Backspace" &&
+      !draft.command &&
+      draft.connections.length > 0 &&
+      !draft.text &&
+      textareaEl?.selectionStart === 0
+    ) {
+      e.preventDefault();
+      removeConnection(draft.connections.length - 1);
+      return;
+    }
+    // Once connections are gone, backspace removes the last pinned @-secret chip.
+    if (
+      e.key === "Backspace" &&
+      !draft.command &&
+      draft.connections.length === 0 &&
+      draft.secrets.length > 0 &&
+      !draft.text &&
+      textareaEl?.selectionStart === 0
+    ) {
+      e.preventDefault();
+      removeSecret(draft.secrets.length - 1);
+      return;
+    }
     // Tab cycles the browse-filter tabs (Shift+Tab backwards) whenever the
     // menu is open, even with no matches.
     if (slashQuery !== null && e.key === "Tab") {
       e.preventDefault();
       cycleSlashFilter(e.shiftKey ? -1 : 1);
       return;
+    }
+    // @-menu navigation (connections + secrets combined into one virtual list;
+    // mutually exclusive with the slash menu: a token can't be both `/…` and
+    // `@…` at the caret without intervening whitespace).
+    const atTotal = atMatches.length + secretMatches.length;
+    if (atQuery !== null && atTotal > 0) {
+      if (atIndex >= atTotal) atIndex = 0;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        atIndex = (atIndex + 1) % atTotal;
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        atIndex = (atIndex - 1 + atTotal) % atTotal;
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (atIndex < atMatches.length) {
+          pickConnection(atMatches[atIndex]!);
+        } else {
+          pickSecret(secretMatches[atIndex - atMatches.length]!);
+        }
+        return;
+      }
     }
     if (slashMatches.length > 0) {
       if (e.key === "ArrowDown") {
@@ -616,7 +899,15 @@
 <footer class="composer-device shrink-0 px-6 pb-6">
   <div class="composer__frame relative">
     {#if pastedSecret}
-      <BwsSecretPrompt secret={pastedSecret} onClose={() => (pastedSecret = null)} />
+      <BwsSecretPrompt
+        secret={pastedSecret}
+        onClose={() => (pastedSecret = null)}
+        onPinned={(s) => {
+          if (!draft.secrets.some((r) => r.id === s.id)) {
+            drafts.update(thread.id, { secrets: [...draft.secrets, s] });
+          }
+        }}
+      />
     {/if}
     <!-- Slash menu -->
     {#if slashQuery !== null}
@@ -681,6 +972,60 @@
       </div>
     {/if}
 
+    <!-- @-menu: connections + secrets -->
+    {#if atQuery !== null}
+      <div
+        class="absolute bottom-full mb-2 w-full overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
+        data-testid="connections-menu"
+      >
+        <div class="border-b border-border-strong px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-fainter">
+          Connections &amp; Secrets <span class="font-normal normal-case text-fainter">· pick to pin @</span>
+        </div>
+        <div class="max-h-80 overflow-y-auto">
+          {#if !connectionsLoaded || !secretsLoaded}
+            <div class="px-3 py-2 text-xs text-faint">Loading…</div>
+          {:else if atMatches.length === 0 && secretMatches.length === 0}
+            <div class="px-3 py-2 text-xs text-faint">
+              {connectionsCatalog.length === 0 && secretsCatalog.length === 0
+                ? "No connections or secrets yet — add one in Connections / Secrets"
+                : "No matching items"}
+            </div>
+          {:else}
+            {#if atMatches.length > 0}
+              <div class="border-b border-border-strong/50 px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Connections</div>
+              {#each atMatches as c, i (c.kind + ":" + c.name)}
+                <div class="flex items-center {i === atIndex ? 'bg-surface-2' : ''} hover:bg-surface-2">
+                  <button
+                    class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
+                    onclick={() => pickConnection(c)}
+                  >
+                    <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={18} />
+                    <span class="min-w-0 truncate text-fg">{c.name}</span>
+                    <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide {c.kind === 'custom' ? 'bg-violet-500/15 text-violet-700' : 'bg-sky-500/15 text-sky-700'}">{c.kind}</span>
+                  </button>
+                </div>
+              {/each}
+            {/if}
+            {#if secretMatches.length > 0}
+              <div class="border-b border-border-strong/50 px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Secrets</div>
+              {#each secretMatches as s, j (s.id)}
+                <div class="flex items-center {atMatches.length + j === atIndex ? 'bg-surface-2' : ''} hover:bg-surface-2">
+                  <button
+                    class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
+                    onclick={() => pickSecret(s)}
+                  >
+                    <KeyRound size={18} class="shrink-0 text-amber-600" />
+                    <span class="min-w-0 truncate font-mono text-fg">{s.name}</span>
+                    <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-amber-500/15 text-amber-700">secret</span>
+                  </button>
+                </div>
+              {/each}
+            {/if}
+          {/if}
+        </div>
+      </div>
+    {/if}
+
     <!-- Queued messages shelf (Codex/Cursor-style chip rail) -->
     {#if queue.followUp.length > 0}
       <section
@@ -730,6 +1075,42 @@
       </section>
     {/if}
 
+    <!-- Pinned @-connections shelf -->
+    {#if draft.connections.length > 0}
+      <div class="mb-2 flex flex-wrap gap-2" data-testid="connections-shelf">
+        {#each draft.connections as c, i (c.kind + ":" + c.name)}
+          <div class="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1 text-xs text-fg-soft">
+            <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={14} />
+            <span class="max-w-40 truncate">@{c.name}</span>
+            <button
+              class="ml-0.5 text-faint hover:text-danger"
+              onclick={() => removeConnection(i)}
+              title="Remove connection"
+              aria-label="Remove connection {c.name}"
+            ><X size={12} /></button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    <!-- Pinned @-secrets shelf (names only; values never enter the prompt) -->
+    {#if draft.secrets.length > 0}
+      <div class="mb-2 flex flex-wrap gap-2" data-testid="secrets-shelf">
+        {#each draft.secrets as s, i (s.id)}
+          <div class="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-800">
+            <KeyRound size={14} class="shrink-0" />
+            <span class="max-w-40 truncate font-mono">@{s.name}</span>
+            <button
+              class="ml-0.5 text-amber-600/60 hover:text-danger"
+              onclick={() => removeSecret(i)}
+              title="Remove secret"
+              aria-label="Remove secret {s.name}"
+            ><X size={12} /></button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
     <!-- Attachments shelf -->
     {#if draft.attachments.length > 0}
       <div class="mb-2 flex flex-wrap gap-2" data-testid="attachment-shelf">
@@ -747,6 +1128,16 @@
                   alt={att.name}
                   class="h-16 w-16 rounded-lg border border-border-strong object-cover"
                 />
+              </button>
+            {:else if att.kind === "text"}
+              <button
+                type="button"
+                class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg-soft hover:bg-surface-2"
+                title="Click to view"
+                onclick={() => textViewer.open(att.name, att.kind === "text" ? att.content : "")}
+              >
+                <FileText size={13} />
+                <span class="max-w-40 truncate">{att.name}</span>
               </button>
             {:else}
               <div class="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg-soft">
