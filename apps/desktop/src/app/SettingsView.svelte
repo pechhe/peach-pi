@@ -22,12 +22,14 @@
   import { api } from "../lib/ipc";
   import { Select } from "../components/ui/select";
   import { Switch } from "../components/ui/switch";
+  import ModelScopeSelect from "../components/ui/model-scope-select/model-scope-select.svelte";
   import DoneBurstPlayground from "./DoneBurstPlayground.svelte";
   import Check from "@lucide/svelte/icons/check";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
   import { autoCompact } from "../stores/auto-compact.svelte";
   import { caveman } from "../stores/caveman.svelte";
   import { piSettings } from "../stores/pi-settings.svelte";
+  import { scopedModels } from "../stores/scoped-models.svelte";
   import { visionProxy } from "../stores/vision-proxy.svelte";
   import { snapshot } from "../stores/snapshot.svelte";
 
@@ -52,6 +54,8 @@
     insomnia: "insomnia sleep idle caffeinate prevent mac awake while running",
     about: "about peach-pi version",
     utilityModel: "utility model background tasks thread titles commit messages fast inexpensive",
+    scopedModels:
+      "scoped models scopedmodels enable disable model scope composer selector enabled models available list",
     computerUse:
       "computer use agent browser cua driver native desktop automation accessibility permissions install setup",
     visionProxy:
@@ -65,6 +69,26 @@
     query = initialQuery;
   });
   const q = $derived(query.trim().toLowerCase());
+
+  // `/scoped-models` arrives as an "open:scopedModels" sentinel, not a real
+  // search term — keep the search bar empty and open the popover, scrolled into view.
+  let scopedModelsOpen = $state(false);
+  let scopedModelsSection = $state<HTMLElement | null>(null);
+  let awaitingScopedScroll = false;
+  $effect(() => {
+    if (initialQuery === "open:scopedModels") {
+      query = "";
+      scopedModelsOpen = true;
+      awaitingScopedScroll = true;
+    }
+  });
+  // Once the section mounts (it renders only after the search bar clears), scroll to it.
+  $effect(() => {
+    if (awaitingScopedScroll && scopedModelsSection) {
+      scopedModelsSection.scrollIntoView({ block: "center" });
+      awaitingScopedScroll = false;
+    }
+  });
 
   /** Typing anywhere in Settings starts the search without clicking the box first. */
   function onWindowKeydown(e: KeyboardEvent) {
@@ -133,6 +157,7 @@
     await piSettings.load();
     await caveman.load();
     await visionProxy.load();
+    await scopedModels.load();
     void loadComputerUse();
   });
 
@@ -879,6 +904,21 @@
             {/if}
           </div>
         {/if}
+      </section>
+      {/if}
+
+      {#if hit("scopedModels")}
+      <section bind:this={scopedModelsSection} class="rounded-lg border border-border bg-surface/50 p-4" data-testid="scoped-models-section">
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <h2 class="text-sm text-fg">Scoped models</h2>
+            <p class="text-xs text-faint">
+              Which models appear in the composer selector. Shared with
+              <code>pi /model</code> in <code>settings.json</code>.
+            </p>
+          </div>
+          <ModelScopeSelect bind:open={scopedModelsOpen} class="min-w-44" />
+        </div>
       </section>
       {/if}
 

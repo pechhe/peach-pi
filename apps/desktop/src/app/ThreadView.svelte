@@ -67,7 +67,7 @@
     return off;
   });
 
-  let { thread, onSetEnvironment, onOpenGraph, onSelectThread, onNewThread, pendingFind, onFindConsumed }: {
+  let { thread, onSetEnvironment, onOpenGraph, onSelectThread, onNewThread, onOpenSettings, pendingFind, onFindConsumed }: {
     thread: Thread;
     /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
     onSetEnvironment?: (threadId: string, worktree: boolean) => void | Promise<void>;
@@ -76,6 +76,8 @@
     onSelectThread?: (threadId: string) => void;
     /** Start a new thread in the current project (`/new` system command). */
     onNewThread?: () => void;
+    /** Open Settings, optionally pre-filling its search (`/scoped-models`). */
+    onOpenSettings?: (query?: string) => void;
     /** Set when the search overlay passes a body-match query through. ThreadView
      *  opens its FindBar pre-filled and calls `onFindConsumed` once applied. */
     pendingFind?: string | null;
@@ -979,7 +981,7 @@
         </button>
       </div>
     {/if}
-    <Composer {thread} onRewind={rewindFromEnd} {onNewThread} centered={isEmpty} />
+    <Composer {thread} onRewind={rewindFromEnd} {onNewThread} {onOpenSettings} centered={isEmpty} />
   </div>
   <RewindDialog
     bind:open={rewindDialogOpen}

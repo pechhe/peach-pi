@@ -9,6 +9,7 @@
   import { queues } from "../stores/composer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
+  import { scopedModels } from "../stores/scoped-models.svelte";
   import { sideChat } from "../stores/side-chat.svelte";
   import { preloadSounds } from "../lib/sound/button-click-sound";
   import { playDoneSound } from "../lib/sound/done-sound";
@@ -28,6 +29,7 @@
   import BwsView from "./BwsView.svelte";
   import TestingView from "./TestingView.svelte";
   import RemoteView from "./RemoteView.svelte";
+  import UsageView from "./UsageView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
@@ -129,6 +131,19 @@
         );
       }
       lastStatuses.set(t.id, t.status);
+    }
+  });
+
+  // Snooze wake chime: when the main process auto-returns an expired snooze
+  // to active it stamps wokeFromSnoozeAt; play the bell once on that
+  // transition (set → carried until the thread is opened, which clears it).
+  let lastWoke = new Map<string, boolean>();
+  $effect(() => {
+    const threads = snapshot.current?.threads ?? [];
+    for (const t of threads) {
+      const woke = !!t.wokeFromSnoozeAt;
+      if (woke && !lastWoke.get(t.id)) playDoneSound("bell");
+      lastWoke.set(t.id, woke);
     }
   });
 
@@ -252,6 +267,7 @@
     sessionMetas.init();
     extensionUi.init();
     sideChat.init();
+    scopedModels.init();
     void snapshot.init();
     preloadSounds();
   });
@@ -319,6 +335,8 @@
       <BwsView />
     {:else if view === "remote"}
       <RemoteView />
+    {:else if view === "usage"}
+      <UsageView />
     {:else if view === "agents"}
       <AgentsView projects={snapshot.current.projects} />
     {:else if view === "graph"}
@@ -335,6 +353,7 @@
         thread={selectedThread}
         onSetEnvironment={setThreadEnvironment}
         onOpenGraph={() => openView("graph")}
+        onOpenSettings={openSettings}
         onSelectThread={selectThread}
         onNewThread={newThreadForCurrentProject}
         pendingFind={pendingFindQuery}

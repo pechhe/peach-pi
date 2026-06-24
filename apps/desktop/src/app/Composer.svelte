@@ -39,12 +39,14 @@
   import QuickSlots from "./composer/QuickSlots.svelte";
   import ConnectorIcon from "./ConnectorIcon.svelte";
 
-  let { thread, onRewind, onNewThread, centered = false }: {
+  let { thread, onRewind, onNewThread, onOpenSettings, centered = false }: {
     thread: Thread;
     /** `/rewind [n]` from the composer — rewind the n-th turn from the end. */
     onRewind?: (n: number) => void;
     /** `/new` system command — start a new thread in the current project. */
     onNewThread?: () => void;
+    /** `/scoped-models` system command — open Settings scoped-models section. */
+    onOpenSettings?: (query?: string) => void;
     /** Centered "new thread" state (composer in the middle, no messages yet). */
     centered?: boolean;
   } = $props();
@@ -192,6 +194,7 @@
     { name: "plan", description: "Switch to Plan mode", kind: "system" },
     { name: "build", description: "Switch to Build mode", kind: "system" },
     { name: "new", description: "Start a new thread in this project", kind: "system" },
+    { name: "scoped-models", description: "Open the Scoped models settings", kind: "system" },
   ];
   const systemCommandNames = new Set(systemCommandList.map((c) => c.name));
   const allCommands = $derived<CommandInfo[]>([...systemCommandList, ...commands]);
@@ -329,6 +332,9 @@
         break;
       case "new":
         onNewThread?.();
+        break;
+      case "scoped-models":
+        onOpenSettings?.("open:scopedModels");
         break;
     }
   }

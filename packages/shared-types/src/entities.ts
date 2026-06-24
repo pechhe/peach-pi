@@ -135,6 +135,11 @@ export interface RemoteHostConfig {
   port: number;
   /** Bind IP auto-resolved from the Tailscale interface; null when offline. */
   bindIp: string | null;
+  /** When true, serve EVERY project — current and future. The "select all"
+   *  shortcut; `servedProjects` is ignored while this is on. */
+  serveAll: boolean;
+  /** Explicitly served project ids (only consulted when `serveAll` is false). */
+  servedProjects: ProjectId[];
 }
 
 /** A saved master the laptop can reach + attach to. */
@@ -215,6 +220,16 @@ export interface ModelInfo {
   provider: string;
   id: string;
   name: string;
+}
+
+/** A model paired with its membership in pi's global `enabledModels` scope.
+ *  When `scoped` is false the model is hidden from the composer selector.
+ *  An empty scope (everything implicitly scoped) surfaces every model as scoped. */
+export interface ScopedModel {
+  provider: string;
+  id: string;
+  name: string;
+  scoped: boolean;
 }
 
 /** Plan mode runs read-only tools; build mode runs everything. */

@@ -13,6 +13,9 @@ class SessionMetaStore {
 
   init(): void {
     api.on("event:sessionMeta", (meta) => this.byThread.set(meta.threadId, meta));
+    // The global scope (settings.json) changed outside any session — rebuild
+    // the cached scoped list so the composer reflects it immediately.
+    api.on("event:scopeChanged", () => this.refreshModels());
   }
 
   for(threadId: string): SessionMeta | null {
@@ -37,6 +40,14 @@ class SessionMetaStore {
   async loadAllModels(threadId: string): Promise<void> {
     if (this.allModels.length > 0) return;
     this.allModels = await api.invoke("threads:listAllModels", threadId);
+  }
+
+  /** Force a re-fetch of the cached scoped list (after a scope change). */
+  private async refreshModels(): Promise<void> {
+    // Pick any live thread to satisfy the thread-bound listModels call.
+    const threadId = this.byThread.keys().next().value ?? this.requested.values().next().value;
+    if (!threadId) return;
+    this.models = await api.invoke("threads:listModels", threadId);
   }
 
   /** Toggle a model in the global scope; updates the cached scoped list. */

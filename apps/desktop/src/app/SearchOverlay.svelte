@@ -61,6 +61,7 @@
     { label: "Retry on error", query: "retry", keywords: "retry error backoff network" },
     { label: "Message delivery", query: "message delivery", keywords: "steering follow-up delivery mode" },
     { label: "Utility model", query: "utility model", keywords: "utility model background titles commit" },
+    { label: "Scoped models", query: "open:scopedModels", keywords: "scoped models enable disable scope composer selector" },
     { label: "About", query: "about", keywords: "about version" },
   ];
 

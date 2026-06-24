@@ -7,7 +7,6 @@
     type RemoteSessionInfo,
     type RemoteTapFrame,
     type TranscriptItem,
-    type Thread,
   } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
@@ -22,8 +21,7 @@
 
   // ── Master side: host serving status ────────────────────────────────
   let hostStatus = $state<RemoteHostConfig | null>(null);
-  let served = $state<string[]>([]);
-  let localThreads = $state<Thread[]>([]);
+  let localProjects = $state<{ id: string; name: string; path: string }[]>([]);
   let togglingHost = $state(false);
 
   // ── Client side: saved master connections ───────────────────────────
@@ -50,17 +48,15 @@
   let pullResult = $state<{ worktreePath: string; sha: string } | null>(null);
 
   async function loadHost() {
-    [hostStatus, served, hosts] = await Promise.all([
+    [hostStatus, hosts] = await Promise.all([
       api.invoke("remote:hostStatus"),
-      api.invoke("remote:listServed"),
       api.invoke("remote:listHosts"),
     ]);
   }
 
-  async function loadLocalThreads() {
-    // Threads available to serve on this host (from the running snapshot).
+  async function loadLocalProjects() {
     const snap = await api.invoke("app:getSnapshot");
-    localThreads = snap.threads.filter((t) => !t.archivedAt);
+    localProjects = snap.projects.map((p) => ({ id: p.id, name: p.name, path: p.path }));
   }
 
   async function toggleHost(on: boolean) {
@@ -75,9 +71,12 @@
     }
   }
 
-  async function setServed(threadId: string, on: boolean) {
-    await api.invoke("remote:setThreadServed", threadId, on);
-    served = await api.invoke("remote:listServed");
+  async function setProjectServed(projectId: string, on: boolean) {
+    hostStatus = await api.invoke("remote:setProjectServed", projectId, on);
+  }
+
+  async function setServeAll(on: boolean) {
+    hostStatus = await api.invoke("remote:setServeAll", on);
   }
 
   async function regenerateToken() {
@@ -165,7 +164,7 @@
 
   onMount(() => {
     loadHost();
-    loadLocalThreads();
+    loadLocalProjects();
     const off = api.on("event:remoteTap", onFrame);
     return off;
   });
@@ -178,7 +177,7 @@
     </h2>
     <button
       class="rounded p-1.5 text-muted hover:bg-surface-2 hover:text-fg"
-      onclick={() => { loadHost(); loadLocalThreads(); }}
+      onclick={() => { loadHost(); loadLocalProjects(); }}
       title="Refresh"
     >
       <RefreshCw size={14} />
@@ -229,17 +228,32 @@
             </div>
           {/if}
 
-          <p class="mb-1.5 text-xs text-faint">Serve a thread so another peach-pi can attach:</p>
+          <p class="mb-1.5 text-xs text-faint">
+            Serve a project so another peach-pi can attach to any of its threads:
+          </p>
           <div class="max-h-40 overflow-y-auto space-y-1">
-            {#each localThreads as t (t.id)}
-              <label class="flex items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-surface-3">
+            <label class="flex items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-surface-3">
+              <input
+                type="checkbox"
+                checked={hostStatus.serveAll}
+                onchange={(e) => setServeAll(e.currentTarget.checked)}
+              />
+              <span class="font-medium text-fg">All projects</span>
+              <span class="ml-auto text-[10px] text-faint">includes future</span>
+            </label>
+            {#each localProjects as p (p.id)}
+              <label
+                class="flex items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-surface-3"
+                class:opacity-50={hostStatus.serveAll}
+              >
                 <input
                   type="checkbox"
-                  checked={served.includes(t.id)}
-                  onchange={(e) => setServed(t.id, e.currentTarget.checked)}
+                  checked={hostStatus.serveAll || hostStatus.servedProjects.includes(p.id)}
+                  disabled={hostStatus.serveAll}
+                  onchange={(e) => setProjectServed(p.id, e.currentTarget.checked)}
                 />
-                <span class="truncate text-fg">{t.title || t.id}</span>
-                <span class="ml-auto text-[10px] text-faint">{t.status}</span>
+                <span class="truncate text-fg">{p.name}</span>
+                <span class="ml-auto truncate text-[10px] text-faint" title={p.path}>{p.path}</span>
               </label>
             {/each}
           </div>

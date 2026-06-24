@@ -46,6 +46,16 @@ function lastAssistantText(items: TranscriptItem[]): string | undefined {
   return undefined;
 }
 
+/** First user message in a transcript, or undefined if none. Used to label a
+ *  thread from its actual opening prompt rather than whatever message later
+ *  retriggers the title pass after an earlier (e.g. offline) failure. */
+function firstUserMessage(items: TranscriptItem[]): string | undefined {
+  for (const item of items) {
+    if (item.kind === "user" && item.text.trim()) return item.text.trim();
+  }
+  return undefined;
+}
+
 /**
  * Owns live pi sessions keyed by thread id. Streams transcript ops to the
  * renderer with a short coalescing buffer (ported concept from peche-pi's
@@ -175,11 +185,18 @@ export class ThreadService {
       if (thread.toTestAt) this.threads.setToTest(threadId, null, null);
       this.onThreadsChanged();
     }
-    if (isNewThread(thread.title)) {
-      // Instant truncated placeholder so the UI feels snappy, then an async
-      // LLM title overwrites it (only if still a placeholder).
-      this.threads.setTitle(threadId, text.length > 60 ? `${text.slice(0, 60)}…` : text);
-      this.onThreadsChanged();
+    // (Re)run the title/tag pass until it succeeds. The tag is set exactly
+    // once — on the first successful completion — so a null tag means the
+    // pass has never stuck: a genuine first message, or an earlier attempt
+    // that failed silently (e.g. while offline). Retry on every prompt until
+    // it lands; once tagged it never re-enters here.
+    if (!thread.tag) {
+      // Instant truncated placeholder on a genuinely-new thread only. On a
+      // retry the title is already the truncated opening prompt.
+      if (isNewThread(thread.title)) {
+        this.threads.setTitle(threadId, text.length > 60 ? `${text.slice(0, 60)}…` : text);
+        this.onThreadsChanged();
+      }
       void this.generateTitleAndTag(threadId, text);
     }
     // Snapshot the working tree before the run touches any files.
@@ -226,12 +243,17 @@ export class ThreadService {
     }
   }
 
-  /** Async LLM title + tag (one call); overwrites the placeholder only if
-   *  untouched since. Tag is always applied (set once at thread creation). */
-  private async generateTitleAndTag(threadId: string, firstPrompt: string): Promise<void> {
+  /** Async LLM title + tag (one call). Classifies from the thread's first
+   *  user message — `fallbackPrompt` (the message that triggered this pass)
+   *  is used only on a genuine first prompt, where the message isn't in the
+   *  transcript yet. Overwrites the title only if untouched since; the tag is
+   *  applied once and never reclassified. */
+  private async generateTitleAndTag(threadId: string, fallbackPrompt: string): Promise<void> {
     const placeholder = this.threads.get(threadId)?.title;
     if (!placeholder) return;
     const config = this.getUtilityModel();
+    const session = this.sessions.get(threadId);
+    const firstPrompt = firstUserMessage(session?.transcript() ?? []) ?? fallbackPrompt;
     const { generateTitleAndTag } = await import("@peach-pi/pi-client");
     const result = await generateTitleAndTag(firstPrompt, config);
     if (!result) return;
@@ -367,6 +389,14 @@ export class ThreadService {
     const session = await this.sessionFor(threadId);
     await session.setModelScoped(provider, modelId, scoped);
     return session.listModels();
+  }
+
+  /** Reload settings.json in every live session + republish each meta.
+   *  Called after the global scope changes from the thread-free Settings UI. */
+  async reloadScopedModels(): Promise<void> {
+    await Promise.all(
+      [...this.sessions.values()].map((s) => s.reloadSettings().catch(() => {})),
+    );
   }
 
   async setModel(threadId: string, provider: string, modelId: string): Promise<SessionMeta> {

@@ -312,6 +312,16 @@ export class PiSession {
   }
 
   /**
+   * Reload this session's settings from disk (settings.json) + republish meta.
+   * Called after the global `enabledModels` scope changes outside this session
+   * (Settings UI) so the composer's scoped list reflects the new scope.
+   */
+  async reloadSettings(): Promise<void> {
+    await this.session.settingsManager.reload();
+    this.callbacks.onMetaChange?.();
+  }
+
+  /**
    * Toggle a model's membership in the global `enabledModels` scope
    * (settings.json, shared with the pi TUI). Persists immediately.
    */

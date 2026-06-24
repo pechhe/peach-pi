@@ -15,4 +15,9 @@ export {
   type ProposedConfig,
 } from "./connection-setup.ts";
 export { scopeModels, THINKING_SUFFIXES } from "./scope-models.ts";
+export {
+  listScopedModels,
+  setModelScoped,
+  type ScopedModel,
+} from "./scoped-models-service.ts";
 export { createUiBridge, type UiBridgeCallbacks } from "./extension-ui-bridge.ts";

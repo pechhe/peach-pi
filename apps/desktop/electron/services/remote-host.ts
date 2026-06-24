@@ -9,6 +9,7 @@ import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
+  ProjectId,
   RemoteHostConfig,
   RemoteSessionInfo,
   RemoteTapFrame,
@@ -40,8 +41,14 @@ const CONFIG_PATH = join(homedir(), ".pi", "agent", "peach-remote-host.json");
 export interface RelayDeps {
   /** Authoritative transcript snapshot for a thread (backfill on attach). */
   transcript: (threadId: ThreadId) => Promise<TranscriptSnapshot>;
-  /** Title/status lookup for /sessions. */
-  threadInfo: (threadId: ThreadId) => { title: string; status: string } | null;
+  /** All threads, for /sessions listing and project-membership checks. */
+  threads: () => {
+    id: ThreadId;
+    title: string;
+    status: string;
+    projectId: ProjectId | null;
+    archivedAt?: string;
+  }[];
   /** Working dir for a thread (to read checkpoint + origin). */
   threadCwd: (threadId: ThreadId) => string | null;
   /** Override interface lookup for tests. */
@@ -56,9 +63,17 @@ export class RemoteHostService {
   private enabled = false;
   /** SSE listeners per thread: late-joiners get a backfill, all get the tail. */
   private listeners = new Map<ThreadId, Set<ServerResponse>>();
-  private served = new Set<ThreadId>();
+  /** "Serve all projects" shortcut — when true, current AND future projects
+   *  are served; `servedProjects` is ignored. */
+  private serveAll = false;
+  /** Explicitly served project ids (only consulted when !serveAll). */
+  private servedProjects = new Set<ProjectId>();
 
-  constructor(private deps: RelayDeps) {}
+  private deps: RelayDeps;
+
+  constructor(deps: RelayDeps) {
+    this.deps = deps;
+  }
 
   async status(): Promise<RemoteHostConfig> {
     return {
@@ -66,37 +81,82 @@ export class RemoteHostService {
       token: this.token,
       port: this.port,
       bindIp: this.bindIp,
+      serveAll: this.serveAll,
+      servedProjects: [...this.servedProjects],
     };
   }
 
-  /** Load persisted config (token) on boot; does not auto-start serving. */
+  /** Load persisted config (token + served-project selection) on boot; does
+   *  not auto-start serving. */
   async load(): Promise<void> {
     try {
-      const raw = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as { token?: string };
+      const raw = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as {
+        token?: string;
+        serveAll?: boolean;
+        servedProjects?: string[];
+      };
       if (isValidToken(raw.token)) this.token = raw.token;
+      if (typeof raw.serveAll === "boolean") this.serveAll = raw.serveAll;
+      if (Array.isArray(raw.servedProjects)) {
+        this.servedProjects = new Set(raw.servedProjects);
+      }
     } catch {
-      // No persisted config yet — keep the generated token.
+      // No persisted config yet — keep defaults.
     }
   }
 
   async persist(): Promise<void> {
     await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
-    await writeFile(CONFIG_PATH, JSON.stringify({ token: this.token }, null, 2), "utf8");
+    await writeFile(
+      CONFIG_PATH,
+      JSON.stringify(
+        {
+          token: this.token,
+          serveAll: this.serveAll,
+          servedProjects: [...this.servedProjects],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
   }
 
-  /** A served thread was added/removed. */
-  setServed(threadId: ThreadId, served: boolean): void {
-    if (served) this.served.add(threadId);
+  /** Is a given thread currently served? A thread is served iff it belongs to a
+   *  served project. Chats (projectId null) are never served in v1 (no repo,
+   *  no checkpoint to pull). `serveAll` opts into every current + future project. */
+  isServedThread(threadId: ThreadId): boolean {
+    const t = this.deps.threads().find((x) => x.id === threadId);
+    if (!t || !t.projectId) return false;
+    return this.serveAll || this.servedProjects.has(t.projectId);
+  }
+
+  /** Toggle the "serve all projects" shortcut. Disabling it re-evaluates
+   *  membership and kicks any listener whose thread is no longer served. */
+  setServeAll(serveAll: boolean): void {
+    this.serveAll = serveAll;
+    this.kickUnservedListeners();
+  }
+
+  /** Add/remove a project from the served set. Kicks listeners on a
+   *  just-un-served project's threads. */
+  setProjectServed(projectId: ProjectId, served: boolean): void {
+    if (served) this.servedProjects.add(projectId);
     else {
-      this.served.delete(threadId);
-      // Kick any listeners on a just-un-served thread.
-      this.listeners.get(threadId)?.forEach((res) => res.end());
-      this.listeners.delete(threadId);
+      this.servedProjects.delete(projectId);
+      this.kickUnservedListeners();
     }
   }
 
-  servedList(): ThreadId[] {
-    return [...this.served];
+  /** Disconnect any SSE listener whose thread is no longer served (e.g. after
+   *  a project was un-served or serveAll was turned off). */
+  private kickUnservedListeners(): void {
+    for (const [threadId, set] of this.listeners) {
+      if (!this.isServedThread(threadId)) {
+        set.forEach((res) => res.end());
+        this.listeners.delete(threadId);
+      }
+    }
   }
 
   /** Begin serving. Resolves the tailnet IP and binds to it; rejects (throws)
@@ -135,7 +195,7 @@ export class RemoteHostService {
 
   /** Inject a transcript delta from thread-service's emit stream (the tap). */
   forwardTranscript(delta: TranscriptDelta): void {
-    if (!this.server || !this.served.has(delta.threadId)) return;
+    if (!this.server || !this.isServedThread(delta.threadId)) return;
     const frame: RemoteTapFrame = {
       kind: "transcript",
       threadId: delta.threadId,
@@ -147,7 +207,7 @@ export class RemoteHostService {
 
   /** Inject a checkpoint frame. */
   forwardCheckpoint(threadId: ThreadId, sha: string): void {
-    if (!this.served.has(threadId)) return;
+    if (!this.isServedThread(threadId)) return;
     this.broadcast(threadId, {
       kind: "checkpoint",
       threadId,
@@ -180,15 +240,15 @@ export class RemoteHostService {
 
       if (req.method === "GET" && url.pathname === "/sessions") {
         const sessions: RemoteSessionInfo[] = [];
-        for (const threadId of this.served) {
-          const info = this.deps.threadInfo(threadId);
-          if (!info) continue;
-          const cwd = this.deps.threadCwd(threadId);
-          const sha = cwd ? await checkpointTip(cwd, threadId) : null;
+        for (const t of this.deps.threads()) {
+          if (t.archivedAt) continue;
+          if (!this.isServedThread(t.id)) continue;
+          const cwd = this.deps.threadCwd(t.id);
+          const sha = cwd ? await checkpointTip(cwd, t.id) : null;
           sessions.push({
-            threadId,
-            title: info.title,
-            status: info.status as RemoteSessionInfo["status"],
+            threadId: t.id,
+            title: t.title,
+            status: t.status as RemoteSessionInfo["status"],
             originUrl: cwd ? await originUrl(cwd) : null,
             lastCheckpointSha: sha,
             lastCheckpointAt: null,
@@ -215,7 +275,8 @@ export class RemoteHostService {
   ): Promise<void> {
     const threadId = url.searchParams.get("threadId");
     if (!threadId) return this.send(res, 400, { error: "threadId required" });
-    if (!this.served.has(threadId)) return this.send(res, 404, { error: "thread not served" });
+    if (!this.isServedThread(threadId))
+      return this.send(res, 404, { error: "thread's project is not served" });
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",

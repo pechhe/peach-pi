@@ -40,12 +40,14 @@ import type {
   TerminalCustomFrame,
   ImagePayload,
   ModelInfo,
+  ScopedModel,
   NoticePayload,
   PiHealth,
   PiSettings,
   VisionProxyConfig,
   VisionProxyInstallState,
   Project,
+  ProjectId,
   QueueState,
   RecordingState,
   RecordingStopResult,
@@ -119,6 +121,10 @@ export const ipcContracts = {
   "app:setCavemanLevel": invoke<[level: string], CavemanState>(),
   /** All auth-configured models (global, not session-scoped). */
   "app:listModels": invoke<[], ModelInfo[]>(),
+  /** All auth-configured models paired with their scope membership (settings.json enabledModels). */
+  "app:listScopedModels": invoke<[], ScopedModel[]>(),
+  /** Toggle a model's membership in the global enabledModels scope; returns the updated list. */
+  "app:setModelScoped": invoke<[provider: string, modelId: string, scoped: boolean], ScopedModel[]>(),
   /** Read the configured "utility" model for background LLM tasks (titles/commits). */
   "app:getUtilityModel": invoke<[], ModelInfo | null>(),
   /** Persist the "utility" model choice. Pass null to clear (fall back to defaults). */
@@ -605,12 +611,13 @@ export const ipcContracts = {
   "remote:setHostEnabled": invoke<[enabled: boolean], RemoteHostConfig>(),
   /** Regenerate the shared bearer token (invalidates attached clients). */
   "remote:regenerateToken": invoke<[], RemoteHostConfig>(),
-  /** Add a thread to the served set (or remove it when already served). */
-  "remote:setThreadServed": invoke<[threadId: ThreadId, served: boolean], void>((id) =>
-    requireNonEmptyString(id, "threadId"),
+  /** Toggle whether a project is served. Returns the updated host config. */
+  "remote:setProjectServed": invoke<[projectId: ProjectId, served: boolean], RemoteHostConfig>(
+    (id) => requireNonEmptyString(id, "projectId"),
   ),
-  /** List the threads currently being served on this host. */
-  "remote:listServed": invoke<[], ThreadId[]>(),
+  /** Toggle the "serve all projects" shortcut (includes future projects).
+   *  Returns the updated host config. */
+  "remote:setServeAll": invoke<[serveAll: boolean], RemoteHostConfig>(),
 
   /** List saved master connections (the laptop side). */
   "remote:listHosts": invoke<[], RemoteHostConnection[]>(),
@@ -684,6 +691,9 @@ export const ipcContracts = {
   /** A run finished while the HUD is up — renderer turns this into an ambient cue. */
   "event:hudFinish": event<{ threadId: ThreadId }>(),
   "event:extensionWidget": event<ExtensionWidgetPayload>(),
+  /** The global `enabledModels` scope changed (settings.json). Live pi sessions
+   *  reload settings + republish meta; the renderer re-lists scoped models. */
+  "event:scopeChanged": event<void>(),
   /** A connector's status changed (connected/revoked/refreshed). Renderer
    *  re-lists via `connectors:list`. */
   "event:connectorsChanged": event<void>(),

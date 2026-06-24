@@ -17,6 +17,7 @@
   import Plug from "@lucide/svelte/icons/plug";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Radio from "@lucide/svelte/icons/radio";
+  import Gauge from "@lucide/svelte/icons/gauge";
   import Bot from "@lucide/svelte/icons/bot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
@@ -145,7 +146,17 @@
 
   function partition(list: Thread[]) {
     return {
-      active: list.filter((t) => !t.archivedAt && !t.snoozedUntil && !t.toTestAt),
+      // A thread that just woke from snooze (wokeFromSnoozeAt set) pins to
+      // the very top of the active area, above the usual activity order.
+      // Cleared once the thread is opened (markSeen in repositories.ts).
+      active: list
+        .filter((t) => !t.archivedAt && !t.snoozedUntil && !t.toTestAt)
+        .sort((a, b) => {
+          const aw = !!a.wokeFromSnoozeAt;
+          const bw = !!b.wokeFromSnoozeAt;
+          if (aw !== bw) return aw ? -1 : 1;
+          return 0;
+        }),
       snoozed: list.filter((t) => !t.archivedAt && t.snoozedUntil),
       toTest: list.filter((t) => !t.archivedAt && !t.snoozedUntil && t.toTestAt),
       archived: list
@@ -588,6 +599,14 @@
         data-testid="nav-remote"
       >
         <span class="flex items-center gap-2.5"><Radio size={15} /> Remote</span>
+      </button>
+      <button
+        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
+          {activeView === 'usage' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
+        onclick={() => onOpenView("usage")}
+        data-testid="nav-usage"
+      >
+        <span class="flex items-center gap-2.5"><Gauge size={15} /> Usage</span>
       </button>
     </MovingHighlight>
   </nav>

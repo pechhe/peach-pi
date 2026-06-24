@@ -185,17 +185,21 @@ async function boot(): Promise<void> {
   // are off until a thread is served / a host is attached.
   const remoteHost: RemoteHostService = new RemoteHostService({
     transcript: (threadId) => threadService.getTranscript(threadId),
-    threadInfo: (threadId) => {
-      const t = appService.snapshot().threads.find((x) => x.id === threadId);
-      return t ? { title: t.title, status: t.status } : null;
-    },
+    threads: () =>
+      appService.snapshot().threads.map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        projectId: t.projectId,
+        archivedAt: t.archivedAt,
+      })),
     threadCwd: (threadId) => gitService.cwdFor(threadId),
   });
   void remoteHost.load();
   threadService.setRemoteTap({
     onTranscriptDelta: (delta) => remoteHost.forwardTranscript(delta),
     onRunIdleWithCwd: async (threadId, cwd) => {
-      if (!cwd || !remoteHost.servedList().includes(threadId)) return;
+      if (!cwd || !remoteHost.isServedThread(threadId)) return;
       const ckpt = await recordCheckpoint(cwd, threadId);
       if (ckpt) remoteHost.forwardCheckpoint(threadId, ckpt.sha);
     },
@@ -280,6 +284,20 @@ async function boot(): Promise<void> {
     "app:setCavemanEnabled": (enabled) => setCavemanEnabled(enabled),
     "app:setCavemanLevel": (level) => setCavemanLevel(level),
     "app:listModels": () => appService.listModels(),
+    "app:listScopedModels": async () => {
+      const { listScopedModels } = await import("@peach-pi/pi-client");
+      return listScopedModels();
+    },
+    "app:setModelScoped": async (provider, modelId, scoped) => {
+      const { setModelScoped } = await import("@peach-pi/pi-client");
+      const result = await setModelScoped(provider, modelId, scoped);
+      // The scope lives in settings.json; reload it into every live pi session
+      // so the composer's scoped list reflects the change, then tell the
+      // renderer to re-list (it caches once).
+      await threadService.reloadScopedModels();
+      emit("event:scopeChanged", undefined);
+      return result;
+    },
     "app:getUtilityModel": () => appService.getUtilityModel(),
     "app:setUtilityModel": (model) => appService.setUtilityModel(model),
     "app:getAutoCompact": () => appService.getAutoCompact(),
@@ -513,11 +531,18 @@ async function boot(): Promise<void> {
       await remoteHost.regenerateToken();
       return remoteHost.status();
     },
-    "remote:setThreadServed": (threadId, served) => {
-      remoteHost.setServed(threadId, served);
+    "remote:setProjectServed": (projectId, served) => {
+      remoteHost.setProjectServed(projectId, served);
+      void remoteHost.persist();
       emit("event:remoteHostStatus", undefined);
+      return remoteHost.status();
     },
-    "remote:listServed": () => remoteHost.servedList(),
+    "remote:setServeAll": (serveAll) => {
+      remoteHost.setServeAll(serveAll);
+      void remoteHost.persist();
+      emit("event:remoteHostStatus", undefined);
+      return remoteHost.status();
+    },
     "remote:listHosts": () => remoteClient.listHosts(),
     "remote:addHost": (input) => remoteClient.addHost(input),
     "remote:removeHost": (id) => remoteClient.removeHost(id),
