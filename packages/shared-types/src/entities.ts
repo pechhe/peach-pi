@@ -169,6 +169,11 @@ export type StartAgentResult =
   | { ok: true; threadId: ThreadId }
   | { ok: false; reason: "not-ready" | "in-progress" | "error"; message?: string };
 
+/** Result of launching every ready issue under a PRD in one action. */
+export type StartAllReadyResult =
+  | { ok: true; launched: Array<{ issueNumber: number; threadId: ThreadId }> }
+  | { ok: false; reason: "error"; message?: string };
+
 /** Result of listing a project's tracker issues. A project with no git remote
  *  or a non-GitHub remote resolves to a placeholder reason rather than erroring. */
 export type WorkQueueResult =

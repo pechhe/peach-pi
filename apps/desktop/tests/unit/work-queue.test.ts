@@ -270,6 +270,28 @@ test("buildSeedPrompt: no parent PRD launches with only its own context", () => 
   assert.doesNotMatch(withNull, /Parent PRD/);
 });
 
+test("startAllReady selection: only ready, not-in-progress children of the PRD", () => {
+  // Mirrors the server-side filter in workQueue:startAllReady.
+  const issues = enrichIssues(
+    [
+      raw({ number: 16, labels: ["prd"] }),
+      raw({ number: 17, body: "## Parent\n\n#16\n" }), // ready
+      raw({ number: 18, body: "## Parent\n\n#16\n" }), // ready
+      raw({ number: 19, body: "## Parent\n\n#16\n" }), // in-progress -> skip
+      raw({ number: 20, body: "## Parent\n\n#16\n\n## Blocked by\n\n- #17\n" }), // blocked -> skip
+      raw({ number: 9 }), // different parent -> skip
+    ],
+    { inProgress: new Set([19]) },
+  );
+  const ready = issues.filter(
+    (i) => i.parent === 16 && i.status === "ready" && !i.inProgress,
+  );
+  assert.deepEqual(
+    ready.map((i) => i.number),
+    [17, 18],
+  );
+});
+
 test("groupWorkQueue: done issues drop out of displayed lists", () => {
   const issues = enrichIssues([
     raw({ number: 16, labels: ["prd"] }),

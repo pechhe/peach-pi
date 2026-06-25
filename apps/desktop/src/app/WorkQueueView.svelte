@@ -19,10 +19,12 @@
   const project = $derived(projectId ? (projects.find((p) => p.id === projectId) ?? null) : null);
 
   let launching = $state<number | null>(null);
+  let launchingPrd = $state<number | null>(null);
   let launchError = $state("");
+  const busy = $derived(launching !== null || launchingPrd !== null);
 
   async function startAgent(issueNumber: number) {
-    if (!projectId || launching !== null) return;
+    if (!projectId || busy) return;
     launching = issueNumber;
     launchError = "";
     try {
@@ -38,6 +40,22 @@
       launching = null;
     }
   }
+
+  async function startAllReady(prdNumber: number) {
+    if (!projectId || busy) return;
+    launchingPrd = prdNumber;
+    launchError = "";
+    try {
+      const res = await api.invoke("workQueue:startAllReady", projectId, prdNumber);
+      if (!res.ok) launchError = `Couldn’t start ready issues (${res.reason})`;
+      await workQueue.load(projectId);
+    } finally {
+      launchingPrd = null;
+    }
+  }
+
+  const groupHasReady = (g: { issues: { status: string; inProgress: boolean }[] }) =>
+    g.issues.some((i) => i.status === "ready" && !i.inProgress);
 
   // Load whenever the viewed project changes.
   $effect(() => {
@@ -97,6 +115,16 @@
                     data-testid="prd-childless">needs breakdown</span
                   >
                 {/if}
+                {#if groupHasReady(group)}
+                  <button
+                    class="ml-auto flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"
+                    onclick={() => startAllReady(group.prd!.number)}
+                    disabled={busy}
+                    data-testid="start-all-ready"
+                    ><Play size={12} />
+                    {launchingPrd === group.prd!.number ? "Starting…" : "Start all ready"}</button
+                  >
+                {/if}
               {:else}
                 <h2 class="text-[13px] font-medium text-fg-soft">Unparented</h2>
               {/if}
@@ -129,7 +157,7 @@
                       <button
                         class="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"
                         onclick={() => startAgent(issue.number)}
-                        disabled={launching !== null}
+                        disabled={busy}
                         data-testid="start-agent"
                         ><Play size={12} /> {launching === issue.number ? "Starting…" : "Start agent"}</button
                       >

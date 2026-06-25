@@ -51,6 +51,7 @@ import type {
   Project,
   ProjectId,
   StartAgentResult,
+  StartAllReadyResult,
   WorkQueueResult,
   QueueState,
   RecordingState,
@@ -407,6 +408,10 @@ export const ipcContracts = {
   ),
   /** Launch an agent on a ready issue: new thread on an isolated worktree+branch. */
   "workQueue:startAgent": invoke<[projectId: ProjectId, issueNumber: number], StartAgentResult>(
+    (id) => requireNonEmptyString(id, "projectId"),
+  ),
+  /** Launch an agent on every ready (unblocked, not-in-progress) child of a PRD. */
+  "workQueue:startAllReady": invoke<[projectId: ProjectId, prdNumber: number], StartAllReadyResult>(
     (id) => requireNonEmptyString(id, "projectId"),
   ),
 
