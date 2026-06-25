@@ -61,7 +61,7 @@
 
 {#if sideChat.open}
   <aside
-    class="btw-panel relative my-2 mr-2 flex w-[23rem] shrink-0 flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
+    class="btw-panel absolute top-2 right-2 bottom-2 z-30 flex w-[23rem] flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
     transition:fly={{ x: 380, duration: 220 }}
   >
     <!-- Header -->

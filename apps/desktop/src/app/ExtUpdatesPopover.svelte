@@ -22,7 +22,10 @@
   let updating = $state(false);
   let error = $state("");
   let justUpdated = $state(false);
-  let queued = $state(false);
+
+  // Queued flag lives on the store so closing/reopening the popover doesn't
+  // lose it — the backend still has the update queued until runs finish.
+  const queued = $derived(extensionUi.extUpdateQueued);
 
   // Updates list (from the store). Declared up here so the queued-up
   // watcher effect below reads it before first run, per Svelte 5 TDZ rules.
@@ -30,9 +33,10 @@
 
   // A queued update applies in the background once runs finish. When it does,
   // the store clears its updates list — flip into the "updated" success state.
+  // The store itself clears `extUpdateQueued` on the empty-list event; here we
+  // only drive the transient success UI while the popover is open.
   $effect(() => {
     if (queued && packages.length === 0) {
-      queued = false;
       justUpdated = true;
       setTimeout(() => {
         justUpdated = false;
@@ -87,8 +91,9 @@
         error = res.error ?? "Update failed.";
       } else if (res.queued) {
         // Update queued: it will apply automatically when runs finish.
-        // Don't close the popover — show the waiting state.
-        queued = true;
+        // Don't close the popover — show the waiting state. The store holds
+        // the flag so a close/reopen won't lose it.
+        extensionUi.extUpdateQueued = true;
       } else {
         justUpdated = true;
         setTimeout(() => {

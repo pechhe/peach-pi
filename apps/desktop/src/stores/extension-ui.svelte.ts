@@ -36,6 +36,10 @@ class ExtensionUiStore {
   terminalCustom = $state<TerminalCustomFrame | null>(null);
   /** Package names with available updates (shown as badge in sidebar). */
   extUpdates = $state<string[]>([]);
+  /** True when a manual update was queued while runs were active; cleared
+   *  when the update applies (extUpdates empties). Survives popover
+   *  close/reopen since it lives on the store, not the component. */
+  extUpdateQueued = $state<boolean>(false);
   /** threadId → (key → text) */
   private statuses = new SvelteMap<string, SvelteMap<string, string>>();
   /** threadId → (key → widget lines) — e.g. pi-subagents fleet feed. */
@@ -56,6 +60,8 @@ class ExtensionUiStore {
     api.on("event:notice", (notice) => this.pushToast(notice));
     api.on("event:extUpdatesAvailable", ({ packages }) => {
       this.extUpdates = packages;
+      // An empty list means the update applied — clear any queued flag.
+      if (packages.length === 0) this.extUpdateQueued = false;
     });
     api.on("event:extensionStatus", ({ threadId, key, text }) => {
       let map = this.statuses.get(threadId);

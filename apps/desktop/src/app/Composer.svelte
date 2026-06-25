@@ -1415,9 +1415,9 @@
   </div>
 
   <!-- Side conversation (/btw): floats at the footer's bottom-right, outside the chassis.
-       Hidden on the centered new-thread state (no message sent yet), and while the
-       panel is open for this thread — the cap "moves" into the panel as its send button. -->
-  {#if !centered && !(sideChat.open && sideChat.threadId === thread.id)}
+       Hidden on the centered new-thread state (no message sent yet). The cap stays put
+       — the panel slides in as an overlay over the top of it, then back off on close. -->
+  {#if !centered}
   <button
     class="btw-btn btw-btn--floating"
     data-press="self"
