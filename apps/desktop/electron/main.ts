@@ -6,6 +6,10 @@ import {
   PORTABLE_PI_CONFIG_FILES,
   PORTABLE_PI_DIRS,
   type EventChannel,
+  type TrackedIssue,
+  issueBranchName,
+  issueWorktreeName,
+  buildSeedPrompt,
 } from "@peach-pi/shared-types";
 import { openDb } from "./persistence/db.ts";
 import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
@@ -15,7 +19,6 @@ import { AutomationService } from "./services/automation-service.ts";
 import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
-import { GraphifyService } from "./services/graphify-service.ts";
 import { IssuesService } from "./services/issues-service.ts";
 import { SideChatService } from "./services/side-chat-service.ts";
 import { DevTapInstallService } from "./services/devtap-install-status.ts";
@@ -421,6 +424,16 @@ async function boot(): Promise<void> {
   const subagentService = new SubagentService(db);
   const sideChatService = new SideChatService(db, emit, threadService, gitService);
   const devTapInstallService = new DevTapInstallService(db);
+  // Work queue (issue #17): per-project tracker issues from the project's
+  // GitHub origin. getWorktreeNames feeds in-progress detection (a worktree
+  // named issue-<n> means that issue is already being worked).
+  const issuesService = new IssuesService(
+    (id) => appService.snapshot().projects.find((p) => p.id === id)?.path ?? null,
+    (id) =>
+      appService.snapshot().worktrees
+        .filter((w) => w.projectId === id && w.archivedAt == null)
+        .map((w) => w.name),
+  );
   const piUpdateService = new PiUpdateService(db, emit, () =>
     appService.snapshot().threads.some((t) => t.status === "running"),
     () => appService.snapshot().projects.map((p) => p.path),
@@ -487,7 +500,7 @@ async function boot(): Promise<void> {
     const dir = await gitService.createWorktree(projectId);
     await gitService.branchWorktree(dir, issueBranchName(issue.number, issue.title));
     const wt = appService.addWorktree(projectId, dir, issueWorktreeName(issue.number));
-    const thread = await threadService.createThread(projectId, wt.id, wt.dir);
+    const thread = await threadService.createThread(projectId, { worktreeId: wt.id });
     const parentPrd =
       issue.parent != null
         ? (allIssues.find((i) => i.number === issue.parent && i.isPrd) ?? null)
@@ -625,6 +638,33 @@ async function boot(): Promise<void> {
       "subagents:listAgents": subagentService.listAgents.bind(subagentService),
       "subagents:updateAgent": subagentService.updateAgent.bind(subagentService),
       "devtap:projectStatus": devTapInstallService.status.bind(devTapInstallService),
+      "workQueue:list": (projectId) => issuesService.list(projectId),
+      "workQueue:startAgent": async (projectId, issueNumber) => {
+        const res = await issuesService.list(projectId);
+        if (!res.ok) return { ok: false, reason: "error", message: res.reason };
+        const issue = res.issues.find((i) => i.number === issueNumber);
+        if (!issue) return { ok: false, reason: "error", message: "Issue not found" };
+        if (issue.inProgress) return { ok: false, reason: "in-progress" };
+        if (issue.status !== "ready") return { ok: false, reason: "not-ready" };
+        const threadId = await launchIssueAgent(projectId, issue, res.issues);
+        return { ok: true, threadId };
+      },
+      "workQueue:startAllReady": async (projectId, prdNumber) => {
+        const res = await issuesService.list(projectId);
+        if (!res.ok) return { ok: false, reason: "error", message: res.reason };
+        // Ready, not-in-progress children of this PRD. Blocked + in-progress
+        // are skipped by construction. Launch sequentially so worktree
+        // creation does not race on the shared repo.
+        const ready = res.issues.filter(
+          (i) => i.parent === prdNumber && i.status === "ready" && !i.inProgress,
+        );
+        const launched: Array<{ issueNumber: number; threadId: string }> = [];
+        for (const issue of ready) {
+          const threadId = await launchIssueAgent(projectId, issue, res.issues);
+          launched.push({ issueNumber: issue.number, threadId });
+        }
+        return { ok: true, launched };
+      },
       "git:info": gitService.info.bind(gitService),
       "git:changedFiles": gitService.changedFiles.bind(gitService),
       "git:fileDiff": gitService.fileDiff.bind(gitService),

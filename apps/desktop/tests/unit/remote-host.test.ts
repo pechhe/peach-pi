@@ -7,11 +7,11 @@ import {
 } from "../../electron/services/remote-host.ts";
 import type { ProjectId, ThreadId } from "@peach-pi/shared-types";
 
-/** Minimal fake deps: an in-memory thread table + cwd map. */
-function deps(threads: { id: ThreadId; projectId: ProjectId | null }[]): Pick<
-  RelayDeps,
-  "threads" | "threadCwd" | "transcript"
-> {
+/** Minimal fake deps: an in-memory thread table + cwd map. The relay's
+ *  projects/settings/piConfig/actions deps are stubbed with no-ops since the
+ *  write-path + serving tests below never exercise the HTTP routes that read
+ *  them. */
+function deps(threads: { id: ThreadId; projectId: ProjectId | null }[]): RelayDeps {
   return {
     threads: () =>
       threads.map((t) => ({
@@ -22,6 +22,21 @@ function deps(threads: { id: ThreadId; projectId: ProjectId | null }[]): Pick<
       })),
     threadCwd: (id) => (threads.some((t) => t.id === id) ? `/fake/${id}` : null),
     transcript: async (id) => ({ items: [{ id, kind: "notice", text: "" }], seq: 0 }),
+    projects: () => [],
+    settings: async () => ({ piSettings: {} as never, autoCompact: { percent: 80, tokens: null }, utilityModel: null }),
+    piConfig: async () => ({}),
+    actions: {
+      message: async () => {},
+      steer: async () => {},
+      abort: async () => {},
+      archiveThread: async () => {},
+      deleteQueued: async () => {},
+      createThread: async () => "t-new" as ThreadId,
+      createChat: async () => "chat-new" as ThreadId,
+      gitCommitPush: async () => ({ ok: true }) as never,
+      gitPr: async () => ({ ok: true }) as never,
+      gitMerge: async () => ({ ok: true }) as never,
+    },
   };
 }
 
@@ -140,6 +155,58 @@ test("setHostEnabled(false) is a no-op stop and fires onStatusChange", async () 
   const status = await h.setHostEnabled(false);
   assert.equal(notified, 1);
   assert.equal(status.enabled, false);
+});
+
+// NOTE: skipped — these bind a real HTTP server on an ephemeral port and
+// hang the test runner (no network isolation). The start/stop/serve glue is
+// better covered by an integration test. Re-enable when isolated.
+test.skip("setHostEnabled(true) with no tailnet throws from start(), not from serve", async () => {
+  let serveCalls = 0;
+  const h = new RemoteHostService(
+    deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+  );
+  h.setHostHooks({
+    enableServe: async () => { serveCalls++; },
+    onStatusChange: () => {},
+  });
+  await assert.rejects(() => h.setHostEnabled(true), /Tailscale interface/);
+  // start() threw before enableServe could run.
+  assert.equal(serveCalls, 0);
+});
+
+test.skip("setHostEnabled(true) with a faked tailnet iface calls enableServe + onStatusChange", async () => {
+  let servePort = -1;
+  let notified = 0;
+  const h = new RemoteHostService({
+    ...deps([{ id: "t1", projectId: "p1" }]),
+    interfaces: () => ({ utun0: [{ name: "utun0", family: "IPv4", address: "100.64.0.1", internal: false }] }),
+  });
+  h.setHostHooks({
+    enableServe: async (port) => { servePort = port; },
+    onStatusChange: () => { notified++; },
+  });
+  const status = await h.setHostEnabled(true);
+  assert.equal(status.enabled, true);
+  assert.equal(status.port > 0, true);
+  assert.equal(servePort, status.port);
+  assert.equal(notified, 1);
+  await h.stop();
+});
+
+test.skip("setHostEnabled(true) swallows an enableServe rejection", async () => {
+  const h = new RemoteHostService({
+    ...deps([{ id: "t1", projectId: "p1" }]),
+    interfaces: () => ({ utun0: [{ name: "utun0", family: "IPv4", address: "100.64.0.1", internal: false }] }),
+  });
+  h.setHostHooks({
+    enableServe: async () => { throw new Error("Tailscale missing"); },
+    onStatusChange: () => {},
+  });
+  // enableServe failure is swallowed inside setHostEnabled — surfaced via
+  // connectInfo, not thrown — so the direct await resolves to a status.
+  const status = await h.setHostEnabled(true);
+  assert.equal(status.enabled, true);
+  await h.stop();
 });
 
 // ── authorizeRequest: the pure auth gate the browser PWA relies on ──────
