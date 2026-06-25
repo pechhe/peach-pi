@@ -199,4 +199,12 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    version: 10,
+    up: (db) => {
+      // Optional pinned model for a fired automation: JSON {provider,id,name}.
+      // null means the fired thread uses pi's default model selection.
+      db.exec("ALTER TABLE automations ADD COLUMN model TEXT");
+    },
+  },
 ];

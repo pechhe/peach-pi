@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import QRCode from "qrcode";
-import type { RemoteConnectInfo } from "@peach-pi/shared-types";
+import type { RemoteConnectInfo, RemoteTailnetPeer } from "@peach-pi/shared-types";
 
 const run = promisify(execFile);
 
@@ -44,6 +44,34 @@ async function ts(args: string[]): Promise<string | null> {
     return stdout;
   } catch {
     return null;
+  }
+}
+
+/** Online machines on this device's tailnet (excluding self), each resolved to
+ *  its Tailscale Serve HTTPS endpoint so the watcher can attach with just a
+ *  passkey. Returns [] when the tailnet / CLI is unavailable. */
+export async function listTailnetPeers(): Promise<RemoteTailnetPeer[]> {
+  const out = await ts(["status", "--json"]);
+  if (!out) return [];
+  try {
+    const peers = (JSON.parse(out) as {
+      Peer?: Record<string, { DNSName?: string; Online?: boolean }>;
+    }).Peer ?? {};
+    return Object.values(peers)
+      .map((p) => {
+        const dns = p.DNSName?.replace(/\.$/, "") ?? "";
+        if (!dns) return null;
+        return {
+          name: dns.split(".")[0] || dns,
+          magicDnsName: dns,
+          httpsUrl: `https://${dns}`,
+          online: p.Online === true,
+        } satisfies RemoteTailnetPeer;
+      })
+      .filter((p): p is RemoteTailnetPeer => p !== null)
+      .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+  } catch {
+    return [];
   }
 }
 

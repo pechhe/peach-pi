@@ -16,6 +16,7 @@
     | "laptop"
     | "wifi-off"
     | "face-id"
+    | "link"
     | "reconnect"
     | "trash"
     | "send"
@@ -72,6 +73,9 @@
   {:else if name === "face-id"}
     <rect x="4" y="4" width="16" height="16" rx="4" stroke-width="1.6" />
     <path d="M8 9v1.5M16 9v1.5M9 15c1 1 5 1 6 0" stroke-width="1.6" />
+  {:else if name === "link"}
+    <path d="M9 12a3 3 0 0 1 3-3h3a3 3 0 0 1 3 3v0a3 3 0 0 1-3 3h-1" />
+    <path d="M15 12a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v0a3 3 0 0 1 3-3h1" />
   {:else if name === "reconnect"}
     <path d="M3 12a9 9 0 0 1 14-7.5M21 5v4h-4M21 12a9 9 0 0 1-14 7.5M3 19v-4h4" />
   {:else if name === "trash"}

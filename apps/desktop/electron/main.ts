@@ -53,7 +53,7 @@ import {
 import { RemoteHostService } from "./services/remote-host.ts";
 import { RemoteClientService } from "./services/remote-client.ts";
 import { createHandoffService } from "./services/handoff-service.ts";
-import { getConnectInfo, enableServe } from "./services/remote-serve.ts";
+import { getConnectInfo, enableServe, listTailnetPeers } from "./services/remote-serve.ts";
 import { recordCheckpoint, originUrl as originUrlOf } from "./services/remote-checkpoint.ts";
 
 // TEMP DEBUG: enable CDP for renderer layout inspection.
@@ -380,6 +380,7 @@ async function boot(): Promise<void> {
     "extensions:remove": (spec) => piUpdateService.removeExtension(spec),
     "extensions:deleteLocal": (p) => piUpdateService.deleteLocalExtension(p),
     "skills:delete": (p) => piUpdateService.deleteSkill(p),
+    "skills:setInvocation": (p, d) => piUpdateService.setSkillInvocation(p, d),
     "app:getPiHealth": () => computePiHealth(__dirname),
     "connectors:catalogue": (query) => connectorService.catalogue(query),
     "connectors:toolkit": (slug) => connectorService.toolkit(slug),
@@ -502,6 +503,7 @@ async function boot(): Promise<void> {
     "threads:listTurns": (id) => threadService.listTurns(id),
     "threads:rewind": (id, entryId, revertFiles) => threadService.rewind(id, entryId, revertFiles),
     "automations:create": (fields) => automationService.create(fields),
+    "automations:update": (id, fields) => automationService.update(id, fields),
     "automations:setEnabled": (id, enabled) => automationService.setEnabled(id, enabled),
     "automations:delete": (id) => automationService.delete(id),
     "automations:runNow": (id) => automationService.runNow(id),
@@ -591,6 +593,17 @@ async function boot(): Promise<void> {
     "remote:setHostEnabled": async (enabled) => {
       if (enabled) await remoteHost.start();
       else await remoteHost.stop();
+      // Best-effort: front the relay with Tailscale Serve HTTPS on enable so the
+      // watch app can reach it without a separate step. Swallowed errors are
+      // surfaced via connectInfo (serveActive=false) in the UI.
+      if (enabled) {
+        try {
+          const s = await remoteHost.status();
+          await enableServe(s.port);
+        } catch {
+          // Tailscale missing / not logged in — UI shows the QR once Serve comes up.
+        }
+      }
       emit("event:remoteHostStatus", undefined);
       return remoteHost.status();
     },
@@ -619,6 +632,7 @@ async function boot(): Promise<void> {
       await enableServe(s.port);
       return getConnectInfo({ token: s.token, relayPort: s.port, enabled: s.enabled });
     },
+    "remote:listTailnetPeers": () => listTailnetPeers(),
     "remote:listHosts": () => remoteClient.listHosts(),
     "remote:addHost": (input) => remoteClient.addHost(input),
     "remote:removeHost": (id) => remoteClient.removeHost(id),

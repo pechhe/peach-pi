@@ -14,7 +14,7 @@ test("migrations are idempotent", () => {
   const db = memoryDb();
   migrate(db); // second run = no-op
   const v = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  assert.equal(v.user_version, 9);
+  assert.equal(v.user_version, 10);
 });
 
 test("automation lifecycle: insert, due, fire, runs, disable", () => {
@@ -26,6 +26,7 @@ test("automation lifecycle: insert, due, fire, runs, disable", () => {
     projectId: null,
     prompt: "do the thing",
     environment: "local",
+    model: null,
     nextFireAt: "2026-01-01T09:00:00.000Z",
   });
   assert.equal(auto.enabled, true);
@@ -42,6 +43,20 @@ test("automation lifecycle: insert, due, fire, runs, disable", () => {
 
   repo.setEnabled(auto.id, false, null);
   assert.equal(repo.due("2026-01-03T10:00:00.000Z").length, 0);
+
+  // Pinned model round-trips as JSON in the model column.
+  assert.equal(repo.get(auto.id)!.model, null);
+  const updated = repo.update(auto.id, {
+    name: auto.name,
+    cron: auto.cron,
+    projectId: null,
+    prompt: auto.prompt,
+    environment: "local",
+    model: { provider: "anthropic", id: "claude-3-5-sonnet", name: "Sonnet" },
+    nextFireAt: null,
+  })!;
+  assert.equal(updated.model?.provider, "anthropic");
+  assert.equal(updated.model?.name, "Sonnet");
 
   repo.delete(auto.id);
   assert.equal(repo.all().length, 0);

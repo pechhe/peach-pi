@@ -11,6 +11,7 @@
   import Download from "@lucide/svelte/icons/download";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import { Switch } from "../components/ui/switch";
 
   let { projects, projectId }: { projects: Project[]; projectId: string | null } = $props();
 
@@ -22,6 +23,8 @@
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let saving = $state(false);
+  let toggling = $state(false);
+  let toggleError = $state("");
   let query = $state("");
   let loading = $state(false);
 
@@ -61,6 +64,11 @@
       if (selected && !inspection.skills.some((s) => s.filePath === selected.filePath)) {
         selected = null;
         content = "";
+      } else if (selected) {
+        // Keep the selection's disableModelInvocation in sync after a refresh
+        // (e.g. after toggling, or external edits).
+        const fresh = inspection.skills.find((s) => s.filePath === selected.filePath);
+        if (fresh) selected = fresh;
       }
     } finally {
       loading = false;
@@ -140,6 +148,28 @@
       dialogError = String(err);
     } finally {
       removing = false;
+    }
+  }
+
+  /** Toggle whether the selected skill is injected into the system prompt
+   *  (false) or trigger-only via /skill:name (true). Only local skills under a
+   *  `skills` directory are editable; packaged skills show a disabled toggle. */
+  async function toggleInvocation(nextDisabled: boolean) {
+    const skill = selected;
+    if (!skill || toggling) return;
+    toggling = true;
+    toggleError = "";
+    try {
+      const res = await api.invoke("skills:setInvocation", skill.filePath, nextDisabled);
+      if (res.ok) {
+        await refresh();
+      } else {
+        toggleError = res.error ?? "Failed.";
+      }
+    } catch (err) {
+      toggleError = String(err);
+    } finally {
+      toggling = false;
     }
   }
 
@@ -230,8 +260,23 @@
             {#if selected.description}
               <p class="mt-2 text-sm text-fg-soft">{selected.description}</p>
             {/if}
+            {#if toggleError}
+              <p class="mt-2 text-xs text-red-400" data-testid="skill-toggle-error">{toggleError}</p>
+            {/if}
           </div>
           <div class="flex shrink-0 items-center gap-2">
+            <div class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5" title={selected.deletePath
+              ? (selected.disableModelInvocation
+                ? "Trigger-only: hidden from system prompt, use /skill:name"
+                : "Injected into system prompt")
+              : "Managed by `pi remove` — not editable here"}>
+              <Switch
+                checked={!selected.disableModelInvocation}
+                disabled={!selected.deletePath || toggling}
+                onCheckedChange={(checked) => void toggleInvocation(!checked)}
+              />
+              <span class="text-xs text-muted">{selected.disableModelInvocation ? "Trigger only" : "Inject"}</span>
+            </div>
             <button
               class="copy-btn"
               onclick={copy}

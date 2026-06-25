@@ -1,5 +1,23 @@
 import path from "node:path";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import type { ResourceInspection } from "@peach-pi/shared-types";
+
+/** The peach-managed stash of disabled extension specs/paths. We move entries
+ *  here from `packages`/`extensions` so pi stops loading them; restoring moves
+ *  them back. Read alongside inspection to flag `disabled` on each extension. */
+async function readDisabledExtensions(): Promise<Set<string>> {
+  try {
+    const raw = await readFile(
+      path.join(homedir(), ".pi", "agent", "settings.json"),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw) as { peachDisabledExtensions?: string[] };
+    return new Set(parsed.peachDisabledExtensions ?? []);
+  } catch {
+    return new Set();
+  }
+}
 
 /**
  * Session-free resource inspection for a cwd: skills, extensions (with load
@@ -86,6 +104,8 @@ export async function inspectResources(cwd: string): Promise<ResourceInspection>
     return target;
   };
 
+  const disabledExtensions = await readDisabledExtensions();
+
   return {
     skills: skills.map((s) => ({
       name: s.name,
@@ -93,6 +113,7 @@ export async function inspectResources(cwd: string): Promise<ResourceInspection>
       filePath: s.filePath,
       source: s.sourceInfo?.scope ?? "unknown",
       deletePath: skillDeletePath(s),
+      disableModelInvocation: s.disableModelInvocation,
     })),
     extensions: [
       ...[...merged.values()].map((e) => ({
@@ -103,6 +124,9 @@ export async function inspectResources(cwd: string): Promise<ResourceInspection>
         deletePath: e.deletePath,
         tools: [...e.tools],
         commands: [...e.commands],
+        // Packages key on removeSpec (the npm:/git: spec); local extensions
+        // key on their path.
+        disabled: disabledExtensions.has(e.removeSpec ?? e.path),
       })),
       ...ext.errors.map((e) => ({
         path: e.path,
@@ -113,6 +137,7 @@ export async function inspectResources(cwd: string): Promise<ResourceInspection>
         removeSpec: null,
         deletePath: null,
         error: e.error,
+        disabled: false,
       })),
     ],
     prompts: loader.getPrompts().prompts.map((p) => ({

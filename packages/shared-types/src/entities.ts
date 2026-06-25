@@ -162,6 +162,20 @@ export interface RemoteConnectInfo {
   serveHint: string | null;
 }
 
+/** A machine on this device's tailnet, surfaced so the watcher can pick a host
+ *  to attach to without typing an address. `httpsUrl` is the Tailscale Serve
+ *  endpoint (HTTPS on 443) the watcher connects to with just a passkey. */
+export interface RemoteTailnetPeer {
+  /** Short label (first DNS label), e.g. "master-mac". */
+  name: string;
+  /** Full MagicDNS name (no trailing dot). */
+  magicDnsName: string;
+  /** HTTPS origin to attach to (`https://<magicDnsName>`). */
+  httpsUrl: string;
+  /** True when Tailscale reports the peer online. */
+  online: boolean;
+}
+
 /** A saved master the laptop can reach + attach to. */
 export interface RemoteHostConnection {
   id: string;
@@ -379,6 +393,12 @@ export type GitPushLocalResult =
   | { ok: false; error: string };
 
 /** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */
+export interface AutomationModel {
+  provider: string;
+  id: string;
+  name: string;
+}
+
 export interface Automation {
   id: string;
   name: string;
@@ -388,6 +408,8 @@ export interface Automation {
   /** Where the fired thread runs: the project's checkout, or a fresh
    *  isolated worktree. Ignored for chats (null projectId). */
   environment: "local" | "worktree";
+  /** Pinned model for the fired thread, or null to use pi's default. */
+  model?: AutomationModel | null;
   enabled: boolean;
   lastFiredAt?: string;
   nextFireAt?: string;
@@ -459,6 +481,9 @@ export interface SkillInfo {
   /** On-disk file/dir to delete for a skill whose file sits under a `skills`
    *  directory. For packaged skills this is null (manage via `pi remove`). */
   deletePath: string | null;
+  /** True = hidden from the system prompt, invocable only via `/skill:name`.
+   *  Mirrors pi's `disable-model-invocation` frontmatter field. */
+  disableModelInvocation: boolean;
 }
 
 /** A loaded pi extension (or a load failure). */
@@ -474,6 +499,10 @@ export interface ExtensionInfo {
   removeSpec: string | null;
   /** On-disk file/dir to delete for a local extension; null for packages. */
   deletePath: string | null;
+  /** True when peach-pi has moved this extension out of the active load list
+   *  (`packages`/`extensions`) into the peach-managed stash so pi no longer
+   *  loads it. Restoring re-adds it. Applies to new sessions. */
+  disabled: boolean;
 }
 
 /** Resources visible for a given cwd (global + project-local). */
@@ -783,8 +812,12 @@ export interface ConnectStartResult {
 /** One MCP server configured in `~/.pi/agent/mcp.json`, surfaced in the
  *  Connections view. Server identity + launch command come from the config;
  *  `toolCount` and `connected` come from the pi-mcp-adapter metadata cache
- *  (`~/.pi/agent/mcp-cache.json`) when available. peach-pi does not manage MCP
- *  server lifecycles — pi-mcp-adapter does — so this is read-only display. */
+ *  (`~/.pi/agent/mcp-cache.json`) when available.
+ *
+ *  Lifecycle: pi-mcp-adapter connects to servers listed under `mcpServers`.
+ *  peach-pi toggles load by moving an entry between `mcpServers` and a
+ *  peach-managed `peachDisabledMcpServers` map in the same file. Applies to
+ *  new sessions. */
 export interface McpServer {
   /** Server name (key in mcp.json `mcpServers`). */
   name: string;
@@ -797,6 +830,10 @@ export interface McpServer {
   /** Whether the metadata cache has a fresh entry for this server's config.
  *  False until the first successful connection populates the cache. */
   connected: boolean;
+  /** True when peach-pi has moved this server out of `mcpServers` into the
+ *  peach-managed `peachDisabledMcpServers` stash so pi-mcp-adapter no longer
+ *  connects to it. Restoring re-adds it. Applies to new sessions. */
+  disabled: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

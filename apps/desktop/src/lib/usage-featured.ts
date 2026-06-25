@@ -43,6 +43,13 @@ export interface MetricOption {
   value: string;
   /** 0–1 urgency for coloring (red ≥ 0.9, amber ≥ 0.7, muted otherwise). */
   urgency: number;
+  /** ISO 8601 timestamp the window resets at, or null when not applicable
+   *  (subscription quota windows only). Used to show a live countdown. */
+  resetAt: string | null;
+  /** Remaining percentage 0–100 for subscription quota windows, or null
+   *  for pay-per-token metrics. Drives the 0% → reset-countdown swap on
+   *  the sidebar badge. */
+  remainingPct: number | null;
 }
 
 /** All metrics available to feature for `s`, in default-priority order. */
@@ -53,11 +60,11 @@ export function metricOptions(s: ProviderUsageSummary): MetricOption[] {
     const opts: MetricOption[] = [];
     if (sum.fiveHours) {
       const p = sum.fiveHours.remainingPct;
-      opts.push({ key: "5h", label: "5-hour window", short: "5h", value: `${Math.round(p)}%`, urgency: quotaUrgency(p) });
+      opts.push({ key: "5h", label: "5-hour window", short: "5h", value: `${Math.round(p)}%`, urgency: quotaUrgency(p), resetAt: sum.fiveHours.resetAt, remainingPct: p });
     }
     if (sum.weekly) {
       const p = sum.weekly.remainingPct;
-      opts.push({ key: "weekly", label: "Weekly window", short: "wk", value: `${Math.round(p)}%`, urgency: quotaUrgency(p) });
+      opts.push({ key: "weekly", label: "Weekly window", short: "wk", value: `${Math.round(p)}%`, urgency: quotaUrgency(p), resetAt: sum.weekly.resetAt, remainingPct: p });
     }
     return opts;
   }
@@ -70,18 +77,48 @@ export function metricOptions(s: ProviderUsageSummary): MetricOption[] {
       short: "rem",
       value: fmtMoney(sum.balanceUSD),
       urgency: balanceUrgency(sum.balanceUSD),
+      resetAt: null,
+      remainingPct: null,
     });
   }
   if (sum.spentMonth !== null) {
-    opts.push({ key: "month", label: "This month", short: "mo", value: fmtMoney(sum.spentMonth), urgency: 0.3 });
+    opts.push({ key: "month", label: "This month", short: "mo", value: fmtMoney(sum.spentMonth), urgency: 0.3, resetAt: null, remainingPct: null });
   }
   if (sum.spentWeek !== null) {
-    opts.push({ key: "week", label: "This week", short: "wk", value: fmtMoney(sum.spentWeek), urgency: 0.3 });
+    opts.push({ key: "week", label: "This week", short: "wk", value: fmtMoney(sum.spentWeek), urgency: 0.3, resetAt: null, remainingPct: null });
   }
   if (sum.spentDay !== null) {
-    opts.push({ key: "day", label: "Today", short: "day", value: fmtMoney(sum.spentDay), urgency: 0.3 });
+    opts.push({ key: "day", label: "Today", short: "day", value: fmtMoney(sum.spentDay), urgency: 0.3, resetAt: null, remainingPct: null });
   }
   return opts;
+}
+
+/** Compact countdown to a reset timestamp for the sidebar badge.
+ *  "" when there is no reset timestamp; "soon" when due or past;
+ *  otherwise hours rounded to the nearest hour, or minutes under one hour.
+ *  Pure: caller passes `now`. */
+export function fmtResetsIn(resetAt: string | null, now: number): string {
+  if (!resetAt) return "";
+  const ms = Date.parse(resetAt) - now;
+  if (ms <= 0) return "soon";
+  const hours = ms / 3_600_000;
+  if (hours < 1) return `${Math.floor(ms / 60_000)}m`;
+  return `${Math.round(hours)}h`;
+}
+
+/** Detailed countdown for the popover: hours + minutes for short windows
+ *  (5-hour), days + hours for longer ones (weekly). "" when no timestamp,
+ *  "soon" when due or past. Pure: caller passes `now`. */
+export function fmtResetsInDetailed(resetAt: string | null, now: number): string {
+  if (!resetAt) return "";
+  const ms = Date.parse(resetAt) - now;
+  if (ms <= 0) return "soon";
+  const m = Math.floor(ms / 60_000);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d >= 1) return `${d}d ${h % 24}h`;
+  if (h >= 1) return `${h}h ${m % 60}m`;
+  return `${m}m`;
 }
 
 /** Lower balance = more urgent (closer to running out). */

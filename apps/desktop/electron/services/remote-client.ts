@@ -3,7 +3,8 @@ import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { request, Agent } from "node:http";
+import { request as httpRequest, Agent as HttpAgent } from "node:http";
+import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import { promisify } from "node:util";
 import type {
   RemoteHostConnection,
@@ -20,6 +21,25 @@ const execFileAsync = promisify(execFile);
 
 const CONNECTIONS_PATH = join(homedir(), ".pi", "agent", "peach-remote-hosts.json");
 
+/** Base origin for a saved connection. A full URL (Tailscale Serve HTTPS, no
+ *  port) is used as-is; a bare host falls back to plain HTTP on its port. */
+function baseUrl(c: { host: string; port: number }): string {
+  const host = c.host.trim().replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(host)) return host;
+  return `http://${host}:${c.port}`;
+}
+
+/** Pick the http/https request fn + Agent for a URL's protocol so the same
+ *  client can reach a bare tailnet host (HTTP) or a Serve endpoint (HTTPS). */
+function transportFor(url: URL): {
+  request: typeof httpRequest;
+  Agent: typeof HttpAgent;
+} {
+  return url.protocol === "https:"
+    ? { request: httpsRequest as typeof httpRequest, Agent: HttpsAgent as typeof HttpAgent }
+    : { request: httpRequest, Agent: HttpAgent };
+}
+
 async function git(args: string[], cwd: string): Promise<string> {
   const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 });
   return stdout;
@@ -33,7 +53,7 @@ async function git(args: string[], cwd: string): Promise<string> {
  */
 export class RemoteClientService {
   /** hostId → active tap controller (cancel the request to detach). */
-  private active = new Map<string, { hostId: string; threadId: ThreadId; agent: Agent; abort: AbortController }>();
+  private active = new Map<string, { hostId: string; threadId: ThreadId; agent: HttpAgent; abort: AbortController }>();
   private connections: RemoteHostConnection[] = [];
 
   constructor(
@@ -94,7 +114,8 @@ export class RemoteClientService {
   /** GET a JSON body from a master (used by listSessions + pullToTest). */
   private getJson<T>(c: RemoteHostConnection, pathName: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      const url = new URL(pathName, `http://${c.host}:${c.port}`);
+      const url = new URL(pathName, baseUrl(c));
+      const { request } = transportFor(url);
       const req = request(url, {
         method: "GET",
         headers: { Authorization: `Bearer ${c.token}`, Accept: "application/json" },
@@ -121,11 +142,12 @@ export class RemoteClientService {
     this.detach();
     const c = this.conn(hostId);
     const controller = new AbortController();
+    const url = new URL(`/tap?threadId=${encodeURIComponent(threadId)}`, baseUrl(c));
+    const { request, Agent } = transportFor(url);
     const agent = new Agent({ keepAlive: true });
     const key = `${hostId}:${threadId}`;
     this.active.set(key, { hostId, threadId, agent, abort: controller });
 
-    const url = new URL(`/tap?threadId=${encodeURIComponent(threadId)}`, `http://${c.host}:${c.port}`);
     const req = request(
       url,
       {

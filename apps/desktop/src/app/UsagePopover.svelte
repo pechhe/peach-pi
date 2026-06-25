@@ -2,7 +2,7 @@
   import type { ProviderUsageSummary } from "@peach-pi/shared-types";
   import { usage } from "../stores/usage.svelte";
   import { usagePrefs } from "../stores/usage-prefs.svelte";
-  import { metricOptions, urgencyClass } from "../lib/usage-featured";
+  import { metricOptions, urgencyClass, fmtResetsInDetailed } from "../lib/usage-featured";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
@@ -172,6 +172,14 @@
           </button>
         {/each}
       </div>
+      {#each opts as o (o.key)}
+        {@const ri = fmtResetsInDetailed(o.resetAt, now)}
+        {#if ri}
+          <div class="mt-0.5 text-[9px] text-fainter">
+            <span class="text-faint">{o.short}</span> resets {ri === "soon" ? "soon" : "in " + ri}
+          </div>
+        {/if}
+      {/each}
     {/if}
   </div>
 {/snippet}

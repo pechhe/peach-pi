@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { parse, stringify } from "yaml";
 import type { AppDb } from "../persistence/db.ts";
 import { KvRepo } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
@@ -203,6 +204,76 @@ export class PiUpdateService {
     } catch (err) {
       const error = String(err);
       this.emit("event:notice", { message: `Delete failed: ${error}`, level: "error" });
+      return { ok: false, error };
+    }
+  }
+
+  /**
+   * Toggle `disable-model-invocation` in a local skill's SKILL.md frontmatter.
+   * Same path-safety gate as `deleteSkill`: the file must sit directly inside a
+   * `skills` directory under a known root. When `disabled` is true the skill
+   * is hidden from the system prompt (trigger-only via `/skill:name`); false
+   * restores injection. Packaged skills are not editable here.
+   */
+  async setSkillInvocation(
+    filePath: string,
+    disabled: boolean,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (this.hasActiveRuns()) {
+      return { ok: false, error: "A run is active — try again when idle." };
+    }
+    if (!existsSync(filePath)) return { ok: false, error: "Path no longer exists." };
+    let real: string;
+    try {
+      real = realpathSync(filePath);
+    } catch {
+      return { ok: false, error: "Could not resolve path." };
+    }
+    if (path.basename(real) !== "SKILL.md") {
+      return { ok: false, error: "Refusing to edit: not a SKILL.md file." };
+    }
+    if (path.basename(path.dirname(real)) !== "skills") {
+      return { ok: false, error: "Refusing to edit: not a local skill." };
+    }
+    const allowedRoots = [homedir() + path.sep, ...this.getProjectRoots().map((r) => r + path.sep)];
+    if (!allowedRoots.some((root) => real.startsWith(root))) {
+      return { ok: false, error: "Refusing to edit: path outside known skill dirs." };
+    }
+    try {
+      const raw = await readFile(real, "utf8");
+      const normalized = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      let frontmatter: Record<string, unknown> = {};
+      let body = normalized;
+      let hasFence = normalized.startsWith("---");
+      if (hasFence) {
+        const endIndex = normalized.indexOf("\n---", 3);
+        if (endIndex === -1) {
+          hasFence = false;
+        } else {
+          const yamlString = normalized.slice(4, endIndex);
+          frontmatter = (parse(yamlString) ?? {}) as Record<string, unknown>;
+          body = normalized.slice(endIndex + 4).trim();
+        }
+      }
+      const next = { ...frontmatter };
+      if (disabled) next["disable-model-invocation"] = true;
+      else delete next["disable-model-invocation"];
+      const yamlOut = stringify(next, { lineWidth: 0 }).trimEnd();
+      const out = hasFence
+        ? `---\n${yamlOut}\n---\n\n${body}\n`
+        : `---\n${yamlOut}\n---\n\n${body}\n`;
+      await writeFile(real, out, "utf8");
+      this.emit("event:notice", {
+        message: disabled
+          ? `Set “${path.basename(path.dirname(real))}” to trigger-only.`
+          : `Set “${path.basename(path.dirname(real))}” to inject into prompt.`,
+        level: "info",
+      });
+      this.emit("event:resourcesChanged", undefined);
+      return { ok: true };
+    } catch (err) {
+      const error = String(err);
+      this.emit("event:notice", { message: `Toggle failed: ${error}`, level: "error" });
       return { ok: false, error };
     }
   }

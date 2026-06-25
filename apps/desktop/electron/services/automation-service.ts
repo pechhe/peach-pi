@@ -1,5 +1,5 @@
 import { computeNextFire, isValidCron } from "@peach-pi/automation-core";
-import type { Automation, AutomationRun } from "@peach-pi/shared-types";
+import type { Automation, AutomationModel, AutomationRun } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { AutomationRepo } from "../persistence/repositories.ts";
 import type { ThreadService } from "./thread-service.ts";
@@ -51,6 +51,7 @@ export class AutomationService {
     projectId: string | null;
     prompt: string;
     environment: "local" | "worktree";
+    model: AutomationModel | null;
   }): Automation {
     if (!isValidCron(fields.cron)) throw new Error(`Invalid cron expression: ${fields.cron}`);
     const automation = this.repo.insert({
@@ -66,6 +67,30 @@ export class AutomationService {
     if (!automation) return;
     this.repo.setEnabled(id, enabled, enabled ? computeNextFire(automation.cron, new Date()) : null);
     this.onChanged();
+  }
+
+  update(
+    id: string,
+    fields: {
+      name: string;
+      cron: string;
+      projectId: string | null;
+      prompt: string;
+      environment: "local" | "worktree";
+      model: AutomationModel | null;
+    },
+  ): Automation {
+    if (!isValidCron(fields.cron)) throw new Error(`Invalid cron expression: ${fields.cron}`);
+    const existing = this.repo.get(id);
+    if (!existing) throw new Error(`Automation not found: ${id}`);
+    // Keep a paused automation paused (no next fire); reschedule an enabled one
+    // against the (possibly new) cron so the countdown reflects the edit.
+    const nextFireAt = existing.enabled
+      ? computeNextFire(fields.cron, new Date())
+      : null;
+    const updated = this.repo.update(id, { ...fields, nextFireAt });
+    this.onChanged();
+    return updated!;
   }
 
   delete(id: string): void {
@@ -116,6 +141,11 @@ export class AutomationService {
         thread = await this.threadService.createThread(automation.projectId);
       }
       threadId = thread.id;
+      // Pin the chosen model before prompting so the fired run uses it. A
+      // null model means pi picks its default (mirrors an empty composer slot).
+      if (automation.model) {
+        await this.threadService.setModel(thread.id, automation.model.provider, automation.model.id);
+      }
       await this.threadService.prompt(thread.id, automation.prompt);
       this.threadService.setTitle(thread.id, `⏰ ${automation.name}`);
     } catch (err) {

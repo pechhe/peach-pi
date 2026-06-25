@@ -32,7 +32,8 @@ test("isFiveHour/isWeekly reject unrelated window types", () => {
 
 test("zaiWindow: normalizes percentage + reset timestamp", () => {
   const w = zaiWindow({ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 82.3, nextResetTime: 1719234567000 });
-  assert.equal(w?.remainingPct, 82.3);
+  // `percentage` is consumed %; remaining counts down (100 - used).
+  assert.ok(w && Math.abs(w.remainingPct - 17.7) < 0.01);
   assert.equal(w?.resetAt, new Date(1719234567000).toISOString());
 });
 
@@ -43,13 +44,14 @@ test("zaiWindow: null when percentage missing", () => {
 
 test("zaiWindow: treats missing reset time as null (not a throw)", () => {
   const w = zaiWindow({ type: "Token usage(Weekly)", percentage: 9 });
-  assert.equal(w?.remainingPct, 9);
+  assert.equal(w?.remainingPct, 91);
   assert.equal(w?.resetAt, null);
 });
 
 test("zaiWindow: clamps percentage to 0-100", () => {
-  assert.equal(zaiWindow({ type: "Token usage(5 Hour)", percentage: 150 })?.remainingPct, 100);
-  assert.equal(zaiWindow({ type: "Token usage(5 Hour)", percentage: -5 })?.remainingPct, 0);
+  // 150 used clamps to 100 → 0 remaining; -5 used clamps to 0 → 100 remaining.
+  assert.equal(zaiWindow({ type: "Token usage(5 Hour)", percentage: 150 })?.remainingPct, 0);
+  assert.equal(zaiWindow({ type: "Token usage(5 Hour)", percentage: -5 })?.remainingPct, 100);
 });
 
 test("zaiWindow: rejects non-numeric percentage", () => {
@@ -73,14 +75,14 @@ test("extractZaiLimits: reads limits from the real {code,data:{limits}} envelope
   const limits = extractZaiLimits(body);
   assert.equal(limits.length, 3);
   // The 5-hour + weekly windows must resolve from this envelope.
-  assert.equal(zaiWindow(limits.find(isFiveHour))?.remainingPct, 75);
-  assert.equal(zaiWindow(limits.find(isWeekly))?.remainingPct, 15);
+  assert.equal(zaiWindow(limits.find(isFiveHour))?.remainingPct, 25);
+  assert.equal(zaiWindow(limits.find(isWeekly))?.remainingPct, 85);
 });
 
 test("extractZaiLimits: tolerates a bare {limits} shape", () => {
   const limits = extractZaiLimits({ limits: [{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 41 }] });
   assert.equal(limits.length, 1);
-  assert.equal(zaiWindow(limits.find(isFiveHour))?.remainingPct, 41);
+  assert.equal(zaiWindow(limits.find(isFiveHour))?.remainingPct, 59);
 });
 
 test("extractZaiLimits: empty when the envelope is absent/malformed", () => {

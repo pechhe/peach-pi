@@ -101,6 +101,39 @@ class Store {
     return this.addMaster(input);
   }
 
+  /** Parse a connect deep link (`https://watch-app/?pair=1&name=&host=&token=`
+   *  or the legacy `#connect?…` fragment) into a master input, or null when the
+   *  link is missing host/token. Shared by the launch deep link and the paste
+   *  field on AddMaster. */
+  parseConnectLink(raw: string): Omit<Master, "id"> | null {
+    let p: URLSearchParams | null = null;
+    try {
+      const u = new URL(raw);
+      p = u.searchParams.get("pair") === "1" ? u.searchParams : null;
+      if (!p) {
+        const m = (u.hash || "").match(/^#connect\?(.*)$/);
+        if (m) p = new URLSearchParams(m[1]);
+      }
+    } catch {
+      return null;
+    }
+    if (!p) return null;
+    const host = (p.get("host") ?? "").trim();
+    const token = (p.get("token") ?? "").trim();
+    const name = (p.get("name") ?? host).trim() || host;
+    if (!host || !token) return null;
+    return { name, host, port: 0, token };
+  }
+
+  /** Add a master from a pasted connect link (the same payload a QR scan
+   *  delivers via the launch deep link). Returns the saved master, or null if
+   *  the link isn't a valid connect link. */
+  addFromConnectLink(raw: string): Master | null {
+    const input = this.parseConnectLink(raw);
+    if (!input) return null;
+    return this.upsertByHost(input);
+  }
+
   /** If launched via a `?pair=1&host=&token=&name=` deep link (QR pairing on
    *  the desktop), fold it into a saved master and jump to its sessions. The
    *  query is cleared immediately so the token doesn't linger in the URL bar or

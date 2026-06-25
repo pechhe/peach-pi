@@ -125,8 +125,9 @@ export class RemoteHostService {
   /** SSE listeners per thread: late-joiners get a backfill, all get the tail. */
   private listeners = new Map<ThreadId, Set<ServerResponse>>();
   /** "Serve all projects" shortcut — when true, current AND future projects
-   *  are served; `servedProjects` is ignored. */
-  private serveAll = false;
+   *  are served; `servedProjects` is ignored. Defaults to true so a new install
+   *  exposes everything to the tailnet without extra configuration. */
+  private serveAll = true;
   /** Explicitly served project ids (only consulted when !serveAll). */
   private servedProjects = new Set<ProjectId>();
 

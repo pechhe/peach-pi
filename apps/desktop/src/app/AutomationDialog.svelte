@@ -1,13 +1,19 @@
 <script lang="ts">
   import { Dialog } from "bits-ui";
-  import type { Project, ReferencedConnection } from "@peach-pi/shared-types";
+  import type {
+    Project,
+    ReferencedConnection,
+    Automation,
+  } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import { buildConnectionsHint } from "../lib/composer/mode";
+  import { scopedModels } from "../stores/scoped-models.svelte";
   import {
     DEFAULT_SCHEDULE,
     scheduleToCron,
     automationScheduleLabel,
+    cronToSchedule,
     type AutomationFrequency,
     type AutomationSchedule,
   } from "../lib/automations/schedule";
@@ -20,10 +26,15 @@
   let {
     open = $bindable(false),
     projects,
+    automation = null,
   }: {
     open?: boolean;
     projects: Project[];
+    /** When set, the dialog edits this automation instead of creating a new one. */
+    automation?: Automation | null;
   } = $props();
+
+  const editing = $derived(automation != null);
 
   const FREQUENCIES: { value: AutomationFrequency; label: string }[] = [
     { value: "hourly", label: "Hourly" },
@@ -49,6 +60,8 @@
   let frequency = $state<AutomationFrequency>(DEFAULT_SCHEDULE.frequency);
   let time = $state(DEFAULT_SCHEDULE.time);
   let dayOfWeek = $state(DEFAULT_SCHEDULE.dayOfWeek ?? 1);
+  // Encoded model choice: `${provider}\t${id}`, or "" for pi's default.
+  let modelKey = $state("");
   let nextPreview = $state<string | null>(null);
   let createError = $state("");
 
@@ -57,22 +70,56 @@
   const selectedProject = $derived(projects.find((p) => p.id === projectId) ?? null);
   // Worktrees require a real git repo; chats/folders can only run locally.
   const canWorktree = $derived(selectedProject?.kind === "repo");
+  // Same scoped-model list the composer's empty slot shows
+  // (app:listScopedModels filtered to scoped=true). Note: an empty scope is
+  // special-cased by pi as "all models implicitly scoped" — the store surfaces
+  // those as scoped=true too, so this filter is correct in both cases.
+  const scopedModelList = $derived(scopedModels.models.filter((m) => m.scoped));
+  const modelItems = $derived(
+    scopedModelList.map((m) => ({
+      value: `${m.provider}\t${m.id}`,
+      label: m.name,
+      group: m.provider,
+    })),
+  );
+  const selectedModel = $derived(
+    modelKey ? (scopedModelList.find((m) => `${m.provider}\t${m.id}` === modelKey) ?? null) : null,
+  );
   const canCreate = $derived(
     name.trim().length > 0 && prompt.trim().length > 0 && Boolean(nextPreview),
   );
 
-  // Fresh form each time the dialog opens.
+  // Populate the form each time the dialog opens: blank for new, prefilled
+  // from `automation` for edit. We don't round-trip the @-connection hint back
+  // out of the stored prompt — edits start from the raw stored prompt body.
   $effect(() => {
     if (open) {
-      name = "";
-      prompt = "";
-      connections = [];
-      projectId = "";
-      environment = "local";
-      frequency = DEFAULT_SCHEDULE.frequency;
-      time = DEFAULT_SCHEDULE.time;
-      dayOfWeek = DEFAULT_SCHEDULE.dayOfWeek ?? 1;
       createError = "";
+      // Ensure the scoped-models list is loaded (settings may never have
+      // been opened) so the picker matches the composer's empty slot.
+      void scopedModels.load();
+      if (automation) {
+        name = automation.name;
+        prompt = automation.prompt;
+        connections = [];
+        projectId = automation.projectId ?? "";
+        environment = automation.environment;
+        const parsed = cronToSchedule(automation.cron);
+        frequency = parsed?.frequency ?? DEFAULT_SCHEDULE.frequency;
+        time = parsed?.time ?? DEFAULT_SCHEDULE.time;
+        dayOfWeek = parsed?.dayOfWeek ?? DEFAULT_SCHEDULE.dayOfWeek ?? 1;
+        modelKey = automation.model ? `${automation.model.provider}\t${automation.model.id}` : "";
+      } else {
+        name = "";
+        prompt = "";
+        connections = [];
+        projectId = "";
+        environment = "local";
+        frequency = DEFAULT_SCHEDULE.frequency;
+        time = DEFAULT_SCHEDULE.time;
+        dayOfWeek = DEFAULT_SCHEDULE.dayOfWeek ?? 1;
+        modelKey = "";
+      }
     }
   });
 
@@ -93,7 +140,7 @@
       ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
       : "—";
 
-  async function create() {
+  async function save() {
     createError = "";
     // Bake the @-connection hints into the stored prompt so the fired thread
     // prefers them (the engine sends the raw prompt verbatim). Appended after
@@ -101,14 +148,22 @@
     const body = prompt.trim();
     const hint = buildConnectionsHint(connections);
     const finalPrompt = hint ? `${body}\n\n${hint}` : body;
+    const fields = {
+      name: name.trim(),
+      cron,
+      projectId: projectId || null,
+      prompt: finalPrompt,
+      environment,
+      model: selectedModel
+        ? { provider: selectedModel.provider, id: selectedModel.id, name: selectedModel.name }
+        : null,
+    };
     try {
-      await api.invoke("automations:create", {
-        name: name.trim(),
-        cron,
-        projectId: projectId || null,
-        prompt: finalPrompt,
-        environment,
-      });
+      if (editing) {
+        await api.invoke("automations:update", automation!.id, fields);
+      } else {
+        await api.invoke("automations:create", fields);
+      }
       playButtonClick("click");
       open = false;
     } catch (err) {
@@ -126,7 +181,7 @@
     >
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <Dialog.Title class="text-sm font-semibold text-fg">New automation</Dialog.Title>
+          <Dialog.Title class="text-sm font-semibold text-fg">{editing ? "Edit automation" : "New automation"}</Dialog.Title>
           <Dialog.Description class="mt-0.5 text-[12px] text-faint">
             Schedule a recurring prompt — it fires into a fresh thread.
           </Dialog.Description>
@@ -201,6 +256,18 @@
       </div>
 
       <div class="flex flex-col gap-1.5">
+        <span class="text-[11px] font-medium uppercase tracking-wide text-fainter">Model</span>
+        <Select
+          placeholder="Default (pi picks)"
+          bind:value={modelKey}
+          items={[
+            { value: "", label: "Default" },
+            ...modelItems,
+          ]}
+        />
+      </div>
+
+      <div class="flex flex-col gap-1.5">
         <span class="text-[11px] font-medium uppercase tracking-wide text-fainter">Schedule</span>
         <div class="flex items-center gap-1 rounded-lg border border-border-strong bg-bg p-1">
           {#each FREQUENCIES as f (f.value)}
@@ -254,8 +321,8 @@
         <button
           class="rounded-lg bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-fg disabled:opacity-30"
           disabled={!canCreate}
-          onclick={create}
-          data-testid="create-automation">Create</button
+          onclick={save}
+          data-testid={editing ? "save-automation" : "create-automation"}>{editing ? "Save" : "Create"}</button
         >
       </div>
     </Dialog.Content>

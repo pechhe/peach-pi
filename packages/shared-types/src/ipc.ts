@@ -14,6 +14,7 @@ import type {
   ConnectStartResult,
   DevTapProjectStatus,
   Automation,
+  AutomationModel,
   AutomationRun,
   ExtensionWidgetPayload,
   GitChangedFile,
@@ -68,6 +69,7 @@ import type {
   RemoteHostConfig,
   RemoteConnectInfo,
   RemoteHostConnection,
+  RemoteTailnetPeer,
   RemoteSessionInfo,
   RemotePullResult,
   ProviderUsageSummary,
@@ -347,10 +349,26 @@ export const ipcContracts = {
         projectId: string | null;
         prompt: string;
         environment: "local" | "worktree";
+        model: AutomationModel | null;
       },
     ],
     Automation
   >((f) => {
+    requireNonEmptyString(f?.name, "name");
+    requireNonEmptyString(f?.cron, "cron");
+    requireNonEmptyString(f?.prompt, "prompt");
+  }),
+  "automations:update": invoke<
+    [id: string, fields: {
+      name: string;
+      cron: string;
+      projectId: string | null;
+      prompt: string;
+      environment: "local" | "worktree";
+      model: AutomationModel | null;
+    }],
+    Automation
+  >((_id, f) => {
     requireNonEmptyString(f?.name, "name");
     requireNonEmptyString(f?.cron, "cron");
     requireNonEmptyString(f?.prompt, "prompt");
@@ -438,6 +456,29 @@ export const ipcContracts = {
   "skills:delete": invoke<[targetPath: string], { ok: boolean; error?: string }>((p) =>
     requireNonEmptyString(p, "targetPath"),
   ),
+  /** Toggle a skill's `disable-model-invocation` frontmatter field. When
+   *  true the skill is hidden from the system prompt (trigger-only via
+   *  `/skill:name`); when false it is injected into the prompt. Only valid
+   *  for local skills under a `skills` directory. */
+  "skills:setInvocation": invoke<
+    [filePath: string, disabled: boolean],
+    { ok: boolean; error?: string }
+  >((p) => requireNonEmptyString(p, "filePath")),
+  /** Toggle whether an extension is in pi's active load list (false) or moved
+   *  to the peach-managed stash so pi no longer loads it (true). `key` is the
+   *  extension's install spec (`npm:…`/`git:…`) for packages, or its resolved
+   *  path for local extensions. Applies to new sessions. */
+  "extensions:setEnabled": invoke<
+    [key: string, enabled: boolean],
+    { ok: boolean; error?: string }
+  >((k) => requireNonEmptyString(k, "key")),
+  /** Toggle whether an MCP server is in `mcpServers` (false) or moved to the
+   *  peach-managed `peachDisabledMcpServers` stash (true). Applies to new
+   *  sessions. */
+  "mcp:setEnabled": invoke<
+    [name: string, enabled: boolean],
+    { ok: boolean; error?: string }
+  >((n) => requireNonEmptyString(n, "name")),
 
   // files
   /** Read a local image file as base64; null if unreadable/unsupported. */
@@ -653,6 +694,9 @@ export const ipcContracts = {
    *  HTTPS-served watch PWA can reach it. Returns refreshed connect info. */
   "remote:enableServe": invoke<[], RemoteConnectInfo>(),
 
+  /** List online machines on this device's tailnet (from `tailscale status`),
+   *  so the watcher can pick a host to attach to without typing an address. */
+  "remote:listTailnetPeers": invoke<[], RemoteTailnetPeer[]>(),
   /** List saved master connections (the laptop side). */
   "remote:listHosts": invoke<[], RemoteHostConnection[]>(),
   /** Add a master connection. */

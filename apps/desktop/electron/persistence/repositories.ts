@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   Automation,
+  AutomationModel,
   AutomationRun,
   ModelInfo,
   Project,
@@ -343,11 +344,25 @@ interface AutomationRow {
   project_id: string | null;
   prompt: string;
   environment: string;
+  model: string | null;
   enabled: number;
   last_fired_at: string | null;
   next_fire_at: string | null;
   created_at: string;
 }
+
+const parseModel = (raw: string | null): AutomationModel | null => {
+  if (!raw) return null;
+  try {
+    const m = JSON.parse(raw) as Partial<AutomationModel>;
+    if (typeof m.provider === "string" && typeof m.id === "string" && typeof m.name === "string") {
+      return { provider: m.provider, id: m.id, name: m.name };
+    }
+  } catch {
+    // Malformed legacy row — treat as unset.
+  }
+  return null;
+};
 
 const toAutomation = (r: AutomationRow): Automation => ({
   id: r.id,
@@ -356,6 +371,7 @@ const toAutomation = (r: AutomationRow): Automation => ({
   projectId: r.project_id,
   prompt: r.prompt,
   environment: r.environment === "worktree" ? "worktree" : "local",
+  model: parseModel(r.model),
   enabled: r.enabled === 1,
   lastFiredAt: r.last_fired_at ?? undefined,
   nextFireAt: r.next_fire_at ?? undefined,
@@ -388,13 +404,14 @@ export class AutomationRepo {
     projectId: string | null;
     prompt: string;
     environment: "local" | "worktree";
+    model: AutomationModel | null;
     nextFireAt: string | null;
   }): Automation {
     const id = randomUUID();
     const now = new Date().toISOString();
     this.db
       .prepare(
-        "INSERT INTO automations (id, name, cron, project_id, prompt, environment, enabled, next_fire_at, created_at) VALUES (?,?,?,?,?,?,1,?,?)",
+        "INSERT INTO automations (id, name, cron, project_id, prompt, environment, model, enabled, next_fire_at, created_at) VALUES (?,?,?,?,?,?,?,1,?,?)",
       )
       .run(
         id,
@@ -403,10 +420,40 @@ export class AutomationRepo {
         fields.projectId,
         fields.prompt,
         fields.environment,
+        fields.model ? JSON.stringify(fields.model) : null,
         fields.nextFireAt,
         now,
       );
     return this.get(id)!;
+  }
+
+  update(
+    id: string,
+    fields: {
+      name: string;
+      cron: string;
+      projectId: string | null;
+      prompt: string;
+      environment: "local" | "worktree";
+      model: AutomationModel | null;
+      nextFireAt: string | null;
+    },
+  ): Automation | null {
+    this.db
+      .prepare(
+        "UPDATE automations SET name = ?, cron = ?, project_id = ?, prompt = ?, environment = ?, model = ?, next_fire_at = ? WHERE id = ?",
+      )
+      .run(
+        fields.name,
+        fields.cron,
+        fields.projectId,
+        fields.prompt,
+        fields.environment,
+        fields.model ? JSON.stringify(fields.model) : null,
+        fields.nextFireAt,
+        id,
+      );
+    return this.get(id);
   }
 
   setEnabled(id: string, enabled: boolean, nextFireAt: string | null): void {

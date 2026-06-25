@@ -126,8 +126,11 @@ export function isWeekly(l: ZaiLimit): boolean {
 
 export function zaiWindow(l: ZaiLimit | undefined): UsageWindow | null {
   if (!l) return null;
-  const remainingPct = clampPct(l.percentage);
-  if (remainingPct === null) return null;
+  const usedPct = clampPct(l.percentage);
+  if (usedPct === null) return null;
+  // Z.ai reports `percentage` = consumed %. Flip to remaining so it counts
+  // down (0 = depleted), matching the Anthropic adapter.
+  const remainingPct = 100 - usedPct;
   return { remainingPct, resetAt: isoFromMs(l.nextResetTime) };
 }
 

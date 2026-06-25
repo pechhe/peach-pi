@@ -2,6 +2,7 @@
   import type { Automation, AutomationRun, Project } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import GitBranchPlus from "@lucide/svelte/icons/git-branch-plus";
   import Monitor from "@lucide/svelte/icons/monitor";
   import AutomationDialog from "./AutomationDialog.svelte";
@@ -18,9 +19,21 @@
     onSelectThread: (threadId: string) => void;
   } = $props();
 
-  let creating = $state(false);
+  let editing = $state<Automation | null>(null);
   let runsFor = $state<string | null>(null);
   let runs = $state<AutomationRun[]>([]);
+
+  let dialogOpen = $state(false);
+  // When the dialog closes (Cancel/Save set open=false via the binding),
+  // drop the edit target so the next "New" starts fresh.
+  $effect(() => {
+    if (!dialogOpen) editing = null;
+  });
+
+  function editAutomation(auto: Automation) {
+    editing = auto;
+    dialogOpen = true;
+  }
 
   const fmt = (iso: string | undefined | null) =>
     iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—";
@@ -43,12 +56,15 @@
     <h1 class="text-sm font-medium text-fg-soft">Automations</h1>
     <button
       class="rounded-lg bg-primary px-3 py-1 text-sm font-medium text-primary-fg"
-      onclick={() => (creating = true)}
+      onclick={() => {
+        editing = null;
+        dialogOpen = true;
+      }}
       data-testid="new-automation">New</button
     >
   </header>
 
-  <AutomationDialog bind:open={creating} {projects} />
+  <AutomationDialog bind:open={dialogOpen} {projects} automation={editing} />
 
   <div class="flex-1 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex max-w-2xl flex-col gap-3">
@@ -70,9 +86,15 @@
                     {#if auto.environment === "worktree"}<GitBranchPlus size={11} /> worktree{:else}<Monitor size={11} /> local{/if}
                   </span>
                 {/if}
+                {#if auto.model}· {auto.model.name}{/if}
                 · next {auto.enabled ? fmt(auto.nextFireAt) : "paused"}
               </span>
             </div>
+            <button
+              class="rounded p-1.5 text-faint hover:bg-surface-2 hover:text-fg"
+              onclick={() => editAutomation(auto)}
+              aria-label="Edit automation"
+              data-testid="edit-automation"><Pencil size={14} /></button>
             <button
               class="rounded px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg"
               onclick={() => api.invoke("automations:runNow", auto.id)}>Run now</button

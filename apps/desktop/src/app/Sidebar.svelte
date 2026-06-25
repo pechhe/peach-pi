@@ -42,7 +42,7 @@
   import ConfirmDialog from "../components/ui/dialog/ConfirmDialog.svelte";
   import { usage } from "../stores/usage.svelte";
   import { usagePrefs } from "../stores/usage-prefs.svelte";
-  import { featuredMetrics, shortTag, urgencyClass } from "../lib/usage-featured";
+  import { featuredMetrics, shortTag, urgencyClass, fmtResetsIn } from "../lib/usage-featured";
   import UsagePopover from "./UsagePopover.svelte";
 
   let {
@@ -727,7 +727,7 @@
               {#each featuredLine as { provider, key, m } (provider + key)}
                 <span>
                   <span class="text-fainter">{shortTag(provider)}</span>
-                  <span class="ml-0.5 {urgencyClass(m.urgency)}">{m.value}</span>
+                  <span class="ml-0.5 {urgencyClass(m.urgency)}">{m.remainingPct !== null && m.remainingPct <= 0 ? `${fmtResetsIn(m.resetAt, now)} left` : m.value}</span>
                 </span>
               {/each}
             </span>

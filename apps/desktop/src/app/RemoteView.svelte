@@ -5,6 +5,7 @@
     type RemoteHostConfig,
     type RemoteConnectInfo,
     type RemoteHostConnection,
+    type RemoteTailnetPeer,
     type RemoteSessionInfo,
     type RemoteTapFrame,
     type TranscriptItem,
@@ -14,6 +15,7 @@
   import { remoteFirst } from "../stores/remote-first.svelte";
   import Monitor from "@lucide/svelte/icons/monitor";
   import Radio from "@lucide/svelte/icons/radio";
+  import Link from "@lucide/svelte/icons/link";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -31,7 +33,6 @@
 
   // ── Phone pairing: Tailscale Serve (HTTPS) + QR connect deep link ───
   let connect = $state<RemoteConnectInfo | null>(null);
-  let enablingServe = $state(false);
 
   // ── Client side: saved master connections ───────────────────────────
   let hosts = $state<RemoteHostConnection[]>([]);
@@ -44,6 +45,13 @@
   let newHost = $state("");
   let newPort = $state("");
   let newToken = $state("");
+  // Primary attach path: pick a tailnet machine + enter its passkey. Paste-link
+  // and manual entry are hidden behind `showManual`.
+  let peers = $state<RemoteTailnetPeer[]>([]);
+  let pickedPeer = $state("");
+  let newLink = $state("");
+  let linkError = $state("");
+  let showManual = $state(false);
 
   // ── Attached tap state ──────────────────────────────────────────────
   // A single attached session at a time (v1). The transcript is folded from
@@ -71,18 +79,6 @@
       connect = hostStatus?.enabled ? await api.invoke("remote:connectInfo") : null;
     } catch {
       connect = null;
-    }
-  }
-
-  async function enableServeNow() {
-    enablingServe = true;
-    try {
-      connect = await api.invoke("remote:enableServe");
-      error = "";
-    } catch (e) {
-      error = String((e as Error).message ?? e);
-    } finally {
-      enablingServe = false;
     }
   }
 
@@ -125,6 +121,68 @@
       token: newToken.trim(),
     });
     newName = newHost = newPort = newToken = "";
+    showAddHost = false;
+    hosts = await api.invoke("remote:listHosts");
+  }
+
+  /** Parse a connect deep link (`?pair=1&name=&host=&token=`) into a host
+   *  input, mirroring the mobile `parseConnectLink`. */
+  function parseConnectLink(raw: string): { name: string; host: string; port: number; token: string } | null {
+    let p: URLSearchParams | null = null;
+    try {
+      const u = new URL(raw);
+      p = u.searchParams.get("pair") === "1" ? u.searchParams : null;
+    } catch {
+      return null;
+    }
+    if (!p) return null;
+    const host = (p.get("host") ?? "").trim();
+    const token = (p.get("token") ?? "").trim();
+    const name = (p.get("name") ?? host).trim() || host;
+    if (!host || !token) return null;
+    return { name, host, port: 0, token };
+  }
+
+  async function loadPeers() {
+    try {
+      peers = await api.invoke("remote:listTailnetPeers");
+    } catch {
+      peers = [];
+    }
+  }
+
+  async function addHostFromPeer() {
+    const peer = peers.find((p) => p.magicDnsName === pickedPeer);
+    if (!peer || !newToken.trim()) return;
+    await api.invoke("remote:addHost", {
+      name: peer.name,
+      host: peer.httpsUrl,
+      port: 0,
+      token: newToken.trim(),
+    });
+    pickedPeer = "";
+    newToken = "";
+    showAddHost = false;
+    hosts = await api.invoke("remote:listHosts");
+  }
+
+  async function pasteLink(): Promise<void> {
+    try {
+      newLink = (await navigator.clipboard.readText()).trim();
+      linkError = "";
+    } catch {
+      // Clipboard blocked — user can paste into the field directly.
+    }
+  }
+
+  async function addHostFromLink() {
+    const input = parseConnectLink(newLink);
+    if (!input) {
+      linkError = "That doesn't look like a peach connect link.";
+      return;
+    }
+    await api.invoke("remote:addHost", input);
+    newLink = "";
     showAddHost = false;
     hosts = await api.invoke("remote:listHosts");
   }
@@ -254,7 +312,7 @@
       </h3>
       <div class="rounded-lg border border-border bg-surface-2 p-3">
         {#if hostStatus}
-          <div class="mb-2 flex items-center gap-2 text-[13px]">
+          <div class="flex items-center gap-2 text-[13px]">
             <button
               class="rounded-md px-2.5 py-1 text-xs font-medium {hostStatus?.enabled
                 ? 'bg-green-600 text-white'
@@ -262,31 +320,31 @@
               onclick={() => toggleHost(!hostStatus!.enabled)}
               disabled={togglingHost}
             >
-              {hostStatus.enabled ? "● Serving" : "○ Off"}
+              {hostStatus.enabled ? "● Watching allowed" : "○ Off"}
             </button>
-            {#if hostStatus.enabled && hostStatus.bindIp}
-              <span class="text-xs text-faint">
-                listening on <span class="font-mono text-fg">{hostStatus.bindIp}:{hostStatus.port}</span>
-              </span>
-            {:else if hostStatus.enabled}
-              <span class="text-xs text-amber-400">starting…</span>
-            {/if}
-          </div>
-
-          {#if hostStatus.token}
-            <div class="mb-3 flex items-center gap-2">
-              <span class="text-xs text-faint">token:</span>
+            {#if hostStatus.token}
+              <span class="text-xs text-faint">passkey</span>
               <code class="rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-muted">
                 {hostStatus.token.slice(0, 8)}…{hostStatus.token.slice(-4)}
               </code>
               <CopyButton text={hostStatus.token} />
-              <button class="text-xs text-muted hover:text-fg" onclick={regenerateToken}>regenerate</button>
-            </div>
-          {/if}
+            {/if}
+            {#if hostStatus.enabled && hostStatus.bindIp}
+              <span class="ml-auto text-[10px] text-faint">
+                <span class="font-mono">{hostStatus.bindIp}:{hostStatus.port}</span>
+              </span>
+            {:else if hostStatus.enabled}
+              <span class="ml-auto text-[10px] text-amber-400">starting…</span>
+            {/if}
+          </div>
 
-          <!-- ── Phone pairing over Tailscale Serve (HTTPS) ───────── -->
           {#if hostStatus.enabled}
-            <div class="mb-3 rounded-md border border-border bg-surface p-3">
+            <p class="mt-1.5 text-[11px] text-faint">
+              Serving all projects. Anyone with the passkey on your tailnet can watch.
+            </p>
+
+            <!-- ── Phone pairing: QR (Serve is auto-enabled in the toggle) ── -->
+            <div class="mt-3 rounded-md border border-border bg-surface p-3">
               <div class="mb-2 flex items-center gap-1.5 text-xs font-semibold text-fg">
                 <Smartphone size={13} /> Watch on your phone
               </div>
@@ -308,27 +366,20 @@
                       <span class="text-[11px]">Copy link</span>
                     </div>
                     <p class="mt-2 text-[10px] leading-relaxed text-faint">
-                      The link carries the bearer token — only open it on your own device.
+                      The link carries the passkey — only open it on your own device.
                     </p>
                   </div>
                 </div>
               {:else if connect && !connect.serveActive}
                 <p class="mb-2 text-xs text-faint">
                   {#if connect.httpsUrl}
-                    Front the relay with HTTPS so the (HTTPS-hosted) watch app can reach it.
+                    Enabling HTTPS access via Tailscale Serve…
                   {:else}
-                    Tailscale isn't reachable — start it, then enable HTTPS access.
+                    Tailscale isn't reachable — start it, then refresh.
                   {/if}
                 </p>
-                <button
-                  class="rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                  onclick={enableServeNow}
-                  disabled={enablingServe || !connect.httpsUrl}
-                >
-                  {enablingServe ? "Enabling…" : "Enable phone access (HTTPS)"}
-                </button>
                 {#if connect.serveHint}
-                  <p class="mt-2 font-mono text-[10px] text-faint">
+                  <p class="font-mono text-[10px] text-faint">
                     or run: {connect.serveHint}
                   </p>
                 {/if}
@@ -338,35 +389,51 @@
             </div>
           {/if}
 
-          <p class="mb-1.5 text-xs text-faint">
-            Serve a project so another peach-pi can attach to any of its threads:
-          </p>
-          <div class="max-h-40 overflow-y-auto space-y-1">
-            <label class="flex items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-surface-3">
-              <input
-                type="checkbox"
-                checked={hostStatus.serveAll}
-                onchange={(e) => setServeAll(e.currentTarget.checked)}
-              />
-              <span class="font-medium text-fg">All projects</span>
-              <span class="ml-auto text-[10px] text-faint">includes future</span>
-            </label>
-            {#each localProjects as p (p.id)}
-              <label
-                class="flex items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-surface-3"
-                class:opacity-50={hostStatus.serveAll}
-              >
-                <input
-                  type="checkbox"
-                  checked={hostStatus.serveAll || hostStatus.servedProjects.includes(p.id)}
-                  disabled={hostStatus.serveAll}
-                  onchange={(e) => setProjectServed(p.id, e.currentTarget.checked)}
-                />
-                <span class="truncate text-fg">{p.name}</span>
-                <span class="ml-auto truncate text-[10px] text-faint" title={p.path}>{p.path}</span>
-              </label>
-            {/each}
-          </div>
+          <!-- ── Advanced: regenerate passkey + per-project selection ─── -->
+          <details class="mt-3">
+            <summary class="cursor-pointer select-none text-[11px] text-muted hover:text-fg">
+              Advanced
+            </summary>
+            <div class="mt-2 space-y-2 border-t border-border pt-2">
+              {#if hostStatus.token}
+                <button class="text-xs text-muted hover:text-fg" onclick={regenerateToken}>
+                  Regenerate passkey
+                </button>
+                <p class="text-[10px] text-faint">
+                  Invalidates all existing watch connections.
+                </p>
+              {/if}
+              <div>
+                <p class="mb-1.5 text-xs text-faint">Projects served:</p>
+                <div class="max-h-40 overflow-y-auto space-y-1">
+                  <label class="flex items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-surface-3">
+                    <input
+                      type="checkbox"
+                      checked={hostStatus.serveAll}
+                      onchange={(e) => setServeAll(e.currentTarget.checked)}
+                    />
+                    <span class="font-medium text-fg">All projects</span>
+                    <span class="ml-auto text-[10px] text-faint">includes future</span>
+                  </label>
+                  {#each localProjects as p (p.id)}
+                    <label
+                      class="flex items-center gap-2 rounded px-2 py-1 text-[13px] hover:bg-surface-3"
+                      class:opacity-50={hostStatus.serveAll}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={hostStatus.serveAll || hostStatus.servedProjects.includes(p.id)}
+                        disabled={hostStatus.serveAll}
+                        onchange={(e) => setProjectServed(p.id, e.currentTarget.checked)}
+                      />
+                      <span class="truncate text-fg">{p.name}</span>
+                      <span class="ml-auto truncate text-[10px] text-faint" title={p.path}>{p.path}</span>
+                    </label>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          </details>
         {/if}
       </div>
     </section>
@@ -377,7 +444,7 @@
         <span class="flex items-center gap-1.5"><Radio size={13} /> Attach — watch a master</span>
         <button
           class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
-          onclick={() => (showAddHost = !showAddHost)}
+          onclick={() => { showAddHost = !showAddHost; if (showAddHost) void loadPeers(); }}
           title="Add master"
         >
           <Plus size={13} />
@@ -386,15 +453,91 @@
 
       {#if showAddHost}
         <div class="mb-3 rounded-lg border border-border bg-surface-2 p-3">
-          <div class="grid grid-cols-2 gap-2 text-[13px]">
-            <input bind:value={newName} placeholder="Name (master-mac)" class="rounded border border-border bg-surface px-2 py-1 text-fg" />
-            <input bind:value={newHost} placeholder="tailnet host / IP" class="rounded border border-border bg-surface px-2 py-1 text-fg" />
-            <input bind:value={newPort} placeholder="port" class="rounded border border-border bg-surface px-2 py-1 text-fg" />
-            <input bind:value={newToken} placeholder="shared token" class="rounded border border-border bg-surface px-2 py-1 text-fg" />
+          <div class="mb-2 flex items-center gap-2 text-[13px] text-fg">
+            <Smartphone size={14} /> Pick a machine and enter its passkey
           </div>
-          <button class="mt-2 rounded-md bg-accent px-3 py-1 text-xs font-medium text-white" onclick={addHost}>
-            Save
+
+          {#if peers.length > 0}
+            <select
+              bind:value={pickedPeer}
+              class="w-full rounded border border-border bg-surface px-2 py-1.5 text-[13px] text-fg"
+            >
+              <option value="" disabled>Choose a tailnet machine…</option>
+              {#each peers as p (p.magicDnsName)}
+                <option value={p.magicDnsName} disabled={!p.online}>
+                  {p.name}{p.online ? "" : " (offline)"}
+                </option>
+              {/each}
+            </select>
+          {:else}
+            <p class="text-[11px] text-faint">
+              No tailnet machines found. Is Tailscale running? Use a connect link below instead.
+            </p>
+          {/if}
+
+          <div class="mt-2 flex items-center gap-2">
+            <input
+              bind:value={newToken}
+              type="password"
+              placeholder="passkey"
+              class="flex-1 rounded border border-border bg-surface px-2 py-1 font-mono text-[13px] tracking-[1px] text-fg"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+            />
+          </div>
+          <button
+            class="mt-2 rounded-md bg-accent px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+            disabled={!pickedPeer || newToken.trim().length === 0}
+            onclick={addHostFromPeer}
+          >
+            Connect
           </button>
+          <button class="ml-2 text-[11px] text-muted hover:text-fg" onclick={loadPeers}>refresh list</button>
+
+          <!-- Advanced: paste a connect link or type the address by hand. -->
+          <button
+            class="mt-3 block text-[11px] text-muted hover:text-fg"
+            onclick={() => (showManual = !showManual)}
+          >
+            {showManual ? "Hide other ways to connect" : "Other ways to connect"}
+          </button>
+          {#if showManual}
+            <div class="mt-2 space-y-2 border-t border-border pt-2">
+              <div class="flex items-center gap-2 text-[12px] text-fg">
+                <Link size={13} /> Paste connect link
+              </div>
+              <div class="flex items-center gap-2">
+                <input
+                  bind:value={newLink}
+                  oninput={() => (linkError = "")}
+                  placeholder="https://peach-pi-bay.vercel.app/?pair=1&…"
+                  class="flex-1 rounded border border-border bg-surface px-2 py-1 font-mono text-[12px] text-fg"
+                />
+                <button class="text-xs text-muted hover:text-fg" onclick={pasteLink}>paste</button>
+              </div>
+              {#if linkError}
+                <p class="text-[11px] text-red-400">{linkError}</p>
+              {/if}
+              <button
+                class="rounded-md bg-accent px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+                disabled={newLink.trim().length === 0}
+                onclick={addHostFromLink}
+              >
+                Connect from link
+              </button>
+
+              <div class="grid grid-cols-2 gap-2 border-t border-border pt-2 text-[13px]">
+                <input bind:value={newName} placeholder="Name (master-mac)" class="rounded border border-border bg-surface px-2 py-1 text-fg" />
+                <input bind:value={newHost} placeholder="tailnet host / IP" class="rounded border border-border bg-surface px-2 py-1 text-fg" />
+                <input bind:value={newPort} placeholder="port" class="rounded border border-border bg-surface px-2 py-1 text-fg" />
+                <input bind:value={newToken} placeholder="passkey" class="rounded border border-border bg-surface px-2 py-1 text-fg" />
+              </div>
+              <button class="rounded-md bg-accent px-3 py-1 text-xs font-medium text-white" onclick={addHost}>
+                Save manual
+              </button>
+            </div>
+          {/if}
         </div>
       {/if}
 
