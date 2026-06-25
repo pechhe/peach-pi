@@ -235,6 +235,14 @@ async function boot(): Promise<void> {
     () => appService.getUtilityModel(),
   );
   threadService.setGitService(gitService);
+  // Sink the `threads:create` + `threads:setEnvironment` orchestrators into
+  // ThreadService (issue #15). App↔Thread cycle → injected post-construction.
+  threadService.setAppService(appService);
+  // Sink the `worktrees:archive` orchestrator into AppService (issue #15).
+  appService.setTeardownCollaborators({
+    threadService,
+    gitService,
+  });
   // Lift a conversation thread into a remote work unit before each prompt when
   // remote-first mode is on (returns a status note; the hook swallows errors).
   threadService.setHandoffService({
@@ -318,6 +326,13 @@ async function boot(): Promise<void> {
     },
   });
   void remoteHost.load();
+  // Sink the `remote:setHostEnabled` orchestrator into RemoteHostService
+  // (issue #15). Inject the Tailscale-Serve fronting hook + status-change
+  // notifier so the relay stays free of the tailscale CLI + typed-Emit coupling.
+  remoteHost.setHostHooks({
+    enableServe,
+    onStatusChange: () => emit("event:remoteHostStatus", undefined),
+  });
   // RemoteHostService is a registered subscriber to ThreadService's frame
   // stream (ADR-0009's second subscriber). The callback builds the SSE-wire
   // RemoteTapFrames from the in-process ThreadFrames — the relay stays a thin
