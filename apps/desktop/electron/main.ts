@@ -258,7 +258,10 @@ async function boot(): Promise<void> {
     onRemoteQueue: (threadId, steering, followUp) =>
       remoteHost.forwardQueue(threadId, steering, followUp),
     onRunIdleWithCwd: async (threadId, cwd) => {
-      if (!cwd || !remoteHost.isServedThread(threadId)) return;
+      // Only checkpoint when remote hosting is actually running. Being "served"
+      // is config intent, not an active host — without isActive() a leftover
+      // serveAll=true force-pushes wip/<id> branches while hosting is off.
+      if (!cwd || !remoteHost.isActive() || !remoteHost.isServedThread(threadId)) return;
       const ckpt = await recordCheckpoint(cwd, threadId);
       if (ckpt) remoteHost.forwardCheckpoint(threadId, ckpt.sha);
     },

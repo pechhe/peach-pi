@@ -415,21 +415,14 @@
     reloading = true;
     try {
       const res = await api.invoke("threads:reloadAll");
-      const n = res.reloaded.length + res.queued.length;
-      if (n === 0) {
+      if (res.queued.length > 0) {
+        extensionUi.notify(
+          `Reloaded ${res.reloaded.length}; ${res.queued.length} queued for when its run finishes.`,
+          undefined,
+          "info",
+        );
+      } else if (res.reloaded.length === 0) {
         extensionUi.notify("No active sessions to reload.", undefined, "info");
-      } else if (res.queued.length > 0) {
-        extensionUi.notify(
-          `Reloading ${res.reloaded.length} session${res.reloaded.length === 1 ? "" : "s"}; ${res.queued.length} queued for when its run finishes.`,
-          undefined,
-          "info",
-        );
-      } else {
-        extensionUi.notify(
-          `Reloaded ${res.reloaded.length} session${res.reloaded.length === 1 ? "" : "s"}.`,
-          undefined,
-          "info",
-        );
       }
     } finally {
       reloading = false;

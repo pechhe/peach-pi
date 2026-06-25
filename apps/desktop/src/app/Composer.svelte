@@ -375,7 +375,6 @@
       case "reload":
         void api.invoke("threads:reload", thread.id).then((res) => {
           if (!res.ok) extensionUi.notify(res.error ?? "Reload failed.", undefined, "error");
-          else extensionUi.notify("Session reloaded.", undefined, "info");
         });
         break;
       case "scoped-models":

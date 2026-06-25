@@ -321,10 +321,21 @@ export class PiSession {
   /** Hot-reload extensions/skills/prompts/themes from disk via the SDK's
    *  `AgentSession.reload()`. Re-imports extension module files, rebuilds the
    *  tool registry, and re-emits `session_start` to the new extension runner —
-   *  without losing the current conversation. Must not be called while a run
-   *  is in progress (the SDK invalidates captured ctxs on reload). */
+ *  without losing the current conversation. Must not be called while a run
+   *  is in progress (the SDK invalidates captured ctxs on reload). Inserts an
+   *  inline notice into the transcript so the user can see it happened. */
   async reload(): Promise<void> {
     await this.session.reload();
+    this.callbacks.onOps([
+      {
+        op: "upsert",
+        item: {
+          id: `reload-${Date.now()}`,
+          kind: "notice",
+          text: "Session reloaded — extensions, skills, and prompts refreshed from disk.",
+        },
+      },
+    ]);
     this.callbacks.onMetaChange?.();
   }
 

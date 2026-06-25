@@ -183,6 +183,13 @@ export class RemoteHostService {
     );
   }
 
+  /** True only when the relay has actually been started (`start()`). Checkpoint
+   *  pushes must gate on this — being "served" is config intent, not an active
+   *  host, and we must never push `wip/<id>` branches while hosting is off. */
+  isActive(): boolean {
+    return this.enabled;
+  }
+
   /** Is a given thread currently served? A thread is served iff it belongs to a
    *  served project. Chats (projectId null) are never served in v1 (no repo,
    *  no checkpoint to pull). `serveAll` opts into every current + future project. */
