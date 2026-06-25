@@ -12,7 +12,8 @@
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import Search from "@lucide/svelte/icons/search";
-import Server from "@lucide/svelte/icons/server";
+  import Server from "@lucide/svelte/icons/server";
+  import { Switch } from "../components/ui/switch";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import ConnectorIcon from "./ConnectorIcon.svelte";
@@ -23,6 +24,7 @@ import Server from "@lucide/svelte/icons/server";
   let connections = $state<Connection[]>([]);
   let catalogue = $state<ToolkitCatalogEntry[]>([]);
   let mcpServers = $state<McpServer[]>([]);
+  let mcpToggling = $state<string | null>(null);
   let query = $state("");
   let error = $state("");
 
@@ -216,6 +218,22 @@ import Server from "@lucide/svelte/icons/server";
 
   async function loadMcp() {
     mcpServers = await api.invoke("mcp:list");
+  }
+
+  /** Toggle whether an MCP server is in `mcpServers` (enabled) or moved to the
+   *  peach-managed stash so pi-mcp-adapter no longer connects to it (disabled).
+   *  Applies to new sessions. */
+  async function toggleMcp(s: McpServer, nextEnabled: boolean) {
+    if (mcpToggling !== null) return;
+    mcpToggling = s.name;
+    try {
+      await api.invoke("mcp:setEnabled", s.name, nextEnabled);
+      await loadMcp();
+    } catch {
+      // surfaced by stale list on next load
+    } finally {
+      mcpToggling = null;
+    }
   }
 
   function selectMcp() {
@@ -826,6 +844,14 @@ import Server from "@lucide/svelte/icons/server";
                 <div class="flex items-center gap-2">
                   <span class="h-1.5 w-1.5 shrink-0 rounded-full {s.connected ? "bg-emerald-500" : "bg-fainter"}"></span>
                   <span class="text-sm font-medium text-fg">{s.name}</span>
+                  <div class="ml-auto flex items-center gap-2" title={s.disabled ? "Disabled: restart to disconnect" : "Loaded by pi-mcp-adapter"}>
+                    <Switch
+                      checked={!s.disabled}
+                      disabled={mcpToggling !== null}
+                      onCheckedChange={(checked) => void toggleMcp(s, checked)}
+                    />
+                    <span class="text-xs text-muted">{s.disabled ? "Off" : "On"}</span>
+                  </div>
                   {#if s.connected}
                     <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-muted">{s.toolCount ?? 0} tools</span>
                   {:else}
@@ -840,9 +866,9 @@ import Server from "@lucide/svelte/icons/server";
           </div>
           <p class="mt-4 text-sm text-fg-soft">
             Connection counts shown here come from the pi-mcp-adapter metadata
-            cache and refresh when threads reconnect. peach-pi does not start or
-            stop MCP servers — edit the config file and re-run the thread to
-            change what's available.
+            cache and refresh when threads reconnect. Toggle a server off to
+            move it out of pi-mcp-adapter's load list; restart the thread for
+            the change to take effect.
           </p>
         {/if}
       </div>

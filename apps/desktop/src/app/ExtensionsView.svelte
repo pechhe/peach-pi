@@ -10,6 +10,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
+  import { Switch } from "../components/ui/switch";
 
   let { projects, projectId }: { projects: Project[]; projectId: string | null } = $props();
 
@@ -18,6 +19,8 @@
   let inspection = $state<ResourceInspection | null>(null);
   let query = $state("");
   let loading = $state(false);
+  let toggling = $state(false);
+  let toggleError = $state("");
   let selectedPath = $state<string | null>(null);
 
   $effect(() => {
@@ -43,6 +46,25 @@
   const selected = $derived(
     inspection?.extensions.find((e) => e.path === selectedPath) ?? null,
   );
+
+  /** Toggle whether the selected extension is in pi's active load list (true)
+   *  or moved to the peach-managed stash so pi stops loading it (false).
+   *  Applies to new sessions. */
+  async function toggleEnabled(ext: ExtensionInfo, nextEnabled: boolean) {
+    if (toggling) return;
+    toggling = true;
+    toggleError = "";
+    // Package specs key on removeSpec (npm:/git:); local extensions key on path.
+    const key = ext.removeSpec ?? ext.path;
+    try {
+      const res = await api.invoke("extensions:setEnabled", key, nextEnabled);
+      if (!res.ok) toggleError = res.error ?? "Failed.";
+    } catch (err) {
+      toggleError = String(err);
+    } finally {
+      toggling = false;
+    }
+  }
 
   const filtered = $derived.by(() => {
     const exts = inspection?.extensions ?? [];
@@ -203,18 +225,36 @@
               <span class="rounded-md bg-surface px-1.5 py-0.5 text-[11px] text-muted">{cap(ext.source)}</span>
             </div>
             <p class="mt-0.5 truncate font-mono text-[11px] text-fainter" use:clickCopy={ext.path}>{ext.path}</p>
+            {#if toggleError}
+              <p class="mt-2 text-xs text-red-400" data-testid="extension-toggle-error">{toggleError}</p>
+            {/if}
           </div>
-          {#if ext.removeSpec || ext.deletePath}
-            <button
-              class="flex shrink-0 items-center gap-1.5 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm font-medium text-fg transition hover:border-red-500/50 hover:text-red-400 disabled:opacity-50"
-              onclick={() => startRemove(ext)}
-              disabled={removing && pending?.path === ext.path}
-              title={ext.removeSpec ? `pi remove ${ext.removeSpec}` : `Delete ${ext.deletePath}`}
-              data-testid="remove-extension"
+          <div class="flex shrink-0 items-center gap-2">
+            <div
+              class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5"
+              title={ext.disabled
+                ? "Disabled: moved out of pi's load list — restart to unload"
+                : "Loaded by pi"}
             >
-              <Trash2 size={14} /><span>{removing && pending?.path === ext.path ? "Removing…" : ext.removeSpec ? "Uninstall" : "Delete"}</span>
-            </button>
-          {/if}
+              <Switch
+                checked={!ext.disabled}
+                disabled={!ext.removeSpec && !ext.deletePath || !!ext.error || toggling}
+                onCheckedChange={(checked) => void toggleEnabled(ext, checked)}
+              />
+              <span class="text-xs text-muted">{ext.disabled ? "Off" : "On"}</span>
+            </div>
+            {#if ext.removeSpec || ext.deletePath}
+              <button
+                class="flex shrink-0 items-center gap-1.5 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm font-medium text-fg transition hover:border-red-500/50 hover:text-red-400 disabled:opacity-50"
+                onclick={() => startRemove(ext)}
+                disabled={removing && pending?.path === ext.path}
+                title={ext.removeSpec ? `pi remove ${ext.removeSpec}` : `Delete ${ext.deletePath}`}
+                data-testid="remove-extension"
+              >
+                <Trash2 size={14} /><span>{removing && pending?.path === ext.path ? "Removing…" : ext.removeSpec ? "Uninstall" : "Delete"}</span>
+              </button>
+            {/if}
+          </div>
         </div>
 
         {#if ext.error}

@@ -381,6 +381,8 @@ async function boot(): Promise<void> {
     "extensions:deleteLocal": (p) => piUpdateService.deleteLocalExtension(p),
     "skills:delete": (p) => piUpdateService.deleteSkill(p),
     "skills:setInvocation": (p, d) => piUpdateService.setSkillInvocation(p, d),
+    "extensions:setEnabled": (k, e) => piUpdateService.setEnabledExtension(k, e),
+    "mcp:setEnabled": (n, e) => mcpService.setEnabled(n, e),
     "app:getPiHealth": () => computePiHealth(__dirname),
     "connectors:catalogue": (query) => connectorService.catalogue(query),
     "connectors:toolkit": (slug) => connectorService.toolkit(slug),

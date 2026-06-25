@@ -10,6 +10,8 @@ import { KvRepo } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
 import { getPiSettings } from "./pi-settings.ts";
 
+const SETTINGS_PATH = path.join(homedir(), ".pi", "agent", "settings.json");
+
 const execFileAsync = promisify(execFile);
 
 const KV_KEY = "piExtUpdate:lastRun"; // epoch ms of the last successful run
@@ -267,6 +269,63 @@ export class PiUpdateService {
         message: disabled
           ? `Set “${path.basename(path.dirname(real))}” to trigger-only.`
           : `Set “${path.basename(path.dirname(real))}” to inject into prompt.`,
+        level: "info",
+      });
+      this.emit("event:resourcesChanged", undefined);
+      return { ok: true };
+    } catch (err) {
+      const error = String(err);
+      this.emit("event:notice", { message: `Toggle failed: ${error}`, level: "error" });
+      return { ok: false, error };
+    }
+  }
+
+  /**
+   * Toggle whether an extension is in pi's active load list. `key` is the
+   *  install spec (`npm:…`/`git:…`) for packages or the resolved path for
+   *  local extensions. Disabling moves the key from `packages`/`extensions`
+   *  into the peach-managed `peachDisabledExtensions` stash so pi stops loading
+   *  it; enabling moves it back. Preserves all other settings keys. Applies to
+   *  new sessions.
+   */
+  async setEnabledExtension(key: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+    if (this.hasActiveRuns()) {
+      return { ok: false, error: "A run is active — try again when idle." };
+    }
+    try {
+      const raw = JSON.parse(await readFile(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
+      const packages = Array.isArray(raw.packages) ? [...(raw.packages as string[])] : [];
+      const extensions = Array.isArray(raw.extensions) ? [...(raw.extensions as string[])] : [];
+      const stash = Array.isArray(raw.peachDisabledExtensions)
+        ? [...(raw.peachDisabledExtensions as string[])]
+        : [];
+      const inPackages = packages.includes(key);
+      const inExtensions = extensions.includes(key);
+      const inStash = stash.includes(key);
+      if (enabled) {
+        if (!inStash) return { ok: true };
+        // Package specs start with npm:/git:; else treat as a local path.
+        const isSpec = /^(npm:|git:)/.test(key);
+        if (isSpec) packages.push(key);
+        else extensions.push(key);
+        const nextStash = stash.filter((k) => k !== key);
+        raw.packages = packages;
+        raw.extensions = extensions;
+        if (nextStash.length) raw.peachDisabledExtensions = nextStash;
+        else delete raw.peachDisabledExtensions;
+      } else {
+        if (inPackages || inExtensions) {
+          raw.packages = packages.filter((k) => k !== key);
+          raw.extensions = extensions.filter((k) => k !== key);
+        }
+        if (!inStash) stash.push(key);
+        raw.peachDisabledExtensions = stash;
+      }
+      await writeFile(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+      this.emit("event:notice", {
+        message: enabled
+          ? `Enabled “${key}”. Restart to load.`
+          : `Disabled “${key}”. Restart to unload.`,
         level: "info",
       });
       this.emit("event:resourcesChanged", undefined);
