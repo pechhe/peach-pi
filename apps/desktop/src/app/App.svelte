@@ -518,7 +518,6 @@
         thread={selectedThread}
         onSetEnvironment={setThreadEnvironment}
         onOpenGraph={() => openView("graph")}
-        onOpenWorkQueue={() => selectedThread.projectId && openWorkQueue(selectedThread.projectId)}
         onSelectThread={selectThread}
         onNewThread={newThreadForCurrentProject}
         pendingFind={pendingFindQuery}

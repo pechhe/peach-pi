@@ -19,7 +19,6 @@
   import Tooltip from "./Tooltip.svelte";
   import DevTapWidget from "./DevTapWidget.svelte";
   import Workflow from "@lucide/svelte/icons/workflow";
-  import ListChecks from "@lucide/svelte/icons/list-checks";
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -70,13 +69,11 @@
     return off;
   });
 
-  let { thread, onSetEnvironment, onOpenGraph, onOpenWorkQueue, onSelectThread, onNewThread, pendingFind, onFindConsumed }: {
+  let { thread, onSetEnvironment, onOpenGraph, onSelectThread, onNewThread, pendingFind, onFindConsumed }: {
     thread: Thread;
     /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
     onSetEnvironment?: (threadId: string, worktree: boolean) => void | Promise<void>;
     onOpenGraph: () => void;
-    /** Open the project's Work Queue (issues + agent launch). */
-    onOpenWorkQueue?: () => void;
     /** Navigate to a thread (used by the DevTap install action). */
     onSelectThread?: (threadId: string) => void;
     /** Start a new thread in the current project (`/new` system command). */
@@ -662,15 +659,6 @@
             data-testid="graph-toggle"><Workflow size={14} /></button
           >
         </Tooltip>
-        {#if onOpenWorkQueue}
-          <Tooltip text="Open work queue">
-            <button
-              class="rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft"
-              onclick={onOpenWorkQueue}
-              data-testid="header-work-queue"><ListChecks size={14} /></button
-            >
-          </Tooltip>
-        {/if}
       {/if}
       {#if !thread.remoteHostId}
         <Tooltip text="Open in Finder">

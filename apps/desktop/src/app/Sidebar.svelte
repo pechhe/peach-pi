@@ -877,9 +877,9 @@
           {#if group.project.kind === "repo"}
             <Tooltip text="Open work queue">
               <button
-                class="flex shrink-0 items-center rounded px-1 py-0.5
-                  {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}
-                  {activeView === 'work-queue' ? 'text-accent opacity-100' : 'text-faint hover:text-fg'}"
+                class="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px]
+                  {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : ''}
+                  {activeView === 'work-queue' ? 'text-accent' : 'text-faint hover:text-fg'}"
                 onclick={() => onOpenWorkQueue(group.project.id)}
                 data-testid="project-work-queue"
                 aria-label="Open work queue"><ListChecks size={14} /></button
