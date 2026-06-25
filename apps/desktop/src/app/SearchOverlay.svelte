@@ -9,6 +9,7 @@
   import { createRawSnippet } from "svelte";
 
   let {
+    open,
     onSelect,
     onClose,
     onNewThread,
@@ -16,6 +17,7 @@
     onOpenView,
     onOpenSettings,
   }: {
+    open: boolean;
     /** `findQuery` is passed when a body match was clicked — ThreadView will
      *  open its FindBar pre-filled with the original search term. */
     onSelect: (threadId: string, findQuery?: string) => void;
@@ -123,7 +125,7 @@
 
 <CommandPalette
   items={commandItems}
-  open={true}
+  {open}
   shortcut=""
   placeholder="Search threads, settings, or run a command…"
   emptyMessage={loading ? "Searching…" : "No matches."}

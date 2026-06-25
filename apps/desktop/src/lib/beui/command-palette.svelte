@@ -207,6 +207,24 @@
     const el = listEl?.querySelector<HTMLButtonElement>(`[data-index="${active}"]`);
     el?.scrollIntoView({ block: "nearest" });
   });
+
+  // Active-row highlight geometry. motion-sv 0.1.x's shared-layout (layoutId)
+  // animation across unmount/mount is a silent no-op at runtime, so we drive
+  // the highlight directly: one persistent motion.div whose top/height spring
+  // to the active button's measured offset within the list. This is a plain
+  // value animation — the same mechanism the entrance spring uses.
+  let activeTop = $state(0);
+  let activeHeight = $state(0);
+  $effect(() => {
+    if (!browser || !open) return;
+    void active;
+    void rows;
+    const el = listEl?.querySelector<HTMLButtonElement>(`[data-index="${active}"]`);
+    if (el) {
+      activeTop = el.offsetTop;
+      activeHeight = el.offsetHeight;
+    }
+  });
 </script>
 
 {#if mounted}
@@ -220,7 +238,7 @@
     class={cn("fixed inset-0 z-[100]", open ? "pointer-events-auto" : "pointer-events-none")}
   >
     <motion.div
-      initial={false}
+      initial={{ opacity: 0 }}
       animate={{ opacity: open ? 1 : 0 }}
       transition={{ duration: open ? 0.18 : 0.12, ease: EASE_OUT }}
       onclick={() => setOpen(false)}
@@ -236,7 +254,7 @@
         aria-modal="true"
         aria-label="Command palette"
         tabindex={-1}
-        initial={false}
+        initial={{ opacity: 0, y: -8, scale: 0.97 }}
         animate={{
           opacity: open ? 1 : 0,
           y: open || reduce.current ? 0 : -8,
@@ -270,13 +288,29 @@
           </kbd>
         </div>
 
-        <div bind:this={listEl} id={`${uid}-list`} role="listbox" aria-label="Commands" class="max-h-[60vh] overflow-y-auto p-2" data-testid="command-palette-list">
+        <div bind:this={listEl} id={`${uid}-list`} role="listbox" aria-label="Commands" class="relative max-h-[60vh] overflow-y-auto p-2" data-testid="command-palette-list">
+          <!-- Single persistent highlight; top/height spring to the active row's
+               measured offset. Rendered once outside the row loop so it never
+               unmounts/mounts on active change (a value animation, not shared-layout). -->
+          {#if active >= 0 && rows.length > 0}
+            <motion.div
+              aria-hidden="true"
+              class="pointer-events-none absolute left-0 right-0 z-0 rounded-md bg-surface-2"
+              style={`top:${activeTop}px;height:${activeHeight}px`}
+              animate={{ top: activeTop, height: activeHeight }}
+              transition={
+                reduce.current
+                  ? { duration: 0 }
+                  : { type: "spring", stiffness: 480, damping: 38 }
+              }
+            ></motion.div>
+          {/if}
           {#if filtered.length === 0}
             <div class="p-8 text-center text-sm text-faint">{loading ? "Searching…" : emptyMessage}</div>
           {:else}
             {#each rows as it (it.id)}
               {@const isActive = it.idx === active}
-              {#if it.idx === 0 || rows[it.idx - 1]?.group !== it.group}}
+              {#if it.idx === 0 || rows[it.idx - 1]?.group !== it.group}
                 <div aria-hidden="true" class="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-fainter">
                   {it.group}
                 </div>
@@ -299,18 +333,6 @@
                 )}
                 data-testid="command-palette-item"
               >
-                <!-- Active-row highlight glides between rows via shared layout. -->
-                {#if isActive}
-                  <motion.span
-                    layoutId={`${uid}-active`}
-                    class="absolute inset-0 z-0 rounded-md bg-surface-2"
-                    transition={
-                      reduce.current
-                        ? { duration: 0 }
-                        : { type: "spring", stiffness: 480, damping: 38 }
-                    }
-                  ></motion.span>
-                {/if}
 
                 {#if it.icon}
                   {@const Icon = it.icon}

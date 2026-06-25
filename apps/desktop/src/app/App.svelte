@@ -538,16 +538,15 @@
     </div>
     <RecordingBar />
     <SidePanel />
-    {#if searchOpen}
-      <SearchOverlay
-        onSelect={selectThread}
-        onClose={() => (searchOpen = false)}
-        onNewThread={newThreadForCurrentProject}
-        onNewChat={() => startNewThread(null)}
-        onOpenView={openView}
-        onOpenSettings={openSettings}
-      />
-    {/if}
+    <SearchOverlay
+      open={searchOpen}
+      onSelect={selectThread}
+      onClose={() => (searchOpen = false)}
+      onNewThread={newThreadForCurrentProject}
+      onNewChat={() => startNewThread(null)}
+      onOpenView={openView}
+      onOpenSettings={openSettings}
+    />
   {:else}
     <main class="flex flex-1 items-center justify-center">
       <p class="text-sm text-fainter">Loading…</p>
