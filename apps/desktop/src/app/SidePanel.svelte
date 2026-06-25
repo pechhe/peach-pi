@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ModelInfo } from "@peach-pi/shared-types";
-  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { sideChat } from "../stores/side-chat.svelte";
   import { api } from "../lib/ipc";
   import Markdown from "./Markdown.svelte";
@@ -12,6 +12,26 @@
 
   let input = $state("");
   let showHistory = $state(false);
+
+  // Subdued starter prompts shown in the empty state.
+  const suggestions = [
+    "What file should I edit?",
+    "Explain this function",
+    "Check this decision",
+  ];
+
+  // The panel grows out of the floating BTW button (bottom-right of the main
+  // card, i.e. the panel's lower-left), so it reads as the button expanding
+  // rather than a sidebar sliding in.
+  function expandFromButton(_node: HTMLElement, { duration = 220 } = {}) {
+    return {
+      duration,
+      easing: cubicOut,
+      css: (t: number, u: number) =>
+        `transform: translate(${u * -28}px, ${u * 36}px) scale(${0.82 + 0.18 * t});` +
+        `opacity: ${t};`,
+    };
+  }
   let models = $state<ModelInfo[]>([]);
   let modelsLoadedFor: string | null = null;
 
@@ -33,6 +53,11 @@
     await sideChat.ask(q);
   }
 
+  async function useSuggestion(text: string) {
+    if (sideChat.streaming) return;
+    await sideChat.ask(text);
+  }
+
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -49,8 +74,8 @@
 
 {#if sideChat.open}
   <aside
-    class="flex h-full w-[24rem] shrink-0 flex-col border-l border-border-strong bg-surface"
-    transition:fly={{ x: 384, duration: 180 }}
+    class="btw-panel relative my-2 mr-2 flex w-[23rem] shrink-0 flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
+    transition:expandFromButton
   >
     <!-- Header -->
     <div class="flex items-start gap-2 border-b border-border px-4 py-3">
@@ -142,10 +167,29 @@
     <!-- Messages -->
     <div class="flex-1 overflow-y-auto px-4 py-3">
       {#if conv && conv.messages.length === 0 && !sideChat.streaming}
-        <p class="text-sm text-fainter">
-          Ask a quick question about the current code or which direction to take —
-          it won't touch your main conversation.
-        </p>
+        <div class="flex h-full flex-col items-center justify-center px-2 pb-12">
+          <div
+            class="w-full max-w-[17rem] rounded-2xl border border-border bg-surface-2/60 px-5 py-5 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.18)]"
+          >
+            <span
+              class="mx-auto mb-3 flex size-9 items-center justify-center rounded-full bg-accent/15 text-[11px] font-bold tracking-wide text-accent uppercase"
+            >
+              btw
+            </span>
+            <p class="text-sm font-semibold text-fg">Ask a quick side question</p>
+            <p class="mt-1 text-xs text-faint">It won't touch the main conversation.</p>
+            <div class="mt-4 flex flex-wrap justify-center gap-1.5">
+              {#each suggestions as s (s)}
+                <button
+                  class="rounded-full border border-border-strong bg-surface px-2.5 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                  onclick={() => useSuggestion(s)}
+                >
+                  {s}
+                </button>
+              {/each}
+            </div>
+          </div>
+        </div>
       {/if}
       {#if conv}
         <div class="flex flex-col gap-3">
@@ -200,3 +244,14 @@
     </div>
   </aside>
 {/if}
+
+<style>
+  /* Grow from the BTW button's corner; soft circular shadow echoes the cap. */
+  .btw-panel {
+    transform-origin: bottom left;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.12),
+      -2px 6px 16px -6px rgba(0, 0, 0, 0.22),
+      -6px 14px 40px -16px rgba(0, 0, 0, 0.28);
+  }
+</style>

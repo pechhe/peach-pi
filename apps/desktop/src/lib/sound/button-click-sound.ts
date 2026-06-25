@@ -424,10 +424,11 @@ export function playButtonClick(_variant?: ButtonClickVariant): void {}
 export function playButtonSecondary(_variant?: ButtonClickVariant): void {}
 
 /**
- * Make every <button> feel like the send dial: a down-click on press, an
- * up-click on release, and a depressed (`is-pressed`) state while held. Buttons
- * that own their own sound/visual (the send dial, thread rows, …) opt out with
- * `data-press="self"`. Call once on app mount; returns a disposer.
+ * Give every <button> the send dial's audio: a down-click on press and an
+ * up-click on release. No depress transform — the physical move is reserved
+ * for buttons with their own press visuals (the send dial, device switches).
+ * Buttons that own their own sound (the send dial, thread rows, …) opt out
+ * with `data-press="self"`. Call once on app mount; returns a disposer.
  */
 export function installGlobalButtonPress(): () => void {
   if (typeof document === "undefined") return () => {};
@@ -439,14 +440,12 @@ export function installGlobalButtonPress(): () => void {
     if (!(btn instanceof HTMLButtonElement)) return;
     if (btn.disabled || btn.dataset.press === "self") return;
     held = btn;
-    btn.classList.add("is-pressed");
     playClick("down");
   };
   const release = (playUp: boolean): void => {
     const btn = held;
     held = null;
     if (!btn) return;
-    btn.classList.remove("is-pressed");
     if (playUp) playClick("up");
   };
   const onPointerUp = (): void => release(true);

@@ -81,6 +81,8 @@ export class ThreadService {
   private pendingOps = new Map<string, TranscriptOp[]>();
   /** Threads with an in-flight compaction; their extension toasts are suppressed. */
   private compacting = new Set<string>();
+  /** Threads queued for a hot-reload once their current run finishes. */
+  private reloadQueued = new Set<string>();
   private flushTimer: NodeJS.Timeout | null = null;
   /** Monotonic counter stamped on each emitted transcript flush; the boundary
    *  `getTranscript` reports so backfilling renderers can dedupe live deltas. */
@@ -581,6 +583,46 @@ export class ThreadService {
     }
   }
 
+  /** Hot-reload one session's extensions/skills/prompts/themes from disk via
+   *  the SDK's `AgentSession.reload()`. Refuses if the thread is currently
+   *  running (reload invalidates in-flight ctxs). */
+  async reloadSession(threadId: string): Promise<{ ok: boolean; error?: string }> {
+    const session = this.sessions.get(threadId);
+    if (!session) {
+      // Nothing loaded yet — nothing to reload. The next prompt loads fresh.
+      return { ok: true };
+    }
+    if (session.isStreaming) {
+      return { ok: false, error: "Cannot reload while a run is in progress." };
+    }
+    try {
+      await session.reload();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  }
+
+  /** Reload every idle session in parallel, and queue a reload for every
+   *  running session (flushed automatically when its run finishes). Returns counts. */
+  async reloadIdleSessions(): Promise<{ reloaded: string[]; queued: string[] }> {
+    const reloaded: string[] = [];
+    const queued: string[] = [];
+    const tasks: Promise<void>[] = [];
+    for (const [threadId, session] of this.sessions) {
+      if (session.isStreaming) {
+        this.reloadQueued.add(threadId);
+        queued.push(threadId);
+        continue;
+      }
+      tasks.push(
+        session.reload().then(() => reloaded.push(threadId)).catch(() => {}),
+      );
+    }
+    await Promise.all(tasks);
+    return { reloaded, queued };
+  }
+
   dispose(): void {
     if (this.flushTimer) clearTimeout(this.flushTimer);
     for (const session of this.sessions.values()) session.dispose();
@@ -684,6 +726,14 @@ export class ThreadService {
     }
     if (status === "completed" && this.onRunIdleWithCwd) {
       this.onRunIdleWithCwd(threadId, this.gitService?.cwdFor(threadId) ?? null);
+    }
+    // Flush a queued hot-reload now that this thread's run has finished.
+    if (status === "completed" && this.reloadQueued.has(threadId)) {
+      this.reloadQueued.delete(threadId);
+      const session = this.sessions.get(threadId);
+      if (session && !session.isStreaming) {
+        void session.reload().catch(() => {});
+      }
     }
   }
 

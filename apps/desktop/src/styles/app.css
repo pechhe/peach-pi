@@ -750,10 +750,4 @@ details[open] > *:not(summary) {
   background: color-mix(in srgb, var(--color-accent) 22%, transparent);
 }
 
-/* Global button press feedback (installGlobalButtonPress): a momentary depress
- * while held, mirroring the send dial. Buttons with their own press visuals
- * (the send dial, the device switches) are excluded so this never fights their
- * bespoke transforms. */
-button.is-pressed:not(.send-dial):not(.devbtn__switch) {
-  transform: translateY(1px);
-}
+

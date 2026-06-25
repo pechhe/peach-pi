@@ -318,6 +318,16 @@ export class PiSession {
     this.callbacks.onMetaChange?.();
   }
 
+  /** Hot-reload extensions/skills/prompts/themes from disk via the SDK's
+   *  `AgentSession.reload()`. Re-imports extension module files, rebuilds the
+   *  tool registry, and re-emits `session_start` to the new extension runner —
+   *  without losing the current conversation. Must not be called while a run
+   *  is in progress (the SDK invalidates captured ctxs on reload). */
+  async reload(): Promise<void> {
+    await this.session.reload();
+    this.callbacks.onMetaChange?.();
+  }
+
   /**
    * Toggle a model's membership in the global `enabledModels` scope
    * (settings.json, shared with the pi TUI). Persists immediately.

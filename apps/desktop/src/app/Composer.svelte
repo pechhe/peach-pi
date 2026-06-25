@@ -1407,11 +1407,17 @@
   <button
     class="btw-btn btw-btn--floating"
     data-press="self"
-    onclick={() => {
+    onpointerdown={(e) => {
+      if (e.button !== 0) return;
+      playClick("down");
+    }}
+    onpointerup={(e) => {
+      if (e.button !== 0) return;
+      playClick("up");
       const closing = sideChat.open && sideChat.threadId === thread.id;
-      playClick(closing ? "up" : "down");
       closing ? sideChat.close() : void sideChat.openPanel(thread.id);
     }}
+    onpointercancel={() => playClick("up")}
     data-testid="open-side-chat"
     title="Side conversation (/btw) — ask a quick question without touching this task"
     aria-label="Open side conversation"
