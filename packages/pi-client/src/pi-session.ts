@@ -36,6 +36,11 @@ export interface PiSessionCallbacks {
   onTerminalCustomFrame?(frame: TerminalCustomFrameEvent): void;
   /** Current auto-compaction thresholds; read after each run ends. */
   getAutoCompact?(): AutoCompactSettings;
+  /** Fired on every tool_execution_start with the tool name + full args (before
+   *  arg summarisation). Lets the app observe commands an agent runs — e.g. a
+   *  `git worktree add` that creates an isolated checkout the app should adopt
+   *  so the thread's branch label reflects where work actually lands. */
+  onToolStart?(toolName: string, args: unknown): void;
 }
 
 export interface PiSessionMeta {
@@ -186,6 +191,9 @@ export class PiSession {
       if (event.type === "thinking_level_changed") this.callbacks.onMetaChange?.();
       if (event.type === "queue_update") {
         this.callbacks.onQueueChange?.([...event.steering], [...event.followUp]);
+      }
+      if (event.type === "tool_execution_start") {
+        this.callbacks.onToolStart?.(event.toolName ?? "", event.args);
       }
       const ops = this.recorder.handleEvent(event as RecorderEvent);
       if (ops.length > 0) this.callbacks.onOps(ops);

@@ -65,6 +65,74 @@ function firstUserMessage(items: TranscriptItem[]): string | undefined {
   return undefined;
 }
 
+/** Extract the path argument from a bash `git worktree add` tool call, or null
+ *  when the command isn't creating a worktree. Agents shell out idioms like
+ *  `git worktree add -b <branch> <path> <commit>`, `git worktree add <path>`,
+ *  or `git worktree add --detach <path>`; the first non-flag token after the
+ *  `add` subcommand is the path (relative to the project checkout cwd, since
+ *  the agent runs bash there). Only the first `worktree add` in a compound
+ *  command is considered — an isolation worktree is created near the start of
+ *  the work, not buried after `&&`s. Handles the JSON-string args shape the pi
+ *  client delivers (bash tool: `{ command: "..." }`). */
+function extractWorktreeAddPath(args: unknown): string | null {
+  let command: string | undefined;
+  if (args && typeof args === "object" && "command" in args) {
+    const c = (args as { command?: unknown }).command;
+    if (typeof c === "string") command = c;
+  } else if (typeof args === "string") {
+    command = args;
+  }
+  if (!command) return null;
+  const addIdx = command.indexOf("worktree add");
+  if (addIdx === -1) return null;
+  // Only consider up to the first command separator after `worktree add` so a
+  // later `&& git worktree add <elsewhere>` in the same compound command
+  // doesn't get picked up (first one wins, matching the isolation pattern).
+  const rest = command.slice(addIdx + "worktree add".length);
+  const stop = Math.min(
+    ...["&&", ";", "|", "\n"].map((sep) => {
+      const i = rest.indexOf(sep);
+      return i === -1 ? rest.length : i;
+    }),
+  );
+  const segment = rest.slice(0, stop);
+  let expectValue = false;
+  for (const tok of tokenizeShell(segment)) {
+    if (expectValue) { expectValue = false; continue; }
+    if (tok === "--") return null; // no positionals before `--`
+    if (tok === "-b" || tok === "-B") { expectValue = true; continue; }
+    if (tok.startsWith("-")) continue; // --detach / --no-checkout / -f / -q …
+    return tok;
+  }
+  return null;
+}
+
+/** Minimal POSIX-ish tokenizer: splits on whitespace, honours single/double
+ *  quotes, and returns the unquoted token value. Good enough for `git worktree
+ *  add` path arguments — not a full shell parser. */
+function* tokenizeShell(input: string): Generator<string> {
+  let i = 0;
+  const s = input.trim();
+  while (i < s.length) {
+    while (i < s.length && /\s/.test(s[i]!)) i++;
+    if (i >= s.length) break;
+    let token = "";
+    while (i < s.length && !/\s/.test(s[i]!)) {
+      const ch = s[i]!;
+      if (ch === "'" || ch === '"') {
+        const close = s.indexOf(ch, i + 1);
+        if (close === -1) return;
+        token += s.slice(i + 1, close);
+        i = close + 1;
+      } else {
+        token += ch;
+        i++;
+      }
+    }
+    if (token) yield token;
+  }
+}
+
 /**
  * Owns live pi sessions keyed by thread id. Streams transcript ops to the
  * renderer with a short coalescing buffer (ported concept from peche-pi's
@@ -780,6 +848,7 @@ export class ThreadService {
         onTerminalCustomFrame: (frame) =>
           this.emit("event:terminalCustom", { threadId, ...frame }),
         getAutoCompact: () => this.getAutoCompact(),
+        onToolStart: (toolName, args) => this.observeToolStart(threadId, toolName, args),
       },
       sessionFile ?? undefined,
     );
@@ -788,6 +857,21 @@ export class ThreadService {
     }
     this.sessions.set(threadId, session);
     return session;
+  }
+
+  /** Tool-call observation seam: fired by the pi client on every
+   *  `tool_execution_start` (before arg summarisation). Used to detect a
+   *  raw `git worktree add -b <branch> <path>` an agent runs to isolate its
+   *  work, and adopt that path as the thread's worktree dir so the git widget
+   *  reflects where commits actually land instead of the project's main
+   *  checkout. Fire-and-forget: gitService guards against re-adoption and
+   *  non-sibling paths. */
+  private observeToolStart(threadId: string, toolName: string, args: unknown): void {
+    if (toolName !== "bash") return;
+    if (!this.gitService) return;
+    const dir = extractWorktreeAddPath(args);
+    if (!dir) return;
+    void this.gitService.adoptSiblingWorktree(threadId, dir).catch(() => {});
   }
 
   private setStatus(threadId: string, status: Thread["status"]): void {
