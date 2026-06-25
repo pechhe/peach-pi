@@ -1,4 +1,4 @@
-import type { RemoteFirstMode } from "@peach-pi/shared-types";
+import { createIpcStore } from "./create-ipc-store.svelte";
 import { api } from "../lib/ipc";
 
 /**
@@ -6,15 +6,22 @@ import { api } from "../lib/ipc";
  * on the target remote machine and messaging a thread hands it off there. The
  * Remote sidebar item glows + pulses while on. Inert when no remote machine is
  * registered (`hasRemoteMachine` false).
+ *
+ * The load/set mirror (`handoff:getMode` / `handoff:setMode`) is owned by the
+ * factory; the cross-window listener + HMR guard stay explicit here, since
+ * they are not part of the load/set loop.
  */
-class RemoteFirstStore {
-  mode = $state<RemoteFirstMode>({
-    enabled: false,
-    targetMachine: null,
-    hasRemoteMachine: false,
-  });
-  private loaded = false;
+const store = createIpcStore<"handoff:getMode", "handoff:setMode">({
+  loadChannel: "handoff:getMode",
+  setChannel: "handoff:setMode",
+  default: { enabled: false, targetMachine: null, hasRemoteMachine: false },
+});
 
+export const remoteFirst = {
+  get mode() {
+    return store.state;
+  },
+  /** Load + start listening for cross-window handoff state changes. Idempotent. */
   init(): void {
     // Load the persisted state immediately so the sidebar lamp reflects
     // remote-first on startup (the lamp lives in the Sidebar, which is always
@@ -25,28 +32,10 @@ class RemoteFirstStore {
     api.on("event:handoffChanged", () => {
       void this.load(true);
     });
-  }
-
-  async load(force = false): Promise<void> {
-    if (!force && this.loaded) return;
-    this.loaded = true;
-    try {
-      this.mode = await api.invoke("handoff:getMode");
-    } catch (err) {
-      console.error("[remote-first] load failed", err);
-    }
-  }
-
-  async toggle(next: boolean): Promise<void> {
-    try {
-      this.mode = await api.invoke("handoff:setMode", next);
-    } catch (err) {
-      console.error("[remote-first] toggle failed", err);
-    }
-  }
-}
-
-export const remoteFirst = new RemoteFirstStore();
+  },
+  load: (force = false) => store.load(force),
+  toggle: (next: boolean) => store.set(next),
+};
 
 // Survive vite HMR: a hot reload of this module swaps in a fresh singleton, so
 // already-mounted components (the Sidebar glow) keep the stale instance. Accept

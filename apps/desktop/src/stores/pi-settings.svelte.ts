@@ -1,44 +1,49 @@
 import type { PiSettings } from "@peach-pi/shared-types";
-import { api } from "../lib/ipc";
+import { createIpcStore } from "./create-ipc-store.svelte";
 
 /**
  * Pi agent settings (retry, message delivery).
  * Persisted in ~/.pi/agent/settings.json by the main process.
  *
- * Each field is a flat $state primitive (matching the auto-compact pattern)
- * so Svelte 5 reactivity tracks reads/writes correctly.
+ * A pure load/set mirror over `app:getPiSettings` / `app:setPiSettings`. The
+ * factory's `$state` holds the whole `PiSettings` payload; these accessors
+ * project it onto the flat field shape consumers already use (so the Settings
+ * view reads `piSettings.retryEnabled` etc., unchanged).
  */
-class PiSettingsStore {
-  retryEnabled = $state(true);
-  retryMaxRetries = $state(3);
-  retryBaseDelayMs = $state(2000);
-  steeringMode = $state<"all" | "one-at-a-time">("one-at-a-time");
-  followUpMode = $state<"all" | "one-at-a-time">("one-at-a-time");
-  autoUpdateExtensions = $state(true);
-  insomnia = $state(false);
-  private loaded = false;
+const store = createIpcStore<"app:getPiSettings", "app:setPiSettings">({
+  loadChannel: "app:getPiSettings",
+  setChannel: "app:setPiSettings",
+  default: {
+    retry: { enabled: true, maxRetries: 3, baseDelayMs: 2000, provider: { timeoutMs: null, maxRetries: 0, maxRetryDelayMs: 60_000 } },
+    steeringMode: "one-at-a-time",
+    followUpMode: "one-at-a-time",
+    autoUpdateExtensions: true,
+    insomnia: false,
+  },
+});
 
-  async load(): Promise<void> {
-    if (this.loaded) return;
-    this.loaded = true;
-    const s = await api.invoke("app:getPiSettings");
-    this.apply(s);
-  }
-
-  async patch(update: Partial<PiSettings>): Promise<void> {
-    const s = await api.invoke("app:setPiSettings", update);
-    this.apply(s);
-  }
-
-  private apply(s: PiSettings): void {
-    this.retryEnabled = s.retry.enabled;
-    this.retryMaxRetries = s.retry.maxRetries;
-    this.retryBaseDelayMs = s.retry.baseDelayMs;
-    this.steeringMode = s.steeringMode;
-    this.followUpMode = s.followUpMode;
-    this.autoUpdateExtensions = s.autoUpdateExtensions;
-    this.insomnia = s.insomnia;
-  }
-}
-
-export const piSettings = new PiSettingsStore();
+export const piSettings = {
+  get retryEnabled(): boolean {
+    return store.state.retry.enabled;
+  },
+  get retryMaxRetries(): number {
+    return store.state.retry.maxRetries;
+  },
+  get retryBaseDelayMs(): number {
+    return store.state.retry.baseDelayMs;
+  },
+  get steeringMode(): PiSettings["steeringMode"] {
+    return store.state.steeringMode;
+  },
+  get followUpMode(): PiSettings["followUpMode"] {
+    return store.state.followUpMode;
+  },
+  get autoUpdateExtensions(): boolean {
+    return store.state.autoUpdateExtensions;
+  },
+  get insomnia(): boolean {
+    return store.state.insomnia;
+  },
+  load: (force?: boolean) => store.load(force),
+  patch: (update: Partial<PiSettings>) => store.set(update),
+};
