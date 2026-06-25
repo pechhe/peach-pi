@@ -424,6 +424,10 @@
     onNewWorktree={newWorktreeInProject}
     onOpenSearch={() => (searchOpen = true)}
     onReloadAll={() => void api.invoke("threads:reloadAll")}
+    onGoBack={goBack}
+    onGoForward={goForward}
+    canGoBack={navIndex > 0}
+    canGoForward={navIndex < navHistory.length - 1}
   />
 {/snippet}
 

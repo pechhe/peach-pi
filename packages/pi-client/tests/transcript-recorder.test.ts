@@ -237,3 +237,76 @@ test("delete op removes a placeholder item", () => {
   ]);
   assert.equal(view.length, 0);
 });
+
+test("compaction_start opens a transient running card", () => {
+  const r = new TranscriptRecorder();
+  const view = run(r, [{ type: "compaction_start", reason: "threshold" }]);
+  assert.equal(view.length, 1);
+  const card = view[0]!;
+  assert.equal(card.kind, "compaction");
+  assert.equal((card as { running: boolean }).running, true);
+  assert.equal((card as { reason: string }).reason, "threshold");
+});
+
+test("compaction_end success patches the leaf card with reason and summary", () => {
+  // The success path assumes PiSession has already reloaded the transcript
+  // from the branch (loadFromEntries), leaving a persisted compaction entry at
+  // the leaf. handleEvent(compaction_end) then patches that leaf with the
+  // precise trigger reason + summary from the event result.
+  const r = new TranscriptRecorder();
+  // Simulate the post-reload branch: a persisted divider at the leaf (reason
+  // defaults to "threshold" since persisted entries don't store the trigger).
+  let view = applyTranscriptOps([], r.loadFromEntries([
+    { id: "e1", type: "message", message: { role: "user", content: [{ type: "text", text: "q" }] } },
+    { id: "e2", type: "compaction", summary: "old summary", tokensBefore: 1000 },
+  ]));
+  view = applyTranscriptOps(view, r.handleEvent({
+    type: "compaction_end",
+    reason: "manual",
+    result: { summary: "## Goal\nfresh recap", tokensBefore: 20000 },
+  }));
+  assert.equal(view.length, 2);
+  const leaf = view[1]!;
+  assert.equal(leaf.kind, "compaction");
+  assert.equal((leaf as { reason: string }).reason, "manual");
+  assert.equal((leaf as { summary?: string }).summary, "## Goal\nfresh recap");
+  assert.equal((leaf as { tokensBefore?: number }).tokensBefore, 20000);
+  // tokensAfter derived from summary length (~4 chars/token).
+  assert.equal((leaf as { tokensAfter?: number }).tokensAfter, Math.ceil("## Goal\nfresh recap".length / 4));
+});
+
+test("compaction_end failure finalises the transient card in place", () => {
+  // On failure nothing is persisted, so there is no caller reload. The
+  // recorder must finalise the transient running card (opened at start) in
+  // place with the error, leaving it visible rather than silently dropped.
+  const r = new TranscriptRecorder();
+  const view = run(r, [
+    { type: "compaction_start", reason: "manual" },
+    { type: "compaction_end", reason: "manual", aborted: false, errorMessage: "boom" },
+  ]);
+  assert.equal(view.length, 1);
+  const card = view[0]!;
+  assert.equal(card.kind, "compaction");
+  assert.equal((card as { running: boolean }).running, false);
+  assert.equal((card as { error?: string }).error, "boom");
+});
+
+test("overlapping compaction_start finalises the orphaned card", () => {
+  // A second compaction_start before the first ends must finalise the prior
+  // still-running card so it doesn't spin forever, then open a new one. The
+  // recorder returns both ops (orphan finalize + new running card); asserting
+  // on the ops avoids same-millisecond Date.now() id collisions that only
+  // happen when the test runs the two starts synchronously.
+  const r = new TranscriptRecorder();
+  const start1 = r.handleEvent({ type: "compaction_start", reason: "threshold" });
+  assert.equal(start1.length, 1);
+  assert.equal((start1[0]!.item as { running: boolean }).running, true);
+  const start2 = r.handleEvent({ type: "compaction_start", reason: "manual" });
+  assert.equal(start2.length, 2, "orphan finalize + new card");
+  const orphan = start2[0]!.item as { running: boolean; aborted?: boolean; error?: string };
+  assert.equal(orphan.running, false);
+  assert.equal(orphan.aborted, true);
+  assert.equal(orphan.error, "Superseded by a newer compaction");
+  const live = start2[1]!.item as { running: boolean };
+  assert.equal(live.running, true);
+});

@@ -4,8 +4,9 @@
 /* Loaded LAST (after composer-device.css / -dark.css and             */
 /* sidebar-device.css) so it wins by source order at equal specificity. */
 /*                                                                    */
-/* Activated only when a custom/saved theme emits `--metal-dye`        */
-/* (see theme-tokens.ts buildCustomCss). Each neutral chassis body     */
+/* Applied whenever a theme emits `--metal-dye` — either a preset      */
+/* (`:root[data-theme]` in app.css) or a custom/saved theme            */
+/* (theme-tokens.ts buildCustomCss). Each neutral chassis body          */
 /* stop is re-mixed toward the dye:                                   */
 /*                                                                    */
 /*   color-mix(in oklch, <neutral>, var(--metal-dye, <neutral>)       */
@@ -28,7 +29,7 @@
 /* Only the final body-ramp layer is retinted; the sheen/corner    */
 /* highlights above it stay neutral so the dye reads as pigment.     */
 /* --------------------------------------------------------------- */
-:root[data-custom="true"] .composer-device .composer__surface {
+:root .composer-device .composer__surface {
   background:
     linear-gradient(180deg, oklch(1 0.002 250 / 0.42), oklch(0.9 0.003 250 / 0.1) 46%, oklch(0.64 0.003 250 / 0.09) 100%),
     radial-gradient(ellipse 95% 76% at 24% 20%, oklch(1 0.002 250 / 0.13), transparent 64%),
@@ -44,7 +45,7 @@
 /* --------------------------------------------------------------- */
 /* Composer chassis — anodized black (dark)                        */
 /* --------------------------------------------------------------- */
-:root[data-custom="true"][data-composer="dark"] .composer-device .composer__surface {
+:root[data-composer="dark"] .composer-device .composer__surface {
   background:
     linear-gradient(180deg, oklch(0.6 0.004 265 / 0.16), oklch(0.3 0.004 265 / 0.05) 46%, oklch(0.05 0.004 265 / 0.14) 100%),
     radial-gradient(ellipse 95% 76% at 24% 20%, oklch(0.62 0.004 265 / 0.1), transparent 64%),
@@ -65,7 +66,7 @@
 /* lit top edge give the dyed surface anodized depth (it otherwise   */
 /* holds flat across a tall rail and reads as a slab).               */
 /* --------------------------------------------------------------- */
-:root[data-custom="true"] .sidebar-device {
+:root .sidebar-device {
   background:
     linear-gradient(180deg, oklch(1 0.002 250 / 0.34) 0%, transparent 40%, transparent 70%, oklch(0.42 0.004 250 / 0.14) 100%),
     radial-gradient(ellipse 34% 55% at 86% 12%, oklch(1 0.002 250 / 0.26), transparent 60%),
@@ -86,7 +87,7 @@
 /* --------------------------------------------------------------- */
 /* Sidebar rail — anodized black (dark)                            */
 /* --------------------------------------------------------------- */
-:root[data-custom="true"][data-composer="dark"] .sidebar-device {
+:root[data-composer="dark"] .sidebar-device {
   background:
     linear-gradient(180deg, oklch(0.62 0.004 265 / 0.22) 0%, transparent 36%, transparent 66%, oklch(0 0 0 / 0.3) 100%),
     radial-gradient(ellipse 34% 55% at 86% 12%, oklch(0.62 0.004 265 / 0.22), transparent 60%),

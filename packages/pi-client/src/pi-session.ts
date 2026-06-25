@@ -70,11 +70,6 @@ export class PiSession {
   private extensionsResult: LoadExtensionsResult | null = null;
   private allToolNames: string[];
   private toolMode: ToolMode = "all";
-  /** FIFO queue of in-flight compaction card ids. Multiple compactions can
-   *  overlap (app auto-compact, extension smart-compact, SDK builtin). Using
-   *  a queue ensures every start→end pair closes the correct card — a single
-   *  id was getting orphaned on overlap, leaving a permanent spinner. */
-  private activeCompactionIds: string[] = [];
 
   private constructor(
     session: AgentSession,
@@ -96,94 +91,24 @@ export class PiSession {
         this.callbacks.onRunningChange(false);
         this.callbacks.onMetaChange?.();
       }
-      if (event.type === "compaction_start") {
-        // Finalise any orphaned still-running card from a prior overlapping
-        // compaction so it doesn't spin forever.
-        while (this.activeCompactionIds.length > 0) {
-          const orphan = this.activeCompactionIds.shift()!;
-          this.callbacks.onOps([
-            {
-              op: "upsert",
-              item: {
-                id: orphan,
-                kind: "compaction",
-                running: false,
-                reason: event.reason,
-                aborted: true,
-                error: "Superseded by a newer compaction",
-              },
-            },
-          ]);
-        }
-        const id = `compaction-${Date.now()}`;
-        this.activeCompactionIds.push(id);
-        this.callbacks.onOps([
-          {
-            op: "upsert",
-            item: {
-              id,
-              kind: "compaction",
-              running: true,
-              reason: event.reason,
-            },
-          },
-        ]);
+      if (event.type === "compaction_end" && !(event.aborted || event.errorMessage)) {
+        // Success: a compaction entry is now persisted on the branch. Reload
+        // from the branch before the recorder patches the leaf card, so the
+        // real summary renders as an in-stream divider (the transient card is
+        // wiped by the reset). This is the same rebuild-from-truth used on
+        // rewind/resume — it touches the SDK session manager, so it stays here
+        // rather than in the SDK-free recorder. (Failure path finalises the
+        // transient card in place with no reload.)
+        this.callbacks.onOps(
+          this.recorder.loadFromEntries(this.session.sessionManager.getBranch()),
+        );
       }
       if (event.type === "compaction_end") {
-        // Pop the matching start id (the transient "compacting…" card).
-        const id = this.activeCompactionIds.shift() ?? `compaction-${Date.now()}`;
-        if (event.aborted || event.errorMessage) {
-          // No compaction entry was persisted on failure, so reconciling the
-          // branch would silently drop the running card and hide the failure.
-          // Finalise the transient card in place instead.
-          this.callbacks.onOps([
-            {
-              op: "upsert",
-              item: {
-                id,
-                kind: "compaction",
-                running: false,
-                reason: event.reason,
-                aborted: event.aborted,
-                error: event.errorMessage,
-              },
-            },
-          ]);
-        } else {
-          // Success: a compaction entry is now on the branch. Reconcile the
-          // whole transcript from the branch so the new summary renders as an
-          // in-stream divider (the transient card is wiped by the reset). This
-          // also keeps the GUI consistent with the SDK after live compaction.
-          this.callbacks.onOps(
-            this.recorder.loadFromEntries(this.session.sessionManager.getBranch()),
-          );
-          // Persisted compaction entries don't store the trigger reason; patch
-          // the just-completed (leaf) card with the precise reason/summary.
-          const items = this.recorder.transcript();
-          const last = items[items.length - 1];
-          if (last?.kind === "compaction") {
-            this.callbacks.onOps([
-              {
-                op: "upsert",
-                item: {
-                  ...last,
-                  reason: event.reason,
-                  summary: event.result?.summary ?? last.summary,
-                  tokensBefore: event.result?.tokensBefore ?? last.tokensBefore,
-                  tokensAfter: event.result?.summary
-                    ? Math.ceil(event.result.summary.length / 4)
-                    : last.tokensAfter,
-                },
-              },
-            ]);
-          }
-        }
+        // Meta (context/model) and the run flag are session lifecycle, not
+        // transcript, so they stay here. A standalone compaction (manual /
+        // threshold after a finished turn) can leave the app's running flag
+        // stuck true with no paired `agent_end`; reconcile it.
         this.callbacks.onMetaChange?.();
-        // Reconcile the run flag against the real streaming state. A standalone
-        // compaction (manual / threshold after a finished turn) can leave the
-        // app's running flag stuck true with no paired `agent_end`, leaving the
-        // "Working…" spinner spinning forever. If the run won't continue and the
-        // agent isn't actually streaming, force the flag back to idle.
         if (!event.willRetry && !this.session.isStreaming) {
           this.callbacks.onRunningChange(false);
         }

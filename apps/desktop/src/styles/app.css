@@ -119,6 +119,455 @@
   --color-warning: #a34d14;
   --color-warning-border: #e7cfa0;
   --color-warning-surface: #f8eccd;
+  --metal-dye: #b0a4cc;
+  --metal-tint-amount: 35%;
+}
+
+/* One Dark (Atom) — dark */
+:root[data-theme="one-dark"] {
+  color-scheme: dark;
+  --color-bg: #282c34;
+  --color-sidebar: #21252b;
+  --color-surface: #282c34;
+  --color-surface-2: #2c313a;
+  --color-surface-3: #323842;
+  --color-selected: #323842;
+  --color-border: #3b4048;
+  --color-border-strong: #545862;
+  --color-border-focus: #61afef;
+  --color-fg: #abb2bf;
+  --color-fg-soft: #828997;
+  --color-muted: #5c6370;
+  --color-faint: #4b5263;
+  --color-fainter: #3b4048;
+  --color-primary: #528bff;
+  --color-primary-fg: #ffffff;
+  --color-accent: #61afef;
+  --color-danger: #e06c75;
+  --color-danger-border: #6a3a3f;
+  --color-danger-surface: #2c2230;
+  --color-success: #98c379;
+  --color-warning: #d19a66;
+  --color-warning-border: #5e4a30;
+  --color-warning-surface: #2e2820;
+}
+
+/* Monokai Pro — dark */
+:root[data-theme="monokai"] {
+  color-scheme: dark;
+  --color-bg: #2d2a2e;
+  --color-sidebar: #221f22;
+  --color-surface: #2d2a2e;
+  --color-surface-2: #373339;
+  --color-surface-3: #403c41;
+  --color-selected: #403c41;
+  --color-border: #403c41;
+  --color-border-strong: #525053;
+  --color-border-focus: #fc618a;
+  --color-fg: #fcfcfa;
+  --color-fg-soft: #c1c0c0;
+  --color-muted: #939293;
+  --color-faint: #727072;
+  --color-fainter: #525053;
+  --color-primary: #fc618a;
+  --color-primary-fg: #ffffff;
+  --color-accent: #fc618a;
+  --color-danger: #ff6188;
+  --color-danger-border: #6a3340;
+  --color-danger-surface: #332028;
+  --color-success: #a9dc76;
+  --color-warning: #fc9867;
+  --color-warning-border: #5e4538;
+  --color-warning-surface: #332a22;
+}
+
+/* Gruvbox Dark (medium) — dark */
+:root[data-theme="gruvbox"] {
+  color-scheme: dark;
+  --color-bg: #282828;
+  --color-sidebar: #1d2021;
+  --color-surface: #282828;
+  --color-surface-2: #3c3836;
+  --color-surface-3: #504945;
+  --color-selected: #504945;
+  --color-border: #3c3836;
+  --color-border-strong: #504945;
+  --color-border-focus: #fabd2f;
+  --color-fg: #ebdbb2;
+  --color-fg-soft: #d5c4a1;
+  --color-muted: #bdae93;
+  --color-faint: #928374;
+  --color-fainter: #7c6f64;
+  --color-primary: #689d6a;
+  --color-primary-fg: #282828;
+  --color-accent: #fabd2f;
+  --color-danger: #fb4934;
+  --color-danger-border: #8a3327;
+  --color-danger-surface: #3a1d1a;
+  --color-success: #b8bb26;
+  --color-warning: #fabd2f;
+  --color-warning-border: #7a5c20;
+  --color-warning-surface: #3a3015;
+}
+
+/* Nord — dark */
+:root[data-theme="nord"] {
+  color-scheme: dark;
+  --color-bg: #2e3440;
+  --color-sidebar: #292e39;
+  --color-surface: #2e3440;
+  --color-surface-2: #3b4252;
+  --color-surface-3: #434c5e;
+  --color-selected: #434c5e;
+  --color-border: #3b4252;
+  --color-border-strong: #434c5e;
+  --color-border-focus: #88c0d0;
+  --color-fg: #d8dee9;
+  --color-fg-soft: #c8d0e0;
+  --color-muted: #8f9aae;
+  --color-faint: #616e88;
+  --color-fainter: #4c566a;
+  --color-primary: #5e81ac;
+  --color-primary-fg: #eceff4;
+  --color-accent: #88c0d0;
+  --color-danger: #bf616a;
+  --color-danger-border: #62353a;
+  --color-danger-surface: #3a2a2e;
+  --color-success: #a3be8c;
+  --color-warning: #ebcb8b;
+  --color-warning-border: #6e5e34;
+  --color-warning-surface: #38342a;
+}
+
+/* Tokyo Night — dark */
+:root[data-theme="tokyo-night"] {
+  color-scheme: dark;
+  --color-bg: #1a1b26;
+  --color-sidebar: #16161e;
+  --color-surface: #1e2030;
+  --color-surface-2: #24283b;
+  --color-surface-3: #2f3550;
+  --color-selected: #2f3550;
+  --color-border: #292e42;
+  --color-border-strong: #3b4261;
+  --color-border-focus: #7aa2f7;
+  --color-fg: #c0caf5;
+  --color-fg-soft: #a9b1d6;
+  --color-muted: #787c99;
+  --color-faint: #565f89;
+  --color-fainter: #414868;
+  --color-primary: #7aa2f7;
+  --color-primary-fg: #1a1b26;
+  --color-accent: #7aa2f7;
+  --color-danger: #f7768e;
+  --color-danger-border: #6e3947;
+  --color-danger-surface: #352434;
+  --color-success: #9ece6a;
+  --color-warning: #e0af68;
+  --color-warning-border: #6e5836;
+  --color-warning-surface: #36312a;
+}
+
+/* Solarized Light */
+:root[data-theme="solarized-light"] {
+  color-scheme: light;
+  --color-bg: #fdf6e3;
+  --color-sidebar: #eee8d5;
+  --color-surface: #fdf6e3;
+  --color-surface-2: #eee8d5;
+  --color-surface-3: #cdc4a6;
+  --color-selected: #e0d6b3;
+  --color-border: #e4dcc0;
+  --color-border-strong: #c9bf9a;
+  --color-border-focus: #268bd2;
+  --color-fg: #586e75;
+  --color-fg-soft: #657b83;
+  --color-muted: #839496;
+  --color-faint: #93a1a1;
+  --color-fainter: #aeb8b8;
+  --color-primary: #268bd2;
+  --color-primary-fg: #fdf6e3;
+  --color-accent: #268bd2;
+  --color-danger: #dc322f;
+  --color-danger-border: #e8b4b3;
+  --color-danger-surface: #f6dedd;
+  --color-success: #859900;
+  --color-warning: #b58900;
+  --color-warning-border: #e3d3a8;
+  --color-warning-surface: #f4ead0;
+  --metal-dye: #cabf95;
+  --metal-tint-amount: 35%;
+}
+
+/* GitHub Light */
+:root[data-theme="github-light"] {
+  color-scheme: light;
+  --color-bg: #ffffff;
+  --color-sidebar: #f6f8fa;
+  --color-surface: #ffffff;
+  --color-surface-2: #f6f8fa;
+  --color-surface-3: #eaeef2;
+  --color-selected: #eaeef2;
+  --color-border: #d0d7de;
+  --color-border-strong: #afb8c1;
+  --color-border-focus: #0969da;
+  --color-fg: #1f2328;
+  --color-fg-soft: #656d76;
+  --color-muted: #6e7781;
+  --color-faint: #818b98;
+  --color-fainter: #9ea7b3;
+  --color-primary: #1f883d;
+  --color-primary-fg: #ffffff;
+  --color-accent: #0969da;
+  --color-danger: #cf222e;
+  --color-danger-border: #ffcecb;
+  --color-danger-surface: #ffebe9;
+  --color-success: #1a7f37;
+  --color-warning: #9a6700;
+  --color-warning-border: #e8c87c;
+  --color-warning-surface: #fff8c5;
+}
+
+/* Catppuccin Latte */
+:root[data-theme="catppuccin-latte"] {
+  color-scheme: light;
+  --color-bg: #eff1f5;
+  --color-sidebar: #e6e9ef;
+  --color-surface: #eff1f5;
+  --color-surface-2: #e6e9ef;
+  --color-surface-3: #dce0e8;
+  --color-selected: #ccd0da;
+  --color-border: #bcc0cc;
+  --color-border-strong: #acb0be;
+  --color-border-focus: #8839ef;
+  --color-fg: #4c4f69;
+  --color-fg-soft: #5c5f77;
+  --color-muted: #6c6f85;
+  --color-faint: #7c7f93;
+  --color-fainter: #9ca0b0;
+  --color-primary: #1e66f5;
+  --color-primary-fg: #ffffff;
+  --color-accent: #8839ef;
+  --color-danger: #d20f39;
+  --color-danger-border: #e6a3b0;
+  --color-danger-surface: #fbe4ec;
+  --color-success: #40a02b;
+  --color-warning: #df8e1d;
+  --color-warning-border: #f0c890;
+  --color-warning-surface: #fcefd8;
+  --metal-dye: #b3a8db;
+  --metal-tint-amount: 35%;
+}
+
+/* One Light (Atom) */
+:root[data-theme="one-light"] {
+  color-scheme: light;
+  --color-bg: #fafafa;
+  --color-sidebar: #f3f3f3;
+  --color-surface: #fafafa;
+  --color-surface-2: #f0f0f0;
+  --color-surface-3: #e5e5e5;
+  --color-selected: #e4e4e4;
+  --color-border: #e5e5e5;
+  --color-border-strong: #d0d0d0;
+  --color-border-focus: #4078f2;
+  --color-fg: #383a42;
+  --color-fg-soft: #696c77;
+  --color-muted: #909194;
+  --color-faint: #a0a1a7;
+  --color-fainter: #b8b9bf;
+  --color-primary: #4078f2;
+  --color-primary-fg: #ffffff;
+  --color-accent: #4078f2;
+  --color-danger: #e45649;
+  --color-danger-border: #f0b8b3;
+  --color-danger-surface: #fceae8;
+  --color-success: #50a14f;
+  --color-warning: #c18401;
+  --color-warning-border: #e0c878;
+  --color-warning-surface: #faf0d6;
+}
+
+/* Gruvbox Light (medium) */
+:root[data-theme="gruvbox-light"] {
+  color-scheme: light;
+  --color-bg: #fbf1c7;
+  --color-sidebar: #f9f5d7;
+  --color-surface: #fbf1c7;
+  --color-surface-2: #ebdbb2;
+  --color-surface-3: #d5c4a1;
+  --color-selected: #d8c79a;
+  --color-border: #e4d6a8;
+  --color-border-strong: #cdb888;
+  --color-border-focus: #d79921;
+  --color-fg: #3c3836;
+  --color-fg-soft: #504945;
+  --color-muted: #665c54;
+  --color-faint: #7c6f64;
+  --color-fainter: #928374;
+  --color-primary: #076678;
+  --color-primary-fg: #fbf1c7;
+  --color-accent: #d79921;
+  --color-danger: #9d0006;
+  --color-danger-border: #d9a6a6;
+  --color-danger-surface: #f0d8d8;
+  --color-success: #79740e;
+  --color-warning: #b57614;
+  --color-warning-border: #e0c890;
+  --color-warning-surface: #f0e0b8;
+  --metal-dye: #c4ad75;
+  --metal-tint-amount: 35%;
+}
+
+/* Rosé Pine Dawn */
+:root[data-theme="rose-pine-dawn"] {
+  color-scheme: light;
+  --color-bg: #faf4ed;
+  --color-sidebar: #fffaf3;
+  --color-surface: #fffaf3;
+  --color-surface-2: #f2e9e1;
+  --color-surface-3: #ece3da;
+  --color-selected: #f2e9e1;
+  --color-border: #ebe1d6;
+  --color-border-strong: #ddd0c2;
+  --color-border-focus: #907aa9;
+  --color-fg: #575279;
+  --color-fg-soft: #6e6a8e;
+  --color-muted: #9893a5;
+  --color-faint: #797593;
+  --color-fainter: #b8b3c8;
+  --color-primary: #907aa9;
+  --color-primary-fg: #faf4ed;
+  --color-accent: #907aa9;
+  --color-danger: #b4637a;
+  --color-danger-border: #d8b5be;
+  --color-danger-surface: #f4d9dd;
+  --color-success: #569f7a;
+  --color-warning: #ea9d34;
+  --color-warning-border: #f3c878;
+  --color-warning-surface: #fbeccc;
+  --metal-dye: #d4b8bd;
+  --metal-tint-amount: 30%;
+}
+
+/* Everforest Light (medium) */
+:root[data-theme="everforest-light"] {
+  color-scheme: light;
+  --color-bg: #fdf6e3;
+  --color-sidebar: #f4f0d9;
+  --color-surface: #fdf6e3;
+  --color-surface-2: #efebd4;
+  --color-surface-3: #e6e2cc;
+  --color-selected: #eaedc8;
+  --color-border: #e0dcc7;
+  --color-border-strong: #bec5b2;
+  --color-border-focus: #8da101;
+  --color-fg: #5c6a72;
+  --color-fg-soft: #6e7a82;
+  --color-muted: #829181;
+  --color-faint: #939f91;
+  --color-fainter: #a6b0a0;
+  --color-primary: #8da101;
+  --color-primary-fg: #fdf6e3;
+  --color-accent: #8da101;
+  --color-danger: #f85552;
+  --color-danger-border: #fab7b5;
+  --color-danger-surface: #fde3da;
+  --color-success: #8da101;
+  --color-warning: #f57d26;
+  --color-warning-border: #f9b683;
+  --color-warning-surface: #faedcd;
+  --metal-dye: #a8b09a;
+  --metal-tint-amount: 35%;
+}
+
+/* Kanagawa Lotus */
+:root[data-theme="kanagawa-lotus"] {
+  color-scheme: light;
+  --color-bg: #f2ecbc;
+  --color-sidebar: #e5ddb0;
+  --color-surface: #f2ecbc;
+  --color-surface-2: #dcd5ac;
+  --color-surface-3: #d5cea3;
+  --color-selected: #c9cbd1;
+  --color-border: #d8d1a8;
+  --color-border-strong: #b8b088;
+  --color-border-focus: #624c83;
+  --color-fg: #545464;
+  --color-fg-soft: #716e61;
+  --color-muted: #8a8980;
+  --color-faint: #a09cac;
+  --color-fainter: #c9cbd1;
+  --color-primary: #624c83;
+  --color-primary-fg: #f2ecbc;
+  --color-accent: #624c83;
+  --color-danger: #c84053;
+  --color-danger-border: #d7474b;
+  --color-danger-surface: #f4d9d9;
+  --color-success: #6f894e;
+  --color-warning: #e98a00;
+  --color-warning-border: #f3b85a;
+  --color-warning-surface: #fde9c0;
+  --metal-dye: #7a6e8a;
+  --metal-tint-amount: 35%;
+}
+
+/* Tomorrow (light) */
+:root[data-theme="tomorrow"] {
+  color-scheme: light;
+  --color-bg: #ffffff;
+  --color-sidebar: #efefef;
+  --color-surface: #ffffff;
+  --color-surface-2: #efefef;
+  --color-surface-3: #e6e6e6;
+  --color-selected: #d6d6d6;
+  --color-border: #e0e0e0;
+  --color-border-strong: #cccccc;
+  --color-border-focus: #4271ae;
+  --color-fg: #4d4d4c;
+  --color-fg-soft: #6b6b6a;
+  --color-muted: #8e908c;
+  --color-faint: #b0b0ad;
+  --color-fainter: #d0d0cd;
+  --color-primary: #4271ae;
+  --color-primary-fg: #ffffff;
+  --color-accent: #4271ae;
+  --color-danger: #c82829;
+  --color-danger-border: #e08080;
+  --color-danger-surface: #fbdcdc;
+  --color-success: #718c00;
+  --color-warning: #eab700;
+  --color-warning-border: #f3d560;
+  --color-warning-surface: #fdf3c0;
+}
+
+/* Alabaster */
+:root[data-theme="alabaster"] {
+  color-scheme: light;
+  --color-bg: #f7f7f7;
+  --color-sidebar: #eeeeee;
+  --color-surface: #f7f7f7;
+  --color-surface-2: #f0f0f0;
+  --color-surface-3: #e0e0e0;
+  --color-selected: #bfdbfe;
+  --color-border: #e8e8e8;
+  --color-border-strong: #d0d0d0;
+  --color-border-focus: #007acc;
+  --color-fg: #1a1a1a;
+  --color-fg-soft: #404040;
+  --color-muted: #777777;
+  --color-faint: #a0a0a0;
+  --color-fainter: #cccccc;
+  --color-primary: #007acc;
+  --color-primary-fg: #ffffff;
+  --color-accent: #007acc;
+  --color-danger: #aa3731;
+  --color-danger-border: #cc807c;
+  --color-danger-surface: #f2d6d4;
+  --color-success: #448c27;
+  --color-warning: #ffbc5d;
+  --color-warning-border: #ffd699;
+  --color-warning-surface: #fff0db;
 }
 
 html,
@@ -238,6 +687,59 @@ button {
   }
 }
 
+/* Tool rows / groups: a slightly springier micro-entrance than the generic
+   item-enter — a small rise + scale settle with a touch of overshoot, so tool
+   calls "pop up" into the flow. transform-origin left keeps the settle anchored
+   to the row's start. */
+.tool-enter {
+  animation: tool-enter 0.28s cubic-bezier(0.34, 1.2, 0.64, 1) both;
+  transform-origin: left center;
+}
+@keyframes tool-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tool-enter {
+    animation: none;
+  }
+}
+
+/* Animated <details> collapse/expand (thinking + tool blocks). Uses the
+   ::details-content pseudo (Chromium 131+, Electron 42 ships ~140); block-size
+   transitions to/from `auto` via interpolate-size, and content-visibility is
+   animated discretely so the content stays rendered through the close. Because
+   the *declared* block-size is `auto` while open, content growth during
+   streaming does NOT re-trigger the transition — only the open↔close toggle
+   does, so the thinking-text stream stays smooth and only its collapse eases. */
+:root {
+  interpolate-size: allow-keywords;
+}
+.collapse-anim::details-content {
+  block-size: 0;
+  overflow: clip;
+  opacity: 0;
+  transition:
+    content-visibility 0.18s allow-discrete,
+    opacity 0.14s ease-out,
+    block-size 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.collapse-anim[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapse-anim::details-content {
+    transition: none;
+  }
+}
+
 /* Views cross-fade on switch. */
 .view-enter {
   animation: view-enter 0.14s ease-out;
@@ -259,6 +761,25 @@ button {
   50% {
     opacity: 0;
   }
+}
+
+/* Inline caret appended at the end of StreamingText content. Must be
+   inline so it sits flush after the last word; height/width as em-based
+   units so it scales with the text. The thinking (plain) variant is dimmer
+   (bg-faint) to match the faint thinking text, the markdown answer uses
+   the softer foreground. It's only rendered when the reveal has caught up
+   (model paused), so the cursor-blink animation gets to actually play. */
+.streaming-caret {
+  display: inline-block;
+  width: 0.13em;
+  height: 1.1em;
+  margin-left: 0.12em;
+  vertical-align: text-bottom;
+  border-radius: 9999px;
+  background: var(--color-fg-soft);
+}
+.message-streaming--plain .streaming-caret {
+  background: var(--color-faint);
 }
 
 /* ---------- Markdown typography (shared by Markdown.svelte + StreamingText.svelte) ----------
@@ -486,7 +1007,7 @@ button {
 /* Braille spinner + shimmer working label (ported from peche-pi). */
 .working-label {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   font-variant-numeric: tabular-nums;
 }
@@ -497,11 +1018,6 @@ button {
   font-family: ui-monospace, monospace;
   text-align: center;
   line-height: 1;
-  /* When the spinner is the dot-matrix grid (a fixed-px box rather than a
-   * text glyph), baseline alignment leaves it hanging below the text.
-   * Self-center it against the text's optical midline instead. */
-  align-self: center;
-  transform: translateY(-0.5px);
 }
 .working-label__text {
   /* Purple base with a white highlight sweeping across. Tile via no-repeat

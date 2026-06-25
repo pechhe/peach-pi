@@ -4,7 +4,7 @@
   // away and back destroys + recreates every StreamingText. Keyed by a stable
   // per-message id, already-revealed words keep their first-seen time across the
   // remount so the rebuild doesn't re-fire their fade.
-  type RevealMemory = { times: Map<number, number> };
+  type RevealMemory = { times: Map<string, number> };
   const revealMemory = new Map<string, RevealMemory>();
   function memoryFor(key: string): RevealMemory {
     let m = revealMemory.get(key);
@@ -45,8 +45,16 @@
     text,
     streaming = true,
     plain = false,
+    cursor = false,
     revealKey,
-  }: { text: string; streaming?: boolean; plain?: boolean; revealKey?: string } = $props();
+  }: {
+    text: string;
+    streaming?: boolean;
+    plain?: boolean;
+    /** Render a blinking caret inline at the end of the streamed text. */
+    cursor?: boolean;
+    revealKey?: string;
+  } = $props();
 
   function escapeHtml(s: string): string {
     return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
@@ -56,27 +64,29 @@
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-  // Steady-rate reveal at char boundaries. Each active frame advances `step`
-  // chars; `tickEvery` skips frames at slower speeds so the trickle stays
-  // visible at low backlog.
-  const SPEED_TABLE = {
-    low: { step: 1, tickEvery: 4 }, // ~15 chars/sec @60fps
-    medium: { step: 1, tickEvery: 2 }, // ~30 chars/sec
-    high: { step: 1, tickEvery: 1 }, // ~60 chars/sec
+  // Time-based, adaptive reveal. Each speed maps the current backlog onto a
+  // per-word interval: the whole backlog is scheduled to drain within ~windowMs,
+  // clamped between minMs (burst floor — keeps fast dumps flowing) and maxMs
+  // (calm trickle near the model's real cadence). Reveal is frame-rate
+  // independent: a frame reveals as many whole words as the schedule allows.
+  const WAVE = {
+    low: { minMs: 16, maxMs: 72, windowMs: 900 },
+    medium: { minMs: 9, maxMs: 52, windowMs: 650 },
+    high: { minMs: 5, maxMs: 34, windowMs: 420 },
   } as const;
-  // When the buffer runs this far ahead, the provider is dumping faster than we
-  // trickle. Past this we jump to whole-word boundaries so each word's span
-  // fades as one unit (clean wave) instead of growing mid-fade.
-  const WORD_SNAP_BACKLOG = 16;
-  // Adaptive catch-up: past WORD_SNAP_BACKLOG we drain this fraction of the
-  // backlog per active frame (snapped to a word boundary). Bounds visible lag
-  // so a fast provider burst is chased down in a few frames instead of
-  // trickling one word/frame forever and lagging after the stream ends.
-  const CATCHUP_FRACTION = 0.15;
+  // Rough chars-per-word (incl. trailing space) to turn a char backlog into a
+  // word count for the interval calc.
+  const AVG_WORD_LEN = 6;
+  // Hard ceiling on words revealed in a single frame so an extreme burst still
+  // unfurls over a few frames instead of dumping one giant block.
+  const MAX_WORDS_PER_FRAME = 10;
+  // Per-word fade scheduling (see `waveCursor`).
+  const WAVE_STAGGER = 30;
+  const MAX_AHEAD = 450;
 
-  function resolveRate() {
+  function resolveWave() {
     const raw = document.documentElement.getAttribute("data-stream-speed");
-    return SPEED_TABLE[(raw as keyof typeof SPEED_TABLE) ?? "medium"] ?? SPEED_TABLE.medium;
+    return WAVE[(raw as keyof typeof WAVE) ?? "medium"] ?? WAVE.medium;
   }
 
   // Reveal index of the end of the word at/after `from`.
@@ -85,14 +95,6 @@
     while (i < s.length && !/\s/.test(s[i]!)) i += 1;
     while (i < s.length && /\s/.test(s[i]!)) i += 1;
     return i;
-  }
-
-  // First word boundary at/after char index `target`. Reveals whole words
-  // (never mid-word) while catching up across many words in one frame.
-  function wordBoundaryAtOrAfter(s: string, from: number, target: number): number {
-    let i = from;
-    while (i < target && i < s.length) i = nextWordBoundary(s, i);
-    return Math.min(i, s.length);
   }
 
   // During streaming the revealed slice often ends mid inline-code (before its
@@ -116,12 +118,18 @@
   // see the `$effect` rAF loop below (kicks in when `text` grows past
   // `revealed`) and the `firstBuild` anchor in the html builder.
   let revealed = $state(untrack(() => text.length));
-  const rate = resolveRate();
-  let frame = 0;
+  const wave = resolveWave();
   // True until the first html build completes. Lets that first build anchor
   // every already-present word to a far-past delay (final frame, no fade) so
   // jumping to full text doesn't flash-fade the whole message.
   let firstBuild = true;
+  // Wave scheduler for the per-word fade. As words enter the DOM each gets a
+  // reveal timestamp a little after the previous one (WAVE_STAGGER), so even a
+  // multi-word frame fades in left-to-right rather than as a block. Floored at
+  // `now` (a slow trickle reveals in real time) and capped at now+MAX_AHEAD so
+  // the wave never schedules unboundedly into the future — bounded lag, stable
+  // ordering. Resets naturally on remount.
+  let waveCursor = 0;
   // word index → first time (performance.now) we saw it. Drives per-word delay.
   const revealTimes = mem.times;
 
@@ -141,21 +149,23 @@
     // on it (no teardown churn per revealed char).
     const target = text;
     let raf = 0;
-    const tick = () => {
-      frame += 1;
-      if (frame % rate.tickEvery === 0 && revealed < target.length) {
-        const backlog = target.length - revealed;
-        let next: number;
-        if (backlog > WORD_SNAP_BACKLOG) {
-          // Drain a fraction of the backlog this frame, snapped up to a whole
-          // word, so big bursts are chased down fast instead of one word/frame.
-          const advance = Math.max(1, Math.ceil(backlog * CATCHUP_FRACTION));
-          next = wordBoundaryAtOrAfter(target, revealed, revealed + advance);
-          if (next <= revealed) next = Math.min(revealed + 1, target.length);
-        } else {
-          next = revealed + Math.min(rate.step, backlog);
+    let last = performance.now();
+    let acc = 0;
+    const tick = (ts: number) => {
+      const dt = ts - last;
+      last = ts;
+      if (revealed < target.length) {
+        const pendingWords = Math.max(1, Math.ceil((target.length - revealed) / AVG_WORD_LEN));
+        const interval = Math.min(wave.maxMs, Math.max(wave.minMs, wave.windowMs / pendingWords));
+        acc += dt;
+        let budget = MAX_WORDS_PER_FRAME;
+        while (revealed < target.length && acc >= interval && budget > 0) {
+          revealed = nextWordBoundary(target, revealed);
+          acc -= interval;
+          budget -= 1;
         }
-        revealed = next;
+        // After a tab-throttle gap don't dump the whole backlog in one frame.
+        if (acc > interval * 6) acc = interval;
       }
       if (revealed < target.length) raf = requestAnimationFrame(tick);
     };
@@ -182,7 +192,13 @@
     if (reduceMotion || !streaming) return raw;
     const doc = new DOMParser().parseFromString(raw, "text/html");
     const now = performance.now();
-    let wordIndex = 0;
+    // Per-word reveal times are keyed by `text\u0000occurrence`, NOT by document
+    // position. Markdown re-tokenization between builds (code/pre regions that
+    // toggle in/out as backticks/fences stream in are skipped by the walker)
+    // shifts positional indices, which made later words inherit earlier words'
+    // timestamps — the out-of-order fade. A text+occurrence key is stable across
+    // re-parses: a word keeps its first-seen time even as neighbours change.
+    const occ = new Map<string, number>();
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     const textNodes: Text[] = [];
     let n: Node | null;
@@ -200,20 +216,43 @@
           frag.appendChild(doc.createTextNode(part));
           continue;
         }
-        const i = wordIndex++;
+        const seen = occ.get(part) ?? 0;
+        occ.set(part, seen + 1);
+        const key = `${part}\u0000${seen}`;
         // Words already in the buffer at mount render at the final frame — no
         // flash-fade of the whole backlog. Only words revealed while the user
         // is actively watching (first build already done) get the per-word wave.
-        if (!revealTimes.has(i)) revealTimes.set(i, firstBuild ? now - 1_000_000 : now);
+        if (!revealTimes.has(key)) {
+          if (firstBuild) {
+            revealTimes.set(key, now - 1_000_000);
+          } else {
+            waveCursor = Math.min(now + MAX_AHEAD, Math.max(now, waveCursor + WAVE_STAGGER));
+            revealTimes.set(key, waveCursor);
+          }
+        }
         const span = doc.createElement("span");
         span.className = "sw";
-        span.style.animationDelay = `${revealTimes.get(i)! - now}ms`;
+        span.style.animationDelay = `${revealTimes.get(key)! - now}ms`;
         span.textContent = part;
         frag.appendChild(span);
       }
       node.replaceWith(frag);
     }
     firstBuild = false;
+    // Streaming caret: only when the reveal has caught up to the available
+    // text (revealed >= text.length) — i.e. the model has paused and we're
+    // waiting for more. While words are still flowing in we hide it so the
+    // text itself reads as the live thing. Position-wise it's tucked INSIDE
+    // the content so it flows inline after the final word, not on a new line
+    // below the block container. Markdown: last block element (<p>/<li>/…);
+    // plain: the body itself. Once shown it persists (html stops rebuilding)
+    // so the cursor-blink animation actually plays.
+    if (cursor && revealed >= text.length) {
+      const caret = doc.createElement("span");
+      caret.className = "streaming-caret cursor-blink";
+      const host = plain ? doc.body : (doc.body.lastElementChild ?? doc.body);
+      host.appendChild(caret);
+    }
     return doc.body.innerHTML;
   });
 </script>

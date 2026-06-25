@@ -580,12 +580,45 @@
     }
   }
 
+  // ── Eased bottom-follow ──────────────────────────────────────────
+  // Streaming grows the content height in chunks; snapping scrollTop to the
+  // bottom on every growth reads as a jerky page. Instead we ease scrollTop
+  // toward the bottom across rAF frames. Because the lerp trails a growing
+  // target, the revealing tail floats a little above the bottom edge while text
+  // pours in (the "buffer below"), then settles once growth stops. Bails the
+  // instant the user scrolls up to read history.
+  const GLIDE_EASE = 0.18; // fraction of the remaining distance closed per frame
+  let glideRaf = 0;
+  let gliding = false;
+  function glideToBottom() {
+    const el = scrollEl;
+    if (!el || gliding) return;
+    gliding = true;
+    const step = () => {
+      const e = scrollEl;
+      if (!e || scrolledUp) {
+        gliding = false;
+        return;
+      }
+      const target = e.scrollHeight - e.clientHeight;
+      const diff = target - e.scrollTop;
+      if (diff <= 0.5) {
+        e.scrollTop = target;
+        gliding = false;
+        return;
+      }
+      e.scrollTop = e.scrollTop + diff * GLIDE_EASE;
+      glideRaf = requestAnimationFrame(step);
+    };
+    glideRaf = requestAnimationFrame(step);
+  }
+
   function scrollToBottom() {
     const el = scrollEl;
     if (!el) return;
     scrolledUp = false;
     upwardAccum = 0;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    glideToBottom();
   }
 
   $effect(() => {
@@ -620,14 +653,9 @@
         upwardAccum = 0;
       }
     }
-    if (!scrolledUp) {
-      requestAnimationFrame(() => {
-        // Re-check at fire time: the user may have scrolled up between the
-        // effect run (which queued this frame) and now. Without this, a token
-        // mid-scroll yanks them back to the bottom.
-        if (!scrolledUp) el.scrollTop = el.scrollHeight;
-      });
-    }
+    // glideToBottom re-checks scrolledUp every frame, so a mid-scroll token
+    // can't yank the user back down.
+    if (!scrolledUp) glideToBottom();
   });
 
   // Keep the bottom pinned whenever content height changes (streaming text,
@@ -641,12 +669,15 @@
     if (!el || !didInitialScroll) return;
     const content = el.firstElementChild;
     const pin = () => {
-      if (!scrolledUp) el.scrollTop = el.scrollHeight;
+      if (!scrolledUp) glideToBottom();
     };
     const ro = new ResizeObserver(pin);
     ro.observe(el);
     if (content) ro.observe(content);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(glideRaf);
+    };
   });
 
 </script>
@@ -759,18 +790,14 @@
         </div>
       {/if}
       {#snippet toolRow(item: ToolItem)}
-        <details class="item-enter group -my-1.5 text-xs" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
+        <details class="collapse-anim tool-enter group text-xs" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
           <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
-            {#if item.status === "error"}
-              <span class="shrink-0 text-danger">✕</span>
-            {:else if item.status !== "running"}
-              <span class="shrink-0 text-fainter">✓</span>
-            {/if}
+            <span class="w-3.5 shrink-0 text-center {item.status === 'error' ? 'text-danger' : 'text-fainter'}">{item.status === "error" ? "✕" : item.status !== "running" ? "✓" : ""}</span>
             <span
               class="shrink-0 font-mono font-medium {item.status === 'running' ? 'tool-name--running' : 'text-muted'}"
               >{item.toolName}</span>
             <span class="truncate font-mono text-fainter">{item.argsSummary}</span>
-            <span class="ml-auto shrink-0 text-fainter transition-transform group-open:rotate-90">›</span>
+            <span class="ml-auto shrink-0 text-fainter transition-transform duration-200 ease-out group-open:rotate-90">›</span>
           </summary>
           {#if item.output}
             <pre class="mx-2 mt-1 max-h-64 overflow-auto rounded-lg border border-border/80 bg-surface/60 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted select-text">{item.output}</pre>
@@ -779,14 +806,14 @@
       {/snippet}
       {#each rows as row (row.type === "group" ? row.id : row.item.id)}
         {#if row.type === "group"}
-          <details class="item-enter group/tools -my-1.5 text-xs" data-item-id={row.id}>
+          <details class="collapse-anim tool-enter group/tools -my-1.5 text-xs" data-item-id={row.id}>
             <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
               <span class="shrink-0 text-fainter">✓</span>
               <span class="shrink-0 font-mono font-medium text-muted">{row.items.length} tool calls</span>
               <span class="truncate font-mono text-fainter">{toolBreakdown(row.items)}</span>
-              <span class="ml-auto shrink-0 text-fainter transition-transform group-open/tools:rotate-90">›</span>
+              <span class="ml-auto shrink-0 text-fainter transition-transform duration-200 ease-out group-open/tools:rotate-90">›</span>
             </summary>
-            <div class="mt-1 flex flex-col border-l-2 border-border pl-1.5">
+            <div class="mt-1 flex flex-col gap-1 border-l-2 border-border pl-1.5">
               {#each row.items as it (it.id)}
                 {@render toolRow(it)}
               {/each}
@@ -881,16 +908,16 @@
           {@const inThinking = isStreaming && !!item.thinking && !item.text}
           <div class="item-enter assistant-message group/assistant text-[13.5px] leading-relaxed text-fg select-text" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId} use:codeCopy={!isStreaming}>
             {#if item.thinking}
-              <details class="group mb-1 text-xs text-faint" open={isStreaming && !item.text}>
+              <details class="collapse-anim group mb-1 text-xs text-faint" open={isStreaming && !item.text}>
                 <summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">
                   <span class="mr-1 inline-block transition-transform group-open:rotate-90">›</span>Thinking
                 </summary>
                 <div class="mt-1.5 border-l-2 border-border pl-3 leading-relaxed text-faint">
-                  <StreamingText text={item.thinking} streaming={isStreaming} plain revealKey={`${item.id}:thinking`} />{#if inThinking}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-faint"></span>{/if}
+                  <StreamingText text={item.thinking} streaming={isStreaming} plain cursor={inThinking} revealKey={`${item.id}:thinking`} />
                 </div>
               </details>
             {/if}
-            <StreamingText text={item.text} streaming={isStreaming} revealKey={`${item.id}:text`} />{#if isStreaming && !inThinking}<span class="cursor-blink ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-fg-soft"></span>{/if}
+            <StreamingText text={item.text} streaming={isStreaming} cursor={isStreaming && !inThinking} revealKey={`${item.id}:text`} />
             {#if item.error}
               <p class="mt-2 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-1.5 text-xs text-danger" use:clickCopy={item.error}>{item.error}</p>
             {/if}
@@ -986,8 +1013,8 @@
           </div>
         {/if}
       {/if}
-      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming)}
-        <div class="item-enter text-[13px]">
+      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming) && !items.some((i) => i.kind === "tool" && i.status === "running") && !items.some((i) => i.kind === "compaction" && i.running)}
+        <div class="item-enter text-xs">
           <WorkingLabel label="Working…" />
         </div>
       {/if}

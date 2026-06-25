@@ -125,6 +125,12 @@ class ExtensionUiStore {
     return [...(this.widgets.get(threadId)?.entries() ?? [])].map(([key, lines]) => ({ key, lines }));
   }
 
+  /** Iterate (threadId → widget map) for reactive cross-thread scans (e.g.
+   *  the sidebar spinner that stays lit while a background subagent runs). */
+  widgetEntries(): Iterable<[string, SvelteMap<string, string[]>]> {
+    return this.widgets.entries();
+  }
+
   async respond(requestId: string, value: string | boolean | undefined): Promise<void> {
     this.dialogs = this.dialogs.filter((d) => d.requestId !== requestId);
     await api.invoke("threads:respondExtensionUi", requestId, value);

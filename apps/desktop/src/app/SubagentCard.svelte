@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { Component } from "svelte";
+  import { slide, fly, fade } from "svelte/transition";
   import Compass from "@lucide/svelte/icons/compass";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Wrench from "@lucide/svelte/icons/wrench";
   import Telescope from "@lucide/svelte/icons/telescope";
   import Sparkles from "@lucide/svelte/icons/sparkles";
-  import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import FileText from "@lucide/svelte/icons/file-text";
   import BrailleSpinner from "./BrailleSpinner.svelte";
@@ -64,6 +64,7 @@
             : "Idle",
   );
   const stats = $derived(live_ ? (live?.stats ?? []) : []);
+  const isLastNode = (i: number) => i === nodes.length - 1;
   const latest = $derived(entity.events[entity.events.length - 1]!);
   const task = $derived(latest.task ?? entity.events[0]!.task);
 </script>
@@ -85,36 +86,42 @@
         {#if stats.length > 0}<span class="agent-entity__stats">{stats.join(" · ")}</span>{/if}
       </div>
     </div>
-  </header>
-
-  <ol class="agent-entity__journey">
-    {#each nodes as node (node.id)}
-      <li class="agent-entity__node agent-entity__node--{node.tone}">
-        <span class="agent-entity__time">{node.at}</span>
-        <span class="agent-entity__marker agent-entity__marker--{node.tone}" aria-hidden="true">
-          {#if node.tone === "active"}<BrailleSpinner class="agent-entity__node-spinner" shape="triangle" />{:else if node.tone === "done"}<Check size={12} />{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={12} />{/if}
-        </span>
-        <div class="agent-entity__body">
-          <span class="agent-entity__node-title">{node.title}</span>
-          {#if node.subtitle}<p class="agent-entity__node-sub">{node.subtitle}</p>{/if}
-        </div>
-      </li>
-    {/each}
-  </ol>
-
-  {#if task}
-    <footer class="agent-entity__footer">
-      <button class="agent-entity__action" type="button" aria-expanded={showInstructions} onclick={() => (showInstructions = !showInstructions)}>
+    {#if task}
+      <button class="agent-entity__action agent-entity__action--top" type="button" aria-expanded={showInstructions} onclick={() => (showInstructions = !showInstructions)}>
         <FileText size={14} />
         View instructions
       </button>
-    </footer>
-    {#if showInstructions}
-      <div class="agent-entity__instructions">
-        <div class="agent-entity__section-label">Instructions</div>
-        <pre class="agent-entity__pre">{task}</pre>
-      </div>
     {/if}
+  </header>
+
+  <ol class="agent-entity__journey">
+    {#each nodes as node, i (node.id)}
+      {#key node.id}
+      <li
+        class="agent-entity__node agent-entity__node--{node.tone}"
+        in:slide={{ duration: 320, axis: "y" }}
+        out:slide={{ duration: 200, axis: "y" }}
+      >
+        <span class="agent-entity__marker agent-entity__marker--{node.tone}" aria-hidden="true">
+          {#if node.tone === "active"}<BrailleSpinner class="agent-entity__node-spinner" shape="triangle" />{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={11} />{:else if node.tone === "blocked"}<span class="agent-entity__node-bang" aria-hidden="true">!</span>{/if}
+        </span>
+        <div class="agent-entity__body" in:fly={{ duration: 300, y: 4, delay: 40 }}>
+          <span class="agent-entity__node-title" title={node.fullTitle ?? node.title}>{node.title}</span>
+          {#if node.subtitle}<p class="agent-entity__node-sub" title={node.subtitle}>{node.subtitle}</p>{/if}
+        </div>
+        {#if !isLastNode(i)}
+          <span class="agent-entity__connector" in:fade={{ duration: 260, delay: 60 }} aria-hidden="true"></span>
+        {/if}
+      </li>
+      {/key}
+    {/each}
+  </ol>
+
+  {#if showInstructions && task}
+    <div class="agent-entity__instructions">
+      <div class="agent-entity__section-label">Instructions</div>
+      <pre class="agent-entity__pre">{task}</pre>
+    </div>
   {/if}
 </article>
 
@@ -183,100 +190,83 @@
 
   /* ── Journey: vertical execution graph ── */
   .agent-entity__journey {
-    position: relative;
     list-style: none;
     margin: 0;
     padding: 0;
     display: grid;
     gap: 4px;
   }
-  .agent-entity__journey::before {
-    content: "";
-    position: absolute;
-    top: 12px;
-    bottom: 12px;
-    left: 80px;
-    width: 2px;
-    background: color-mix(in srgb, var(--ae-accent) 18%, var(--color-border));
-  }
 
   .agent-entity__node {
     position: relative;
     display: grid;
-    grid-template-columns: 58px 22px 1fr;
-    column-gap: 10px;
+    grid-template-columns: 22px 1fr;
+    column-gap: 12px;
     align-items: start;
     padding: 6px 0;
-    animation: agent-node-in 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   }
-  @keyframes agent-node-in {
-    from { opacity: 0; transform: translateY(-6px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .agent-entity__time {
-    grid-column: 1;
-    text-align: right;
-    font-size: 11px;
-    line-height: 20px;
-    color: var(--color-muted);
-    white-space: nowrap;
+  /* connector to the next node — a real element so it can fade in with the
+     row's transition instead of re-growing on every re-render. Centered on
+     the marker column (11px = half marker). Leaves a small gap around each marker. */
+  .agent-entity__connector {
+    position: absolute;
+    left: 11px;
+    top: 32px;    /* marker bottom (28) + 4px gap */
+    bottom: -8px; /* next marker top (12 from this node's bottom) - 4px gap */
+    width: 2px;
+    transform: translateX(-50%);
+    background: color-mix(in srgb, var(--ae-accent) 20%, var(--color-border));
   }
 
+  /* plain nodes — no colored boxes */
   .agent-entity__marker {
-    grid-column: 2;
+    grid-column: 1;
     justify-self: center;
+    align-self: start;
+    margin-top: 2px;
     z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 20px;
     height: 20px;
-    border-radius: 999px;
-    border: 1.5px solid color-mix(in srgb, var(--color-border) 80%, transparent);
-    background: var(--color-surface);
-    color: transparent;
+    color: var(--color-muted);
+    transition: color 0.2s ease, transform 0.2s ease;
   }
+  /* completed step = solid dot */
   .agent-entity__marker--done {
-    border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
-    background: color-mix(in srgb, var(--color-success) 13%, var(--color-surface));
-    color: var(--color-success);
+    color: var(--ae-accent);
   }
-  .agent-entity__marker--active {
-    border-color: color-mix(in srgb, var(--ae-accent) 45%, transparent);
-    background: color-mix(in srgb, var(--ae-accent) 14%, var(--color-surface));
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ae-accent) 12%, transparent);
-    animation: agent-node-pulse 1.8s ease-in-out infinite;
+  .agent-entity__marker--done::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.55;
   }
-  @keyframes agent-node-pulse {
-    0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ae-accent) 14%, transparent); }
-    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--ae-accent) 5%, transparent); }
-  }
-  .agent-entity__marker--blocked {
-    border-color: color-mix(in srgb, #f08c2e 42%, transparent);
-    background: color-mix(in srgb, #f08c2e 13%, var(--color-surface));
-    color: #f08c2e;
-  }
-  .agent-entity__marker--blocked::after { content: "!"; font-size: 11px; font-weight: 700; }
+  .agent-entity__marker--active { color: var(--ae-accent); }
+  .agent-entity__marker--blocked { color: #f08c2e; }
   .agent-entity__marker--failed,
-  .agent-entity__marker--cancelled {
-    border-color: color-mix(in srgb, var(--color-danger) 32%, transparent);
-    background: color-mix(in srgb, var(--color-danger) 13%, var(--color-surface));
-    color: var(--color-danger);
-  }
+  .agent-entity__marker--cancelled { color: var(--color-danger); }
+  .agent-entity__node-bang { font-size: 11px; font-weight: 700; }
 
   :global(.agent-entity__node-spinner) {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     color: var(--ae-accent);
   }
 
-  .agent-entity__body { grid-column: 3; min-width: 0; }
+  .agent-entity__body { grid-column: 2; min-width: 0; }
   .agent-entity__node-title {
     font-size: 13px;
     font-weight: 600;
     line-height: 20px;
     color: var(--color-fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.2s ease;
   }
   .agent-entity__node--blocked .agent-entity__node-title { color: #c2691a; }
   .agent-entity__node--active .agent-entity__node-title { color: var(--ae-accent); }
@@ -285,23 +275,20 @@
     font-size: 12px;
     line-height: 1.45;
     color: var(--color-muted);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
     overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
   }
 
-  .agent-entity__footer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-top: 10px;
-    border-top: 1px solid color-mix(in srgb, var(--ae-accent) 12%, var(--color-border));
-  }
   .agent-entity__action {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    margin-left: auto;
+    align-self: center;
+    flex-shrink: 0;
     font-size: 12px;
     font-weight: 600;
     color: var(--ae-accent);
@@ -310,6 +297,7 @@
     border-radius: 7px;
     padding: 5px 12px;
     cursor: pointer;
+    transition: background 0.15s ease;
   }
   .agent-entity__action:hover { background: color-mix(in srgb, var(--ae-accent) 12%, transparent); }
 

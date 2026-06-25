@@ -93,6 +93,7 @@ export interface TimelineNode {
   readonly id: string;
   readonly tone: NodeTone;
   readonly title: string;
+  readonly fullTitle?: string;
   readonly subtitle?: string;
   readonly at: string;
 }
@@ -121,6 +122,16 @@ function eventTime(ev: AgentEvent, seq: number): number {
 function relAt(t: number): string {
   const rel = formatRelativeTime(new Date(t).toISOString());
   return rel === "now" ? "Now" : rel === "" ? "" : `${rel} ago`;
+}
+
+/** Compress a free-form activity string into a compact step label.
+ *  Keeps the first clause, caps at ~46 chars, appends an ellipsis when cut. */
+function shortenTitle(raw: string): string {
+  const s = raw.trim().replace(/\s+/g, " ").replace(/[….\s]+$/u, "");
+  if (s.length <= 46) return s;
+  const clause = s.split(/\.\s+|,\s+|:\s+|;\s+|—\s+|–\s+/u)[0] ?? s;
+  const base = (clause.length <= 46 ? clause : clause.slice(0, 46)).replace(/[\s,;:.-]+$/u, "");
+  return base + "…";
 }
 
 /**
@@ -174,10 +185,10 @@ export function buildNodes(
       prevCompleted = ev.status === "completed";
     } else {
       // Skip generic placeholders from pi-subagents — they aren't useful steps.
-      const title = u.a.activity;
-      if (/^(?:thinking|working)[.……]$/i.test(title)) continue;
+      const raw = u.a.activity;
+      if (/^(?:thinking|working)[.……]$/i.test(raw)) continue;
       lastActivityIdx = nodes.length;
-      nodes.push({ id: `act-${u.t}`, tone: "done", title, at: relAt(u.t) });
+      nodes.push({ id: `act-${u.t}`, tone: "done", title: shortenTitle(raw), fullTitle: raw, at: relAt(u.t) });
     }
   }
 
@@ -186,11 +197,12 @@ export function buildNodes(
     const raw = liveActivity ?? "Working…";
     // Don't surface generic placeholders as a separate step, but always
     // surface an active node so the spinner has somewhere to live.
-    const current = /^(?:thinking|working)/i.test(raw) ? "Working…" : raw;
+    const current = /^(?:thinking|working)/i.test(raw) ? "Working…" : shortenTitle(raw);
     if (lastActivityIdx >= 0 && nodes[lastActivityIdx]!.title === current) {
-      nodes[lastActivityIdx] = { ...nodes[lastActivityIdx]!, tone: "active", at: "Now" };
+      const n = nodes[lastActivityIdx]!;
+      nodes[lastActivityIdx] = { ...n, tone: "active", at: "Now", title: current, fullTitle: n.fullTitle ?? n.title };
     } else {
-      nodes.push({ id: "act-now", tone: "active", title: current, at: "Now" });
+      nodes.push({ id: "act-now", tone: "active", title: current, fullTitle: raw, at: "Now" });
     }
   } else {
     const last = entity.events[entity.events.length - 1];

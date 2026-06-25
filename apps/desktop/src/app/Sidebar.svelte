@@ -2,7 +2,9 @@
   import type { AppView, Project, Thread, Worktree } from "@peach-pi/shared-types";
   import { isNewThread } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
+  import { SvelteSet } from "svelte/reactivity";
   import { extensionUi } from "../stores/extension-ui.svelte";
+  import { FLEET_WIDGET_KEY, parseFleet } from "../lib/subagent/fleet";
   import { playButtonSecondary, playRotary } from "../lib/sound/button-click-sound";
   import SnoozePicker from "./SnoozePicker.svelte";
   import SnoozedPopover from "./SnoozedPopover.svelte";
@@ -23,6 +25,8 @@
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import Settings from "@lucide/svelte/icons/settings";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Clock from "@lucide/svelte/icons/clock";
   import Check from "@lucide/svelte/icons/check";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
@@ -64,6 +68,10 @@
     onOpenWorkQueue,
     onOpenSearch,
     onReloadAll,
+    onGoBack,
+    onGoForward,
+    canGoBack = false,
+    canGoForward = false,
     remoteFirst = false,
   }: {
     width?: number;
@@ -83,6 +91,10 @@
     onOpenWorkQueue: (projectId: string) => void;
     onOpenSearch: () => void;
     onReloadAll: () => void;
+    onGoBack: () => void;
+    onGoForward: () => void;
+    canGoBack?: boolean;
+    canGoForward?: boolean;
     /** Remote-first mode on: the Remote item glows red + pulses. */
     remoteFirst?: boolean;
   } = $props();
@@ -93,6 +105,11 @@
   let snoozeAnchor: HTMLElement | null = $state(null);
   let snoozedListAnchor: HTMLElement | null = $state(null);
   let doneAnimFor = $state<string | null>(null);
+  // Ids whose archive animation has finished but whose archived snapshot
+  // hasn't landed yet. Filtered out of the active lists so the row leaves
+  // the DOM at its collapsed end-state instead of springing back to full
+  // height for the frames before the async threads:archive snapshot arrives.
+  let archivingIds = $state(new SvelteSet<string>());
 
   // Available extension-updates popover anchored under the amber badge button.
   let extUpdatesAnchor: HTMLElement | null = $state(null);
@@ -212,7 +229,7 @@
       // the very top of the active area, above the usual activity order.
       // Cleared once the thread is opened (markSeen in repositories.ts).
       active: list
-        .filter((t) => !t.archivedAt && !t.snoozedUntil && !t.toTestAt)
+        .filter((t) => !t.archivedAt && !t.snoozedUntil && !t.toTestAt && !archivingIds.has(t.id))
         .sort((a, b) => {
           const aw = !!a.wokeFromSnoozeAt;
           const bw = !!b.wokeFromSnoozeAt;
@@ -243,6 +260,33 @@
     }),
   );
   const chatGroups = $derived(partition(chats));
+
+  // Once the real snapshot marks an optimistically-hidden thread archived
+  // (or it no longer exists), drop it from the set so unarchive/restore can
+  // surface it again.
+  $effect(() => {
+    if (archivingIds.size === 0) return;
+    const byId = new Map(threads.map((t) => [t.id, t]));
+    for (const id of archivingIds) {
+      const t = byId.get(id);
+      if (!t || t.archivedAt) archivingIds.delete(id);
+    }
+  });
+
+  // Thread IDs with at least one still-running background subagent, per
+  // the pi-subagents "subagent-status" widget feed. A `later_message` helper
+  // returns before its work is done, so the parent thread's status flips to
+  // "completed" while the child is still active — the sidebar spinner would
+  // otherwise vanish mid-run. Keep it spinning while the fleet feed reports
+  // live agents.
+  const fleetActiveIds = $derived.by(() => {
+    const ids = new Set<string>();
+    for (const [threadId, map] of extensionUi.widgetEntries()) {
+      const lines = map.get(FLEET_WIDGET_KEY);
+      if (lines && parseFleet(lines)?.count) ids.add(threadId);
+    }
+    return ids;
+  });
 
   // The project the active thread belongs to (null for chats / non-thread
   //  views). Drives the Projects section label glow.
@@ -404,11 +448,15 @@
     doneAnimFor = thread.id;
   }
   function finishArchive(thread: Thread) {
-    if (doneAnimFor === thread.id) doneAnimFor = null;
     // Pick the next thread below before this one leaves the list, so the
     // view advances instead of landing on nothing.
     const idx = previewOrder.indexOf(thread.id);
     const nextId = idx !== -1 ? (previewOrder[idx + 1] ?? previewOrder[idx - 1] ?? null) : null;
+    // Hide the row locally *before* clearing doneAnimFor so it unmounts at
+    // its collapsed end-state — clearing the class alone would spring the
+    // row back to full height until the async archive snapshot lands.
+    archivingIds.add(thread.id);
+    if (doneAnimFor === thread.id) doneAnimFor = null;
     void api.invoke("threads:archive", thread.id);
     if (nextId && thread.id === selectedThreadId) onSelect(nextId);
     extensionUi.notify(`Archived “${thread.title || "Untitled"}”`, {
@@ -519,7 +567,7 @@
             : thread.status === 'completed' && !isActive
               ? 'text-accent'
               : ''}">{thread.title}</span>
-      {#if thread.status === "running"}
+      {#if thread.status === "running" || fleetActiveIds.has(thread.id)}
         <BrailleSpinner class="session-spinner ml-auto mr-0 shrink-0" title="Thinking…" shape="hex" />
       {:else if variant === "active"}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{relativeTime(thread.lastActivityAt, now)}</span>
@@ -649,6 +697,26 @@
           <span class="num-badge num-badge--accent">{extensionUi.extUpdates.length}</span>
         </button>
       {/if}
+      <button
+        class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
+        onclick={() => { playRotary(); onGoBack(); }}
+        disabled={!canGoBack}
+        data-testid="nav-back"
+        data-press="self"
+        title="Back (⌘[)"
+      >
+        <ArrowLeft size={15} />
+      </button>
+      <button
+        class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
+        onclick={() => { playRotary(); onGoForward(); }}
+        disabled={!canGoForward}
+        data-testid="nav-forward"
+        data-press="self"
+        title="Forward (⌘])"
+      >
+        <ArrowRight size={15} />
+      </button>
       <button
         class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
         onclick={reloadAll}
@@ -843,6 +911,18 @@
               >
             </Tooltip>
           </div>
+          {#if group.project.kind === "repo"}
+            <Tooltip text="Open work queue">
+              <button
+                class="flex shrink-0 items-center rounded px-1 py-0.5
+                  {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}
+                  {activeView === 'work-queue' ? 'text-accent opacity-100' : 'text-faint hover:text-fg'}"
+                onclick={() => onOpenWorkQueue(group.project.id)}
+                data-testid="project-work-queue"
+                aria-label="Open work queue"><ListChecks size={14} /></button
+              >
+            </Tooltip>
+          {/if}
           {#if group.snoozed.length > 0}
             <div class="relative flex shrink-0 items-center">
               <Tooltip text="Snoozed threads">
@@ -873,18 +953,6 @@
                 />
               {/if}
             </div>
-          {/if}
-          {#if group.project.kind === "repo"}
-            <Tooltip text="Open work queue">
-              <button
-                class="flex shrink-0 items-center rounded px-1 py-0.5
-                  {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}
-                  {activeView === 'work-queue' ? 'text-accent opacity-100' : 'text-faint hover:text-fg'}"
-                onclick={() => onOpenWorkQueue(group.project.id)}
-                data-testid="project-work-queue"
-                aria-label="Open work queue"><ListChecks size={14} /></button
-              >
-            </Tooltip>
           {/if}
           {#if group.toTest.length > 0}
             <Tooltip text="Open testing area">

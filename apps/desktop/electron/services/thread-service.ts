@@ -839,6 +839,11 @@ export class ThreadService {
           // window, so keep the prefix filter for those.
           if (this.compacting.has(threadId)) return;
           if (message.startsWith("Smart auto-compact")) return;
+          // Vision proxy runtime notices ("analyzing…", "analyzed N/M",
+          // "cancelled", slash-command confirmations) are noise during normal
+          // use. Keep `error`-level ones so genuinely broken vision calls
+          // surface, but suppress the rest.
+          if (message.startsWith("[vision-proxy]") && level !== "error") return;
           this.emit("event:notice", { threadId, message, level });
         },
         onExtensionStatus: (key, text) =>

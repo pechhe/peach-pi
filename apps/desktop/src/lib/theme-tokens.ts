@@ -23,6 +23,21 @@ export const THEMES: ThemeOption[] = [
   { id: "light", label: "Light", scheme: "light" },
   { id: "dracula", label: "Dracula", scheme: "dark" },
   { id: "dracula-light", label: "Dracula Light", scheme: "light" },
+  { id: "one-dark", label: "One Dark", scheme: "dark" },
+  { id: "monokai", label: "Monokai", scheme: "dark" },
+  { id: "gruvbox", label: "Gruvbox", scheme: "dark" },
+  { id: "nord", label: "Nord", scheme: "dark" },
+  { id: "tokyo-night", label: "Tokyo Night", scheme: "dark" },
+  { id: "solarized-light", label: "Solarized Light", scheme: "light" },
+  { id: "github-light", label: "GitHub Light", scheme: "light" },
+  { id: "catppuccin-latte", label: "Catppuccin Latte", scheme: "light" },
+  { id: "one-light", label: "One Light", scheme: "light" },
+  { id: "gruvbox-light", label: "Gruvbox Light", scheme: "light" },
+  { id: "rose-pine-dawn", label: "Rosé Pine Dawn", scheme: "light" },
+  { id: "everforest-light", label: "Everforest Light", scheme: "light" },
+  { id: "kanagawa-lotus", label: "Kanagawa Lotus", scheme: "light" },
+  { id: "tomorrow", label: "Tomorrow", scheme: "light" },
+  { id: "alabaster", label: "Alabaster", scheme: "light" },
 ];
 
 /** Theme id representing a user-customized palette (not a preset). Setting any

@@ -43,6 +43,11 @@ export interface RecorderEvent {
   args?: unknown;
   result?: unknown;
   isError?: boolean;
+  // Compaction events (mirrors of the SDK union, kept structural so the
+  // recorder stays unit-testable without importing the pi package).
+  reason?: "manual" | "threshold" | "overflow";
+  aborted?: boolean;
+  errorMessage?: string;
 }
 
 function blocksToText(content: unknown, type: "text" | "thinking"): string {
@@ -66,10 +71,61 @@ function blocksToImages(content: unknown): { mimeType: string; data: string }[] 
     .map((b) => ({ mimeType: b.mimeType!, data: b.data! }));
 }
 
-function summarizeArgs(args: unknown): string {
+function summarizeArgs(toolName: string | undefined, args: unknown): string {
+  const obj = args && typeof args === "object" ? (args as Record<string, unknown>) : null;
+  const pickStr = (...keys: string[]): string | null => {
+    if (!obj) return null;
+    for (const k of keys) {
+      const v = obj[k];
+      if (typeof v === "string" && v.trim()) return v;
+    }
+    return null;
+  };
+  const clip = (s: string, n = 120): string => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+  switch (toolName) {
+    case "bash":
+    case "shell": {
+      const c = pickStr("command", "cmd");
+      if (c) return clip(c.replace(/\s+/g, " ").trim());
+      break;
+    }
+    case "read":
+    case "write":
+    case "edit": {
+      const p = pickStr("path", "file", "filePath", "target");
+      if (p) return clip(p);
+      break;
+    }
+    case "web_search":
+    case "firecrawl_search": {
+      const q = pickStr("query", "q", "search");
+      if (q) return clip(q);
+      break;
+    }
+    case "web_fetch":
+    case "firecrawl_scrape": {
+      const u = pickStr("url");
+      if (u) return clip(u);
+      break;
+    }
+    case "subagent":
+    case "subagent_resume": {
+      const n = pickStr("name", "agent");
+      if (n) return clip(n);
+      break;
+    }
+  }
+
+  // Generic fallback: show the first short string field, else compact JSON.
+  if (obj) {
+    for (const v of Object.values(obj)) {
+      if (typeof v === "string" && v.trim() && v.length <= 120) return v.trim();
+    }
+  }
   try {
     const s = JSON.stringify(args);
-    return s.length > 200 ? `${s.slice(0, 200)}…` : (s ?? "");
+    return s && s.length > 120 ? `${s.slice(0, 120)}…` : (s ?? "");
   } catch {
     return "";
   }
@@ -81,6 +137,16 @@ function resultToText(result: unknown): string {
     return blocksToText((result as { content: unknown }).content, "text");
   }
   return "";
+}
+
+/** Read a compaction_end `result` ({ summary?, tokensBefore? }) structurally. */
+function compactionResult(result: unknown): { summary?: string; tokensBefore?: number } {
+  const obj = asObject(result);
+  if (!obj) return {};
+  const out: { summary?: string; tokensBefore?: number } = {};
+  if (typeof obj.summary === "string") out.summary = obj.summary;
+  if (typeof obj.tokensBefore === "number") out.tokensBefore = obj.tokensBefore;
+  return out;
 }
 
 // ── Subagent tool calls ───────────────────────────────────────────────────
@@ -182,6 +248,10 @@ export class TranscriptRecorder {
   private items: TranscriptItem[] = [];
   private seq = 0;
   private activeAssistantId: string | null = null;
+  /** FIFO of in-flight compaction card ids. Multiple compactions can overlap
+   *  (app auto-compact, extension smart-compact, SDK builtin); a queue keeps
+   *  every start→end pair closing the correct card so none orphan-spins. */
+  private activeCompactionIds: string[] = [];
 
   transcript(): TranscriptItem[] {
     return this.items;
@@ -221,6 +291,7 @@ export class TranscriptRecorder {
     this.items = [];
     this.seq = 0;
     this.activeAssistantId = null;
+    this.activeCompactionIds = [];
     for (const m of messages) this.upsert(this.messageToItem(m, false));
     return [{ op: "reset", items: this.items }];
   }
@@ -234,6 +305,7 @@ export class TranscriptRecorder {
     this.items = [];
     this.seq = 0;
     this.activeAssistantId = null;
+    this.activeCompactionIds = [];
     for (const entry of entries) {
       const item = this.entryToItem(entry);
       if (item) this.upsert(item);
@@ -348,7 +420,7 @@ export class TranscriptRecorder {
             id: event.toolCallId,
             kind: "tool",
             toolName: event.toolName ?? "tool",
-            argsSummary: summarizeArgs(event.args),
+            argsSummary: summarizeArgs(event.toolName, event.args),
             output: "",
             status: "running",
           }),
@@ -381,6 +453,73 @@ export class TranscriptRecorder {
             status: event.isError ? "error" : "done",
           }),
         ];
+      }
+      case "compaction_start": {
+        // Finalise any orphaned still-running cards from prior overlapping
+        // compactions so none spins forever, then open a new transient card.
+        const ops: TranscriptOp[] = [];
+        while (this.activeCompactionIds.length > 0) {
+          const orphan = this.activeCompactionIds.shift()!;
+          ops.push(
+            this.upsertOp({
+              id: orphan,
+              kind: "compaction",
+              running: false,
+              reason: event.reason ?? "threshold",
+              aborted: true,
+              error: "Superseded by a newer compaction",
+            }),
+          );
+        }
+        const id = `compaction-${Date.now()}`;
+        this.activeCompactionIds.push(id);
+        ops.push(
+          this.upsertOp({
+            id,
+            kind: "compaction",
+            running: true,
+            reason: event.reason ?? "threshold",
+          }),
+        );
+        return ops;
+      }
+      case "compaction_end": {
+        // Pop the matching start id (the transient "compacting…" card). A
+        // success leaves a persisted entry on the branch; the caller reloads
+        // from the branch (which wipes this transient card) and we then patch
+        // the just-completed leaf card with the precise reason/summary. On
+        // failure nothing is persisted, so we finalise the transient card
+        // in place — no caller reload on the failure path.
+        const reason = event.reason ?? "threshold";
+        const id = this.activeCompactionIds.shift() ?? `compaction-${Date.now()}`;
+        if (event.aborted || event.errorMessage) {
+          return [
+            this.upsertOp({
+              id,
+              kind: "compaction",
+              running: false,
+              reason,
+              aborted: event.aborted,
+              error: event.errorMessage,
+            }),
+          ];
+        }
+        const res = compactionResult(event.result);
+        const items = this.transcript();
+        const last = items[items.length - 1];
+        if (last?.kind === "compaction") {
+          const tokensAfter = res.summary ? Math.ceil(res.summary.length / 4) : last.tokensAfter;
+          return [
+            this.upsertOp({
+              ...last,
+              reason,
+              summary: res.summary ?? last.summary,
+              tokensBefore: res.tokensBefore ?? last.tokensBefore,
+              tokensAfter,
+            }),
+          ];
+        }
+        return [];
       }
       default:
         return [];
