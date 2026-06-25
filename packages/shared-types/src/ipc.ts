@@ -166,7 +166,8 @@ export const ipcContracts = {
   /** Write pi settings (partial merge into ~/.pi/agent/settings.json). */
   "app:setPiSettings": invoke<[patch: Partial<PiSettings>], PiSettings>(),
   /** Manually run `pi update --extensions` now (bypasses throttle). */
-  "app:updateExtensions": invoke<[], { ok: boolean; updated: boolean; error?: string }>(),
+  "app:updateExtensions": invoke<[], { ok: boolean; updated: boolean; queued: boolean; error?: string }>(),
+
   /** Uninstall a package extension via `pi remove <spec>`. */
   "extensions:remove": invoke<[spec: string], { ok: boolean; error?: string }>((spec) =>
     requireNonEmptyString(spec, "spec"),

@@ -7,8 +7,8 @@
   "bin": {
     "peach": "bin/peach.ts"
   },
-  "main": "src/handoff.ts",
-  "types": "src/handoff.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types tests/*.test.ts"

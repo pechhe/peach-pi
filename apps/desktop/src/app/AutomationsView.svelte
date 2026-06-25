@@ -6,6 +6,7 @@
   import Monitor from "@lucide/svelte/icons/monitor";
   import AutomationDialog from "./AutomationDialog.svelte";
   import { cronLabel } from "../lib/automations/schedule";
+  import { Switch } from "../components/ui/switch";
 
   let {
     projects,
@@ -54,19 +55,11 @@
       {#each automations as auto (auto.id)}
         <div class="rounded-lg border border-border bg-surface/50 px-4 py-3">
           <div class="flex items-center gap-3">
-            <button
-              class="relative h-4 w-7 shrink-0 rounded-full transition-colors {auto.enabled ? 'bg-success' : 'bg-surface-3'}"
-              onclick={() => api.invoke("automations:setEnabled", auto.id, !auto.enabled)}
+            <Switch
+              checked={auto.enabled}
+              onCheckedChange={() => api.invoke("automations:setEnabled", auto.id, !auto.enabled)}
               aria-label="Toggle automation"
-              role="switch"
-              aria-checked={auto.enabled}
-            >
-              <span
-                class="absolute top-0.5 size-3 rounded-full bg-white transition-transform {auto.enabled
-                  ? 'translate-x-[0.85rem]'
-                  : 'translate-x-0.5'}"
-              ></span>
-            </button>
+            />
             <div class="min-w-0 flex-1">
               <span class="block truncate text-sm text-fg">{auto.name}</span>
               <span class="flex items-center gap-1 text-xs text-faint">

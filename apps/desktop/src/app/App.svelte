@@ -10,10 +10,12 @@
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { scopedModels } from "../stores/scoped-models.svelte";
+  import { remoteFirst } from "../stores/remote-first.svelte";
   import { sideChat } from "../stores/side-chat.svelte";
   import { usage } from "../stores/usage.svelte";
   import { usagePrefs } from "../stores/usage-prefs.svelte";
-  import { preloadSounds } from "../lib/sound/button-click-sound";
+  import { preloadSounds, installGlobalButtonPress } from "../lib/sound/button-click-sound";
+  import { preloadDoneSamples } from "../lib/sound/done-sound";
   import { playDoneSound } from "../lib/sound/done-sound";
   import Sidebar from "./Sidebar.svelte";
   import ThreadView from "./ThreadView.svelte";
@@ -387,8 +389,11 @@
     usage.init();
     usagePrefs.init();
     scopedModels.init();
+    remoteFirst.init();
     void snapshot.init();
     preloadSounds();
+    preloadDoneSamples();
+    return installGlobalButtonPress();
   });
 </script>
 
@@ -405,6 +410,7 @@
     {selectedThreadId}
     activeView={view}
     onSelect={selectThread}
+    remoteFirst={remoteFirst.mode.enabled}
     onNewChat={() => startNewThread(null)}
     onOpenView={openView}
     onOpenTesting={openTesting}
@@ -459,7 +465,7 @@
     {#key view === "thread" ? `thread:${selectedThreadId}` : view === "testing" ? `testing:${testingProjectId}` : view}
     <div class="view-enter flex min-h-0 flex-1">
     {#if view === "settings"}
-      <SettingsView initialQuery={settingsQuery} />
+      <SettingsView initialQuery={settingsQuery} onOpenPlayroom={() => openView("playroom")} />
     {:else if view === "skills"}
       <SkillsView
         projects={snapshot.current.projects}

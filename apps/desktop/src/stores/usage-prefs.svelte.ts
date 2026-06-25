@@ -72,8 +72,10 @@ class UsagePrefsStore {
     });
   }
 
-  keysFor(provider: string): string[] {
-    return this.highlights[provider] ?? [];
+  /** Pinned keys for a provider. `undefined` = never touched (use default
+   *  first metric); `[]` = explicitly unpinned (show nothing in sidebar). */
+  keysFor(provider: string): string[] | undefined {
+    return this.highlights[provider];
   }
 
   /** Toggle a metric key on/off for `provider`, preserving order. */
@@ -86,11 +88,18 @@ class UsagePrefsStore {
     writeMap(KEY, this.highlights);
   }
 
-  /** Reset a provider to its default featured metric. */
+  /** Reset a provider to its default featured metric (clear any pins). */
   reset(provider: string): void {
     const next = { ...this.highlights };
     delete next[provider];
     this.highlights = next;
+    writeMap(KEY, this.highlights);
+  }
+
+  /** Explicitly show nothing for `provider` in the sidebar line, while keeping
+   *  it visible in the popover (unpin all, vs `toggleHidden`). */
+  unpinAll(provider: string): void {
+    this.highlights = { ...this.highlights, [provider]: [] };
     writeMap(KEY, this.highlights);
   }
 

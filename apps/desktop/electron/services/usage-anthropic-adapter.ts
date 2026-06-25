@@ -126,7 +126,9 @@ export class AnthropicAdapter implements UsageAdapter {
 
 function toWindow(d: WindowData | undefined): UsageWindow | null {
   if (!d || typeof d.utilization !== "number" || !Number.isFinite(d.utilization)) return null;
-  const usedPct = Math.max(0, Math.min(100, d.utilization));
+  // Anthropic reports `utilization` = consumed %. Flip to remaining so it
+  // counts down (0 = depleted), consistent with Z.ai's `percentage`.
+  const remainingPct = Math.max(0, Math.min(100, 100 - d.utilization));
   const resetAt = d.resets_at ?? null;
-  return { usedPct, resetAt };
+  return { remainingPct, resetAt };
 }

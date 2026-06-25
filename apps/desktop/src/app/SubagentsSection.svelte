@@ -26,7 +26,7 @@
     if (models.length === 0) void api.invoke("app:listModels").then((m) => (models = m));
   });
 
-  async function patchAgent(field: "model" | "thinking", value: string) {
+  async function patchAgent(field: "model" | "thinking" | "description", value: string) {
     if (!selected) return;
     const filePath = selected.filePath;
     try {
@@ -85,7 +85,27 @@
       {#if selected}
         <h3 class="text-sm font-medium text-fg">{selected.name}</h3>
         <p class="mt-1 font-mono text-[11px] text-fainter" use:clickCopy={selected.filePath}>{selected.filePath}</p>
+        {#if !selected.description}
+          <p class="mt-1 text-[10px] text-faint">No description — this agent won't appear in pi's subagent roster until you add one.</p>
+        {/if}
         <div class="mt-3 grid max-w-md gap-3">
+          <label class="grid gap-1">
+            <span class="text-[10px] uppercase tracking-wide text-faint">Description</span>
+            <textarea
+              class="resize-y rounded-md border border-border bg-surface-2 px-2 py-1.5 text-xs"
+              rows="2"
+              placeholder="One-line summary; required for the agent to appear in pi's subagent roster"
+            >{selected.description ?? ""}</textarea>
+            <button
+              type="button"
+              class="justify-self-start rounded px-2 py-1 text-[10px] text-faint hover:bg-surface"
+              onclick={(e) => {
+                const ta = (e.currentTarget.previousElementSibling as HTMLTextAreaElement);
+                if (ta && ta.value.trim() !== (selected?.description ?? "").trim()) {
+                  patchAgent("description", ta.value.trim());
+                }
+              }}>Save description</button>
+          </label>
           <label class="grid gap-1">
             <span class="text-[10px] uppercase tracking-wide text-faint">Model</span>
             <Select

@@ -15,6 +15,8 @@
 // fetchable under file:// and work in dev too.
 import { soundsMuted } from "./sound-prefs";
 import clickMp3 from "./click.mp3?inline";
+import buttonDownMp3 from "./button-down.mp3?inline";
+import buttonUpMp3 from "./button-up.mp3?inline";
 import keyOnMp3 from "./key-on.mp3?inline";
 import keyOffMp3 from "./key-off.mp3?inline";
 import click01Mp3 from "./click_01.mp3?inline";
@@ -69,8 +71,10 @@ export function getButtonSoundSettings(): ButtonSoundSettings {
 type ClickKind = "down" | "up";
 type KeyPhase = "press" | "release";
 
-const URLS: { click: string; keys: string[]; rotary: string[] } = {
+const URLS: { click: string; down: string; up: string; keys: string[]; rotary: string[] } = {
   click: clickMp3,
+  down: buttonDownMp3,
+  up: buttonUpMp3,
   keys: [keyOnMp3, keyOffMp3],
   rotary: [click01Mp3],
 };
@@ -81,6 +85,11 @@ let context: AudioContext | undefined;
 let masterGain: GainNode | undefined;
 
 let clickBuffer: AudioBuffer | undefined;
+// Dedicated down/up click samples (a single physical press split into its
+// down-stroke and up-stroke). When loaded, these take precedence over the
+// pitch-shifted single `clickBuffer` fallback.
+let downClickBuffer: AudioBuffer | undefined;
+let upClickBuffer: AudioBuffer | undefined;
 let keyBuffers: Array<{ press: AudioBuffer; release: AudioBuffer }> = [];
 let rotaryBuffers: AudioBuffer[] = [];
 
@@ -299,11 +308,15 @@ function loadAll(): Promise<void> {
 
   const urls = URLS;
   loadPromise = (async () => {
-    const [rawClick, ...rawKeys] = await Promise.all([
+    const [rawClick, rawDown, rawUp, ...rawKeys] = await Promise.all([
       fetchBuffer(ctx, urls.click),
+      fetchBuffer(ctx, urls.down),
+      fetchBuffer(ctx, urls.up),
       ...urls.keys.map((url) => fetchBuffer(ctx, url)),
     ]);
     if (rawClick) clickBuffer = trimSilence(ctx, rawClick);
+    if (rawDown) downClickBuffer = trimSilence(ctx, rawDown);
+    if (rawUp) upClickBuffer = trimSilence(ctx, rawUp);
     keyBuffers = rawKeys
       .filter((b): b is AudioBuffer => Boolean(b))
       .map((b) => splitKeySample(ctx, b));
@@ -348,12 +361,19 @@ export function preloadSounds(): void {
 /** Play a click sound (down = lower pitch, up = normal pitch) */
 export function playClick(kind: ClickKind = "down"): void {
   if (soundsMuted()) return;
+  const dedicated = kind === "down" ? downClickBuffer : upClickBuffer;
+  if (dedicated) {
+    void fire(dedicated);
+    return;
+  }
   if (clickBuffer) {
     void fire(clickBuffer, CLICK_RATE[kind] ?? 1);
     return;
   }
   void loadAll().then(() => {
-    if (clickBuffer) void fire(clickBuffer, CLICK_RATE[kind] ?? 1);
+    const buf = kind === "down" ? downClickBuffer : upClickBuffer;
+    if (buf) void fire(buf);
+    else if (clickBuffer) void fire(clickBuffer, CLICK_RATE[kind] ?? 1);
   });
 }
 
@@ -394,32 +414,51 @@ export function playRotary(): void {
   if (buffer) void fire(buffer, 0.9 + Math.random() * 0.2); // slight pitch variation
 }
 
-/** Play button click (legacy API, uses primary category) */
-export function playButtonClick(variant?: ButtonClickVariant): void {
-  ensureSettingsLoaded();
-  const resolvedVariant = variant ?? currentSettings.primary;
-  if (resolvedVariant === "none") return;
+/**
+ * Legacy per-call click APIs. The generic click sound is now produced globally
+ * by `installGlobalButtonPress`, so these are kept as no-ops to avoid stacking a
+ * second tone on top of the global down/up press feedback. Existing call sites
+ * stay valid without edits.
+ */
+export function playButtonClick(_variant?: ButtonClickVariant): void {}
+export function playButtonSecondary(_variant?: ButtonClickVariant): void {}
 
-  if (resolvedVariant === "click") {
+/**
+ * Make every <button> feel like the send dial: a down-click on press, an
+ * up-click on release, and a depressed (`is-pressed`) state while held. Buttons
+ * that own their own sound/visual (the send dial, thread rows, …) opt out with
+ * `data-press="self"`. Call once on app mount; returns a disposer.
+ */
+export function installGlobalButtonPress(): () => void {
+  if (typeof document === "undefined") return () => {};
+  let held: HTMLButtonElement | null = null;
+
+  const onPointerDown = (e: PointerEvent): void => {
+    if (e.button !== 0) return;
+    const btn = (e.target as HTMLElement | null)?.closest("button");
+    if (!(btn instanceof HTMLButtonElement)) return;
+    if (btn.disabled || btn.dataset.press === "self") return;
+    held = btn;
+    btn.classList.add("is-pressed");
     playClick("down");
-  } else if (resolvedVariant === "key") {
-    playKey("press");
-  } else if (resolvedVariant === "rotary") {
-    playRotary();
-  }
-}
+  };
+  const release = (playUp: boolean): void => {
+    const btn = held;
+    held = null;
+    if (!btn) return;
+    btn.classList.remove("is-pressed");
+    if (playUp) playClick("up");
+  };
+  const onPointerUp = (): void => release(true);
+  const onPointerCancel = (): void => release(false);
 
-/** Play secondary button sound (higher-pitched click) */
-export function playButtonSecondary(variant?: ButtonClickVariant): void {
-  ensureSettingsLoaded();
-  const resolvedVariant = variant ?? currentSettings.secondary;
-  if (resolvedVariant === "none") return;
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("pointerup", onPointerUp, true);
+  document.addEventListener("pointercancel", onPointerCancel, true);
 
-  if (resolvedVariant === "click") {
-    playClick("up"); // up is higher-pitched
-  } else if (resolvedVariant === "key") {
-    playKey("release");
-  } else if (resolvedVariant === "rotary") {
-    playRotary();
-  }
+  return () => {
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("pointerup", onPointerUp, true);
+    document.removeEventListener("pointercancel", onPointerCancel, true);
+  };
 }

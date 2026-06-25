@@ -203,7 +203,7 @@
         <span class="text-danger">−{info.deletions}</span>
       {/if}
       {#if info.changedCount}
-        <span class="rounded-full bg-surface-2 px-1.5 text-[10px] text-fg-soft">{info.changedCount}</span>
+        <span class="num-badge">{info.changedCount}</span>
       {/if}
       {#if info.ahead}<span class="text-faint">↑{info.ahead}</span>{/if}
       {#if info.behind}<span class="text-faint">↓{info.behind}</span>{/if}

@@ -418,7 +418,7 @@ import Server from "@lucide/svelte/icons/server";
           <ConnectorIcon logoUrl={t.logoUrl} label={t.name} size={20} />
           <span class="flex-1 truncate text-sm text-fg">{t.name}</span>
           {#if t.count > 1}
-            <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted">{t.count}</span>
+            <span class="num-badge">{t.count}</span>
           {/if}
         </button>
       {/each}
@@ -446,7 +446,7 @@ import Server from "@lucide/svelte/icons/server";
             <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Server size={12} /></span>
             <span class="flex-1 truncate text-sm {mode === "mcp" ? "text-fg" : "text-muted"}">{s.name}</span>
             {#if s.connected}
-              <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted" title="{s.toolCount ?? 0} tools">{s.toolCount ?? 0}</span>
+              <span class="num-badge" title="{s.toolCount ?? 0} tools">{s.toolCount ?? 0}</span>
             {/if}
           </button>
         {/each}

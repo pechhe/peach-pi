@@ -52,6 +52,7 @@ import {
 } from "./windows/hud-window.ts";
 import { RemoteHostService } from "./services/remote-host.ts";
 import { RemoteClientService } from "./services/remote-client.ts";
+import { createHandoffService } from "./services/handoff-service.ts";
 import { getConnectInfo, enableServe } from "./services/remote-serve.ts";
 import { recordCheckpoint, originUrl as originUrlOf } from "./services/remote-checkpoint.ts";
 
@@ -123,6 +124,13 @@ async function boot(): Promise<void> {
   const db = openDb(path.join(app.getPath("userData"), "peach-pi.sqlite"));
   const emit = createEmitter(() => BrowserWindow.getAllWindows());
   const appService = new AppService(db, emit);
+  // Movable execution / remote-first mode (docs/remote-handoff.md). Distinct
+  // from the ADR-0009 RemoteHostService below; shares the same kv db handle.
+  // The service declares a loose Emit shape (channel: string, payload: unknown)
+  // so it loads in plain Node for unit tests; adapt the typed emitter here.
+  const handoffEmit = ((channel: string, payload: unknown) => emit(channel, payload as never)) as
+    Parameters<typeof createHandoffService>[1];
+  const handoffService = createHandoffService(db, handoffEmit);
   setDevTapStateProvider(() => ({ app: appService.snapshot() }));
   let mainWindow: BrowserWindow | null = null;
   let hudWindow: BrowserWindow | null = null;
@@ -163,7 +171,12 @@ async function boot(): Promise<void> {
     () => appService.getAutoCompact(),
     (running) => {
       if (running) insomniaService.onRunStart();
-      else insomniaService.onRunEnd();
+      else {
+        insomniaService.onRunEnd();
+        // Flush any update queued while runs were active. Safe to call even
+        // when no update is queued; piUpdateService re-checks hasActiveRuns.
+        piUpdateService.onRunsIdle();
+      }
     },
   );
   const automationService = new AutomationService(
@@ -188,6 +201,18 @@ async function boot(): Promise<void> {
     () => appService.getUtilityModel(),
   );
   threadService.setGitService(gitService);
+  // Lift a conversation thread into a remote work unit before each prompt when
+  // remote-first mode is on (returns a status note; the hook swallows errors).
+  threadService.setHandoffService({
+    beforePrompt: async (threadId, task) => {
+      const before = await handoffService.statusForThread(threadId);
+      const after = await handoffService.ensureRemoteForThread(threadId, task);
+      if (before.owner !== after.owner && after.owner === "remote") {
+        return `handed off to ${after.remoteMachine ?? "remote"}`;
+      }
+      return null;
+    },
+  });
 
   // Remote session hosting (ADR-0009). The master relay taps the same
   // transcript flush the renderer gets; checkpoints fire on run-idle. Both
@@ -595,6 +620,13 @@ async function boot(): Promise<void> {
     "remote:attach": (hostId, threadId) => remoteClient.attach(hostId, threadId),
     "remote:detach": () => remoteClient.detach(),
     "remote:pullToTest": (hostId, threadId) => remoteClient.pullToTest(hostId, threadId),
+    // Movable execution / remote-first mode (docs/remote-handoff.md).
+    "handoff:getMode": () => handoffService.getMode(),
+    "handoff:setMode": (enabled) => handoffService.setMode(enabled),
+    "handoff:statusForThread": (threadId) => handoffService.statusForThread(threadId),
+    "handoff:message": (threadId) =>
+      handoffService.ensureRemoteForThread(threadId, "manual handoff"),
+    "handoff:registerMachine": (input) => handoffService.registerMachine(input),
     "usage:list": () => usageService.list(),
     "usage:refresh": () => usageService.refresh(),
     "threads:steer": (id, text) => threadService.steer(id, text),

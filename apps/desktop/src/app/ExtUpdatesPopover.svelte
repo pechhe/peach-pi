@@ -22,6 +22,24 @@
   let updating = $state(false);
   let error = $state("");
   let justUpdated = $state(false);
+  let queued = $state(false);
+
+  // Updates list (from the store). Declared up here so the queued-up
+  // watcher effect below reads it before first run, per Svelte 5 TDZ rules.
+  const packages = $derived(extensionUi.extUpdates);
+
+  // A queued update applies in the background once runs finish. When it does,
+  // the store clears its updates list — flip into the "updated" success state.
+  $effect(() => {
+    if (queued && packages.length === 0) {
+      queued = false;
+      justUpdated = true;
+      setTimeout(() => {
+        justUpdated = false;
+        onClose();
+      }, 1500);
+    }
+  });
 
   // Anchor to the trigger button with fixed positioning so the popover
   // escapes the sidebar's overflow clipping. Portaled to <body>.
@@ -33,7 +51,6 @@
     const left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8));
     pos = { top: r.bottom + 4, left };
   });
-
   // Re-measure on viewport changes.
   $effect(() => {
     if (!anchor || !popoverEl) return;
@@ -68,6 +85,10 @@
       const res = await api.invoke("app:updateExtensions");
       if (!res.ok) {
         error = res.error ?? "Update failed.";
+      } else if (res.queued) {
+        // Update queued: it will apply automatically when runs finish.
+        // Don't close the popover — show the waiting state.
+        queued = true;
       } else {
         justUpdated = true;
         setTimeout(() => {
@@ -81,8 +102,6 @@
       updating = false;
     }
   }
-
-  const packages = $derived(extensionUi.extUpdates);
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} onclick={onWindowClick} />
@@ -98,7 +117,7 @@
     <span class="text-[11px] font-semibold uppercase tracking-wide text-faint">
       Updates available
     </span>
-    <span class="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-400">
+    <span class="num-badge">
       {packages.length}
     </span>
   </div>
@@ -107,6 +126,11 @@
     <div class="flex items-center gap-2 px-3 py-6 text-emerald-500">
       <Check size={16} />
       <span class="text-xs">Extensions updated. Restart to load.</span>
+    </div>
+  {:else if queued}
+    <div class="flex items-center gap-2 px-3 py-6 text-amber-400">
+      <RefreshCw size={16} class="animate-spin" />
+      <span class="text-xs">Update queued — will apply as soon as runs finish.</span>
     </div>
   {:else}
     <div class="flex flex-col py-1">
@@ -136,7 +160,7 @@
       <button
         class="flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-[11px] font-medium text-amber-950 transition-colors hover:bg-amber-400 disabled:opacity-50"
         onclick={updateAll}
-        disabled={updating}
+        disabled={updating || queued}
         data-testid="ext-updates-update-all"
       >
         {#if updating}

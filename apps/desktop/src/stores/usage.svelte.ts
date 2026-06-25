@@ -12,16 +12,14 @@ class UsageStore {
   refreshing = $state(false);
   error = $state("");
   private poll: ReturnType<typeof setInterval> | null = null;
-  private loaded = false;
   private started = false;
 
   async load(): Promise<void> {
-    if (this.loaded && this.summaries.length > 0 && !this.loading) return;
+    if (this.loading) return; // dedup concurrent calls; main-side TTL cache handles the rest
     this.loading = true;
     this.error = "";
     try {
       this.summaries = await api.invoke("usage:list");
-      this.loaded = true;
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
     } finally {

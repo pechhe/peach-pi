@@ -11,6 +11,7 @@
   } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
+  import { remoteFirst } from "../stores/remote-first.svelte";
   import Monitor from "@lucide/svelte/icons/monitor";
   import Radio from "@lucide/svelte/icons/radio";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -21,6 +22,7 @@
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import CopyButton from "./CopyButton.svelte";
   import StreamingText from "./StreamingText.svelte";
+  import { Switch } from "../components/ui/switch";
 
   // ── Master side: host serving status ────────────────────────────────
   let hostStatus = $state<RemoteHostConfig | null>(null);
@@ -196,6 +198,7 @@
   onMount(() => {
     loadHost();
     loadLocalProjects();
+    void remoteFirst.load();
     const off = api.on("event:remoteTap", onFrame);
     return off;
   });
@@ -221,6 +224,28 @@
         {error}
       </div>
     {/if}
+
+    <!-- ── Remote-first mode (movable execution, docs/remote-handoff.md) ─── -->
+    <section class="mb-6 rounded-md border border-border bg-surface-1 px-3.5 py-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-[13px] font-medium text-fg">Remote-first mode</p>
+          <p class="mt-0.5 text-xs text-faint">
+            {remoteFirst.mode.enabled
+              ? remoteFirst.mode.hasRemoteMachine
+                ? `New threads + messages hand off to ${remoteFirst.mode.targetMachine ?? "the remote machine"}.`
+                : "On, but no remote machine is registered — add a machine below."
+              : "New threads + messages run locally; nothing is handed off."}
+          </p>
+        </div>
+        <Switch
+          checked={remoteFirst.mode.enabled}
+          onCheckedChange={(v) => remoteFirst.toggle(v)}
+          data-testid="remote-first-toggle"
+          aria-label="Toggle remote-first mode"
+        />
+      </div>
+    </section>
 
     <!-- ── Master side: serve your sessions ─────────────────────── -->
     <section class="mb-6">

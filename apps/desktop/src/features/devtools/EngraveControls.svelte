@@ -63,20 +63,20 @@
 .sidebar-device .main-nav-item--active > span,
 .sidebar-device .engraved--active {
   color: var(--engrave-active, oklch(0.74 0.185 52));
-  text-shadow: 0 ${px}px 0 oklch(1 0.002 ${iH} / ${op}), 0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  text-shadow: 0 ${px}px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 ${iH} / ${op})), 0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
 }
 .sidebar-device .main-nav-item--active > span svg,
 .sidebar-device .engraved--active svg {
-  filter: drop-shadow(0 ${px}px 0 oklch(1 0.002 ${iH} / ${op})) drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+  filter: drop-shadow(0 ${px}px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 ${iH} / ${op}))) drop-shadow(0 0 5px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
 }
 :root[data-composer="dark"] .sidebar-device .main-nav-item--active > span,
 :root[data-composer="dark"] .sidebar-device .engraved--active {
   color: var(--engrave-active, oklch(0.74 0.185 52));
-  text-shadow: 0 -${px}px 0 oklch(0 0 0 / ${op}), 0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  text-shadow: 0 -${px}px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / ${op})), 0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
 }
 :root[data-composer="dark"] .sidebar-device .main-nav-item--active > span svg,
 :root[data-composer="dark"] .sidebar-device .engraved--active svg {
-  filter: drop-shadow(0 -${px}px 0 oklch(0 0 0 / ${op})) drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+  filter: drop-shadow(0 -${px}px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / ${op}))) drop-shadow(0 0 5px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
 }
 `;
   }

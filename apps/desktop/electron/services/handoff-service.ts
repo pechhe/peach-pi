@@ -7,10 +7,14 @@ import {
   HandoffService,
   LocalTransport,
   SshTransport,
-  type HandoffThread,
   type Machine,
 } from "@peach-pi/remote-handoff";
-import type { Emit } from "../ipc/registry.ts";
+
+/** Minimal emit signature: the emitter registered in main.ts broadcasts an
+ *  event payload to all renderer windows. Defined locally (not imported from
+ *  ipc/registry.ts) so this module loads in plain Node for unit tests —
+ *  registry.ts imports `electron`, which isn't available in the test runner. */
+export type Emit = (channel: string, payload: unknown) => void;
 
 /**
  * Remote-first mode + per-thread movable execution, layered on the
@@ -34,7 +38,7 @@ import type { Emit } from "../ipc/registry.ts";
 
 const MODE_KEY = "remote-first-mode";
 const TARGET_KEY = "remote-first-target";
-const PEACH_ROOT = join(homedir(), ".peach");
+const MAPPING_KEY = "remote-handoff-mapping";
 
 /** Persisted shape: just the boolean + chosen target machine name. */
 interface PersistedMode {
@@ -44,17 +48,26 @@ interface PersistedMode {
 
 export class HandoffAppService {
   private engine: HandoffService;
+  private kv: KvRepo;
+  private emit: Emit;
   /** The remote machine name threads are sent to (null = first remote found). */
   private targetMachine: string | null = null;
 
   constructor(
-    private kv: KvRepo,
-    private emit: Emit,
+    kv: KvRepo,
+    emit: Emit,
+    root: string,
   ) {
+    this.kv = kv;
+    this.emit = emit;
     // SSH transport for real cross-machine handoff; the engine falls back to
     // LocalTransport behaviour when the peer turns out to be this machine.
+    // repoPath is the app's cwd only so HandoffService.self() can synthesize a
+    // local machine record without throwing — real git ops run on the *remote*
+    // peer (target.repoPath), never here, since this machine is the controller.
     this.engine = new HandoffService({
-      root: PEACH_ROOT,
+      root,
+      repoPath: process.cwd(),
       transport: new SshTransport(),
       machineName: "local",
     });
@@ -125,42 +138,42 @@ export class HandoffAppService {
     const target = await this.resolveTarget();
     if (!target) return this.statusForThread(id);
 
-    // Look for an existing handoff thread keyed by the conversation thread.
-    const existing = (await this.engine.listThreads()).find((t) => t.id === this.handoffId(id));
-    if (existing && existing.activeMachine === target.id) {
-      return this.statusForThread(id);
-    }
-    if (existing) {
-      // Already a handoff thread but owned elsewhere / here → send it to target.
-      await this.engine.send(existing.id, { machine: target.name }).catch((e) =>
-        this.warn(id, `could not hand off to ${target.name}: ${String((e as Error).message)}`),
-      );
-      return this.statusForThread(id);
+    // Reuse an existing handoff thread if we already created one for this
+    // conversation thread (recorded in the kv mapping, not by renaming the
+    // handoff id — the registry id stays the package's generated id). Keeping
+    // the mapping in kv avoids mutating the registry across an SSH send.
+    const mapping = this.loadMapping();
+    const existingId = mapping[id];
+    if (existingId) {
+      const existing = await this.engine.getRegistry().getThread(existingId);
+      if (existing && existing.activeMachine === target.id) return this.statusForThread(id);
+      if (existing) {
+        await this.engine.send(existing.id, { machine: target.name }).catch((e) =>
+          this.warn(id, `could not hand off to ${target.name}: ${String((e as Error).message)}`),
+        );
+        return this.statusForThread(id);
+      }
     }
 
-    // Create a new handoff thread "remote started" on this machine, then send
-    // it to the target — mirroring the `peach remote start` + `send` flow.
-    const res = await this.engine.remoteStart(task, { machine: "local" }).catch((e) => {
+    // Create a new handoff thread owned by the target (remoteStart seeds the
+    // registry with owner = target and starts the worker over the transport).
+    const res = await this.engine.remoteStart(task, { machine: target.name }).catch((e) => {
       this.warn(id, `could not start remote thread: ${String((e as Error).message)}`);
       return null;
     });
     if (!res) return this.statusForThread(id);
-    // Re-key the handoff thread's id to the conversation thread id so we can
-    // find it again next message. (The branch embeds the id; renaming the id
-    // field keeps the branch stable as a checkoutable ref.)
-    await this.engine.getRegistry().removeThread(res.thread.id).catch(() => undefined);
-    const renamed: HandoffThread = { ...res.thread, id: this.handoffId(id) };
-    await this.engine.getRegistry().addThread(renamed);
-    await this.engine.send(renamed.id, { machine: target.name }).catch((e) =>
-      this.warn(id, `could not hand off to ${target.name}: ${String((e as Error).message)}`),
-    );
+    mapping[id] = res.thread.id;
+    this.saveMapping(mapping);
     this.emit("event:handoffChanged", undefined);
     return this.statusForThread(id);
   }
 
-  /** The handoff thread id derived from a conversation thread id. */
-  private handoffId(conversationThreadId: ThreadId): string {
-    return `thread_cv_${conversationThreadId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}`;
+  /** kv mapping conversation thread id → handoff thread id. */
+  private loadMapping(): Record<string, string> {
+    return this.kv.get<Record<string, string>>(MAPPING_KEY) ?? {};
+  }
+  private saveMapping(m: Record<string, string>): void {
+    this.kv.set(MAPPING_KEY, m);
   }
 
   /** Resolve the target machine by name, else the first remote found. */
@@ -176,7 +189,17 @@ export class HandoffAppService {
 
   /** Per-thread handoff status (owner / lease held here). */
   async statusForThread(id: ThreadId): Promise<ThreadHandoffStatus> {
-    const handoffId = this.handoffId(id);
+    const mapping = this.loadMapping();
+    const handoffId = mapping[id] ?? null;
+    if (!handoffId) {
+      return {
+        threadId: id,
+        owner: "none",
+        handoffThreadId: null,
+        remoteMachine: null,
+        leaseHeldHere: false,
+      };
+    }
     const thread = await this.engine.getRegistry().getThread(handoffId);
     if (!thread) {
       return {
@@ -189,10 +212,14 @@ export class HandoffAppService {
     }
     const self = await this.engine.getRegistry().self();
     const owner = thread.activeMachine === self.id ? "local" : "remote";
-    const ownerMachine = await this.engine.getRegistry().getMachine(thread.activeMachine).catch(() => null);
+    const ownerMachine = await this.engine
+      .getRegistry()
+      .getMachine(thread.activeMachine)
+      .catch(() => null);
     const now = new Date();
     const liveLease =
-      thread.leaseExpiresAt !== null && new Date(thread.leaseExpiresAt).getTime() > now.getTime();
+      thread.leaseExpiresAt !== null &&
+      new Date(thread.leaseExpiresAt).getTime() > now.getTime();
     return {
       threadId: id,
       owner,
@@ -210,9 +237,15 @@ export class HandoffAppService {
 }
 
 /** Exposed for main.ts wiring (the typed IPC handlers live there). */
-export function createHandoffService(db: AppDb, emit: Emit): HandoffAppService {
+export function createHandoffService(
+  db: AppDb,
+  emit: Emit,
+  /** Optional root override for tests; defaults to PEACH_ROOT / ~/.peach. */
+  rootOverride?: string,
+): HandoffAppService {
   const kv = new KvRepo(db);
-  return new HandoffAppService(kv, emit);
+  const root = rootOverride ?? process.env.PEACH_ROOT ?? join(homedir(), ".peach");
+  return new HandoffAppService(kv, emit, root);
 }
 
 // Quiet the unused import for LocalTransport (kept for parity / future same-host path).

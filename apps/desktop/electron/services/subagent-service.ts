@@ -85,6 +85,10 @@ function writeAgentPatch(filePath: string, patch: SubagentAgentPatch, scope: "gl
       if (patch.thinking !== undefined) {
         if (patch.thinking) out.push(`thinking: ${patch.thinking}`);
       } else out.push(line);
+    } else if (key === "description") {
+      if (patch.description !== undefined) {
+        if (patch.description) out.push(`description: ${patch.description}`);
+      } else out.push(line);
     } else {
       out.push(line);
     }
@@ -92,6 +96,7 @@ function writeAgentPatch(filePath: string, patch: SubagentAgentPatch, scope: "gl
   // Keys absent from file but provided in patch get appended (preserving file order).
   if (patch.model && !seen.has("model")) out.push(`model: ${patch.model}`);
   if (patch.thinking && !seen.has("thinking")) out.push(`thinking: ${patch.thinking}`);
+  if (patch.description && !seen.has("description")) out.push(`description: ${patch.description}`);
   const nextRaw = `---\n${out.join("\n")}\n---\n${body}`;
   writeFileSync(filePath, nextRaw);
   const reparsed = parseAgentFile(filePath, scope);

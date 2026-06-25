@@ -126,28 +126,115 @@
 .sidebar-device .main-nav-item--active > span,
 .sidebar-device .engraved--active {
   color: var(--engrave-active, oklch(0.74 0.185 52));
-  text-shadow: 0 2px 0 oklch(1 0.002 250 / 0.7),
-               0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  /* Lip tinted toward the lit ink (not pure white) so it reads as a warm
+     letterpress edge rather than a white sticker outline. */
+  text-shadow: 0 2px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 250 / 0.85)),
+               0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
 }
 .sidebar-device .main-nav-item--active > span svg,
 .sidebar-device .engraved--active svg {
-  filter: drop-shadow(0 2px 0 oklch(1 0.002 250 / 0.7))
-          drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+  filter: drop-shadow(0 2px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 250 / 0.85)))
+          drop-shadow(0 0 5px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
 }
 :root[data-composer="dark"] .sidebar-device .main-nav-item--active > span,
 :root[data-composer="dark"] .sidebar-device .engraved--active {
   color: var(--engrave-active, oklch(0.74 0.185 52));
-  text-shadow: 0 -2px 0 oklch(0 0 0 / 0.7),
-               0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  text-shadow: 0 -2px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / 0.7)),
+               0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
 }
 :root[data-composer="dark"] .sidebar-device .main-nav-item--active > span svg,
 :root[data-composer="dark"] .sidebar-device .engraved--active svg {
-  filter: drop-shadow(0 -2px 0 oklch(0 0 0 / 0.7))
-          drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+  filter: drop-shadow(0 -2px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / 0.7)))
+          drop-shadow(0 0 5px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
 }
 /* No selector pill behind the active nav item — just the glow. */
 .sidebar-device .moving-highlight--nav .sidebar-moving-highlight__indicator--active {
   background: transparent;
+}
+
+/* ================================================================ */
+/* Remote-first mode — the Remote *icon* pulses green slowly while on.     */
+/* Mirrors the active-orange engraving: lit ink + a lower lip tinted toward */
+/* the lit colour (green here), NOT pure white — a white lip on a green     */
+/* glyph reads as a white sticker edge, the same problem fixed for orange.  */
+/* Scoped to `svg` only so the "Remote" label keeps its dark machined ink.  */
+/* Glow kept at constant drop-shadow count across keyframes so `filter`     */
+/* interpolates (a differing count would snap discretely).                  */
+/* ================================================================ */
+.sidebar-device .main-nav-item > span.remote-first-pulse svg {
+  animation: remote-first-engrave 2.8s ease-in-out infinite;
+}
+@keyframes remote-first-engrave {
+  0%, 100% {
+    color: oklch(0.6 0.13 150);
+    filter: drop-shadow(0 2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 35%, oklch(1 0.002 250 / 0.85)))
+            drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0));
+  }
+  50% {
+    color: oklch(0.68 0.13 150);
+    filter: drop-shadow(0 2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 35%, oklch(1 0.002 250 / 0.85)))
+            drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0.22));
+  }
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > span.remote-first-pulse svg {
+  animation: remote-first-engrave-dark 2.8s ease-in-out infinite;
+}
+@keyframes remote-first-engrave-dark {
+  0%, 100% {
+    color: oklch(0.62 0.13 150);
+    filter: drop-shadow(0 -2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 30%, oklch(0 0 0 / 0.7)))
+            drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0));
+  }
+  50% {
+    color: oklch(0.7 0.13 150);
+    filter: drop-shadow(0 -2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 30%, oklch(0 0 0 / 0.7)))
+            drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0.22));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-device .main-nav-item > span.remote-first-pulse svg {
+    animation: none;
+    color: oklch(0.72 0.17 150);
+    filter: drop-shadow(0 2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 35%, oklch(1 0.002 250 / 0.85)));
+  }
+  :root[data-composer="dark"] .sidebar-device .main-nav-item > span.remote-first-pulse svg {
+    filter: drop-shadow(0 -2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 30%, oklch(0 0 0 / 0.7)));
+  }
+}
+
+/* ================================================================ */
+/* Number badge — just the digit, lit in the same orange (with glow) as the  */
+/* active label, engraved into the metal (no pill / no fill).                */
+/* ================================================================ */
+/* Selectors carry .main-nav-item too, to out-specify the engraved-label rule
+   `.sidebar-device .main-nav-item > span` which otherwise paints the badge
+   span dark machined ink. */
+/* Only the main-nav counts (Automations etc.) get the lit-orange engraved
+   digit + etched circle. Every other .num-badge (git status, extension and
+   connector lists) stays a plain number from the base rule in app.css. */
+.sidebar-device .main-nav-item > .num-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-weight: 600;
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 250 / 0.85)),
+               0 0 4px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  /* etched ring: thin recessed cut (dark inner line) + lit lower lip. */
+  box-shadow:
+    inset 0 0 0 1px oklch(0.3 0.004 250 / 0.16),
+    0 1px 0 oklch(1 0.002 250 / 0.65);
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > .num-badge {
+  text-shadow: 0 -1px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / 0.7)),
+               0 0 4px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  box-shadow:
+    inset 0 0 0 1px oklch(0 0 0 / 0.38),
+    0 -1px 0 oklch(0.7 0.004 265 / 0.16);
 }
 
 /* ================================================================ */

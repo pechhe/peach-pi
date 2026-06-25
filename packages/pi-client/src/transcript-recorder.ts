@@ -18,6 +18,7 @@ interface MessageLike {
   content?: unknown;
   stopReason?: string;
   errorMessage?: string;
+  display?: boolean;
 }
 
 /** Structural subset of pi's `SessionEntry` read by `loadFromEntries`. The
@@ -276,6 +277,11 @@ export class TranscriptRecorder {
     switch (event.type) {
       case "message_start": {
         if (!event.message) return [];
+        // Extensions inject context (e.g. pi-subagents' agent roster) as
+        // custom-role messages with `display: false`. The TUI hides these and
+        // the reload path (entryToItem → custom_message) skips them; mirror
+        // that here so they don't surface as notices on the live path.
+        if (event.message.role === "custom" && event.message.display === false) return [];
         const item = this.messageToItem(event.message, true);
         const ops: TranscriptOp[] = [];
         // The real user `message_start` fires after `before_agent_start`.

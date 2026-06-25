@@ -7,6 +7,9 @@
 
 export type DoneAnimId =
   | "archiveSlide"
+  | "archiveSwipe"
+  | "archiveShing"
+  | "archiveVacuum"
   | "popSpark"
   | "stamp"
   | "confetti"
@@ -17,6 +20,9 @@ const STORAGE_KEY = "peachpi:doneAnim";
 
 const VALID: readonly DoneAnimId[] = [
   "archiveSlide",
+  "archiveSwipe",
+  "archiveShing",
+  "archiveVacuum",
   "popSpark",
   "stamp",
   "confetti",

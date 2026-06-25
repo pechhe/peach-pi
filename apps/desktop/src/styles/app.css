@@ -551,6 +551,61 @@ button {
 .main-nav-item:hover > span:first-child {
   filter: grayscale(0.4) opacity(1);
 }
+/* The active item lights up (--engrave-active): never desaturate it, or the
+   grayscale filter would render the lit orange ink as grey. Both selectors so
+   it wins over the :hover rule too. */
+.main-nav-item--active > span:first-child,
+.main-nav-item--active:hover > span:first-child {
+  filter: none;
+}
+
+/* ---------------- Number badge ---------------- *
+ * Shared count indicator used across the app (nav counts, project tree
+ * counts, tool counts, …). No pill / no fill — just the digit. Themes that
+ * have an engraved type treatment (sidebar-device) restyle it to match their
+ * lettering; the base is a plain tabular muted number. */
+.num-badge {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-faint);
+}
+/* Accent variant — lit orange, used for the ext-updates count in the
+ * titlebar strip so it matches the engraved Automations badge. */
+.num-badge--accent {
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  text-shadow: 0 0 4px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 50%, transparent);
+}
+
+/* Remote-first mode: only the Remote *icon* glows green (slow pulse) while on;
+ * the label stays its normal ink. Neutralise the sidebar's grayscale :first-
+ * child treatment on this row (base + hover, mirroring --active) so the green
+ * actually reads. The engraved (sidebar-device) theme refines the lip in
+ * sidebar-device.css. This base rule covers non-device themes. */
+.main-nav-item[data-remote-first="on"] > span:first-child,
+.main-nav-item[data-remote-first="on"]:hover > span:first-child {
+  filter: none;
+}
+.remote-first-pulse svg {
+  animation: remote-first-pulse 2.8s ease-in-out infinite;
+}
+@keyframes remote-first-pulse {
+  0%, 100% {
+    color: oklch(0.6 0.12 150);
+    filter: drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0));
+  }
+  50% {
+    color: oklch(0.7 0.13 150);
+    filter: drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0.22));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .remote-first-pulse svg {
+    animation: none;
+    color: oklch(0.74 0.17 150);
+  }
+}
 
 /* Smooth detail expansion (height jumps still snap, but content fades). */
 details[open] > *:not(summary) {
@@ -693,4 +748,12 @@ details[open] > *:not(summary) {
 .skill-chip__remove:hover {
   opacity: 1;
   background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+/* Global button press feedback (installGlobalButtonPress): a momentary depress
+ * while held, mirroring the send dial. Buttons with their own press visuals
+ * (the send dial, the device switches) are excluded so this never fights their
+ * bespoke transforms. */
+button.is-pressed:not(.send-dial):not(.devbtn__switch) {
+  transform: translateY(1px);
 }

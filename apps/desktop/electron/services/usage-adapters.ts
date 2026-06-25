@@ -126,9 +126,9 @@ export function isWeekly(l: ZaiLimit): boolean {
 
 export function zaiWindow(l: ZaiLimit | undefined): UsageWindow | null {
   if (!l) return null;
-  const usedPct = clampPct(l.percentage);
-  if (usedPct === null) return null;
-  return { usedPct, resetAt: isoFromMs(l.nextResetTime) };
+  const remainingPct = clampPct(l.percentage);
+  if (remainingPct === null) return null;
+  return { remainingPct, resetAt: isoFromMs(l.nextResetTime) };
 }
 
 /** Pull the `limits[]` out of a raw Z.ai monitor response, tolerating both the

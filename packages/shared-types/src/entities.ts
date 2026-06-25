@@ -425,6 +425,7 @@ export interface SubagentAgentInfo {
 export interface SubagentAgentPatch {
   model?: string | null;
   thinking?: string | null;
+  description?: string | null;
 }
 
 /** Knowledge-graph state for a project (graphify CLI, graphify-out/). */
@@ -946,8 +947,9 @@ export interface RecordingStopResult {
 
 /** A single rolling quota window a subscription plan enforces. */
 export interface UsageWindow {
-  /** Utilized percentage 0–100 (how much of the window is consumed). */
-  usedPct: number;
+  /** Remaining percentage 0–100 (how much of the window is still available;
+   *  0 = fully consumed, 100 = untouched). Counted down, not up. */
+  remainingPct: number;
   /** ISO 8601 timestamp the window resets at, or null when unknown. */
   resetAt: string | null;
 }

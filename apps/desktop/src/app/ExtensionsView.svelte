@@ -179,7 +179,7 @@
               </span>
               <span class="flex-1 truncate text-sm {selectedPath === ext.path ? 'text-fg' : ext.error ? 'text-red-400' : 'text-muted'}">{ext.name}</span>
               {#if ext.tools.length > 0}
-                <span class="rounded-full bg-bg px-1.5 text-[11px] text-muted">{ext.tools.length}</span>
+                <span class="num-badge">{ext.tools.length}</span>
               {/if}
             </button>
           {/each}

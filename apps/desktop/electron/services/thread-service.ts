@@ -20,12 +20,20 @@ import type {
   TranscriptDelta,
   TranscriptSnapshot,
 } from "@peach-pi/shared-types";
-import { isNewThread } from "@peach-pi/shared-types";
+
 import type { PiSession } from "@peach-pi/pi-client";
 import type { GitService } from "./git-service.ts";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
+
+/** Remote-handoff hook injected by main.ts. When remote-first mode is on,
+ *  `beforePrompt` guarantees the conversation thread has been handed off to
+ *  the remote machine before the prompt runs locally as controller. Returns a
+ *  human status note (null = no handoff happened). */
+export type HandoffHook = {
+  beforePrompt: (threadId: string, task: string) => Promise<string | null>;
+};
 
 const FLUSH_MS = 16;
 
@@ -85,6 +93,7 @@ export class ThreadService {
   private getAutoCompact: () => AutoCompactSettings;
   /** Git boundary for rewind file snapshots; injected post-construction. */
   private gitService: GitService | null = null;
+  private handoff: HandoffHook | null = null;
   /** In-memory rewind snapshots: threadId → (prior-turn entryId | "root") → sha. */
   private rewindSnapshots = new Map<string, Map<string, string>>();
   /** Remote tap hooks (ADR-0009); set after construction. When set, each
@@ -120,6 +129,13 @@ export class ThreadService {
   /** Wire the git boundary after construction (resolves service ordering). */
   setGitService(gitService: GitService): void {
     this.gitService = gitService;
+  }
+
+  /** Wire the remote-handoff boundary after construction (service ordering):
+   *  when remote-first mode is on, messaging a thread hands it off to the
+   *  remote machine before the prompt runs. Optional — null by default. */
+  setHandoffService(hs: HandoffHook | null): void {
+    this.handoff = hs;
   }
 
   /** Wire the remote relay tap (ADR-0009). Optional; a no-op when unset. */
@@ -183,6 +199,17 @@ export class ThreadService {
     images?: ImagePayload[],
     toolMode?: ToolMode,
   ): Promise<void> {
+    // Remote-first mode: hand the conversation thread to the remote machine
+    // before running the prompt locally as controller. Non-blocking-safe: if
+    // the remote is unreachable the prompt still runs (a notice is emitted).
+    if (this.handoff) {
+      try {
+        const note = await this.handoff.beforePrompt(threadId, text);
+        void note;
+      } catch {
+        // Swallowed: the hook itself surfaces warnings; the prompt continues.
+      }
+    }
     const session = await this.sessionFor(threadId);
     const thread = this.threads.get(threadId)!;
     // Sending a message to a thread that's archived / snoozed / marked to test
@@ -199,13 +226,12 @@ export class ThreadService {
     // that failed silently (e.g. while offline). Retry on every prompt until
     // it lands; once tagged it never re-enters here.
     if (!thread.tag) {
-      // Instant placeholder on a genuinely-new thread only. On a retry the
-      // title is already the opening prompt. Store the full text; the sidebar
-      // truncates for display (so widening the sidebar reveals more).
-      if (isNewThread(thread.title)) {
-        this.threads.setTitle(threadId, text);
-        this.onThreadsChanged();
-      }
+      // Keep the creation title ("New thread" / "New chat") until the LLM
+      // pass lands. Prematurely stamping the full first prompt as the title
+      // makes the top bar render the entire long message janky while the
+      // rename is in flight. The overwrite guard in generateTitleAndTag
+      // compares against this placeholder, so it still detects a manual
+      // rename that happens before the LLM title arrives.
       void this.generateTitleAndTag(threadId, text);
     }
     // Snapshot the working tree before the run touches any files.

@@ -14,6 +14,7 @@ import type {
 } from "@peach-pi/shared-types";
 
 import type { Emit } from "../ipc/registry.ts";
+import { DiskCache, isOfflineError } from "./disk-cache.ts";
 import { AsyncTtl, KeyedAsyncTtl } from "./ttl-cache.ts";
 
 /** Where the Composio API key lives — kept out of the repo and the renderer.
@@ -96,6 +97,15 @@ function parseAuthFields(
   return [...map(init.required, true), ...map(init.optional, false)];
 }
 
+/** Map a network failure to a clear, agent-readable offline error; otherwise
+ *  pass the original error through. */
+function offlineOr(e: unknown, action: string): Error {
+  if (isOfflineError(e)) {
+    return new Error(`Offline: cannot reach Composio to ${action}. Reconnect and retry.`);
+  }
+  return e instanceof Error ? e : new Error(String(e));
+}
+
 function primaryScheme(t: {
   authSchemes?: string[];
   composioManagedAuthSchemes?: string[];
@@ -123,6 +133,14 @@ export class ConnectorService {
   // navigation is instant. Cleared on every connectorsChanged emit.
   private listCache = new AsyncTtl<Connection[]>(60_000);
   private catalogueCache = new KeyedAsyncTtl<ToolkitCatalogEntry[]>(60_000);
+  // Disk-backed last-good snapshots (non-secret metadata) so the page opens
+  // instantly across restarts and stays readable offline.
+  private listSnapshot = new DiskCache<Connection[]>(
+    join(homedir(), ".pi", "agent", "peach-connectors-list.cache.json"),
+  );
+  private catalogueSnapshot = new DiskCache<ToolkitCatalogEntry[]>(
+    join(homedir(), ".pi", "agent", "peach-connectors-catalogue.cache.json"),
+  );
 
   constructor(private emit: Emit) {}
 
@@ -154,27 +172,47 @@ export class ConnectorService {
   }
 
   private async fetchCatalogue(query: string): Promise<ToolkitCatalogEntry[]> {
-    const c = this.client();
-    const page = await c.toolkits.get({ sortBy: "usage", limit: 100 });
-    const counts = new Map<string, number>();
-    for (const x of await this.list()) {
-      if (x.status === "ACTIVE") counts.set(x.toolkitSlug, (counts.get(x.toolkitSlug) ?? 0) + 1);
-    }
+    // The cloud list endpoint has no text search — we always fetch the same
+    // usage-ranked top page and filter client-side. So cache that page once
+    // and reuse it for every query, including offline.
+    const page = await this.toolkitPage();
     const q = query.trim().toLowerCase();
-    const out: ToolkitCatalogEntry[] = [];
-    for (const t of page) {
-      this.meta.set(t.slug, { name: t.name, logo: t.meta?.logo ?? null });
-      if (q && !t.slug.toLowerCase().includes(q) && !t.name.toLowerCase().includes(q)) continue;
-      out.push({
-        slug: t.slug,
-        name: t.name,
-        description: t.meta?.description ?? "",
-        logoUrl: t.meta?.logo ?? null,
-        authScheme: primaryScheme(t),
-        connectedCount: counts.get(t.slug) ?? 0,
+    if (!q) return page;
+    return page.filter(
+      (t) => t.slug.toLowerCase().includes(q) || t.name.toLowerCase().includes(q),
+    );
+  }
+
+  /** The full usage-ranked toolkit page, with live connected counts. Persisted
+   *  to disk; served from the last-good snapshot when the network read fails. */
+  private async toolkitPage(): Promise<ToolkitCatalogEntry[]> {
+    try {
+      const c = this.client();
+      const page = await c.toolkits.get({ sortBy: "usage", limit: 100 });
+      const counts = new Map<string, number>();
+      for (const x of await this.list()) {
+        if (x.status === "ACTIVE") counts.set(x.toolkitSlug, (counts.get(x.toolkitSlug) ?? 0) + 1);
+      }
+      const out: ToolkitCatalogEntry[] = page.map((t) => {
+        this.meta.set(t.slug, { name: t.name, logo: t.meta?.logo ?? null });
+        return {
+          slug: t.slug,
+          name: t.name,
+          description: t.meta?.description ?? "",
+          logoUrl: t.meta?.logo ?? null,
+          authScheme: primaryScheme(t),
+          connectedCount: counts.get(t.slug) ?? 0,
+        };
       });
+      this.catalogueSnapshot.set(out);
+      return out;
+    } catch (e) {
+      // Offline → serve the last good page. A missing API key (not offline)
+      // still surfaces, so the user sees the real configuration error.
+      const cached = this.catalogueSnapshot.get();
+      if (cached && isOfflineError(e)) return cached;
+      throw e;
     }
-    return out;
   }
 
   /** Full detail for one toolkit: metadata + its tool list (for the detail
@@ -211,24 +249,34 @@ export class ConnectorService {
   }
 
   private async fetchList(): Promise<Connection[]> {
-    const c = this.client();
-    const res = await c.connectedAccounts.list({ userIds: [USER_ID] });
-    // connectedAccounts only carry the toolkit slug, so the logo comes from
-    // `meta`. Backfill any connected toolkit we haven't seen yet (e.g. not on
-    // the catalogue's top page) so its icon isn't stuck on the monogram.
-    await this.ensureMeta([...new Set(res.items.map((a) => a.toolkit.slug))]);
-    return res.items.map((a) => {
-      const m = this.meta.get(a.toolkit.slug);
-      return {
-        id: a.id,
-        toolkitSlug: a.toolkit.slug,
-        name: m?.name ?? titleCase(a.toolkit.slug),
-        alias: a.alias ?? null,
-        logoUrl: m?.logo ?? null,
-        status: toStatus(a.status),
-        createdAt: a.createdAt,
-      };
-    });
+    try {
+      const c = this.client();
+      const res = await c.connectedAccounts.list({ userIds: [USER_ID] });
+      // connectedAccounts only carry the toolkit slug, so the logo comes from
+      // `meta`. Backfill any connected toolkit we haven't seen yet (e.g. not on
+      // the catalogue's top page) so its icon isn't stuck on the monogram.
+      await this.ensureMeta([...new Set(res.items.map((a) => a.toolkit.slug))]);
+      const out = res.items.map((a) => {
+        const m = this.meta.get(a.toolkit.slug);
+        return {
+          id: a.id,
+          toolkitSlug: a.toolkit.slug,
+          name: m?.name ?? titleCase(a.toolkit.slug),
+          alias: a.alias ?? null,
+          logoUrl: m?.logo ?? null,
+          status: toStatus(a.status),
+          createdAt: a.createdAt,
+        };
+      });
+      // Name + logo are baked into each Connection, so the snapshot renders
+      // correctly offline without the in-memory `meta` map.
+      this.listSnapshot.set(out);
+      return out;
+    } catch (e) {
+      const cached = this.listSnapshot.get();
+      if (cached && isOfflineError(e)) return cached;
+      throw e;
+    }
   }
 
   /** Begin an OAuth connect. Returns the Composio-hosted authorize URL; the
@@ -274,18 +322,28 @@ export class ConnectorService {
 
   // ── agent-facing (proxied over the localhost ConnectorResolver) ────────────
 
-  /** Discover Composio tools for the agent (provider-wrapped slugs + schemas). */
+  /** Discover Composio tools for the agent (provider-wrapped slugs + schemas).
+   *  Live-only — tool schemas aren't cached, so offline fails fast and clear. */
   async searchTools(query: string, toolkits?: string[]): Promise<unknown> {
-    const c = this.client();
-    if (toolkits?.length) {
-      return c.tools.get(USER_ID, { toolkits, limit: 20, search: query || undefined });
+    try {
+      const c = this.client();
+      if (toolkits?.length) {
+        return await c.tools.get(USER_ID, { toolkits, limit: 20, search: query || undefined });
+      }
+      return await c.tools.get(USER_ID, { search: query });
+    } catch (e) {
+      throw offlineOr(e, "discover connector tools");
     }
-    return c.tools.get(USER_ID, { search: query });
   }
 
-  /** Execute a Composio tool for the agent (runs in the Composio cloud). */
+  /** Execute a Composio tool for the agent (runs in the Composio cloud). Blocked
+   *  with a clear offline error when the cloud is unreachable. */
   async executeTool(slug: string, args: Record<string, unknown>): Promise<unknown> {
-    return this.client().tools.execute(slug, { userId: USER_ID, arguments: args });
+    try {
+      return await this.client().tools.execute(slug, { userId: USER_ID, arguments: args });
+    } catch (e) {
+      throw offlineOr(e, "run connector tools");
+    }
   }
 
   /** Populate `meta` (name + logo) for any slugs we don't already know, one

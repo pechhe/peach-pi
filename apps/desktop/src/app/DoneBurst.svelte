@@ -10,6 +10,9 @@
 
   const DURATIONS: Record<DoneAnimId, number> = {
     archiveSlide: 480,
+    archiveSwipe: 420,
+    archiveShing: 460,
+    archiveVacuum: 500,
     popSpark: 560,
     stamp: 520,
     confetti: 720,
@@ -22,9 +25,9 @@
 
   let variant = $derived(doneAnim.current);
   let duration = $derived(reduce ? 0 : DURATIONS[variant]);
-  // archiveSlide carries its whole effect on the row itself (glint sweep +
-  // slide + collapse); the burst overlay renders no ring/sparks for it.
-  let bare = $derived(variant === "archiveSlide");
+  // The archive* family carries its whole effect on the row itself (glint
+  // sweep + slide + collapse); the burst overlay renders no ring/sparks.
+  let bare = $derived(variant.startsWith("archive"));
 
   // Generate particles. Confetti needs gravity-arc props (cf, spin) and
   // prefers square chips; every other variant uses radial spread (dx, dy).

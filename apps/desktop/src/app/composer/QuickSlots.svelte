@@ -187,6 +187,9 @@
           <button
             class="devbtn__switch {isOn(index, slot) ? 'devbtn__switch--on' : ''}"
             aria-pressed={isToggle(slot) ? isOn(index, slot) : undefined}
+            data-press={slot.behavior.type === "bound" && slot.behavior.binding === "caveman"
+              ? "self"
+              : undefined}
             onclick={() => activate(index)}
             oncontextmenu={(e) => {
               e.preventDefault();

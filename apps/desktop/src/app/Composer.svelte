@@ -80,10 +80,29 @@
   void autoCompact.load();
   commandPrefs.init();
 
-  // Caveman shares the heavier "clanky" click with the send button.
+  // Caveman is a toggle: pressing it in plays the down-click, releasing it
+  // (toggling back off) plays the up-click — mirroring a real latching switch.
   function toggleCaveman() {
-    playClick("down");
+    playClick(caveman.enabled ? "up" : "down");
     void caveman.toggle(thread.id);
+  }
+
+  // Send button is momentary: it physically depresses (down-click) while held
+  // and springs back up (up-click) on release. The release fires the actual
+  // submit via the button's onclick; pointer-initiated clicks therefore skip
+  // submit's own click sound to avoid stacking a second tone on top.
+  let sendPressed = $state(false);
+  // Whether an Enter-driven send should queue/steer (Cmd+Enter while running),
+  // captured on keydown and consumed on the matching keyup.
+  let enterSteer = false;
+  function pressSend(): void {
+    sendPressed = true;
+    playClick("down");
+  }
+  function releaseSend(playUp: boolean): void {
+    if (!sendPressed) return;
+    sendPressed = false;
+    if (playUp) playClick("up");
   }
 
   // Quick-slot helpers. A skill slot injects its chip into the composer; an
@@ -169,6 +188,17 @@
     if (ps && textareaEl && !textareaEl.value.includes(ps.value)) {
       pastedSecret = null;
     }
+  }
+
+  // Enter release springs the send button back up and fires the actual send.
+  // Guarded on sendPressed so menu-completing Enters (which never depress the
+  // button) don't submit on key release.
+  function onKeyup(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey && sendPressed) {
+      releaseSend(true);
+      void submit(enterSteer, true);
+    }
+    syncCursor();
   }
 
   // ── Slash menu ─────────────────────────────────────────────────────────
@@ -650,13 +680,13 @@
   }
 
   // ── Submit / steer / abort ────────────────────────────────────────────
-  async function submit(asSteer = false) {
+  async function submit(asSteer = false, fromPointer = false) {
     const raw = draft.text.trim();
     if (!raw && draft.attachments.length === 0 && !draft.command) return;
     // `/rewind [n]` is an app command (conversation rewind), not sent to pi.
     const rewindMatch = /^\/rewind(?:\s+(\d+))?\s*$/.exec(raw);
     if (rewindMatch && !draft.command) {
-      playButtonClick("click");
+      if (!fromPointer) playButtonClick("click");
       drafts.clearText(thread.id);
       onRewind?.(rewindMatch[1] ? Number(rewindMatch[1]) : 1);
       return;
@@ -667,7 +697,7 @@
     if (btwMatch && !draft.command) {
       const question = btwMatch[1]!.trim();
       if (!question) return;
-      playButtonClick("click");
+      if (!fromPointer) playButtonClick("click");
       drafts.clearText(thread.id);
       void sideChat.openPanel(thread.id, question);
       return;
@@ -680,7 +710,7 @@
       runSystemCommand(sysMatch[1]!, (sysMatch[2] ?? "").trim());
       return;
     }
-    playButtonClick("click");
+    if (!fromPointer) playButtonClick("click");
 
     const fileRefs = draft.attachments
       .filter((a) => a.kind === "file")
@@ -878,7 +908,10 @@
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void submit(e.metaKey && running);
+      // Holding Enter keeps the send button depressed (no re-trigger).
+      if (e.repeat) return;
+      enterSteer = e.metaKey && running;
+      pressSend();
       return;
     }
     // Escape dismisses the open slash / @ menu: drop the `/…` or `@…` token
@@ -1240,7 +1273,7 @@
               syncCursor();
             }}
             onkeydown={onKeydown}
-            onkeyup={syncCursor}
+            onkeyup={onKeyup}
             onclick={syncCursor}
             onselect={syncCursor}
             onpaste={onPaste}
@@ -1348,9 +1381,13 @@
             </button>
           {:else}
             <button
-              class="send-dial"
-              onclick={() => submit()}
-              disabled={!draft.text.trim() && draft.attachments.length === 0}
+              class="send-dial {sendPressed ? 'is-pressed' : ''}"
+              data-press="self"
+              onclick={() => submit(false, true)}
+              onpointerdown={pressSend}
+              onpointerup={() => releaseSend(true)}
+              onpointerleave={() => releaseSend(true)}
+              onpointercancel={() => releaseSend(false)}
               data-has-input={draft.text.trim() || draft.attachments.length > 0 ? "" : undefined}
               data-testid="send"
               title={running ? "Queue message" : "Send message"}
@@ -1369,10 +1406,12 @@
   {#if !centered}
   <button
     class="btw-btn btw-btn--floating"
-    onclick={() =>
-      sideChat.open && sideChat.threadId === thread.id
-        ? sideChat.close()
-        : sideChat.openPanel(thread.id)}
+    data-press="self"
+    onclick={() => {
+      const closing = sideChat.open && sideChat.threadId === thread.id;
+      playClick(closing ? "up" : "down");
+      closing ? sideChat.close() : void sideChat.openPanel(thread.id);
+    }}
     data-testid="open-side-chat"
     title="Side conversation (/btw) — ask a quick question without touching this task"
     aria-label="Open side conversation"

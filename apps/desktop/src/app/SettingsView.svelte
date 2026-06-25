@@ -7,9 +7,21 @@
     PiSettings,
     VisionProxyConfig,
   } from "@peach-pi/shared-types";
-  import { setSoundsMuted, soundsMuted, setDoneSoundVariant, getDoneSoundVariant } from "../lib/sound/sound-prefs";
+  import {
+    setSoundsMuted,
+    soundsMuted,
+    setDoneSoundVariant,
+    getDoneSoundVariant,
+    setArchiveSoundVariant,
+    getArchiveSoundVariant,
+  } from "../lib/sound/sound-prefs";
   import { playButtonClick } from "../lib/sound/button-click-sound";
-  import { DONE_SOUND_OPTIONS, playDoneSound, type DoneSoundVariant } from "../lib/sound/done-sound";
+  import {
+    DONE_SOUND_OPTIONS,
+    playDoneSound,
+    playArchiveSound,
+    type DoneSoundVariant,
+  } from "../lib/sound/done-sound";
   import {
     theme,
     type ComposerStyle,
@@ -38,12 +50,13 @@
   import { visionProxy } from "../stores/vision-proxy.svelte";
   import { snapshot } from "../stores/snapshot.svelte";
 
-  let { initialQuery = "" }: { initialQuery?: string } = $props();
+  let { initialQuery = "", onOpenPlayroom }: { initialQuery?: string; onOpenPlayroom?: () => void } = $props();
 
   const hudAutoReveal = $derived(snapshot.current?.ui.hudAutoRevealOnFinish ?? false);
 
   /** Searchable keywords per section (title + description), lowercased. */
   const SECTION_KEYWORDS = {
+    playroom: "appearance playroom live stage tune look feel messages done animation alerts chassis",
     theme: "theme appearance applies to every window colors",
     composer: "composer light silver dark anodized chassis auto follows your theme",
     caveman: "caveman intensity level composer toggle",
@@ -52,6 +65,7 @@
     streaming: "streaming text assistant replies reveal stream",
     sounds: "sounds button clicks done chime mute",
     doneChime: "done chime celebration cue thread finishes preview",
+    threadDoneSound: "thread done sound mark done archive click precision archive latch metallic preview",
     autoCompact: "auto-compaction compact context usage threshold tokens percentage",
     retry: "retry on error network drop transient exponential backoff wait doubles",
     messageDelivery: "message delivery steering mode follow-up mode",
@@ -123,20 +137,20 @@
 .sidebar-device .main-nav-item--active > span,
 .sidebar-device .engraved--active {
   color: var(--engrave-active, oklch(0.74 0.185 52));
-  text-shadow: 0 ${px}px 0 oklch(1 0.002 ${iH} / ${op}), 0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  text-shadow: 0 ${px}px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 ${iH} / ${op})), 0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
 }
 .sidebar-device .main-nav-item--active > span svg,
 .sidebar-device .engraved--active svg {
-  filter: drop-shadow(0 ${px}px 0 oklch(1 0.002 ${iH} / ${op})) drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+  filter: drop-shadow(0 ${px}px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 ${iH} / ${op}))) drop-shadow(0 0 5px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
 }
 :root[data-composer="dark"] .sidebar-device .main-nav-item--active > span,
 :root[data-composer="dark"] .sidebar-device .engraved--active {
   color: var(--engrave-active, oklch(0.74 0.185 52));
-  text-shadow: 0 -${px}px 0 oklch(0 0 0 / ${op}), 0 0 8px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  text-shadow: 0 -${px}px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / ${op})), 0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
 }
 :root[data-composer="dark"] .sidebar-device .main-nav-item--active > span svg,
 :root[data-composer="dark"] .sidebar-device .engraved--active svg {
-  filter: drop-shadow(0 -${px}px 0 oklch(0 0 0 / ${op})) drop-shadow(0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+  filter: drop-shadow(0 -${px}px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / ${op}))) drop-shadow(0 0 5px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
 }
 `;
   }
@@ -203,6 +217,7 @@
 
   let muted = $state(soundsMuted());
   let doneVariant = $state(getDoneSoundVariant() as DoneSoundVariant);
+  let archiveVariant = $state(getArchiveSoundVariant() as DoneSoundVariant);
   let version = $state("");
   let models = $state<ModelInfo[]>([]);
   let utilityModel = $state<ModelInfo | null>(null);
@@ -277,6 +292,17 @@
 
   function previewDone() {
     playDoneSound(doneVariant);
+  }
+
+  function pickArchiveVariant(value: string) {
+    const v = value as DoneSoundVariant;
+    archiveVariant = v;
+    setArchiveSoundVariant(v);
+    playArchiveSound(v); // live preview
+  }
+
+  function previewArchive() {
+    playArchiveSound(archiveVariant);
   }
 
   async function pickUtilityModel(key: string) {
@@ -432,6 +458,22 @@
           No settings match “{query.trim()}”.
         </p>
       {/if}
+      {#if hit("playroom")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-sm text-fg">Appearance Playroom</h2>
+            <p class="text-xs text-faint">A live, isolated stage for tuning how the app looks and feels — send messages, mark done, fire alerts.</p>
+          </div>
+          <button
+            class="rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg transition-colors hover:bg-surface-3"
+            onclick={onOpenPlayroom}
+            data-testid="settings-open-playroom"
+          >Open</button>
+        </div>
+      </section>
+      {/if}
+
       {#if hit("theme")}
       <section class="rounded-lg border border-border bg-surface/50 p-4" bind:this={themeSection}>
         <ThemeControls />
@@ -621,6 +663,36 @@
         </div>
         <p class="mt-2 text-xs text-fainter">
           {DONE_SOUND_OPTIONS.find((o) => o.id === doneVariant)?.description}
+        </p>
+      </section>
+      {/if}
+
+      {#if hit("threadDoneSound")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-sm text-fg">Thread done sound</h2>
+            <p class="text-xs text-faint">The cue played when you mark a thread done (the archive action).</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <Select
+              class="rounded-md bg-surface-2"
+              value={archiveVariant}
+              onValueChange={pickArchiveVariant}
+              items={DONE_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
+              data-testid="archive-sound-select"
+              aria-label="Thread done sound"
+            />
+            <button
+              class="rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
+              onclick={previewArchive}
+              disabled={muted}
+              data-testid="archive-sound-preview"
+            >Play</button>
+          </div>
+        </div>
+        <p class="mt-2 text-xs text-fainter">
+          {DONE_SOUND_OPTIONS.find((o) => o.id === archiveVariant)?.description}
         </p>
       </section>
       {/if}

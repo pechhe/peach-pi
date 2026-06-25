@@ -10,6 +10,21 @@
       label: "Precision archive slide",
       desc: "Press · metallic glint sweep · slide, fade & collapse (no particles)",
     },
+    {
+      id: "archiveSwipe",
+      label: "Archive swipe",
+      desc: "Snappier · longer throw with a slight tilt · brighter glint",
+    },
+    {
+      id: "archiveShing",
+      label: "Archive shing",
+      desc: "Twin crossing glints · chrome brightness ping · crisp collapse",
+    },
+    {
+      id: "archiveVacuum",
+      label: "Archive vacuum",
+      desc: "Extreme · squash, skew & motion-blur sucked toward Done",
+    },
     { id: "popSpark", label: "Pop & sparkle", desc: "Stepped pop · smooth radial sparks" },
     { id: "stamp", label: "Approval stamp", desc: "Hard stepped stamp · smooth shockwave rings" },
     { id: "confetti", label: "Confetti", desc: "Bouncy smooth pop · arcing confetti with gravity" },
@@ -77,7 +92,7 @@
 
       <!-- right: preview + play -->
       <div class="relative flex shrink-0 items-center">
-        <div class="mock-row" class:popping={popping[v.id]} class:pop--archiveSlide={popping[v.id] && v.id === "archiveSlide"} class:pop--popSpark={popping[v.id] && v.id === "popSpark"} class:pop--stamp={popping[v.id] && v.id === "stamp"} class:pop--confetti={popping[v.id] && v.id === "confetti"} class:pop--twos={popping[v.id] && v.id === "twos"} class:pop--spring={popping[v.id] && v.id === "spring"}>
+        <div class="mock-row" class:popping={popping[v.id]} class:pop--archiveSlide={popping[v.id] && v.id === "archiveSlide"} class:pop--archiveSwipe={popping[v.id] && v.id === "archiveSwipe"} class:pop--archiveShing={popping[v.id] && v.id === "archiveShing"} class:pop--archiveVacuum={popping[v.id] && v.id === "archiveVacuum"} class:pop--popSpark={popping[v.id] && v.id === "popSpark"} class:pop--stamp={popping[v.id] && v.id === "stamp"} class:pop--confetti={popping[v.id] && v.id === "confetti"} class:pop--twos={popping[v.id] && v.id === "twos"} class:pop--spring={popping[v.id] && v.id === "spring"}>
           <Check size={13} class="shrink-0 text-accent" />
           <span class="truncate">Mock thread</span>
         </div>
@@ -85,7 +100,7 @@
         {#key runs[v.id]}
           {#if runs[v.id]}
             <div class="burst burst--{v.id}">
-              {#if v.id !== "archiveSlide"}
+              {#if !v.id.startsWith("archive")}
               <span class="ring"></span>
               <span class="ring ring2"></span>
               {#each particles as p, i (i)}
@@ -159,6 +174,83 @@
     0%   { transform: translateX(-130%); opacity: 0; }
     25%  { opacity: 1; }
     100% { transform: translateX(130%);  opacity: 0; }
+  }
+  @keyframes pop-archive-glint-rev {
+    0%   { transform: translateX(130%);  opacity: 0; }
+    25%  { opacity: 1; }
+    100% { transform: translateX(-130%); opacity: 0; }
+  }
+
+  /* swipe */
+  .popping.pop--archiveSwipe { animation: pop-swipe 420ms cubic-bezier(0.3, 0, 0.2, 1); }
+  .popping.pop--archiveSwipe::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(100deg, transparent 36%, oklch(1 0 0 / 0.7) 48%, oklch(1 0 0 / 1) 50%, oklch(1 0 0 / 0.7) 52%, transparent 64%);
+    mix-blend-mode: screen;
+    transform: translateX(-130%);
+    animation: pop-archive-glint 180ms cubic-bezier(0.4, 0, 0.2, 1) 50ms;
+  }
+  @keyframes pop-swipe {
+    0%   { transform: translate(0, 0) rotate(0) scale(1);     }
+    14%  { transform: translate(0, 0) rotate(0) scale(0.978); }
+    22%  { transform: translate(-2px, 0) rotate(-0.4deg) scale(0.99); }
+    58%  { transform: translate(20px, 9px) rotate(1deg) scale(0.97); opacity: 0.22; }
+    80%  { transform: translate(26px, 12px) rotate(1.4deg) scale(0.96); opacity: 0.04; }
+    100% { transform: translate(26px, 12px) rotate(1.4deg) scale(0.96); opacity: 0; }
+  }
+
+  /* shing */
+  .popping.pop--archiveShing { animation: pop-shing 460ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .popping.pop--archiveShing::after,
+  .popping.pop--archiveShing::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+  .popping.pop--archiveShing::after {
+    background: linear-gradient(100deg, transparent 38%, oklch(1 0 0 / 0.85) 50%, transparent 62%);
+    transform: translateX(-130%);
+    animation: pop-archive-glint 200ms cubic-bezier(0.4, 0, 0.2, 1) 40ms;
+  }
+  .popping.pop--archiveShing::before {
+    background: linear-gradient(260deg, transparent 38%, oklch(1 0 0 / 0.6) 50%, transparent 62%);
+    transform: translateX(130%);
+    animation: pop-archive-glint-rev 200ms cubic-bezier(0.4, 0, 0.2, 1) 120ms;
+  }
+  @keyframes pop-shing {
+    0%   { transform: scale(1);     filter: brightness(1);    }
+    12%  { transform: scale(0.98);  filter: brightness(1);    }
+    30%  { transform: scale(1.012); filter: brightness(1.55); }
+    42%  { transform: scale(0.995); filter: brightness(1);    }
+    64%  { transform: translateY(9px) scale(0.985); opacity: 0.2; }
+    80%  { transform: translateY(11px) scale(0.98); opacity: 0.04; }
+    100% { transform: translateY(11px) scale(0.98); opacity: 0; }
+  }
+
+  /* vacuum */
+  .popping.pop--archiveVacuum { transform-origin: right center; animation: pop-vacuum 500ms cubic-bezier(0.5, 0, 0.75, 0); }
+  .popping.pop--archiveVacuum::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(95deg, transparent 30%, oklch(1 0 0 / 0.8) 49%, oklch(1 0 0 / 1) 50%, oklch(1 0 0 / 0.8) 51%, transparent 70%);
+    mix-blend-mode: screen;
+    transform: translateX(-130%);
+    animation: pop-archive-glint 200ms cubic-bezier(0.4, 0, 0.2, 1) 40ms;
+  }
+  @keyframes pop-vacuum {
+    0%   { transform: translate(0, 0) scaleX(1) scaleY(1) skewX(0);             filter: blur(0); }
+    14%  { transform: translate(0, 0) scaleX(1.03) scaleY(0.97) skewX(0);       filter: blur(0); }
+    24%  { transform: translate(0, 0) scaleX(1) scaleY(1) skewX(0);             filter: blur(0); }
+    62%  { transform: translate(18px, 10px) scaleX(0.7) scaleY(0.92) skewX(-8deg);  filter: blur(0.6px); opacity: 0.3; }
+    80%  { transform: translate(34px, 14px) scaleX(0.45) scaleY(0.85) skewX(-14deg); filter: blur(1.4px); opacity: 0.04; }
+    100% { transform: translate(40px, 16px) scaleX(0.3) scaleY(0.8) skewX(-16deg);  filter: blur(2px);   opacity: 0; }
   }
 
   .burst { inset: 0 calc(0.75rem + 52px) 0 0; }

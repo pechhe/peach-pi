@@ -21,6 +21,7 @@ import type {
 } from "@peach-pi/shared-types";
 
 import type { Emit } from "../ipc/registry.ts";
+import { DiskCache, isOfflineError } from "./disk-cache.ts";
 import { AsyncTtl, KeyedAsyncTtl } from "./ttl-cache.ts";
 
 const execFileAsync = promisify(execFile);
@@ -30,6 +31,11 @@ const MAX_BUFFER = 16 * 1024 * 1024;
 /** Where the on-device access token + selected project live. Kept out of the
  *  repo and the renderer; the token is injected into `bws` via env. */
 const CONFIG_FILE = path.join(homedir(), ".pi", "agent", "peach-bws.json");
+
+/** Non-secret last-good snapshots (status + project list; secret KEY names with
+ *  values redacted) so the BWS view opens instantly and lists keys offline. */
+const STATUS_CACHE_FILE = path.join(homedir(), ".pi", "agent", "peach-bws-status.cache.json");
+const SECRETS_CACHE_FILE = path.join(homedir(), ".pi", "agent", "peach-bws-secrets.cache.json");
 
 /** Preferred install location (also where a manually-installed bws often sits
  *  in this setup). GUI apps don't inherit the login-shell PATH, so we probe
@@ -124,6 +130,10 @@ export class BwsService {
   // every bwsChanged emit so mutations re-read fresh.
   private statusCache = new AsyncTtl<BwsStatus>(20_000);
   private secretsCache = new KeyedAsyncTtl<BwsSecret[]>(20_000);
+  // Disk-backed last-good snapshots. The status snapshot never contains the
+  // access token; the secrets snapshot stores key names only (values redacted).
+  private statusSnapshot = new DiskCache<BwsStatus>(STATUS_CACHE_FILE);
+  private secretsSnapshot = new DiskCache<Record<string, BwsSecret[]>>(SECRETS_CACHE_FILE);
 
   constructor(private emit: Emit) {}
 
@@ -165,19 +175,29 @@ export class BwsService {
     let projects: BwsProject[] = [];
     let error: string | null = null;
 
+    let servedStale = false;
     if (installed && hasToken) {
       try {
         projects = await this.listProjects();
         authenticated = true;
       } catch (e) {
-        error = errMessage(e);
+        const cached = this.statusSnapshot.get();
+        if (isOfflineError(e) && cached?.projects?.length) {
+          // Offline → reuse the last good project list so the view stays usable.
+          projects = cached.projects;
+          authenticated = true;
+          servedStale = true;
+          error = "Offline — showing cached projects.";
+        } else {
+          error = errMessage(e);
+        }
       }
     }
 
     const projectId = cfg.projectId ?? null;
     const project = projectId ? (projects.find((p) => p.id === projectId) ?? null) : null;
 
-    return {
+    const status: BwsStatus = {
       installed,
       version,
       hasToken,
@@ -188,6 +208,9 @@ export class BwsService {
       projects,
       error,
     };
+    // Persist only freshly fetched state (never a stale-served copy).
+    if (authenticated && !servedStale) this.statusSnapshot.set(status);
+    return status;
   }
 
   async setAccessToken(token: string): Promise<BwsStatus> {
@@ -228,11 +251,24 @@ export class BwsService {
   }
 
   async listSecrets(projectId?: string | null): Promise<BwsSecret[]> {
-    return this.secretsCache.run(projectId ?? "", async () => {
+    const key = projectId ?? "";
+    return this.secretsCache.run(key, async () => {
       const args = ["secret", "list"];
       if (projectId) args.push(projectId);
-      const raw = await this.runJson<RawSecret[]>(args);
-      return (raw ?? []).map(toSecret);
+      try {
+        const raw = await this.runJson<RawSecret[]>(args);
+        const secrets = (raw ?? []).map(toSecret);
+        // Cache KEY NAMES only — values are stripped before they touch disk.
+        const map = this.secretsSnapshot.get() ?? {};
+        map[key] = secrets.map((s) => ({ ...s, value: "" }));
+        this.secretsSnapshot.set(map);
+        return secrets;
+      } catch (e) {
+        const cached = this.secretsSnapshot.get()?.[key];
+        // Offline → list keys from the snapshot (values blank; reveal needs net).
+        if (cached && isOfflineError(e)) return cached;
+        throw e;
+      }
     });
   }
 
@@ -240,8 +276,16 @@ export class BwsService {
    *  `bws_get_secret` model tool so the agent can use a credential without it
    *  ever appearing in prompt text. Not cached — reads are one-shot. */
   async getSecret(secretId: string): Promise<BwsSecret> {
-    const raw = await this.runJson<RawSecret>(["secret", "get", secretId]);
-    return toSecret(raw);
+    try {
+      const raw = await this.runJson<RawSecret>(["secret", "get", secretId]);
+      return toSecret(raw);
+    } catch (e) {
+      // Values are never cached — revealing one requires the network.
+      if (isOfflineError(e)) {
+        throw new Error("Offline: secret values are not cached. Reconnect to reveal.");
+      }
+      throw e;
+    }
   }
 
   async createSecret(input: BwsSecretInput): Promise<BwsSecret> {

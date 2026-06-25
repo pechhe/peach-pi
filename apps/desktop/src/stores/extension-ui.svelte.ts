@@ -42,7 +42,14 @@ class ExtensionUiStore {
   private widgets = new SvelteMap<string, SvelteMap<string, string[]>>();
   private toastSeq = 0;
 
+  private started = false;
+
   init(): void {
+    // Idempotent: the preload `on` forwards to ipcRenderer.on (additive), so a
+    // second registration (App.svelte + HudComposer.svelte, or HMR remount)
+    // would fire every `event:notice` twice — duplicating toasts.
+    if (this.started) return;
+    this.started = true;
     api.on("event:extensionUi", (req) => {
       this.dialogs = [...this.dialogs, req];
     });

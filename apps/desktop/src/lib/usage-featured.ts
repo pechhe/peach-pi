@@ -26,6 +26,11 @@ function fmtMoney(v: number): string {
   return `$${v.toFixed(2)}`;
 }
 
+/** Urgency from a *remaining* percentage: 0% left → 1 (max red), 100% left → 0. */
+function quotaUrgency(remainingPct: number): number {
+  return Math.max(0, Math.min(1, (100 - remainingPct) / 100));
+}
+
 /** A selectable metric for one provider. */
 export interface MetricOption {
   /** Stable key persisted as the chosen featured metric (e.g. "5h"). */
@@ -47,12 +52,12 @@ export function metricOptions(s: ProviderUsageSummary): MetricOption[] {
   if (sum.kind === "quota") {
     const opts: MetricOption[] = [];
     if (sum.fiveHours) {
-      const p = sum.fiveHours.usedPct;
-      opts.push({ key: "5h", label: "5-hour window", short: "5h", value: `${Math.round(p)}%`, urgency: p / 100 });
+      const p = sum.fiveHours.remainingPct;
+      opts.push({ key: "5h", label: "5-hour window", short: "5h", value: `${Math.round(p)}%`, urgency: quotaUrgency(p) });
     }
     if (sum.weekly) {
-      const p = sum.weekly.usedPct;
-      opts.push({ key: "weekly", label: "Weekly window", short: "wk", value: `${Math.round(p)}%`, urgency: p / 100 });
+      const p = sum.weekly.remainingPct;
+      opts.push({ key: "weekly", label: "Weekly window", short: "wk", value: `${Math.round(p)}%`, urgency: quotaUrgency(p) });
     }
     return opts;
   }
@@ -87,16 +92,18 @@ function balanceUrgency(remaining: number): number {
   return 0.2;
 }
 
-/** The featured metrics for `s`, honouring pinned `keys` (default = first
- *  option). Returns one MetricOption per result, deduped, in option order. */
+/** The featured metrics for `s`, honouring pinned `keys`.
+ *  `undefined` = never touched → show default (first option).
+ *  `[]` = explicitly unpinned → show nothing.
+ *  otherwise the matched options, in option order. */
 export function featuredMetrics(
   s: ProviderUsageSummary,
   keys: string[] | undefined,
 ): MetricOption[] {
   const opts = metricOptions(s);
   if (opts.length === 0) return [];
-  if (!keys || keys.length === 0) return [opts[0]!];
-  // Preserve option order so the line reads predictably; ignore stale keys.
+  if (keys === undefined) return [opts[0]!];
+  if (keys.length === 0) return [];
   return opts.filter((o) => keys.includes(o.key));
 }
 

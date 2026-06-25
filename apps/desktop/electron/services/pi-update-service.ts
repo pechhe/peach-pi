@@ -34,6 +34,9 @@ export class PiUpdateService {
   private timer: NodeJS.Timeout | null = null;
   private bootTimer: NodeJS.Timeout | null = null;
   private running = false;
+  /** True when a manual update was requested while runs were active; flushed
+   *  by `onRunsIdle()` as soon as no runs remain. */
+  private queued = false;
 
   constructor(
     db: AppDb,
@@ -73,12 +76,30 @@ export class PiUpdateService {
     await this.run(false);
   }
 
-  /** Manual path: bypasses the throttle, still defers while runs are active. */
-  async updateNow(): Promise<{ ok: boolean; updated: boolean; error?: string }> {
+  /** Manual path: bypasses the throttle. When runs are active, queues the
+   *  update to be applied automatically as soon as the runs finish, instead
+   *  of rejecting the request. */
+  async updateNow(): Promise<{ ok: boolean; updated: boolean; queued: boolean; error?: string }> {
     if (this.hasActiveRuns()) {
-      return { ok: false, updated: false, error: "A run is active — try again when idle." };
+      this.queued = true;
+      this.emit("event:notice", {
+        message: "Update queued — will apply when runs finish.",
+        level: "info",
+      });
+      return { ok: true, updated: false, queued: true };
     }
-    return this.run(true);
+    const res = await this.run(true);
+    return { ...res, queued: false };
+  }
+
+  /** Called from main when active runs drop to zero. Flushes a queued update
+   *  if one is waiting; re-checks `hasActiveRuns` in case a new run started
+   *  between the signal and now. */
+  onRunsIdle(): void {
+    if (!this.queued) return;
+    if (this.hasActiveRuns()) return;
+    this.queued = false;
+    void this.run(true);
   }
 
   /** Uninstall a package extension via `pi remove <spec>`. */

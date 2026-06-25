@@ -22,12 +22,12 @@
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import Settings from "@lucide/svelte/icons/settings";
-  import Palette from "@lucide/svelte/icons/palette";
   import Clock from "@lucide/svelte/icons/clock";
   import Check from "@lucide/svelte/icons/check";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import DoneBurst from "./DoneBurst.svelte";
   import { doneAnim } from "../lib/done-anim.svelte";
+  import { playArchiveSound } from "../lib/sound/done-sound";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Plus from "@lucide/svelte/icons/plus";
   import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -35,7 +35,6 @@
   import MessageSquare from "@lucide/svelte/icons/message-square";
   import Archive from "@lucide/svelte/icons/archive";
   import GitBranchPlus from "@lucide/svelte/icons/git-branch-plus";
-  import SquarePen from "@lucide/svelte/icons/square-pen";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { TAG_META } from "../lib/tag-meta";
@@ -61,6 +60,7 @@
     onOpenView,
     onOpenTesting,
     onOpenSearch,
+    remoteFirst = false,
   }: {
     width?: number;
     projects: Project[];
@@ -77,6 +77,8 @@
     onOpenView: (view: AppView) => void;
     onOpenTesting: (projectId: string) => void;
     onOpenSearch: () => void;
+    /** Remote-first mode on: the Remote item glows red + pulses. */
+    remoteFirst?: boolean;
   } = $props();
 
   let expanded = $state<Record<string, boolean>>({});
@@ -139,20 +141,10 @@
     dragOverId = null;
   }
 
-  // The usage popover anchored under the Usage nav button. Opens on hover
-  // with a small grace delay so moving between the button and the popover
-  // doesn't dismiss it. Click toggles.
+  // The usage popover anchored under the Usage nav button. Opens on click
+  // and closes on outside-click (handled inside UsagePopover).
   let usageAnchor: HTMLButtonElement | null = $state(null);
   let usageOpen = $state(false);
-  let usageTimer: ReturnType<typeof setTimeout> | null = null;
-  function openUsagePopover(): void {
-    if (usageTimer) { clearTimeout(usageTimer); usageTimer = null; }
-    usageOpen = true;
-  }
-  function scheduleCloseUsagePopover(): void {
-    if (usageTimer) clearTimeout(usageTimer);
-    usageTimer = setTimeout(() => (usageOpen = false), 220);
-  }
   function toggleUsagePopover(): void {
     playButtonSecondary("click");
     usageOpen = !usageOpen;
@@ -227,6 +219,11 @@
     activeView === "thread" && selectedThreadId
       ? threads.find((t) => t.id === selectedThreadId)?.projectId ?? null
       : null,
+  );
+  // True when the selected thread is a project-less chat — drives the Chats
+  //  section label glow (mirrors the Projects label for project threads).
+  const chatActive = $derived(
+    activeView === "thread" && selectedThreadId && activeProjectId === null,
   );
 
   // Flat, top-to-bottom order of the rows ⌘⇧↑/↓ can land on: every visible
@@ -372,6 +369,7 @@
       if (nextId && thread.id === selectedThreadId) onSelect(nextId);
       return;
     }
+    playArchiveSound();
     doneAnimFor = thread.id;
   }
   function finishArchive(thread: Thread) {
@@ -424,12 +422,16 @@
         {isActive ? 'session-row--active text-fg' : 'text-muted hover:text-fg'}"
       class:done-pop={doneAnimFor === thread.id}
       class:done-pop--archiveSlide={doneAnimFor === thread.id && doneAnim.current === "archiveSlide"}
+      class:done-pop--archiveSwipe={doneAnimFor === thread.id && doneAnim.current === "archiveSwipe"}
+      class:done-pop--archiveShing={doneAnimFor === thread.id && doneAnim.current === "archiveShing"}
+      class:done-pop--archiveVacuum={doneAnimFor === thread.id && doneAnim.current === "archiveVacuum"}
       class:done-pop--popSpark={doneAnimFor === thread.id && doneAnim.current === "popSpark"}
       class:done-pop--stamp={doneAnimFor === thread.id && doneAnim.current === "stamp"}
       class:done-pop--confetti={doneAnimFor === thread.id && doneAnim.current === "confetti"}
       class:done-pop--twos={doneAnimFor === thread.id && doneAnim.current === "twos"}
       class:done-pop--spring={doneAnimFor === thread.id && doneAnim.current === "spring"}
       data-thread-id={thread.id}
+      data-press="self"
       onclick={() => selectThread(thread.id)}
     >
       {#if woke}
@@ -584,7 +586,8 @@
           data-testid="nav-ext-updates"
           title="{extensionUi.extUpdates.length} extension update{extensionUi.extUpdates.length === 1 ? '' : 's'} available: {extensionUi.extUpdates.join(', ')}"
         >
-          <span class="flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500/20 px-1 text-[10px] font-bold text-amber-400">{extensionUi.extUpdates.length}</span>
+          <BellRing size={14} />
+          <span class="num-badge num-badge--accent">{extensionUi.extUpdates.length}</span>
         </button>
       {/if}
       <button
@@ -621,10 +624,7 @@
       >
         <span class="flex items-center gap-2.5"><AlarmClock size={15} /> Automations</span>
         {#if automationCount > 0}
-          <span
-            class="min-w-[1.25rem] rounded-full bg-surface-3 px-1.5 py-0.5 text-center text-[11px] font-medium text-fg-soft"
-            data-testid="automations-badge">{automationCount}</span
-          >
+          <span class="num-badge" data-testid="automations-badge">{automationCount}</span>
         {/if}
       </button>
       <button
@@ -653,14 +653,6 @@
       </button>
       <button
         class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-          {activeView === 'playroom' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-        onclick={() => onOpenView("playroom")}
-        data-testid="nav-playroom"
-      >
-        <span class="flex items-center gap-2.5"><Palette size={15} /> Playroom</span>
-      </button>
-      <button
-        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
           {activeView === 'connections' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
         onclick={() => onOpenView("connections")}
         data-testid="nav-connections"
@@ -680,14 +672,15 @@
           {activeView === 'remote' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
         onclick={() => onOpenView("remote")}
         data-testid="nav-remote"
+        data-remote-first={remoteFirst ? "on" : undefined}
       >
-        <span class="flex items-center gap-2.5"><Radio size={15} /> Remote</span>
+        <span class="flex items-center gap-2.5 {remoteFirst ? 'remote-first-pulse' : ''}">
+          <Radio size={15} /> Remote
+        </span>
       </button>
       <div
         class="main-nav-item--usage relative"
         data-nav-usage-host
-        onmouseenter={openUsagePopover}
-        onmouseleave={scheduleCloseUsagePopover}
       >
         <button
           bind:this={usageAnchor}
@@ -708,7 +701,7 @@
           {/if}
         </button>
         {#if usageOpen}
-          <UsagePopover anchor={usageAnchor} onEnter={openUsagePopover} onLeave={scheduleCloseUsagePopover} onClose={() => (usageOpen = false)} />
+          <UsagePopover anchor={usageAnchor} onClose={() => (usageOpen = false)} />
         {/if}
       </div>
     </MovingHighlight>
@@ -756,12 +749,6 @@
               <ChevronDown size={14} class="shrink-0 text-faint" />
             {/if}
             <span class="truncate text-sm font-medium text-fg-soft">{group.project.name}</span>
-            {#if isCollapsed(group.project.id)}
-              {@const total = group.masterActive.length + group.worktreeGroups.reduce((n, wg) => n + wg.active.length, 0)}
-              {#if total > 0}
-                <span class="shrink-0 rounded-full bg-surface-2 px-1.5 text-[10px] text-fainter">{total}</span>
-              {/if}
-            {/if}
           </button>
           <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
             <Tooltip text="Add thread to master">
@@ -911,12 +898,12 @@
   <!-- Chats -->
   <div class="border-t border-border/60 px-3 pt-3 pb-3">
     <div class="flex items-center justify-between px-1 pb-1.5">
-      <span class="engraved flex items-center gap-1.5 text-xs font-semibold tracking-wide text-faint uppercase"><MessageSquare size={12} /> Chats</span>
+      <span class="engraved flex items-center gap-1.5 text-xs font-semibold tracking-wide text-faint uppercase {chatActive ? 'engraved--active' : ''}"><MessageSquare size={12} /> Chats</span>
       <button
         class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg"
         onclick={newChat}
         data-testid="new-chat"
-        title="New chat"><SquarePen size={14} /></button
+        title="New chat"><Plus size={14} /></button
       >
     </div>
     <div class="chats-scroll max-h-48 overflow-y-auto">
@@ -940,6 +927,15 @@
 />
 
 <style>
+  /* Nav buttons are mouse/keyboard-activated, not tab-stopped — the
+     global :focus-visible ring would otherwise linger on the clicked
+     item (Chromium keeps :focus-visible after a click reached from
+     keyboard focus). Suppress it here; the active state is already
+     shown via .main-nav-item--active. */
+  .main-nav-item:focus-visible {
+    outline: none;
+  }
+
   /* ── worktree header: tinted to distinguish from master ───────── */
   .worktree-header {
     background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface) 94%);
@@ -995,6 +991,124 @@
     0%   { transform: translateX(-130%); opacity: 0; }
     25%  { opacity: 1; }
     100% { transform: translateX(130%);  opacity: 0; }
+  }
+
+  /* v0b Archive swipe — juicier: snappier press, longer lateral throw with
+     a slight tilt, brighter/faster glint, crisp collapse. */
+  :global(.session-row.done-pop--archiveSwipe) {
+    position: relative;
+    overflow: hidden;
+    transform-origin: center top;
+    animation: archive-swipe 420ms cubic-bezier(0.3, 0, 0.2, 1) forwards;
+  }
+  :global(.session-row.done-pop--archiveSwipe)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background: linear-gradient(
+      100deg,
+      transparent 36%,
+      oklch(1 0 0 / 0.7) 48%,
+      oklch(1 0 0 / 1) 50%,
+      oklch(1 0 0 / 0.7) 52%,
+      transparent 64%
+    );
+    mix-blend-mode: screen;
+    transform: translateX(-130%);
+    animation: archive-glint 180ms cubic-bezier(0.4, 0, 0.2, 1) 50ms forwards;
+  }
+  @keyframes archive-swipe {
+    0%   { transform: translate(0, 0) rotate(0) scale(1);     box-shadow: none; }
+    14%  { transform: translate(0, 0) rotate(0) scale(0.978); box-shadow: inset 0 1px 3px oklch(0 0 0 / 0.32); }
+    22%  { transform: translate(-2px, 0) rotate(-0.4deg) scale(0.99); box-shadow: none; }
+    58%  { transform: translate(20px, 9px) rotate(1deg) scale(0.97); opacity: 0.22; max-height: 2.4rem; }
+    68%  { transform: translate(26px, 12px) rotate(1.4deg) scale(0.96); opacity: 0.04; max-height: 2.4rem;
+           padding-top: 0.375rem; padding-bottom: 0.375rem; margin-top: 0; margin-bottom: 0; }
+    100% { transform: translate(26px, 12px) rotate(1.4deg) scale(0.96); opacity: 0; max-height: 0;
+           padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; }
+  }
+
+  /* v0c Archive shing — high juice: twin glints cross + a whole-row
+     brightness flash (the "filed" chrome ping), then a crisp collapse. */
+  :global(.session-row.done-pop--archiveShing) {
+    position: relative;
+    overflow: hidden;
+    transform-origin: center top;
+    animation: archive-shing 460ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  :global(.session-row.done-pop--archiveShing)::before,
+  :global(.session-row.done-pop--archiveShing)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    mix-blend-mode: screen;
+  }
+  :global(.session-row.done-pop--archiveShing)::after {
+    background: linear-gradient(100deg, transparent 38%, oklch(1 0 0 / 0.85) 50%, transparent 62%);
+    transform: translateX(-130%);
+    animation: archive-glint 200ms cubic-bezier(0.4, 0, 0.2, 1) 40ms forwards;
+  }
+  :global(.session-row.done-pop--archiveShing)::before {
+    background: linear-gradient(260deg, transparent 38%, oklch(1 0 0 / 0.6) 50%, transparent 62%);
+    transform: translateX(130%);
+    animation: archive-glint-rev 200ms cubic-bezier(0.4, 0, 0.2, 1) 120ms forwards;
+  }
+  @keyframes archive-glint-rev {
+    0%   { transform: translateX(130%);  opacity: 0; }
+    25%  { opacity: 1; }
+    100% { transform: translateX(-130%); opacity: 0; }
+  }
+  @keyframes archive-shing {
+    0%   { transform: translateY(0) scale(1);     filter: brightness(1);    box-shadow: none; }
+    12%  { transform: translateY(0) scale(0.98);  filter: brightness(1);    box-shadow: inset 0 1px 3px oklch(0 0 0 / 0.3); }
+    30%  { transform: translateY(0) scale(1.012); filter: brightness(1.55); box-shadow: none; }
+    42%  { transform: translateY(0) scale(0.995); filter: brightness(1);    }
+    64%  { transform: translateY(9px) scale(0.985); opacity: 0.2; max-height: 2.4rem; }
+    72%  { transform: translateY(11px) scale(0.98); opacity: 0.04; max-height: 2.4rem;
+           padding-top: 0.375rem; padding-bottom: 0.375rem; margin-top: 0; margin-bottom: 0; }
+    100% { transform: translateY(11px) scale(0.98); opacity: 0; max-height: 0;
+           padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; }
+  }
+
+  /* v0d Archive vacuum — extreme: the row gets sucked toward the Done
+     section: scaleX squash + skew + motion-blur streak, then collapse. */
+  :global(.session-row.done-pop--archiveVacuum) {
+    position: relative;
+    overflow: hidden;
+    transform-origin: right center;
+    animation: archive-vacuum 500ms cubic-bezier(0.5, 0, 0.75, 0) forwards;
+  }
+  :global(.session-row.done-pop--archiveVacuum)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background: linear-gradient(
+      95deg,
+      transparent 30%,
+      oklch(1 0 0 / 0.8) 49%,
+      oklch(1 0 0 / 1) 50%,
+      oklch(1 0 0 / 0.8) 51%,
+      transparent 70%
+    );
+    mix-blend-mode: screen;
+    transform: translateX(-130%);
+    animation: archive-glint 200ms cubic-bezier(0.4, 0, 0.2, 1) 40ms forwards;
+  }
+  @keyframes archive-vacuum {
+    0%   { transform: translate(0, 0) scaleX(1) scaleY(1) skewX(0);          filter: blur(0);     box-shadow: none; }
+    14%  { transform: translate(0, 0) scaleX(1.03) scaleY(0.97) skewX(0);    filter: blur(0);     box-shadow: inset 0 1px 3px oklch(0 0 0 / 0.34); }
+    24%  { transform: translate(0, 0) scaleX(1) scaleY(1) skewX(0);          filter: blur(0);     box-shadow: none; }
+    62%  { transform: translate(18px, 10px) scaleX(0.7) scaleY(0.92) skewX(-8deg); filter: blur(0.6px); opacity: 0.3; max-height: 2.4rem; }
+    74%  { transform: translate(34px, 14px) scaleX(0.45) scaleY(0.85) skewX(-14deg); filter: blur(1.4px); opacity: 0.04; max-height: 2.4rem;
+           padding-top: 0.375rem; padding-bottom: 0.375rem; margin-top: 0; margin-bottom: 0; }
+    100% { transform: translate(40px, 16px) scaleX(0.3) scaleY(0.8) skewX(-16deg);  filter: blur(2px);   opacity: 0; max-height: 0;
+           padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; }
   }
 
   /* v1 Pop & sparkle — on-twos stepped, anticipation -> stretch -> settle */

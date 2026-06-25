@@ -3,6 +3,9 @@ const KEY = "peachpi:sounds-muted";
 /** Which "done" chime plays when a thread finishes. Validated by done-sound.ts. */
 const VARIANT_KEY = "peachpi:done-sound-variant";
 const DEFAULT_VARIANT = "arpeggio";
+/** Which cue plays when the user marks a thread done (archives it). */
+const ARCHIVE_VARIANT_KEY = "peachpi:archive-sound-variant";
+const DEFAULT_ARCHIVE_VARIANT = "archive";
 
 export function soundsMuted(): boolean {
   try {
@@ -31,6 +34,22 @@ export function getDoneSoundVariant(): string {
 export function setDoneSoundVariant(variant: string): void {
   try {
     localStorage.setItem(VARIANT_KEY, variant);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getArchiveSoundVariant(): string {
+  try {
+    return localStorage.getItem(ARCHIVE_VARIANT_KEY) ?? DEFAULT_ARCHIVE_VARIANT;
+  } catch {
+    return DEFAULT_ARCHIVE_VARIANT;
+  }
+}
+
+export function setArchiveSoundVariant(variant: string): void {
+  try {
+    localStorage.setItem(ARCHIVE_VARIANT_KEY, variant);
   } catch {
     /* ignore */
   }
