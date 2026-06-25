@@ -1,13 +1,10 @@
-import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { rmSync } from "node:fs";
-import { promisify } from "node:util";
 import { recoveryBranchName, wipCommitMessage } from "./ids.ts";
-
-const execFileAsync = promisify(execFile);
+import { git, gitEnv, gitOk, gitOrFail } from "./git-cli.ts";
 
 /**
  * Git boundary for movable execution. Canonical CLI (no library), mirroring
@@ -26,45 +23,6 @@ const execFileAsync = promisify(execFile);
  * checked out in at most one local worktree on any given machine — there is
  * no cross-machine "already checked out" conflict. Code travels as git.
  */
-
-async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 });
-  return stdout;
-}
-
-async function gitOk(args: string[], cwd: string): Promise<boolean> {
-  try {
-    await git(args, cwd);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Run git with an extra env (isolated index for non-destructive snapshots). */
-async function gitEnv(
-  args: string[],
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, {
-    cwd,
-    env: { ...process.env, ...env },
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  return stdout;
-}
-
-/** Capture a failed git run's combined output as a readable message. */
-async function gitOrFail(args: string[], cwd: string, what: string): Promise<string> {
-  try {
-    return await git(args, cwd);
-  } catch (err) {
-    const e = err as { stderr?: string; message?: string };
-    const tail = (e.stderr || e.message || "").trim().split("\n").slice(-3).join(" ");
-    throw new Error(`${what} failed: ${tail}`);
-  }
-}
 
 /** Is `cwd` inside a git repo? */
 export async function isRepo(cwd: string): Promise<boolean> {

@@ -17,8 +17,9 @@ import type {
   ToolMode,
   TranscriptItem,
   TranscriptOp,
-  TranscriptDelta,
   TranscriptSnapshot,
+  ThreadFrame,
+  ThreadFrameListener,
 } from "@peach-pi/shared-types";
 
 import type { PiSession } from "@peach-pi/pi-client";
@@ -98,14 +99,11 @@ export class ThreadService {
   private handoff: HandoffHook | null = null;
   /** In-memory rewind snapshots: threadId → (prior-turn entryId | "root") → sha. */
   private rewindSnapshots = new Map<string, Map<string, string>>();
-  /** Remote tap hooks (ADR-0009); set after construction. When set, each
-   *  transcript flush and run-idle is forwarded to the remote relay. */
-  private onTranscriptDelta?: (delta: TranscriptDelta) => void;
-  private onRunIdleWithCwd?: (threadId: string, cwd: string | null) => void;
-  /** Remote steer-back tap (ADR-0010): live run-status + queue, so the phone
-   *  composer mirrors the desktop without polling. */
-  private onRemoteStatus?: (threadId: string, status: Thread["status"]) => void;
-  private onRemoteQueue?: (threadId: string, steering: string[], followUp: string[]) => void;
+  /** Remote-subscriber seam (ADR-0009): the relay (and any future tap such
+   *  as a DevTap recorder) registers here and receives every emission from
+   *  one tagged-union site. Replaces the former 4-hook scatter-gather so a
+   *  new frame type or a new subscriber touches one place, not five. */
+  private frameListeners = new Set<ThreadFrameListener>();
 
   constructor(
     db: AppDb,
@@ -133,6 +131,30 @@ export class ThreadService {
     this.gitService = gitService;
   }
 
+  /** Wire the app-state boundary after construction (resolves the App↔Thread
+   *  cycle). Owns worktree record add/archive; required for the sunk
+   *  `threads:create` + `threads:setEnvironment` orchestrators (issue #15). */
+  private appService: {
+    worktree: (id: string) => { id: string; dir: string; projectId: string } | null;
+    addWorktree: (projectId: string, dir: string) => { id: string; dir: string };
+    snapshot: () => {
+      threads: Thread[];
+      projects: { id: string; path: string }[];
+    };
+    archiveWorktree: (id: string) => string[];
+  } | null = null;
+  setAppService(appService: {
+    worktree: (id: string) => { id: string; dir: string; projectId: string } | null;
+    addWorktree: (projectId: string, dir: string) => { id: string; dir: string };
+    snapshot: () => {
+      threads: Thread[];
+      projects: { id: string; path: string }[];
+    };
+    archiveWorktree: (id: string) => string[];
+  }): void {
+    this.appService = appService;
+  }
+
   /** Wire the remote-handoff boundary after construction (service ordering):
    *  when remote-first mode is on, messaging a thread hands it off to the
    *  remote machine before the prompt runs. Optional — null by default. */
@@ -140,17 +162,26 @@ export class ThreadService {
     this.handoff = hs;
   }
 
-  /** Wire the remote relay tap (ADR-0009). Optional; a no-op when unset. */
-  setRemoteTap(hooks: {
-    onTranscriptDelta?: (delta: TranscriptDelta) => void;
-    onRunIdleWithCwd?: (threadId: string, cwd: string | null) => void;
-    onRemoteStatus?: (threadId: string, status: Thread["status"]) => void;
-    onRemoteQueue?: (threadId: string, steering: string[], followUp: string[]) => void;
-  }): void {
-    this.onTranscriptDelta = hooks.onTranscriptDelta;
-    this.onRunIdleWithCwd = hooks.onRunIdleWithCwd;
-    this.onRemoteStatus = hooks.onRemoteStatus;
-    this.onRemoteQueue = hooks.onRemoteQueue;
+  /** Register a subscriber to the in-process frame stream (ADR-0009's second
+   *  subscriber seam). Returns a disposer so callers can detach. Any frame
+   *  type added in future flows here with no edits to the emission paths. */
+  subscribe(listener: ThreadFrameListener): () => void {
+    this.frameListeners.add(listener);
+    return () => this.frameListeners.delete(listener);
+  }
+
+  /** Fan a frame out to every registered subscriber. Centralising emission here
+   *  is the whole point of #14: each path calls one method instead of a hook
+   *  per field, so a missed subscriber is impossible by construction. */
+  private emitFrame(frame: ThreadFrame): void {
+    if (this.frameListeners.size === 0) return;
+    for (const listener of this.frameListeners) {
+      try {
+        listener(frame);
+      } catch {
+        // A faulty subscriber must never break the host's own stream.
+      }
+    }
   }
 
   /** Snapshot the working tree before a turn runs, keyed by the prior turn's
@@ -172,9 +203,26 @@ export class ThreadService {
     this.rewindSnapshots.delete(threadId);
   }
 
-  async createThread(projectId: string, worktreeId?: string | null, worktreeDir?: string): Promise<Thread> {
+  async createThread(
+    projectId: string,
+    opts?: { worktreeId?: string; worktree?: boolean },
+  ): Promise<Thread> {
     const project = this.projects.all().find((p) => p.id === projectId);
     if (!project) throw new Error(`Unknown project: ${projectId}`);
+    let worktreeId: string | null = null;
+    let worktreeDir: string | undefined;
+    if (opts?.worktreeId) {
+      const wt = this.appService?.worktree(opts.worktreeId);
+      if (!wt) throw new Error(`Unknown worktree: ${opts.worktreeId}`);
+      worktreeId = wt.id;
+      worktreeDir = wt.dir;
+    } else if (opts?.worktree) {
+      // Legacy one-shot: create a worktree record + git checkout together.
+      const dir = await this.gitService!.createWorktree(projectId);
+      const wt = this.appService!.addWorktree(projectId, dir);
+      worktreeId = wt.id;
+      worktreeDir = wt.dir;
+    }
     const thread = this.threads.insert({ projectId, title: "New thread", worktreeId, worktreeDir });
     await this.ensureSession(thread.id, worktreeDir ?? project.path, null);
     this.onThreadsChanged();
@@ -542,9 +590,39 @@ export class ThreadService {
 
   /** Flip an empty (never-prompted) thread between its project dir and an
    *  isolated worktree, keeping the same thread id so the renderer's
-   *  ThreadView stays mounted (no flash). The caller resolves the git
-   *  worktree dir; we only own the session swap + row mutation. */
-  async setEnvironment(threadId: string, worktreeId: string | null, worktreeDir: string | undefined): Promise<void> {
+   *  ThreadView stays mounted (no flash). Owns the full resolve/teardown
+   *  choreography sunk from main.ts's `threads:setEnvironment` handler
+   *  (issue #15): creating a fresh worktree on enable, tearing down the old
+   *  worktree record + git checkout on disable. */
+  async setEnvironment(threadId: string, worktree: boolean): Promise<void> {
+    const before = this.threads.get(threadId);
+    if (!before?.projectId) return;
+    if ((before.worktreeDir != null) === worktree) return;
+    if (worktree) {
+      // Resolve a freshly-created worktree record + dir before disposing.
+      const dir = await this.gitService!.createWorktree(before.projectId);
+      const wt = this.appService!.addWorktree(before.projectId, dir);
+      await this.swapEnvironment(threadId, wt.id, wt.dir);
+    } else {
+      await this.swapEnvironment(threadId, null, undefined);
+      // Tear down the old worktree record + git checkout.
+      if (before.worktreeId) {
+        const project = this.projects.all().find((p) => p.id === before.projectId);
+        if (project && before.worktreeDir) {
+          await this.gitService!.removeWorktree(project.path, before.worktreeDir);
+        }
+        this.appService!.archiveWorktree(before.worktreeId);
+      }
+    }
+  }
+
+  /** Low-level session swap + row mutation. Shared by `setEnvironment`
+   *  (worktree flip) and `bringWorktreeToLocal` (detach). */
+  private async swapEnvironment(
+    threadId: string,
+    worktreeId: string | null,
+    worktreeDir: string | undefined,
+  ): Promise<void> {
     this.disposeSession(threadId);
     this.threads.setWorktree(threadId, worktreeId, worktreeDir ?? null);
     const thread = this.threads.get(threadId);
@@ -657,7 +735,7 @@ export class ThreadService {
         onRunningChange: (running) => this.setStatus(threadId, running ? "running" : "completed"),
         onQueueChange: (steering, followUp) => {
           this.emit("event:queue", { threadId, steering, followUp });
-          this.onRemoteQueue?.(threadId, steering, followUp);
+          this.emitFrame({ kind: "queue", threadId, steering, followUp });
         },
         onMetaChange: () => {
           const live = this.sessions.get(threadId);
@@ -718,14 +796,21 @@ export class ThreadService {
     const nowRunning = status === "running";
     this.threads.setStatus(threadId, status);
     this.onThreadsChanged();
-    this.onRemoteStatus?.(threadId, status);
+    this.emitFrame({ kind: "status", threadId, status });
     if (wasRunning !== nowRunning && this.onRunningChange) this.onRunningChange(nowRunning);
     if (status === "completed" && this.onRunIdle) {
       const thread = this.threads.get(threadId);
       if (thread) this.onRunIdle(thread);
     }
-    if (status === "completed" && this.onRunIdleWithCwd) {
-      this.onRunIdleWithCwd(threadId, this.gitService?.cwdFor(threadId) ?? null);
+    if (status === "completed") {
+      // Idle→checkpoint frame: subscribers (e.g. the relay) record the wip/
+      // branch. Kept as a frame, not a separate hook, so a new subscriber gets
+      // it for free.
+      this.emitFrame({
+        kind: "idle",
+        threadId,
+        cwd: this.gitService?.cwdFor(threadId) ?? null,
+      });
     }
     // Flush a queued hot-reload now that this thread's run has finished.
     if (status === "completed" && this.reloadQueued.has(threadId)) {
@@ -757,7 +842,7 @@ export class ThreadService {
     for (const [threadId, ops] of this.pendingOps) {
       const delta = { threadId, ops, seq: ++this.transcriptSeq };
       this.emit("event:transcript", delta);
-      this.onTranscriptDelta?.(delta);
+      this.emitFrame({ kind: "transcript", threadId, ops, seq: delta.seq });
     }
     this.pendingOps.clear();
   }

@@ -4,7 +4,7 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
   "include": ["electron/**/*.ts", "tests/unit/**/*.ts", "src/global.d.ts"]
 }

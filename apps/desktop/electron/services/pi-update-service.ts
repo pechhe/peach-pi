@@ -347,18 +347,36 @@ export class PiUpdateService {
         timeout: TIMEOUT_MS,
         maxBuffer: 8 * 1024 * 1024,
       });
-      // Extract npm package names from `pi list` output (lines like "  npm:pi-agent-browser-native")
+      // Extract npm package names from `pi list` output (lines like "  npm:pi-agent-browser-native"),
+      // and derive the npm project root that `pi update --extensions` actually updates.
+      // `pi list` prints the resolved path under each package, e.g.
+      //   npm:pi-mcp-adapter
+      //     /Users/.../.pi/agent/npm/node_modules/pi-mcp-adapter
+      // The project root is the directory *containing* `node_modules`.
       const npmPackages: string[] = [];
+      let prefix: string | null = null;
       for (const line of listOut.split("\n")) {
-        const m = line.trim().match(/^npm:(.+)$/);
-        if (m?.[1]) npmPackages.push(m[1].trim());
+        const trimmed = line.trim();
+        const m = trimmed.match(/^npm:(.+)$/);
+        if (m?.[1]) {
+          npmPackages.push(m[1].trim());
+          continue;
+        }
+        if (!prefix) {
+          const idx = trimmed.indexOf("/node_modules/");
+          if (idx > 0) prefix = trimmed.slice(0, idx);
+        }
       }
       if (npmPackages.length === 0) return;
-      // Check npm outdated for globally-installed packages
+      if (!prefix) return; // can't check outdated without the install root
+      // Check npm outdated against the pi-managed install root — the same
+      // location `pi update --extensions` updates. Checking `-g` (global)
+      // instead would report stale global copies that `pi update` never
+      // touches, so the badge would reappear every boot despite updates.
       // npm outdated exits non-zero when outdated packages exist; the output is still usable
       let outdatedOut = "";
       try {
-        await execFileAsync("npm", ["outdated", "-g"], {
+        await execFileAsync("npm", ["outdated", "--prefix", prefix], {
           timeout: TIMEOUT_MS,
           maxBuffer: 8 * 1024 * 1024,
         });

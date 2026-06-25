@@ -5,6 +5,11 @@ declare module "*.mp3?inline" {
   export default src;
 }
 
+declare module "*.md?raw" {
+  const src: string;
+  export default src;
+}
+
 declare global {
   interface Window {
     peachPi: PeachPiApi;

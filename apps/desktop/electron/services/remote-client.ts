@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { request as httpRequest, Agent as HttpAgent } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
-import { promisify } from "node:util";
 import type {
   PiConfigPayload,
   RemoteHostConnection,
@@ -19,8 +17,7 @@ import type {
 import type { Emit } from "../ipc/registry.ts";
 import type { RemoteHostService } from "./remote-host.ts";
 import { checkpointBranch } from "./remote-checkpoint.ts";
-
-const execFileAsync = promisify(execFile);
+import { git } from "@peach-pi/remote-handoff";
 
 const CONNECTIONS_PATH = join(homedir(), ".pi", "agent", "peach-remote-hosts.json");
 
@@ -63,11 +60,6 @@ function toRemoteThread(c: RemoteHostConnection, s: RemoteSessionInfo): Thread {
     remoteControllerId: s.controllerId,
     remoteControllerName: s.controllerName,
   };
-}
-
-async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 });
-  return stdout;
 }
 
 /**

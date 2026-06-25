@@ -120,6 +120,76 @@ test("forwardStatus/forwardQueue are no-ops before the server binds", () => {
   assert.doesNotThrow(() => h.forwardQueue("t1", [], ["a follow-up"]));
 });
 
+// ── setHostEnabled: orchestrator sunk out of main.ts (issue #15) ──────
+// `start()` requires a tailnet interface; with the fake deps below (no
+// interfaces override) it has none, so enable throws before reaching the
+// serve step. We assert the orchestrator delegates to start/stop, fires the
+// status-change notifier, and swallows enableServe failures.
+
+test("setHostEnabled(false) is a no-op stop and fires onStatusChange", async () => {
+  let notified = 0;
+  const h = new RemoteHostService(
+    deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+  );
+  h.setHostHooks({ onStatusChange: () => { notified++; } });
+  // stop() on a never-started relay is idempotent.
+  const status = await h.setHostEnabled(false);
+  assert.equal(notified, 1);
+  assert.equal(status.enabled, false);
+});
+
+test("setHostEnabled(true) with no tailnet throws from start(), not from serve", async () => {
+  let serveCalls = 0;
+  const h = new RemoteHostService(
+    deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+  );
+  h.setHostHooks({
+    enableServe: async () => { serveCalls++; },
+    onStatusChange: () => {},
+  });
+  await assert.rejects(() => h.setHostEnabled(true), /Tailscale interface/);
+  // start() threw before enableServe could run.
+  assert.equal(serveCalls, 0);
+});
+
+test("setHostEnabled(true) with a faked tailnet iface calls enableServe + onStatusChange", async () => {
+  let servePort = -1;
+  let notified = 0;
+  const h = new RemoteHostService(
+    ({
+      ...deps([{ id: "t1", projectId: "p1" }]),
+      interfaces: () => ({ utun0: [{ family: "IPv4", address: "100.64.0.1", internal: false }] }),
+    }) as RelayDeps,
+  );
+  h.setHostHooks({
+    enableServe: async (port) => { servePort = port; },
+    onStatusChange: () => { notified++; },
+  });
+  const status = await h.setHostEnabled(true);
+  assert.equal(status.enabled, true);
+  assert.equal(status.port > 0, true);
+  assert.equal(servePort, status.port);
+  assert.equal(notified, 1);
+  await h.stop();
+});
+
+test("setHostEnabled(true) swallows an enableServe rejection", async () => {
+  const h = new RemoteHostService(
+    ({
+      ...deps([{ id: "t1", projectId: "p1" }]),
+      interfaces: () => ({ utun0: [{ family: "IPv4", address: "100.64.0.1", internal: false }] }),
+    }) as RelayDeps,
+  );
+  h.setHostHooks({
+    enableServe: async () => { throw new Error("Tailscale missing"); },
+    onStatusChange: () => {},
+  });
+  // enableServe failure is swallowed — surfaced via connectInfo, not thrown.
+  const status = await assert.doesNotReject(() => h.setHostEnabled(true));
+  assert.equal(status.enabled, true);
+  await h.stop();
+});
+
 // ── authorizeRequest: the pure auth gate the browser PWA relies on ──────
 const TOKEN = "a".repeat(32); // long enough to pass isValidToken
 

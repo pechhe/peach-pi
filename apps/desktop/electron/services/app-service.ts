@@ -40,6 +40,14 @@ export class AppService {
   private automations: AutomationRepo;
   private snoozeTimer: NodeJS.Timeout | null = null;
   private emit: Emit;
+  /** Collaborators for worktree teardown (archive a worktree → archive its
+   *  threads → remove the git dir). Injected post-construction to avoid the
+   *  App↔Thread cycle; the orchestration lives here because the worktree
+   *  lifecycle is owned by AppService (issue #15). */
+  private threadService: { archive: (threadId: string) => void } | null = null;
+  private gitService: {
+    removeWorktree: (projectPath: string, worktreeDir: string) => Promise<void>;
+  } | null = null;
   /** Supplies synthetic threads mirrored from remote masters (set by main.ts),
    *  merged into the snapshot so they render in the sidebar tagged as remote. */
   private remoteThreads: () => Thread[] = () => [];
@@ -71,6 +79,19 @@ export class AppService {
   /** Register the provider of remote-master threads (RemoteClientService). */
   setRemoteThreadsProvider(provider: () => Thread[]): void {
     this.remoteThreads = provider;
+  }
+
+  /** Wire the collaborators for full worktree archive (teardown choreography
+   *  that previously lived inline in main.ts's `worktrees:archive` handler).
+   *  Issue #15: sink the orchestrator into the service that owns the lifecycle. */
+  setTeardownCollaborators(c: {
+    threadService: { archive: (threadId: string) => void };
+    gitService: {
+      removeWorktree: (projectPath: string, worktreeDir: string) => Promise<void>;
+    };
+  }): void {
+    this.threadService = c.threadService;
+    this.gitService = c.gitService;
   }
 
   /** This machine's stable client identity for remote steering leases + archive
@@ -176,6 +197,20 @@ export class AppService {
       .map((t) => t.id);
     this.publish();
     return threadIds;
+  }
+
+  /** Full worktree lifecycle teardown: archive every live thread in it, remove
+   *  the git worktree dir, then mark the worktree record archived. Sinks the
+   *  `worktrees:archive` orchestrator out of main.ts (issue #15). Requires the
+   *  teardown collaborators wired via `setTeardownCollaborators`; no-ops the
+   *  git/thread steps gracefully when they're unset (e.g. in unit tests). */
+  async archive(worktreeId: string): Promise<void> {
+    const wt = this.worktree(worktreeId);
+    if (!wt) return;
+    const project = this.projects.all().find((p) => p.id === wt.projectId);
+    const threadIds = this.archiveWorktree(worktreeId);
+    for (const tid of threadIds) this.threadService?.archive(tid);
+    if (project && this.gitService) await this.gitService.removeWorktree(project.path, wt.dir);
   }
 
   setSelectedThread(threadId: string | null): void {

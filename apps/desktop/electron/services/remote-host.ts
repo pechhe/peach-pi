@@ -27,6 +27,11 @@ import type {
 } from "@peach-pi/shared-types";
 import { resolveBindAddress, isValidToken, type IfaceAddress } from "./remote-tailnet.ts";
 import { checkpointTip, originUrl } from "./remote-checkpoint.ts";
+import {
+  SteeringLeaseStore,
+  LEASE_TTL_MS,
+  type ClientIdentity,
+} from "./remote-steering-lease.ts";
 
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "peach-remote-host.json");
 
@@ -120,23 +125,6 @@ export interface RelayActions {
   gitMerge: (threadId: ThreadId) => Promise<GitMergeResult>;
 }
 
-/** A steering lease on a served session (ADR-0011). The master holds one per
- *  thread. Held by a single client at a time; force-take allowed; auto-lapses
- *  when the holder's tap drops or the TTL elapses with no renewal. */
-interface LeaseEntry {
-  controllerId: string;
-  controllerName: string;
-  /** Epoch-ms expiry; null = no live lease. */
-  expiresAt: number | null;
-}
-/** Lease TTL: a client holding a thread must be seen (tap heartbeats / a
- *  write) within this window, else the lease lapses so the thread frees up. */
-const LEASE_TTL_MS = 60_000;
-/** A connected client's identity, read from request headers. */
-interface ClientIdentity {
-  id: string;
-  name: string;
-}
 /** Read a client's identity from `X-Pi-Client-Id` / `X-Pi-Client-Name`. */
 function readClient(req: IncomingMessage): ClientIdentity | null {
   const id = req.headers["x-pi-client-id"];
@@ -164,16 +152,33 @@ export class RemoteHostService {
   private serveAll = true;
   /** Explicitly served project ids (only consulted when !serveAll). */
   private servedProjects = new Set<ProjectId>();
-  /** Per-session steering lease (ADR-0011): the single client whose steers the
-   *  master accepts. Auto-acquired on tap attach, auto-lapsed when the tap
-   *  drops. Force-take allowed; mid-prompt pre-emption does not stop a running
-   *  turn — control applies to the next steer. */
-  private leases = new Map<ThreadId, LeaseEntry>();
+  /** Per-session steering lease (ADR-0011). Pure state machine extracted out
+   *  of the relay (ADR-0010: the relay stays a thin forwarder, no logic). */
+  private leases = new SteeringLeaseStore();
 
   private deps: RelayDeps;
+  /** Fronts the relay with Tailscale Serve HTTPS so the watch app can reach it
+   *  without a separate step. Injected so tests don't shell out to tailscale.
+   *  Null = Tailscale unavailable; enableServe failures are surfaced via
+   *  connectInfo (serveActive=false) in the UI. */
+  private enableServe?: (relayPort: number) => Promise<void>;
+  /** Notifies the renderer that serving state changed (event:remoteHostStatus).
+   *  Injected so the relay stays free of the typed-Emit coupling. */
+  private onStatusChange?: () => void;
 
   constructor(deps: RelayDeps) {
     this.deps = deps;
+  }
+
+  /** Wire the Tailscale-Serve fronting hook + status-change notifier (main.ts
+   *  composes these after construction so the relay's core stays testable
+   *  without the tailscale CLI or the typed emitter). */
+  setHostHooks(hooks: {
+    enableServe?: (relayPort: number) => Promise<void>;
+    onStatusChange?: () => void;
+  }): void {
+    this.enableServe = hooks.enableServe;
+    this.onStatusChange = hooks.onStatusChange;
   }
 
   async status(): Promise<RemoteHostConfig> {
@@ -441,7 +446,7 @@ export class RemoteHostService {
     // Auto-acquire the steering lease on attach (force-take; ADR-0011) so the
     // client opening the thread is the controller. Released on tap close.
     const client = readClient(req);
-    if (client) this.acquireLease(threadId, client, true);
+    if (client) this.leases.acquire(threadId, client, true);
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -485,11 +490,11 @@ export class RemoteHostService {
 
     // Keep the lease warm while the tap is live; release it when the tap drops
     // (so the thread frees up for another client — ADR-0011 auto-lapse).
-    const renew = client ? setInterval(() => this.renewLease(threadId, client), Math.floor(LEASE_TTL_MS / 2)) : null;
+    const renew = client ? setInterval(() => this.leases.renew(threadId, client), Math.floor(LEASE_TTL_MS / 2)) : null;
     reqCloseHandler(req, () => {
       set.delete(res);
       if (renew) clearInterval(renew);
-      if (client) this.releaseLease(threadId, client);
+      if (client) this.leases.release(threadId, client);
       try {
         res.end();
       } catch {
@@ -528,73 +533,7 @@ export class RemoteHostService {
     controllerName: string | null;
     leaseExpiresAt: string | null;
   } {
-    this.lapseIfExpired(threadId);
-    const entry = this.leases.get(threadId);
-    if (!entry || entry.expiresAt == null) {
-      return { controllerId: null, controllerName: null, leaseExpiresAt: null };
-    }
-    return {
-      controllerId: entry.controllerId,
-      controllerName: entry.controllerName,
-      leaseExpiresAt: new Date(entry.expiresAt).toISOString(),
-    };
-  }
-
-  /** Drop a lapsed lease (TTL elapsed with no renewal). */
-  private lapseIfExpired(threadId: ThreadId): void {
-    const e = this.leases.get(threadId);
-    if (e && e.expiresAt != null && Date.now() >= e.expiresAt) {
-      this.leases.delete(threadId);
-    }
-  }
-
-  /** Take the steering lease (force = pre-empt a live holder). Returns the new
-   *  holder id, or null if blocked. */
-  private acquireLease(threadId: ThreadId, client: ClientIdentity, force: boolean): string | null {
-    this.lapseIfExpired(threadId);
-    const cur = this.leases.get(threadId);
-    if (cur && cur.expiresAt != null && cur.controllerId !== client.id && !force) {
-      return null; // held by another client, not forced
-    }
-    this.leases.set(threadId, {
-      controllerId: client.id,
-      controllerName: client.name,
-      expiresAt: Date.now() + LEASE_TTL_MS,
-    });
-    return client.id;
-  }
-
-  /** Release the lease; only the holder may release (others ignored). */
-  private releaseLease(threadId: ThreadId, client: ClientIdentity): void {
-    const cur = this.leases.get(threadId);
-    if (cur && cur.controllerId === client.id) this.leases.delete(threadId);
-  }
-
-  /** Renew a live lease the client holds (taps + writes keep it warm). */
-  private renewLease(threadId: ThreadId, client: ClientIdentity): void {
-    const cur = this.leases.get(threadId);
-    if (cur && cur.controllerId === client.id) {
-      cur.expiresAt = Date.now() + LEASE_TTL_MS;
-    }
-  }
-
-  /** Throws a 409-shaped object if `client` is not the current controller. */
-  private assertControl(threadId: ThreadId, client: ClientIdentity | null): true | { status: number; body: unknown } {
-    this.lapseIfExpired(threadId);
-    const cur = this.leases.get(threadId);
-    if (!client) return { status: 401, body: { error: "client identity required" } };
-    if (!cur || cur.expiresAt == null || cur.controllerId !== client.id) {
-      return {
-        status: 409,
-        body: {
-          error: "controlled by another client",
-          controllerName: cur?.controllerName ?? null,
-        },
-      };
-    }
-    // Renew on every accepted steer — the client is actively using it.
-    this.renewLease(threadId, client);
-    return true;
+    return this.leases.fields(threadId);
   }
 
   /** Write path (ADR-0010). Routes a token-gated POST to a RelayActions verb.
@@ -636,15 +575,15 @@ export class RemoteHostService {
         //  on attach; also the top-bar Take control / Hand back action.
         if (!client) return this.send(res, 401, { error: "client identity required" });
         if (body.release === true) {
-          this.releaseLease(threadId, client);
+          this.leases.release(threadId, client);
           return this.send(res, 200, { ok: true, ...this.leaseFields(threadId) });
         }
         const force = body.force !== false; // default true
-        const held = this.acquireLease(threadId, client, force);
+        const held = this.leases.acquire(threadId, client, force);
         if (!held) {
           return this.send(res, 409, {
             error: "controlled by another client",
-            controllerName: this.leases.get(threadId)?.controllerName ?? null,
+            controllerName: this.leases.fields(threadId).controllerName,
           });
         }
         return this.send(res, 200, { ok: true, ...this.leaseFields(threadId) });
@@ -652,7 +591,7 @@ export class RemoteHostService {
       case "archive": {
         // POST /sessions/:id/archive — the controller finishing a thread marks
         // it done; the master archives it so every client drops it (ADR-0011).
-        const guard = this.assertControl(threadId, client);
+        const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await this.deps.actions.archiveThread(threadId);
         return this.send(res, 200, { ok: true });
@@ -660,7 +599,7 @@ export class RemoteHostService {
       case "message": {
         const text = String(body.text ?? "").trim();
         if (!text) return this.send(res, 400, { error: "text required" });
-        const guard = this.assertControl(threadId, client);
+        const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await a.message(threadId, text);
         return this.send(res, 200, { ok: true });
@@ -668,13 +607,13 @@ export class RemoteHostService {
       case "steer": {
         const text = String(body.text ?? "").trim();
         if (!text) return this.send(res, 400, { error: "text required" });
-        const guard = this.assertControl(threadId, client);
+        const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await a.steer(threadId, text);
         return this.send(res, 200, { ok: true });
       }
       case "abort": {
-        const guard = this.assertControl(threadId, client);
+        const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await a.abort(threadId);
         return this.send(res, 200, { ok: true });
@@ -709,6 +648,26 @@ export class RemoteHostService {
   private send(res: ServerResponse, status: number, body: unknown): void {
     res.writeHead(status, { "Content-Type": "application/json", ...CORS_HEADERS });
     res.end(JSON.stringify(body));
+  }
+
+  /** Toggle serving on/off and front the relay with Tailscale Serve HTTPS
+   *  on enable. Choreography that previously leaked across the IPC seam into
+   *  main.ts's `remote:setHostEnabled` handler (ADR: sink orchestrators into
+   *  the service that owns the responsibility). Swallowed Tailscale failures
+   *  surface via connectInfo (serveActive=false) rather than throwing. */
+  async setHostEnabled(enabled: boolean): Promise<RemoteHostConfig> {
+    if (enabled) await this.start();
+    else await this.stop();
+    if (enabled) {
+      try {
+        const s = await this.status();
+        await this.enableServe?.(s.port);
+      } catch {
+        // Tailscale missing / not logged in — UI shows the QR once Serve comes up.
+      }
+    }
+    this.onStatusChange?.();
+    return this.status();
   }
 
   async regenerateToken(): Promise<string> {
