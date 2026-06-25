@@ -10,6 +10,7 @@ import { ThreadService } from "./services/thread-service.ts";
 import { AutomationService } from "./services/automation-service.ts";
 import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
+import { IssuesService } from "./services/issues-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
 import { GraphifyService } from "./services/graphify-service.ts";
 import { SideChatService } from "./services/side-chat-service.ts";
@@ -162,7 +163,7 @@ async function boot(): Promise<void> {
   // from the ADR-0009 RemoteHostService below; shares the same kv db handle.
   // The service declares a loose Emit shape (channel: string, payload: unknown)
   // so it loads in plain Node for unit tests; adapt the typed emitter here.
-  const handoffEmit = ((channel: string, payload: unknown) => emit(channel, payload as never)) as
+  const handoffEmit = ((channel: string, payload: unknown) => emit(channel as never, payload as never)) as
     Parameters<typeof createHandoffService>[1];
   const handoffService = createHandoffService(db, handoffEmit);
   setDevTapStateProvider(() => ({ app: appService.snapshot() }));
@@ -235,6 +236,9 @@ async function boot(): Promise<void> {
     () => appService.getUtilityModel(),
   );
   threadService.setGitService(gitService);
+  const issuesService = new IssuesService(
+    (id) => appService.snapshot().projects.find((p) => p.id === id)?.path ?? null,
+  );
   // Lift a conversation thread into a remote work unit before each prompt when
   // remote-first mode is on (returns a status note; the hook swallows errors).
   threadService.setHandoffService({
@@ -689,6 +693,7 @@ async function boot(): Promise<void> {
     "graphify:openViewer": (id) => graphifyService.openViewer(id),
     "graphify:report": (id) => graphifyService.report(id),
     "devtap:projectStatus": (id) => devTapInstallService.status(id),
+    "workQueue:list": (projectId) => issuesService.list(projectId),
     "git:info": (id) => gitService.info(id),
     "git:changedFiles": (id) => gitService.changedFiles(id),
     "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),

@@ -129,7 +129,25 @@ export type AppView =
   | "graph"
   | "bws"
   | "remote"
+  | "work-queue"
   | "playroom";
+
+/** One open issue from the project's tracker, as shown in the Work Queue.
+ *  Slice 1 carries only the flat fields; PRD nesting + blocked-by + acceptance
+ *  criteria are parsed in a later slice. */
+export interface TrackedIssue {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed";
+  labels: string[];
+}
+
+/** Result of listing a project's tracker issues. A project with no git remote
+ *  or a non-GitHub remote resolves to a placeholder reason rather than erroring. */
+export type WorkQueueResult =
+  | { ok: true; source: "gh" | "rest"; issues: TrackedIssue[] }
+  | { ok: false; reason: "no-remote" | "not-github" | "error"; message?: string };
 
 /** Base64 image crossing the IPC boundary with a prompt. */
 export interface ImagePayload {
