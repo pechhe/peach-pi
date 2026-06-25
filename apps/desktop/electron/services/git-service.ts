@@ -1,9 +1,7 @@
-import { execFile } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { promisify } from "node:util";
 import { shell } from "electron";
 import type {
   GitChangedFile,
@@ -16,42 +14,7 @@ import type {
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
-
-const execFileAsync = promisify(execFile);
-
-/** Canonical git CLI boundary (peche-pi's git-runner pattern, no library). */
-async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 });
-  return stdout;
-}
-
-async function gitOk(args: string[], cwd: string): Promise<boolean> {
-  try {
-    await git(args, cwd);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Run git with extra env (e.g. GIT_INDEX_FILE for an isolated index). */
-async function gitEnv(args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, {
-    cwd,
-    env: { ...process.env, ...env },
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  return stdout;
-}
-
-/** Normalize a git remote (ssh or https) to its https web base, sans .git. */
-function toHttpsRepoUrl(remote: string): string | null {
-  const ssh = /^git@([^:]+):(.+?)(?:\.git)?$/.exec(remote);
-  if (ssh) return `https://${ssh[1]}/${ssh[2]}`;
-  const https = /^https?:\/\/(?:[^@]+@)?(.+?)(?:\.git)?$/.exec(remote);
-  if (https) return `https://${https[1]}`;
-  return null;
-}
+import { git, gitEnv, gitOk, toHttpsRepoUrl } from "@peach-pi/remote-handoff";
 
 const slug = (text: string): string =>
   text

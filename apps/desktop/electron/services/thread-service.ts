@@ -17,8 +17,9 @@ import type {
   ToolMode,
   TranscriptItem,
   TranscriptOp,
-  TranscriptDelta,
   TranscriptSnapshot,
+  ThreadFrame,
+  ThreadFrameListener,
 } from "@peach-pi/shared-types";
 
 import type { PiSession } from "@peach-pi/pi-client";
@@ -98,14 +99,11 @@ export class ThreadService {
   private handoff: HandoffHook | null = null;
   /** In-memory rewind snapshots: threadId → (prior-turn entryId | "root") → sha. */
   private rewindSnapshots = new Map<string, Map<string, string>>();
-  /** Remote tap hooks (ADR-0009); set after construction. When set, each
-   *  transcript flush and run-idle is forwarded to the remote relay. */
-  private onTranscriptDelta?: (delta: TranscriptDelta) => void;
-  private onRunIdleWithCwd?: (threadId: string, cwd: string | null) => void;
-  /** Remote steer-back tap (ADR-0010): live run-status + queue, so the phone
-   *  composer mirrors the desktop without polling. */
-  private onRemoteStatus?: (threadId: string, status: Thread["status"]) => void;
-  private onRemoteQueue?: (threadId: string, steering: string[], followUp: string[]) => void;
+  /** Remote-subscriber seam (ADR-0009): the relay (and any future tap such
+   *  as a DevTap recorder) registers here and receives every emission from
+   *  one tagged-union site. Replaces the former 4-hook scatter-gather so a
+   *  new frame type or a new subscriber touches one place, not five. */
+  private frameListeners = new Set<ThreadFrameListener>();
 
   constructor(
     db: AppDb,
@@ -140,17 +138,26 @@ export class ThreadService {
     this.handoff = hs;
   }
 
-  /** Wire the remote relay tap (ADR-0009). Optional; a no-op when unset. */
-  setRemoteTap(hooks: {
-    onTranscriptDelta?: (delta: TranscriptDelta) => void;
-    onRunIdleWithCwd?: (threadId: string, cwd: string | null) => void;
-    onRemoteStatus?: (threadId: string, status: Thread["status"]) => void;
-    onRemoteQueue?: (threadId: string, steering: string[], followUp: string[]) => void;
-  }): void {
-    this.onTranscriptDelta = hooks.onTranscriptDelta;
-    this.onRunIdleWithCwd = hooks.onRunIdleWithCwd;
-    this.onRemoteStatus = hooks.onRemoteStatus;
-    this.onRemoteQueue = hooks.onRemoteQueue;
+  /** Register a subscriber to the in-process frame stream (ADR-0009's second
+   *  subscriber seam). Returns a disposer so callers can detach. Any frame
+   *  type added in future flows here with no edits to the emission paths. */
+  subscribe(listener: ThreadFrameListener): () => void {
+    this.frameListeners.add(listener);
+    return () => this.frameListeners.delete(listener);
+  }
+
+  /** Fan a frame out to every registered subscriber. Centralising emission here
+   *  is the whole point of #14: each path calls one method instead of a hook
+   *  per field, so a missed subscriber is impossible by construction. */
+  private emitFrame(frame: ThreadFrame): void {
+    if (this.frameListeners.size === 0) return;
+    for (const listener of this.frameListeners) {
+      try {
+        listener(frame);
+      } catch {
+        // A faulty subscriber must never break the host's own stream.
+      }
+    }
   }
 
   /** Snapshot the working tree before a turn runs, keyed by the prior turn's
@@ -657,7 +664,7 @@ export class ThreadService {
         onRunningChange: (running) => this.setStatus(threadId, running ? "running" : "completed"),
         onQueueChange: (steering, followUp) => {
           this.emit("event:queue", { threadId, steering, followUp });
-          this.onRemoteQueue?.(threadId, steering, followUp);
+          this.emitFrame({ kind: "queue", threadId, steering, followUp });
         },
         onMetaChange: () => {
           const live = this.sessions.get(threadId);
@@ -718,14 +725,21 @@ export class ThreadService {
     const nowRunning = status === "running";
     this.threads.setStatus(threadId, status);
     this.onThreadsChanged();
-    this.onRemoteStatus?.(threadId, status);
+    this.emitFrame({ kind: "status", threadId, status });
     if (wasRunning !== nowRunning && this.onRunningChange) this.onRunningChange(nowRunning);
     if (status === "completed" && this.onRunIdle) {
       const thread = this.threads.get(threadId);
       if (thread) this.onRunIdle(thread);
     }
-    if (status === "completed" && this.onRunIdleWithCwd) {
-      this.onRunIdleWithCwd(threadId, this.gitService?.cwdFor(threadId) ?? null);
+    if (status === "completed") {
+      // Idle→checkpoint frame: subscribers (e.g. the relay) record the wip/
+      // branch. Kept as a frame, not a separate hook, so a new subscriber gets
+      // it for free.
+      this.emitFrame({
+        kind: "idle",
+        threadId,
+        cwd: this.gitService?.cwdFor(threadId) ?? null,
+      });
     }
     // Flush a queued hot-reload now that this thread's run has finished.
     if (status === "completed" && this.reloadQueued.has(threadId)) {
@@ -757,7 +771,7 @@ export class ThreadService {
     for (const [threadId, ops] of this.pendingOps) {
       const delta = { threadId, ops, seq: ++this.transcriptSeq };
       this.emit("event:transcript", delta);
-      this.onTranscriptDelta?.(delta);
+      this.emitFrame({ kind: "transcript", threadId, ops, seq: delta.seq });
     }
     this.pendingOps.clear();
   }

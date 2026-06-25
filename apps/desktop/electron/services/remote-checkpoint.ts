@@ -1,41 +1,15 @@
-import { execFile } from "node:child_process";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { promisify } from "node:util";
 import type { RemoteCheckpoint } from "@peach-pi/shared-types";
-
-const execFileAsync = promisify(execFile);
+import { git, gitEnv, gitOk, toHttpsRepoUrl } from "@peach-pi/remote-handoff";
 
 /** Branch namespace for disposable checkpoint branches (ADR-0009). A commit
  *  here is transport, not endorsement — squash/cherry-pick the good parts
  *  later, or delete the branch if the work is wrong. */
 export function checkpointBranch(threadId: string): string {
   return `wip/${threadId}`;
-}
-
-async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 });
-  return stdout;
-}
-
-async function gitOk(args: string[], cwd: string): Promise<boolean> {
-  try {
-    await git(args, cwd);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function gitEnv(args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
-  const { stdout } = await execFileAsync("git", args, {
-    cwd,
-    env: { ...process.env, ...env },
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  return stdout;
 }
 
 /**
@@ -98,11 +72,7 @@ export async function pushCheckpoint(cwd: string, threadId: string): Promise<boo
 export async function originUrl(cwd: string): Promise<string | null> {
   try {
     const remote = (await git(["remote", "get-url", "origin"], cwd)).trim();
-    const ssh = /^git@([^:]+):(.+?)(?:\.git)?$/.exec(remote);
-    if (ssh) return `https://${ssh[1]}/${ssh[2]}`;
-    const https = /^https?:\/\/(?:[^@]+@)?(.+?)(?:\.git)?$/.exec(remote);
-    if (https) return `https://${https[1]}`;
-    return null;
+    return toHttpsRepoUrl(remote);
   } catch {
     return null;
   }

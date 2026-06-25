@@ -112,6 +112,20 @@ export function applyTranscriptOps(
   return next;
 }
 
+/** A tagged-union frame emitted by `ThreadService.subscribe` (ADR-0009's
+ *  "second subscriber" seam). One shape per emission path; new frame types or
+ *  new subscribers are added here + at the one emit site, not in 4 hooks.
+ *  This is the in-process subscriber seam — `RemoteTapFrame` below is the
+ *  SSE wire type the relay builds from these. */
+export type ThreadFrame =
+  | { kind: "transcript"; threadId: ThreadId; ops: TranscriptOp[]; seq: number }
+  | { kind: "status"; threadId: ThreadId; status: ThreadStatus }
+  | { kind: "queue"; threadId: ThreadId; steering: string[]; followUp: string[] }
+  | { kind: "idle"; threadId: ThreadId; cwd: string | null };
+
+/** Listener registered with `ThreadService.subscribe`; receives every frame. */
+export type ThreadFrameListener = (frame: ThreadFrame) => void;
+
 /** One frame on the remote session tap wire (SSE). The laptop folds these into
  *  its existing timeline exactly like the local `event:transcript` stream.
  *  Defined here because it references the transcript item/op shapes. */

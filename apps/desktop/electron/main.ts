@@ -44,7 +44,6 @@ import { AgentBrowserService } from "./services/agent-browser-service.ts";
 import { UsageService } from "./services/usage-service.ts";
 import { ConnectorResolver } from "./services/connector-resolver.ts";
 import { ensureConnectorExtension } from "./services/connector-extension.ts";
-import { ensureCuaDriverExtension } from "./services/cua-driver-extension.ts";
 import { ensurePeachVisionConsentExtension } from "./services/peach-vision-consent-extension.ts";
 import { createMainWindow } from "./windows/main-window.ts";
 import {
@@ -318,19 +317,34 @@ async function boot(): Promise<void> {
     },
   });
   void remoteHost.load();
-  threadService.setRemoteTap({
-    onTranscriptDelta: (delta) => remoteHost.forwardTranscript(delta),
-    onRemoteStatus: (threadId, status) => remoteHost.forwardStatus(threadId, status),
-    onRemoteQueue: (threadId, steering, followUp) =>
-      remoteHost.forwardQueue(threadId, steering, followUp),
-    onRunIdleWithCwd: async (threadId, cwd) => {
-      // Only checkpoint when remote hosting is actually running. Being "served"
-      // is config intent, not an active host — without isActive() a leftover
-      // serveAll=true force-pushes wip/<id> branches while hosting is off.
-      if (!cwd || !remoteHost.isActive() || !remoteHost.isServedThread(threadId)) return;
-      const ckpt = await recordCheckpoint(cwd, threadId);
-      if (ckpt) remoteHost.forwardCheckpoint(threadId, ckpt.sha);
-    },
+  // RemoteHostService is a registered subscriber to ThreadService's frame
+  // stream (ADR-0009's second subscriber). The callback builds the SSE-wire
+  // RemoteTapFrames from the in-process ThreadFrames — the relay stays a thin
+  // forwarder; adding a DevTap or recording tap is now one subscribe() call,
+  // with no edits to the emission paths. (#14)
+  threadService.subscribe((frame) => {
+    switch (frame.kind) {
+      case "transcript":
+        remoteHost.forwardTranscript(frame);
+        break;
+      case "status":
+        remoteHost.forwardStatus(frame.threadId, frame.status);
+        break;
+      case "queue":
+        remoteHost.forwardQueue(frame.threadId, frame.steering, frame.followUp);
+        break;
+      case "idle": {
+        // Only checkpoint when remote hosting is actually running. Being "served"
+        // is config intent, not an active host — without isActive() a leftover
+        // serveAll=true force-pushes wip/<id> branches while hosting is off.
+        const { threadId, cwd } = frame;
+        if (!cwd || !remoteHost.isActive() || !remoteHost.isServedThread(threadId)) return;
+        void recordCheckpoint(cwd, threadId).then((ckpt) => {
+          if (ckpt) remoteHost.forwardCheckpoint(threadId, ckpt.sha);
+        });
+        break;
+      }
+    }
   });
   const remoteClient = new RemoteClientService(
     emit,
@@ -410,7 +424,8 @@ async function boot(): Promise<void> {
   const agentBrowserService = new AgentBrowserService();
   const usageService = new UsageService(emit);
   // Install CuaDriver.app + start its background daemon + install the agent
-  // skill. Best-effort; never blocks boot (see ADR-0007).
+  // skill + install the cua-driver toolset extension. Best-effort; never
+  // blocks boot (see ADR-0007).
   void cuaDriverService.init();
   // Ensure the pi-agent-browser-native package is installed so pi exposes the
   // native `agent_browser` tool (ADR-0008). Idempotent; background; never
@@ -428,9 +443,6 @@ async function boot(): Promise<void> {
   // Write the pi extension (auto-discovered by pi) so the agent gets the
   // connectors_search_tools / connector_execute tools. Idempotent; rewrites on bump.
   void ensureConnectorExtension();
-  // Install the cua-driver toolset extension (cua_driver_* tools driving the
-  // bundled native driver — ADR-0007). Idempotent; rewrites on bump.
-  void ensureCuaDriverExtension();
   // Make the pi-vision-proxy data-egress consent prompt fire at most once
   // per 24h per provider (peach-owned extension; survives vision-proxy
   // reinstalls/upgrades). Idempotent; rewrites on bump.
@@ -444,337 +456,330 @@ async function boot(): Promise<void> {
     return result.canceled || !dir ? null : appService.addProject(dir);
   }
 
-  registerIpcHandlers({
-    "app:getSnapshot": () => appService.snapshot(),
-    "app:ping": () => ({ pong: true, version: app.getVersion() }),
-    "app:setSelectedThread": (id) => appService.setSelectedThread(id),
-    "app:getCavemanState": () => getCavemanState(),
-    "app:setCavemanEnabled": (enabled) => setCavemanEnabled(enabled),
-    "app:setCavemanLevel": (level) => setCavemanLevel(level),
-    "app:listModels": () => appService.listModels(),
-    "app:listScopedModels": async () => {
-      const { listScopedModels } = await import("@peach-pi/pi-client");
-      return listScopedModels();
+  // Declarative pass-throughs: channel → bound method / bare function. The
+  // registry loop registers these exactly like a normal handler; no wrapping
+  // lambda, so signature == implementation (ADR-0009 typed registry unchanged).
+  registerIpcHandlers(
+    {
+      "app:getSnapshot": appService.snapshot.bind(appService),
+      "app:setSelectedThread": appService.setSelectedThread.bind(appService),
+      "app:getCavemanState": getCavemanState,
+      "app:setCavemanEnabled": setCavemanEnabled,
+      "app:setCavemanLevel": setCavemanLevel,
+      "app:listModels": appService.listModels.bind(appService),
+      "app:getUtilityModel": appService.getUtilityModel.bind(appService),
+      "app:setUtilityModel": appService.setUtilityModel.bind(appService),
+      "app:getRemoteClientId": appService.getRemoteClientId.bind(appService),
+      "app:getAutoCompact": appService.getAutoCompact.bind(appService),
+      "app:setAutoCompact": appService.setAutoCompact.bind(appService),
+      "app:getPiSettings": getPiSettings,
+      "app:getVisionProxyInstallState": getVisionProxyInstallState,
+      "app:getVisionProxyConfig": getVisionProxyConfig,
+      "app:setVisionProxyModel": setVisionProxyModel,
+      "app:setVisionProxyMode": setVisionProxyMode,
+      "app:updateExtensions": piUpdateService.updateNow.bind(piUpdateService),
+      "extensions:remove": piUpdateService.removeExtension.bind(piUpdateService),
+      "extensions:deleteLocal": piUpdateService.deleteLocalExtension.bind(piUpdateService),
+      "skills:delete": piUpdateService.deleteSkill.bind(piUpdateService),
+      "skills:setInvocation": piUpdateService.setSkillInvocation.bind(piUpdateService),
+      "extensions:setEnabled": piUpdateService.setEnabledExtension.bind(piUpdateService),
+      "mcp:setEnabled": mcpService.setEnabled.bind(mcpService),
+      "mcp:list": mcpService.list.bind(mcpService),
+      "connectors:catalogue": connectorService.catalogue.bind(connectorService),
+      "connectors:toolkit": connectorService.toolkit.bind(connectorService),
+      "connectors:list": connectorService.list.bind(connectorService),
+      "connectors:connectFields": connectorService.connectFields.bind(connectorService),
+      "connectors:disconnect": connectorService.disconnect.bind(connectorService),
+      "bws:status": bwsService.status.bind(bwsService),
+      "bws:setAccessToken": bwsService.setAccessToken.bind(bwsService),
+      "bws:clearAuth": bwsService.clearAuth.bind(bwsService),
+      "bws:setProject": bwsService.setProject.bind(bwsService),
+      "bws:install": bwsService.install.bind(bwsService),
+      "bws:listProjects": bwsService.listProjects.bind(bwsService),
+      "bws:listSecrets": bwsService.listSecrets.bind(bwsService),
+      "bws:createSecret": bwsService.createSecret.bind(bwsService),
+      "bws:editSecret": bwsService.editSecret.bind(bwsService),
+      "bws:deleteSecret": bwsService.deleteSecret.bind(bwsService),
+      "customConnections:list": customConnectionService.list.bind(customConnectionService),
+      "customConnections:create": customConnectionService.create.bind(customConnectionService),
+      "customConnections:delete": customConnectionService.delete.bind(customConnectionService),
+      "connectionSetup:start": connectionSetupService.start.bind(connectionSetupService),
+      "connectionSetup:send": connectionSetupService.send.bind(connectionSetupService),
+      "connectionSetup:save": connectionSetupService.save.bind(connectionSetupService),
+      "connectionSetup:close": connectionSetupService.close.bind(connectionSetupService),
+      "cuaDriver:status": cuaDriverService.status.bind(cuaDriverService),
+      "cuaDriver:grantPermissions": cuaDriverService.grantPermissions.bind(cuaDriverService),
+      "agentBrowser:state": agentBrowserService.state.bind(agentBrowserService),
+      "ui:setSidebarWidth": appService.setSidebarWidth.bind(appService),
+      "ui:setSidebarCollapsed": appService.setSidebarCollapsed.bind(appService),
+      "projects:add": appService.addProject.bind(appService),
+      "projects:remove": appService.removeProject.bind(appService),
+      "projects:pick": pickProject,
+      "projects:reorder": appService.reorderProjects.bind(appService),
+      "projects:setCollapsed": appService.setProjectCollapsed.bind(appService),
+      "worktrees:rename": appService.renameWorktree.bind(appService),
+      "threads:createChat": threadService.createChat.bind(threadService),
+      "threads:prompt": threadService.prompt.bind(threadService),
+      "threads:runCommand": threadService.runCommand.bind(threadService),
+      "threads:reload": threadService.reloadSession.bind(threadService),
+      "threads:reloadAll": threadService.reloadIdleSessions.bind(threadService),
+      "threads:listCommands": threadService.listCommands.bind(threadService),
+      "threads:search": threadService.searchThreads.bind(threadService),
+      "threads:listModels": threadService.listModels.bind(threadService),
+      "threads:listAllModels": threadService.listAllModels.bind(threadService),
+      "threads:setModelScoped": threadService.setModelScoped.bind(threadService),
+      "threads:setModel": threadService.setModel.bind(threadService),
+      "threads:setThinking": threadService.setThinking.bind(threadService),
+      "threads:getMeta": threadService.getMeta.bind(threadService),
+      "threads:respondExtensionUi": threadService.respondExtensionUi.bind(threadService),
+      "threads:terminalCustomInput": threadService.terminalCustomInput.bind(threadService),
+      "threads:terminalCustomCancel": threadService.terminalCustomCancel.bind(threadService),
+      "threads:compact": threadService.compact.bind(threadService),
+      "threads:retryCompact": threadService.retryCompact.bind(threadService),
+      "threads:listTurns": threadService.listTurns.bind(threadService),
+      "threads:rewind": threadService.rewind.bind(threadService),
+      "threads:archive": threadService.archive.bind(threadService),
+      "threads:unarchive": threadService.unarchive.bind(threadService),
+      "threads:steer": threadService.steer.bind(threadService),
+      "threads:promoteFollowUpToSteer": threadService.promoteFollowUpToSteer.bind(threadService),
+      "threads:popLastFollowUp": threadService.popLastFollowUp.bind(threadService),
+      "threads:deleteFollowUp": threadService.deleteFollowUp.bind(threadService),
+      "threads:deleteSteer": threadService.deleteSteer.bind(threadService),
+      "threads:abort": threadService.abort.bind(threadService),
+      "threads:getTranscript": threadService.getTranscript.bind(threadService),
+      "threads:snooze": appService.snoozeThread.bind(appService),
+      "threads:unsnooze": appService.unsnoozeThread.bind(appService),
+      "threads:markToTest": threadService.markToTest.bind(threadService),
+      "threads:unmarkToTest": appService.unmarkToTest.bind(appService),
+      "threads:bringToLocal": threadService.bringWorktreeToLocal.bind(threadService),
+      "side:start": sideChatService.start.bind(sideChatService),
+      "side:ask": sideChatService.ask.bind(sideChatService),
+      "side:list": sideChatService.list.bind(sideChatService),
+      "side:get": sideChatService.get.bind(sideChatService),
+      "side:delete": sideChatService.delete.bind(sideChatService),
+      "automations:create": automationService.create.bind(automationService),
+      "automations:update": automationService.update.bind(automationService),
+      "automations:setEnabled": automationService.setEnabled.bind(automationService),
+      "automations:delete": automationService.delete.bind(automationService),
+      "automations:runNow": automationService.runNow.bind(automationService),
+      "automations:runs": automationService.runs.bind(automationService),
+      "automations:previewNext": automationService.previewNext.bind(automationService),
+      "hud:setThread": appService.setHudThread.bind(appService),
+      "hud:setAutoReveal": appService.setHudAutoReveal.bind(appService),
+      "terminal:open": terminalService.open.bind(terminalService),
+      "terminal:input": terminalService.input.bind(terminalService),
+      "terminal:resize": terminalService.resize.bind(terminalService),
+      "terminal:kill": terminalService.kill.bind(terminalService),
+      "recording:start": recordingService.start.bind(recordingService),
+      "recording:stop": recordingService.stop.bind(recordingService),
+      "recording:cancel": recordingService.cancel.bind(recordingService),
+      "recording:status": recordingService.status.bind(recordingService),
+      "recording:revealSkill": recordingService.revealSkill.bind(recordingService),
+      "resources:inspect": threadService.inspectResources.bind(threadService),
+      "resources:inspectSlotCommand": threadService.inspectSlotCommand.bind(threadService),
+      "skills:save": saveSkillFile,
+      "files:readImage": readImageFile,
+      "subagents:listAgents": subagentService.listAgents.bind(subagentService),
+      "subagents:updateAgent": subagentService.updateAgent.bind(subagentService),
+      "graphify:status": graphifyService.status.bind(graphifyService),
+      "graphify:build": graphifyService.build.bind(graphifyService),
+      "graphify:update": graphifyService.update.bind(graphifyService),
+      "graphify:openViewer": graphifyService.openViewer.bind(graphifyService),
+      "graphify:report": graphifyService.report.bind(graphifyService),
+      "devtap:projectStatus": devTapInstallService.status.bind(devTapInstallService),
+      "git:info": gitService.info.bind(gitService),
+      "git:changedFiles": gitService.changedFiles.bind(gitService),
+      "git:fileDiff": gitService.fileDiff.bind(gitService),
+      "git:commitPush": gitService.commitPush.bind(gitService),
+      "git:createPr": gitService.createPr.bind(gitService),
+      "git:mergeToLocal": gitService.mergeToLocal.bind(gitService),
+      "git:pushLocal": gitService.pushLocal.bind(gitService),
+      // remote session hosting (ADR-0009)
+      "remote:hostStatus": remoteHost.status.bind(remoteHost),
+      "remote:listTailnetPeers": listTailnetPeers,
+      "remote:listHosts": remoteClient.listHosts.bind(remoteClient),
+      "remote:addHost": remoteClient.addHost.bind(remoteClient),
+      "remote:removeHost": remoteClient.removeHost.bind(remoteClient),
+      "remote:listSessions": remoteClient.listSessions.bind(remoteClient),
+      "remote:attach": remoteClient.attach.bind(remoteClient),
+      "remote:detach": remoteClient.detach.bind(remoteClient),
+      "remote:message": remoteClient.message.bind(remoteClient),
+      "remote:steer": remoteClient.steer.bind(remoteClient),
+      "remote:abort": remoteClient.abort.bind(remoteClient),
+      "remote:takeControl": remoteClient.takeControl.bind(remoteClient),
+      "remote:releaseControl": remoteClient.releaseControl.bind(remoteClient),
+      "remote:archive": remoteClient.archive.bind(remoteClient),
+      "remote:pullToTest": remoteClient.pullToTest.bind(remoteClient),
+      // Movable execution / remote-first mode (docs/remote-handoff.md).
+      "handoff:getMode": handoffService.getMode.bind(handoffService),
+      "handoff:setMode": handoffService.setMode.bind(handoffService),
+      "handoff:statusForThread": handoffService.statusForThread.bind(handoffService),
+      "handoff:registerMachine": handoffService.registerMachine.bind(handoffService),
+      "usage:list": usageService.list.bind(usageService),
+      "usage:refresh": usageService.refresh.bind(usageService),
     },
-    "app:setModelScoped": async (provider, modelId, scoped) => {
-      const { setModelScoped } = await import("@peach-pi/pi-client");
-      const result = await setModelScoped(provider, modelId, scoped);
-      // The scope lives in settings.json; reload it into every live pi session
-      // so the composer's scoped list reflects the change, then tell the
-      // renderer to re-list (it caches once).
-      await threadService.reloadScopedModels();
-      emit("event:scopeChanged", undefined);
-      return result;
-    },
-    "app:getUtilityModel": () => appService.getUtilityModel(),
-    "app:setUtilityModel": (model) => appService.setUtilityModel(model),
-    "app:getRemoteClientId": () => appService.getRemoteClientId(),
-    "app:getAutoCompact": () => appService.getAutoCompact(),
-    "app:setAutoCompact": (settings) => appService.setAutoCompact(settings),
-    "app:getPiSettings": () => getPiSettings(),
-    "app:setPiSettings": async (patch) => {
-      const updated = await setPiSettings(patch);
-      if (patch.insomnia !== undefined) insomniaService.setEnabled(updated.insomnia);
-      return updated;
-    },
-    "app:getVisionProxyInstallState": () => getVisionProxyInstallState(),
-    "app:installVisionProxy": () => installVisionProxy(emit),
-    "app:getVisionProxyConfig": () => getVisionProxyConfig(),
-    "app:setVisionProxyModel": (model) => setVisionProxyModel(model),
-    "app:setVisionProxyMode": (mode) => setVisionProxyMode(mode),
-    "app:updateExtensions": () => piUpdateService.updateNow(),
-    "extensions:remove": (spec) => piUpdateService.removeExtension(spec),
-    "extensions:deleteLocal": (p) => piUpdateService.deleteLocalExtension(p),
-    "skills:delete": (p) => piUpdateService.deleteSkill(p),
-    "skills:setInvocation": (p, d) => piUpdateService.setSkillInvocation(p, d),
-    "extensions:setEnabled": (k, e) => piUpdateService.setEnabledExtension(k, e),
-    "mcp:setEnabled": (n, e) => mcpService.setEnabled(n, e),
-    "app:getPiHealth": () => computePiHealth(__dirname),
-    "connectors:catalogue": (query) => connectorService.catalogue(query),
-    "connectors:toolkit": (slug) => connectorService.toolkit(slug),
-    "connectors:list": () => connectorService.list(),
-    "connectors:connect": async (slug) => {
-      const r = await connectorService.connect(slug);
-      if (r.redirectUrl) void shell.openExternal(r.redirectUrl);
-      return r;
-    },
-    "connectors:connectFields": (slug, fields) => connectorService.connectFields(slug, fields),
-    "connectors:disconnect": (id) => connectorService.disconnect(id),
-    "bws:status": () => bwsService.status(),
-    "bws:setAccessToken": (token) => bwsService.setAccessToken(token),
-    "bws:clearAuth": () => bwsService.clearAuth(),
-    "bws:setProject": (projectId) => bwsService.setProject(projectId),
-    "bws:install": () => bwsService.install(),
-    "bws:listProjects": () => bwsService.listProjects(),
-    "bws:listSecrets": (projectId) => bwsService.listSecrets(projectId),
-    "bws:createSecret": (input) => bwsService.createSecret(input),
-    "bws:editSecret": (secretId, patch) => bwsService.editSecret(secretId, patch),
-    "bws:deleteSecret": (secretId) => bwsService.deleteSecret(secretId),
-    "customConnections:list": () => customConnectionService.list(),
-    "mcp:list": () => mcpService.list(),
-    "cuaDriver:status": () => cuaDriverService.status(),
-    "cuaDriver:grantPermissions": () => cuaDriverService.grantPermissions(),
-    "agentBrowser:state": () => agentBrowserService.state(),
-    "agentBrowser:install": () => agentBrowserService.install((channel, payload) => emit(channel, payload)),
-    "customConnections:create": (input) => customConnectionService.create(input),
-    "customConnections:delete": (id) => customConnectionService.delete(id),
-    "connectionSetup:start": (input) => connectionSetupService.start(input),
-    "connectionSetup:send": (sessionId, text) => connectionSetupService.send(sessionId, text),
-    "connectionSetup:save": (sessionId, config) => connectionSetupService.save(sessionId, config),
-    "connectionSetup:close": (sessionId) => connectionSetupService.close(sessionId),
-    "devtap:report": (entry) =>
-      emitDevTapEvent({
-        level: entry.error ? "error" : "info",
-        source: "renderer",
-        area: entry.error ? "error" : "diagnostic",
-        event: entry.event,
-        message: entry.message ?? entry.error?.message,
-        payload: entry.payload,
-        error: entry.error,
-      }),
-    "app:openFolder": async (threadId) => {
-      const dir = gitService.cwdFor(threadId);
-      console.log('[openFolder]', threadId, dir);
-      if (dir) {
-        const err = await shell.openPath(dir);
-        if (err) console.error('[openFolder]', err);
-      }
-    },
-    "ui:setSidebarWidth": (width) => appService.setSidebarWidth(width),
-    "ui:setSidebarCollapsed": (collapsed) => appService.setSidebarCollapsed(collapsed),
-    "projects:add": (p) => appService.addProject(p),
-    "projects:remove": (id) => appService.removeProject(id),
-    "projects:pick": () => pickProject(),
-    "projects:reorder": (orderedIds) => appService.reorderProjects(orderedIds),
-    "projects:setCollapsed": (projectId, collapsed) =>
-      appService.setProjectCollapsed(projectId, collapsed),
-    "worktrees:create": async (projectId) => {
-      const dir = await gitService.createWorktree(projectId);
-      return appService.addWorktree(projectId, dir);
-    },
-    "worktrees:rename": (worktreeId, name) => {
-      appService.renameWorktree(worktreeId, name);
-    },
-    "worktrees:archive": async (worktreeId) => {
-      const wt = appService.worktree(worktreeId);
-      if (!wt) return;
-      const project = appService.snapshot().projects.find((p) => p.id === wt.projectId);
-      const threadIds = appService.archiveWorktree(worktreeId);
-      for (const tid of threadIds) threadService.archive(tid);
-      if (project) await gitService.removeWorktree(project.path, wt.dir);
-    },
-    "threads:create": async (projectId, opts) => {
-      let worktreeId: string | null = null;
-      let worktreeDir: string | undefined;
-      if (opts?.worktreeId) {
-        const wt = appService.worktree(opts.worktreeId);
-        if (!wt) throw new Error(`Unknown worktree: ${opts.worktreeId}`);
-        worktreeId = wt.id;
-        worktreeDir = wt.dir;
-      } else if (opts?.worktree) {
-        // Legacy one-shot: create a worktree record + git checkout together.
+    {
+      "app:ping": () => ({ pong: true, version: app.getVersion() }),
+      "app:listScopedModels": async () => {
+        const { listScopedModels } = await import("@peach-pi/pi-client");
+        return listScopedModels();
+      },
+      "app:setModelScoped": async (provider, modelId, scoped) => {
+        const { setModelScoped } = await import("@peach-pi/pi-client");
+        const result = await setModelScoped(provider, modelId, scoped);
+        // The scope lives in settings.json; reload it into every live pi session
+        // so the composer's scoped list reflects the change, then tell the
+        // renderer to re-list (it caches once).
+        await threadService.reloadScopedModels();
+        emit("event:scopeChanged", undefined);
+        return result;
+      },
+      "app:setPiSettings": async (patch) => {
+        const updated = await setPiSettings(patch);
+        if (patch.insomnia !== undefined) insomniaService.setEnabled(updated.insomnia);
+        return updated;
+      },
+      "app:installVisionProxy": () => installVisionProxy(emit),
+      "app:getPiHealth": () => computePiHealth(__dirname),
+      "connectors:connect": async (slug) => {
+        const r = await connectorService.connect(slug);
+        if (r.redirectUrl) void shell.openExternal(r.redirectUrl);
+        return r;
+      },
+      "devtap:report": (entry) =>
+        emitDevTapEvent({
+          level: entry.error ? "error" : "info",
+          source: "renderer",
+          area: entry.error ? "error" : "diagnostic",
+          event: entry.event,
+          message: entry.message ?? entry.error?.message,
+          payload: entry.payload,
+          error: entry.error,
+        }),
+      "app:openFolder": async (threadId) => {
+        const dir = gitService.cwdFor(threadId);
+        console.log('[openFolder]', threadId, dir);
+        if (dir) {
+          const err = await shell.openPath(dir);
+          if (err) console.error('[openFolder]', err);
+        }
+      },
+      "worktrees:create": async (projectId) => {
         const dir = await gitService.createWorktree(projectId);
-        const wt = appService.addWorktree(projectId, dir);
-        worktreeId = wt.id;
-        worktreeDir = wt.dir;
-      }
-      return threadService.createThread(projectId, worktreeId, worktreeDir);
-    },
-    "threads:createChat": () => threadService.createChat(),
-    "threads:prompt": (id, text, images, toolMode) =>
-      threadService.prompt(id, text, images, toolMode),
-    "threads:runCommand": (id, command) => threadService.runCommand(id, command),
-    "threads:reload": (id) => threadService.reloadSession(id),
-    "threads:reloadAll": () => threadService.reloadIdleSessions(),
-    "threads:listCommands": (id) => threadService.listCommands(id),
-    "threads:search": (query) => threadService.searchThreads(query),
-    "threads:listModels": (id) => threadService.listModels(id),
-    "threads:listAllModels": (id) => threadService.listAllModels(id),
-    "threads:setModelScoped": (id, provider, modelId, scoped) =>
-      threadService.setModelScoped(id, provider, modelId, scoped),
-    "threads:setModel": (id, provider, modelId) => threadService.setModel(id, provider, modelId),
-    "threads:setThinking": (id, level) => threadService.setThinking(id, level),
-    "threads:getMeta": (id) => threadService.getMeta(id),
-    "threads:respondExtensionUi": (requestId, value) =>
-      threadService.respondExtensionUi(requestId, value),
-    "threads:terminalCustomInput": (id, requestId, data) =>
-      threadService.terminalCustomInput(id, requestId, data),
-    "threads:terminalCustomCancel": (id, requestId) =>
-      threadService.terminalCustomCancel(id, requestId),
-    "threads:compact": (id) => threadService.compact(id),
-    "threads:retryCompact": (id) => threadService.retryCompact(id),
-    "side:start": (threadId, modelOverride) => sideChatService.start(threadId, modelOverride),
-    "side:ask": (convId, question) => sideChatService.ask(convId, question),
-    "side:list": (threadId) => sideChatService.list(threadId),
-    "side:get": (convId) => sideChatService.get(convId),
-    "side:delete": (convId) => sideChatService.delete(convId),
-    "threads:listTurns": (id) => threadService.listTurns(id),
-    "threads:rewind": (id, entryId, revertFiles) => threadService.rewind(id, entryId, revertFiles),
-    "automations:create": (fields) => automationService.create(fields),
-    "automations:update": (id, fields) => automationService.update(id, fields),
-    "automations:setEnabled": (id, enabled) => automationService.setEnabled(id, enabled),
-    "automations:delete": (id) => automationService.delete(id),
-    "automations:runNow": (id) => automationService.runNow(id),
-    "automations:runs": (id) => automationService.runs(id),
-    "automations:previewNext": (cron) => automationService.previewNext(cron),
-    "hud:hide": () => {
-      hudWindow?.hide();
-    },
-    "hud:toggle": () => toggleHud(),
-    "hud:setThread": (threadId) => appService.setHudThread(threadId),
-    "hud:newChat": async () => {
-      const thread = await threadService.createChat();
-      appService.setHudThread(thread.id);
-      return thread;
-    },
-    "hud:setExpanded": (expanded) => setHudExpanded(expanded),
-    "hud:setClickThrough": (ignore) =>
-      hudWindow?.setIgnoreMouseEvents(ignore, { forward: true }),
-    "hud:releaseFocus": () => hudWindow?.blur(),
-    "hud:setAutoReveal": (on) => appService.setHudAutoReveal(on),
-    "terminal:open": (id) => terminalService.open(id),
-    "terminal:input": (id, data) => terminalService.input(id, data),
-    "terminal:resize": (id, cols, rows) => terminalService.resize(id, cols, rows),
-    "terminal:kill": (id) => terminalService.kill(id),
-    "recording:start": (threadId) => recordingService.start(threadId),
-    "recording:stop": (skillBody) => recordingService.stop(skillBody),
-    "recording:cancel": () => recordingService.cancel(),
-    "recording:status": () => recordingService.status(),
-    "recording:revealSkill": (p) => recordingService.revealSkill(p),
-    "resources:inspect": (projectId) => threadService.inspectResources(projectId),
-    "resources:inspectSlotCommand": (projectId, kind, name) =>
-      threadService.inspectSlotCommand(projectId, kind, name),
-    "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
-    "skills:save": (skillName, filePath) => saveSkillFile(skillName, filePath),
-    "files:readImage": (filePath) => readImageFile(filePath),
-    "threads:archive": (id) => threadService.archive(id),
-    "threads:unarchive": (id) => threadService.unarchive(id),
-    "threads:delete": (id) => {
-      // Deleting one thread leaves the worktree record + dir intact; teardown
-      // happens only when the whole worktree is archived.
-      threadService.delete(id);
-    },
-    "threads:bringToLocal": async (id) => {
-      // Detach the thread back to the project checkout. The worktree record
-      // and its git dir persist — other threads may still run in it. Use
-      // `worktrees:archive` to tear the whole worktree down.
-      await threadService.bringWorktreeToLocal(id);
-    },
-    "threads:setEnvironment": async (threadId, worktree) => {
-      const before = appService.snapshot().threads.find((t) => t.id === threadId);
-      if (!before?.projectId) return;
-      if ((before.worktreeDir != null) === worktree) return;
-      // Resolve a freshly-created worktree record + dir before disposing.
-      if (worktree) {
-        const dir = await gitService.createWorktree(before.projectId);
-        const wt = appService.addWorktree(before.projectId, dir);
-        await threadService.setEnvironment(threadId, wt.id, wt.dir);
-      } else {
-        await threadService.setEnvironment(threadId, null, undefined);
-        // Tear down the old worktree record + git checkout.
-        if (before.worktreeId) {
-          const project = appService.snapshot().projects.find((p) => p.id === before.projectId);
-          if (project && before.worktreeDir) {
-            await gitService.removeWorktree(project.path, before.worktreeDir);
+        return appService.addWorktree(projectId, dir);
+      },
+      "worktrees:archive": async (worktreeId) => {
+        const wt = appService.worktree(worktreeId);
+        if (!wt) return;
+        const project = appService.snapshot().projects.find((p) => p.id === wt.projectId);
+        const threadIds = appService.archiveWorktree(worktreeId);
+        for (const tid of threadIds) threadService.archive(tid);
+        if (project) await gitService.removeWorktree(project.path, wt.dir);
+      },
+      "threads:create": async (projectId, opts) => {
+        let worktreeId: string | null = null;
+        let worktreeDir: string | undefined;
+        if (opts?.worktreeId) {
+          const wt = appService.worktree(opts.worktreeId);
+          if (!wt) throw new Error(`Unknown worktree: ${opts.worktreeId}`);
+          worktreeId = wt.id;
+          worktreeDir = wt.dir;
+        } else if (opts?.worktree) {
+          // Legacy one-shot: create a worktree record + git checkout together.
+          const dir = await gitService.createWorktree(projectId);
+          const wt = appService.addWorktree(projectId, dir);
+          worktreeId = wt.id;
+          worktreeDir = wt.dir;
+        }
+        return threadService.createThread(projectId, worktreeId, worktreeDir);
+      },
+      "threads:delete": (id) => {
+        // Deleting one thread leaves the worktree record + dir intact; teardown
+        // happens only when the whole worktree is archived.
+        threadService.delete(id);
+      },
+      "threads:setEnvironment": async (threadId, worktree) => {
+        const before = appService.snapshot().threads.find((t) => t.id === threadId);
+        if (!before?.projectId) return;
+        if ((before.worktreeDir != null) === worktree) return;
+        // Resolve a freshly-created worktree record + dir before disposing.
+        if (worktree) {
+          const dir = await gitService.createWorktree(before.projectId);
+          const wt = appService.addWorktree(before.projectId, dir);
+          await threadService.setEnvironment(threadId, wt.id, wt.dir);
+        } else {
+          await threadService.setEnvironment(threadId, null, undefined);
+          // Tear down the old worktree record + git checkout.
+          if (before.worktreeId) {
+            const project = appService.snapshot().projects.find((p) => p.id === before.projectId);
+            if (project && before.worktreeDir) {
+              await gitService.removeWorktree(project.path, before.worktreeDir);
+            }
+            appService.archiveWorktree(before.worktreeId);
           }
-          appService.archiveWorktree(before.worktreeId);
         }
-      }
-    },
-    "subagents:listAgents": (projectId) => subagentService.listAgents(projectId),
-    "subagents:updateAgent": (filePath, patch) => subagentService.updateAgent(filePath, patch),
-    "graphify:status": (id) => graphifyService.status(id),
-    "graphify:build": (id) => graphifyService.build(id),
-    "graphify:update": (id) => graphifyService.update(id),
-    "graphify:openViewer": (id) => graphifyService.openViewer(id),
-    "graphify:report": (id) => graphifyService.report(id),
-    "devtap:projectStatus": (id) => devTapInstallService.status(id),
-    "git:info": (id) => gitService.info(id),
-    "git:changedFiles": (id) => gitService.changedFiles(id),
-    "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),
-    "git:commitPush": (id, message) => gitService.commitPush(id, message),
-    "git:createPr": (id) => gitService.createPr(id),
-    "git:mergeToLocal": (id) => gitService.mergeToLocal(id),
-    "git:pushLocal": (id) => gitService.pushLocal(id),
-    // remote session hosting (ADR-0009)
-    "remote:hostStatus": () => remoteHost.status(),
-    "remote:setHostEnabled": async (enabled) => {
-      if (enabled) await remoteHost.start();
-      else await remoteHost.stop();
-      // Best-effort: front the relay with Tailscale Serve HTTPS on enable so the
-      // watch app can reach it without a separate step. Swallowed errors are
-      // surfaced via connectInfo (serveActive=false) in the UI.
-      if (enabled) {
-        try {
-          const s = await remoteHost.status();
-          await enableServe(s.port);
-        } catch {
-          // Tailscale missing / not logged in — UI shows the QR once Serve comes up.
+      },
+      "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
+      "agentBrowser:install": () => agentBrowserService.install((channel, payload) => emit(channel, payload)),
+      "hud:hide": () => {
+        hudWindow?.hide();
+      },
+      "hud:toggle": () => toggleHud(),
+      "hud:newChat": async () => {
+        const thread = await threadService.createChat();
+        appService.setHudThread(thread.id);
+        return thread;
+      },
+      "hud:setExpanded": (expanded) => setHudExpanded(expanded),
+      "hud:setClickThrough": (ignore) =>
+        hudWindow?.setIgnoreMouseEvents(ignore, { forward: true }),
+      "hud:releaseFocus": () => hudWindow?.blur(),
+      "remote:setHostEnabled": async (enabled) => {
+        if (enabled) await remoteHost.start();
+        else await remoteHost.stop();
+        // Best-effort: front the relay with Tailscale Serve HTTPS on enable so the
+        // watch app can reach it without a separate step. Swallowed errors are
+        // surfaced via connectInfo (serveActive=false) in the UI.
+        if (enabled) {
+          try {
+            const s = await remoteHost.status();
+            await enableServe(s.port);
+          } catch {
+            // Tailscale missing / not logged in — UI shows the QR once Serve comes up.
+          }
         }
-      }
-      emit("event:remoteHostStatus", undefined);
-      return remoteHost.status();
+        emit("event:remoteHostStatus", undefined);
+        return remoteHost.status();
+      },
+      "remote:regenerateToken": async () => {
+        await remoteHost.regenerateToken();
+        return remoteHost.status();
+      },
+      "remote:setProjectServed": (projectId, served) => {
+        remoteHost.setProjectServed(projectId, served);
+        void remoteHost.persist();
+        emit("event:remoteHostStatus", undefined);
+        return remoteHost.status();
+      },
+      "remote:setServeAll": (serveAll) => {
+        remoteHost.setServeAll(serveAll);
+        void remoteHost.persist();
+        emit("event:remoteHostStatus", undefined);
+        return remoteHost.status();
+      },
+      "remote:connectInfo": async () => {
+        const s = await remoteHost.status();
+        return getConnectInfo({ token: s.token, relayPort: s.port, enabled: s.enabled });
+      },
+      "remote:enableServe": async () => {
+        const s = await remoteHost.status();
+        await enableServe(s.port);
+        return getConnectInfo({ token: s.token, relayPort: s.port, enabled: s.enabled });
+      },
+      "handoff:message": (threadId) =>
+        handoffService.ensureRemoteForThread(threadId, "manual handoff"),
     },
-    "remote:regenerateToken": async () => {
-      await remoteHost.regenerateToken();
-      return remoteHost.status();
-    },
-    "remote:setProjectServed": (projectId, served) => {
-      remoteHost.setProjectServed(projectId, served);
-      void remoteHost.persist();
-      emit("event:remoteHostStatus", undefined);
-      return remoteHost.status();
-    },
-    "remote:setServeAll": (serveAll) => {
-      remoteHost.setServeAll(serveAll);
-      void remoteHost.persist();
-      emit("event:remoteHostStatus", undefined);
-      return remoteHost.status();
-    },
-    "remote:connectInfo": async () => {
-      const s = await remoteHost.status();
-      return getConnectInfo({ token: s.token, relayPort: s.port, enabled: s.enabled });
-    },
-    "remote:enableServe": async () => {
-      const s = await remoteHost.status();
-      await enableServe(s.port);
-      return getConnectInfo({ token: s.token, relayPort: s.port, enabled: s.enabled });
-    },
-    "remote:listTailnetPeers": () => listTailnetPeers(),
-    "remote:listHosts": () => remoteClient.listHosts(),
-    "remote:addHost": (input) => remoteClient.addHost(input),
-    "remote:removeHost": (id) => remoteClient.removeHost(id),
-    "remote:listSessions": (hostId) => remoteClient.listSessions(hostId),
-    "remote:attach": (hostId, threadId) => remoteClient.attach(hostId, threadId),
-    "remote:detach": () => remoteClient.detach(),
-    "remote:message": (hostId, threadId, text) => remoteClient.message(hostId, threadId, text),
-    "remote:steer": (hostId, threadId, text) => remoteClient.steer(hostId, threadId, text),
-    "remote:abort": (hostId, threadId) => remoteClient.abort(hostId, threadId),
-    "remote:takeControl": (hostId, threadId) => remoteClient.takeControl(hostId, threadId),
-    "remote:releaseControl": (hostId, threadId) => remoteClient.releaseControl(hostId, threadId),
-    "remote:archive": (hostId, threadId) => remoteClient.archive(hostId, threadId),
-    "remote:pullToTest": (hostId, threadId) => remoteClient.pullToTest(hostId, threadId),
-    // Movable execution / remote-first mode (docs/remote-handoff.md).
-    "handoff:getMode": () => handoffService.getMode(),
-    "handoff:setMode": (enabled) => handoffService.setMode(enabled),
-    "handoff:statusForThread": (threadId) => handoffService.statusForThread(threadId),
-    "handoff:message": (threadId) =>
-      handoffService.ensureRemoteForThread(threadId, "manual handoff"),
-    "handoff:registerMachine": (input) => handoffService.registerMachine(input),
-    "usage:list": () => usageService.list(),
-    "usage:refresh": () => usageService.refresh(),
-    "threads:steer": (id, text) => threadService.steer(id, text),
-    "threads:promoteFollowUpToSteer": (id, index) => threadService.promoteFollowUpToSteer(id, index),
-    "threads:popLastFollowUp": (id) => threadService.popLastFollowUp(id),
-    "threads:deleteFollowUp": (id, index) => threadService.deleteFollowUp(id, index),
-    "threads:deleteSteer": (id, index) => threadService.deleteSteer(id, index),
-    "threads:abort": (id) => threadService.abort(id),
-    "threads:getTranscript": (id) => threadService.getTranscript(id),
-    "threads:snooze": (id, until) => appService.snoozeThread(id, until),
-    "threads:unsnooze": (id) => appService.unsnoozeThread(id),
-    "threads:markToTest": (id) => threadService.markToTest(id),
-    "threads:unmarkToTest": (id) => appService.unmarkToTest(id),
-  });
+  );
 
   // Persistent floating HUD (CONTEXT.md, ADR-0002). ⌘⇧Space toggles.
   async function toggleHud(): Promise<void> {
