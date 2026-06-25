@@ -259,6 +259,10 @@ export const ipcContracts = {
     requireNonEmptyString(cmd, "command");
   }),
   "threads:abort": invoke<[threadId: ThreadId], void>(),
+  /** Hot-reload one session's extensions/skills/prompts/themes from disk. */
+  "threads:reload": invoke<[threadId: ThreadId], { ok: boolean; error?: string }>(),
+  /** Reload every idle session; queue running ones for reload on idle. */
+  "threads:reloadAll": invoke<[], { reloaded: string[]; queued: string[] }>(),
   "threads:getTranscript": invoke<[threadId: ThreadId], TranscriptSnapshot>(),
   /** Full-text search across thread bodies + titles. */
   "threads:search": invoke<[query: string], ThreadSearchHit[]>((q) =>

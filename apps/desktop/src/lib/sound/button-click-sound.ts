@@ -377,6 +377,35 @@ export function playClick(kind: ClickKind = "down"): void {
   });
 }
 
+/**
+ * Floor for the gap between a down- and up-click. A fast tap (mouse or Enter
+ * key) where press and release land almost simultaneously would otherwise
+ * smear the two clicks into one blur; this keeps them sounding like a
+ * deliberate press-and-release.
+ */
+const MIN_CLICK_GAP_MS = 90;
+
+/**
+ * Play the down-click now and return a `release()` that plays the up-click,
+ * never closer than {@link MIN_CLICK_GAP_MS} to the down. A held press is
+ * already past the floor and clicks immediately; a fast tap nudges the
+ * up-click out just enough. Call `release()` on pointer/key up; skip it on
+ * cancel to fire no up-click.
+ */
+export function pressClick(): () => void {
+  playClick("down");
+  const downAt = now();
+  return () => {
+    const wait = MIN_CLICK_GAP_MS - (now() - downAt);
+    if (wait <= 0) playClick("up");
+    else setTimeout(() => playClick("up"), wait);
+  };
+}
+
+function now(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
 /** Play a key sound (press/release pair) */
 export function playKey(phase: KeyPhase = "press"): void {
   if (soundsMuted()) return;
@@ -432,21 +461,19 @@ export function playButtonSecondary(_variant?: ButtonClickVariant): void {}
  */
 export function installGlobalButtonPress(): () => void {
   if (typeof document === "undefined") return () => {};
-  let held: HTMLButtonElement | null = null;
+  let releaseHeld: (() => void) | null = null;
 
   const onPointerDown = (e: PointerEvent): void => {
     if (e.button !== 0) return;
     const btn = (e.target as HTMLElement | null)?.closest("button");
     if (!(btn instanceof HTMLButtonElement)) return;
     if (btn.disabled || btn.dataset.press === "self") return;
-    held = btn;
-    playClick("down");
+    releaseHeld = pressClick();
   };
   const release = (playUp: boolean): void => {
-    const btn = held;
-    held = null;
-    if (!btn) return;
-    if (playUp) playClick("up");
+    const r = releaseHeld;
+    releaseHeld = null;
+    if (playUp) r?.();
   };
   const onPointerUp = (): void => release(true);
   const onPointerCancel = (): void => release(false);

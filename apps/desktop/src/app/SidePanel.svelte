@@ -1,13 +1,12 @@
 <script lang="ts">
   import type { ModelInfo } from "@peach-pi/shared-types";
-  import { cubicOut } from "svelte/easing";
+  import { fly } from "svelte/transition";
   import { sideChat } from "../stores/side-chat.svelte";
   import { api } from "../lib/ipc";
   import Markdown from "./Markdown.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import History from "@lucide/svelte/icons/history";
-  import CornerDownLeft from "@lucide/svelte/icons/corner-down-left";
   import X from "@lucide/svelte/icons/x";
 
   let input = $state("");
@@ -20,18 +19,6 @@
     "Check this decision",
   ];
 
-  // The panel grows out of the floating BTW button (bottom-right of the main
-  // card, i.e. the panel's lower-left), so it reads as the button expanding
-  // rather than a sidebar sliding in.
-  function expandFromButton(_node: HTMLElement, { duration = 220 } = {}) {
-    return {
-      duration,
-      easing: cubicOut,
-      css: (t: number, u: number) =>
-        `transform: translate(${u * -28}px, ${u * 36}px) scale(${0.82 + 0.18 * t});` +
-        `opacity: ${t};`,
-    };
-  }
   let models = $state<ModelInfo[]>([]);
   let modelsLoadedFor: string | null = null;
 
@@ -75,7 +62,7 @@
 {#if sideChat.open}
   <aside
     class="btw-panel relative my-2 mr-2 flex w-[23rem] shrink-0 flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
-    transition:expandFromButton
+    transition:fly={{ x: 380, duration: 220 }}
   >
     <!-- Header -->
     <div class="flex items-start gap-2 border-b border-border px-4 py-3">
@@ -224,22 +211,27 @@
 
     <!-- Input -->
     <div class="border-t border-border p-3">
-      <div class="flex items-end gap-2 rounded-lg border border-border-strong bg-surface px-2 py-1.5">
+      <div class="flex items-end gap-2 rounded-lg border border-border-strong bg-surface py-1.5 pr-1.5 pl-2.5">
         <textarea
           bind:value={input}
           onkeydown={onKeydown}
           rows="1"
           placeholder="Ask a side question…"
-          class="max-h-32 flex-1 resize-none bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
+          class="max-h-32 flex-1 resize-none self-center bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
         ></textarea>
-        <button
-          class="rounded p-1 text-muted hover:bg-surface-2 disabled:opacity-40"
-          disabled={!input.trim() || sideChat.streaming}
-          onclick={() => send()}
-          title="Send (Enter)"
-        >
-          <CornerDownLeft class="size-4" />
-        </button>
+        <!-- The floating BTW button "becomes" the send control once inside the
+             panel. Wrapping in .composer-device reuses the metal cap styling. -->
+        <div class="composer-device shrink-0">
+          <button
+            class="btw-btn btw-send"
+            data-has-input={input.trim() && !sideChat.streaming ? "" : undefined}
+            onclick={() => send()}
+            title="Send (Enter)"
+            aria-label="Send side question"
+          >
+            <span class="btw-btn__label">BTW</span>
+          </button>
+        </div>
       </div>
     </div>
   </aside>
@@ -248,10 +240,24 @@
 <style>
   /* Grow from the BTW button's corner; soft circular shadow echoes the cap. */
   .btw-panel {
-    transform-origin: bottom left;
     box-shadow:
       0 1px 2px rgba(0, 0, 0, 0.12),
       -2px 6px 16px -6px rgba(0, 0, 0, 0.22),
       -6px 14px 40px -16px rgba(0, 0, 0, 0.28);
+  }
+
+  /* In-panel BTW cap acts as send: smaller, no row margin. Never greyed —
+     the engraved label glows orange once there's something to send. */
+  .composer-device .btw-send {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    margin: 0;
+  }
+  .composer-device .btw-send[data-has-input] .btw-btn__label {
+    color: oklch(0.74 0.185 52);
+    text-shadow:
+      0 1px 0 oklch(1 0.002 250 / 0.55),
+      0 0 7px oklch(0.78 0.2 55 / 0.65);
   }
 </style>

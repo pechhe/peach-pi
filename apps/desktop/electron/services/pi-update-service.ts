@@ -37,17 +37,22 @@ export class PiUpdateService {
   /** True when a manual update was requested while runs were active; flushed
    *  by `onRunsIdle()` as soon as no runs remain. */
   private queued = false;
+  /** Invoked after an update is applied, so the caller can hot-reload all
+   *  idle sessions from the freshly-installed extension files. */
+  private onUpdateApplied?: () => void;
 
   constructor(
     db: AppDb,
     emit: Emit,
     hasActiveRuns: () => boolean,
     getProjectRoots: () => string[] = () => [],
+    onUpdateApplied?: () => void,
   ) {
     this.kv = new KvRepo(db);
     this.emit = emit;
     this.hasActiveRuns = hasActiveRuns;
     this.getProjectRoots = getProjectRoots;
+    this.onUpdateApplied = onUpdateApplied;
   }
 
   /** Schedule the throttled boot run + the periodic re-check. */
@@ -264,9 +269,17 @@ export class PiUpdateService {
       this.kv.set(KV_KEY, Date.now());
       const updated = /updat|install/i.test(stdout) && !/up to date|nothing to/i.test(stdout);
       if (updated) {
-        this.emit("event:notice", { message: "Extensions updated. Restart to load.", level: "info" });
+        this.emit("event:notice", { message: "Extensions updated. Reloading…", level: "info" });
         // Clear the available-updates badge since we just updated
         this.emit("event:extUpdatesAvailable", { packages: [] });
+        // Hot-reload all idle sessions from the freshly-installed files.
+        // Running sessions are queued by reloadIdleSessions() and flushed
+        // when their run finishes (ThreadService.reloadQueued).
+        try {
+          this.onUpdateApplied?.();
+        } catch (err) {
+          console.warn("[pi-update] post-update reload failed:", err);
+        }
       } else if (manual) {
         this.emit("event:notice", { message: "Extensions already up to date.", level: "info" });
       }

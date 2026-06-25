@@ -282,6 +282,7 @@ async function boot(): Promise<void> {
   const piUpdateService = new PiUpdateService(db, emit, () =>
     appService.snapshot().threads.some((t) => t.status === "running"),
     () => appService.snapshot().projects.map((p) => p.path),
+    () => void threadService.reloadIdleSessions(),
   );
   setupSubagentEnvironment(app.getPath("userData"));
 
@@ -471,6 +472,8 @@ async function boot(): Promise<void> {
     "threads:prompt": (id, text, images, toolMode) =>
       threadService.prompt(id, text, images, toolMode),
     "threads:runCommand": (id, command) => threadService.runCommand(id, command),
+    "threads:reload": (id) => threadService.reloadSession(id),
+    "threads:reloadAll": () => threadService.reloadIdleSessions(),
     "threads:listCommands": (id) => threadService.listCommands(id),
     "threads:search": (query) => threadService.searchThreads(query),
     "threads:listModels": (id) => threadService.listModels(id),

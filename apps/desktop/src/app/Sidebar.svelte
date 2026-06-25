@@ -22,6 +22,7 @@
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import Settings from "@lucide/svelte/icons/settings";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Clock from "@lucide/svelte/icons/clock";
   import Check from "@lucide/svelte/icons/check";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
@@ -60,6 +61,7 @@
     onOpenView,
     onOpenTesting,
     onOpenSearch,
+    onReloadAll,
     remoteFirst = false,
   }: {
     width?: number;
@@ -77,6 +79,7 @@
     onOpenView: (view: AppView) => void;
     onOpenTesting: (projectId: string) => void;
     onOpenSearch: () => void;
+    onReloadAll: () => void;
     /** Remote-first mode on: the Remote item glows red + pulses. */
     remoteFirst?: boolean;
   } = $props();
@@ -91,6 +94,9 @@
   // Available extension-updates popover anchored under the amber badge button.
   let extUpdatesAnchor: HTMLElement | null = $state(null);
   let extUpdatesOpen = $state(false);
+
+  // Global reload-all-sessions button spin state.
+  let reloading = $state(false);
 
   // ⌘⇧↑/↓ traversal: while the modifiers are held the highlight "hovers"
   // a thread without selecting it; releasing ⌘ or ⇧ "clicks" the previewed
@@ -404,6 +410,31 @@
   const archiveWorktreeDescription = $derived(
     `“${pendingArchiveWorktreeName}” and all its threads will be archived, and the checkout removed.`,
   );
+  async function reloadAll() {
+    if (reloading) return;
+    reloading = true;
+    try {
+      const res = await api.invoke("threads:reloadAll");
+      const n = res.reloaded.length + res.queued.length;
+      if (n === 0) {
+        extensionUi.notify("No active sessions to reload.", undefined, "info");
+      } else if (res.queued.length > 0) {
+        extensionUi.notify(
+          `Reloading ${res.reloaded.length} session${res.reloaded.length === 1 ? "" : "s"}; ${res.queued.length} queued for when its run finishes.`,
+          undefined,
+          "info",
+        );
+      } else {
+        extensionUi.notify(
+          `Reloaded ${res.reloaded.length} session${res.reloaded.length === 1 ? "" : "s"}.`,
+          undefined,
+          "info",
+        );
+      }
+    } finally {
+      reloading = false;
+    }
+  }
 </script>
 
 {#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived")}
@@ -590,6 +621,15 @@
           <span class="num-badge num-badge--accent">{extensionUi.extUpdates.length}</span>
         </button>
       {/if}
+      <button
+        class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
+        onclick={reloadAll}
+        disabled={reloading}
+        data-testid="nav-reload-all"
+        title="Reload extensions/skills/prompts in all sessions"
+      >
+        <RotateCw size={15} class={reloading ? "animate-spin" : ""} />
+      </button>
       <button
         class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg"
         onclick={onOpenSearch}

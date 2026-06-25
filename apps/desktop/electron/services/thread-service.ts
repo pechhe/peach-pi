@@ -616,7 +616,7 @@ export class ThreadService {
         continue;
       }
       tasks.push(
-        session.reload().then(() => reloaded.push(threadId)).catch(() => {}),
+        session.reload().then(() => { reloaded.push(threadId); }).catch(() => {}),
       );
     }
     await Promise.all(tasks);

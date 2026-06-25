@@ -125,7 +125,7 @@
   {#if justUpdated}
     <div class="flex items-center gap-2 px-3 py-6 text-emerald-500">
       <Check size={16} />
-      <span class="text-xs">Extensions updated. Restart to load.</span>
+      <span class="text-xs">Extensions updated. Reloading…</span>
     </div>
   {:else if queued}
     <div class="flex items-center gap-2 px-3 py-6 text-amber-400">

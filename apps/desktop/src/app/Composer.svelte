@@ -11,7 +11,7 @@
     readImageAttachmentsFromPaths,
     shouldPasteAsAttachment,
   } from "../lib/composer/attachments";
-  import { playButtonClick, playClick, playRotary } from "../lib/sound/button-click-sound";
+  import { playButtonClick, playClick, pressClick, playRotary } from "../lib/sound/button-click-sound";
   import FileText from "@lucide/svelte/icons/file-text";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
@@ -95,14 +95,21 @@
   // Whether an Enter-driven send should queue/steer (Cmd+Enter while running),
   // captured on keydown and consumed on the matching keyup.
   let enterSteer = false;
+  // Holds the up-click released on send spring-back; pressClick spaces it off
+  // the down-click so a fast Enter tap doesn't smear the two into one sound.
+  let releaseSendClick: (() => void) | null = null;
+  // Same press/release spacing for the BTW (side-chat) toggle button.
+  let btwRelease: (() => void) | null = null;
   function pressSend(): void {
     sendPressed = true;
-    playClick("down");
+    releaseSendClick = pressClick();
   }
   function releaseSend(playUp: boolean): void {
     if (!sendPressed) return;
     sendPressed = false;
-    if (playUp) playClick("up");
+    const r = releaseSendClick;
+    releaseSendClick = null;
+    if (playUp) r?.();
   }
 
   // Quick-slot helpers. A skill slot injects its chip into the composer; an
@@ -225,6 +232,7 @@
     { name: "plan", description: "Switch to Plan mode", kind: "system" },
     { name: "build", description: "Switch to Build mode", kind: "system" },
     { name: "new", description: "Start a new thread in this project", kind: "system" },
+    { name: "reload", description: "Reload extensions/skills/prompts from disk", kind: "system" },
     { name: "scoped-models", description: "Pick which models appear in the composer", kind: "system" },
   ];
   const systemCommandNames = new Set(systemCommandList.map((c) => c.name));
@@ -363,6 +371,12 @@
         break;
       case "new":
         onNewThread?.();
+        break;
+      case "reload":
+        void api.invoke("threads:reload", thread.id).then((res) => {
+          if (!res.ok) extensionUi.notify(res.error ?? "Reload failed.", undefined, "error");
+          else extensionUi.notify("Session reloaded.", undefined, "info");
+        });
         break;
       case "scoped-models":
         void scopedModelsPanel?.openScopedModels();
@@ -1402,22 +1416,24 @@
   </div>
 
   <!-- Side conversation (/btw): floats at the footer's bottom-right, outside the chassis.
-       Hidden on the centered new-thread state (no message sent yet). -->
-  {#if !centered}
+       Hidden on the centered new-thread state (no message sent yet), and while the
+       panel is open for this thread — the cap "moves" into the panel as its send button. -->
+  {#if !centered && !(sideChat.open && sideChat.threadId === thread.id)}
   <button
     class="btw-btn btw-btn--floating"
     data-press="self"
     onpointerdown={(e) => {
       if (e.button !== 0) return;
-      playClick("down");
+      btwRelease = pressClick();
     }}
     onpointerup={(e) => {
       if (e.button !== 0) return;
-      playClick("up");
+      btwRelease?.();
+      btwRelease = null;
       const closing = sideChat.open && sideChat.threadId === thread.id;
       closing ? sideChat.close() : void sideChat.openPanel(thread.id);
     }}
-    onpointercancel={() => playClick("up")}
+    onpointercancel={() => { btwRelease = null; }}
     data-testid="open-side-chat"
     title="Side conversation (/btw) — ask a quick question without touching this task"
     aria-label="Open side conversation"
