@@ -1,0 +1,175 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  parseIssueBody,
+  isPrdLabels,
+  enrichIssues,
+  groupWorkQueue,
+  type RawIssue,
+} from "@peach-pi/shared-types";
+
+// Real issue bodies (trimmed) captured from pechhe/peach-pi, used as fixtures.
+const BODY_3 = `## Parent
+
+#2
+
+## What to build
+
+Replace the existing ephemeral launcher overlay with a persistent HUD.
+
+## Acceptance criteria
+
+- [ ] ⌘⇧Space toggles the HUD
+- [ ] The HUD does not hide on blur
+`;
+
+const BODY_16 = `## Parent
+
+#1 (PRD: Make Loops First-Class) — this is the first manual slice of that PRD.
+
+## Problem Statement
+
+When I have a repo full of ready-for-agent issues...
+`;
+
+const BODY_18 = `## Parent
+
+#16
+
+## What to build
+
+Extend the parser.
+
+## Acceptance criteria
+
+- [ ] Issues are grouped under their parent PRD
+- [ ] A PRD with no child issues is visibly flagged
+
+## Blocked by
+
+- #17
+`;
+
+test("parseIssueBody: extracts parent, blocked-by and acceptance criteria", () => {
+  assert.deepEqual(parseIssueBody(BODY_18), {
+    parent: 16,
+    blockedBy: [17],
+    acceptanceCriteria: [
+      "Issues are grouped under their parent PRD",
+      "A PRD with no child issues is visibly flagged",
+    ],
+  });
+});
+
+test("parseIssueBody: parent header followed by '#1 (PRD ...)' resolves to 1", () => {
+  assert.equal(parseIssueBody(BODY_16).parent, 1);
+});
+
+test("parseIssueBody: no blocked-by section yields empty list", () => {
+  const parsed = parseIssueBody(BODY_3);
+  assert.equal(parsed.parent, 2);
+  assert.deepEqual(parsed.blockedBy, []);
+  assert.equal(parsed.acceptanceCriteria.length, 2);
+});
+
+test("parseIssueBody: empty body is all-empty", () => {
+  assert.deepEqual(parseIssueBody(""), {
+    parent: null,
+    blockedBy: [],
+    acceptanceCriteria: [],
+  });
+});
+
+test("isPrdLabels: only the prd label counts", () => {
+  assert.equal(isPrdLabels(["prd", "ready-for-agent"]), true);
+  assert.equal(isPrdLabels(["ready-for-agent"]), false);
+});
+
+// A small DAG mirroring the real structure: PRD #16 with slices #17→#18→#19,
+// plus an unparented refactor issue #9.
+function raw(over: Partial<RawIssue> & Pick<RawIssue, "number">): RawIssue {
+  return {
+    title: `Issue ${over.number}`,
+    url: `https://github.com/o/r/issues/${over.number}`,
+    state: "open",
+    stateReason: null,
+    labels: [],
+    body: "",
+    ...over,
+  };
+}
+
+test("enrichIssues: derives done from closed-as-completed only", () => {
+  const issues = enrichIssues([
+    raw({ number: 17, state: "closed", stateReason: "completed" }),
+    raw({ number: 30, state: "closed", stateReason: "not_planned" }),
+  ]);
+  assert.equal(issues.find((i) => i.number === 17)!.status, "done");
+  // closed-as-not_planned is NOT done — it must not satisfy dependents.
+  assert.equal(issues.find((i) => i.number === 30)!.status, "ready");
+});
+
+test("enrichIssues: ready when all blockers done, blocked otherwise", () => {
+  const open17 = enrichIssues([
+    raw({ number: 17 }),
+    raw({ number: 18, body: "## Blocked by\n\n- #17\n" }),
+  ]);
+  const i18 = open17.find((i) => i.number === 18)!;
+  assert.equal(i18.status, "blocked");
+  assert.deepEqual(i18.unmetBlockers, [17]);
+
+  const done17 = enrichIssues([
+    raw({ number: 17, state: "closed", stateReason: "completed" }),
+    raw({ number: 18, body: "## Blocked by\n\n- #17\n" }),
+  ]);
+  const ready18 = done17.find((i) => i.number === 18)!;
+  assert.equal(ready18.status, "ready");
+  assert.deepEqual(ready18.unmetBlockers, []);
+});
+
+test("enrichIssues: no blockers means ready", () => {
+  const [i] = enrichIssues([raw({ number: 17 })]);
+  assert.equal(i!.status, "ready");
+});
+
+test("groupWorkQueue: groups under PRD, lists Unparented, flags childless", () => {
+  const issues = enrichIssues([
+    raw({ number: 16, labels: ["prd"], body: "## Parent\n\n#1\n" }),
+    raw({ number: 17, body: "## Parent\n\n#16\n" }),
+    raw({ number: 18, body: "## Parent\n\n#16\n\n## Blocked by\n\n- #17\n" }),
+    raw({ number: 40, labels: ["prd"] }), // PRD with no children
+    raw({ number: 9 }), // unparented refactor issue
+  ]);
+  const groups = groupWorkQueue(issues);
+
+  const prd16 = groups.find((g) => g.prd?.number === 16)!;
+  assert.deepEqual(
+    prd16.issues.map((i) => i.number),
+    [17, 18],
+  );
+  assert.equal(prd16.childless, false);
+
+  const prd40 = groups.find((g) => g.prd?.number === 40)!;
+  assert.equal(prd40.childless, true);
+
+  const unparented = groups.find((g) => g.prd === null)!;
+  assert.deepEqual(
+    unparented.issues.map((i) => i.number),
+    [9],
+  );
+});
+
+test("groupWorkQueue: done issues drop out of displayed lists", () => {
+  const issues = enrichIssues([
+    raw({ number: 16, labels: ["prd"] }),
+    raw({ number: 17, state: "closed", stateReason: "completed", body: "## Parent\n\n#16\n" }),
+    raw({ number: 18, body: "## Parent\n\n#16\n" }),
+  ]);
+  const prd16 = groupWorkQueue(issues).find((g) => g.prd?.number === 16)!;
+  assert.deepEqual(
+    prd16.issues.map((i) => i.number),
+    [18],
+  );
+  // #17 still exists as a child, so the PRD is not flagged childless.
+  assert.equal(prd16.childless, false);
+});

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { TrackedIssue, WorkQueueResult } from "@peach-pi/shared-types";
+import { enrichIssues, type RawIssue, type WorkQueueResult } from "@peach-pi/shared-types";
 
 const run = promisify(execFile);
 
@@ -24,27 +24,33 @@ interface RestIssue {
   title: string;
   html_url: string;
   state: string;
+  state_reason: string | null;
+  body: string | null;
   labels: Array<{ name: string } | string>;
   pull_request?: unknown;
 }
 
-/** Map a GitHub REST issue to a TrackedIssue, or null if it is actually a PR.
+/** Map a GitHub REST issue to a RawIssue, or null if it is actually a PR.
  *  Pure — unit-tested. */
-export function mapRestIssue(raw: RestIssue): TrackedIssue | null {
+export function mapRestIssue(raw: RestIssue): RawIssue | null {
   if (raw.pull_request) return null;
   return {
     number: raw.number,
     title: raw.title,
     url: raw.html_url,
     state: raw.state === "closed" ? "closed" : "open",
+    stateReason: raw.state_reason ?? null,
     labels: raw.labels.map((l) => (typeof l === "string" ? l : l.name)),
+    body: raw.body ?? "",
   };
 }
 
-/** Reads a project's open tracker issues for the Work Queue view. GitHub only:
+/** Reads a project's tracker issues for the Work Queue view. GitHub only:
  *  prefers the `gh` CLI when present, otherwise the REST API with a token from
- *  the git credential helper. State lives in main; the renderer renders the
- *  returned snapshot via the typed `workQueue:list` contract. */
+ *  the git credential helper. Fetches all issues (open + closed) so blocker
+ *  satisfaction can be resolved, then enriches them (parse + status) in main.
+ *  The renderer renders the returned snapshot via the typed `workQueue:list`
+ *  contract. */
 export class IssuesService {
   private getProjectPath: (projectId: string) => string | null;
 
@@ -67,16 +73,15 @@ export class IssuesService {
     if (!gh) return { ok: false, reason: "not-github" };
 
     try {
-      if (await ghAvailable()) {
-        return { ok: true, source: "gh", issues: await this.viaGh(gh, cwd) };
-      }
-      return { ok: true, source: "rest", issues: await this.viaRest(gh) };
+      const useGh = await ghAvailable();
+      const raw = useGh ? await this.viaGh(gh, cwd) : await this.viaRest(gh);
+      return { ok: true, source: useGh ? "gh" : "rest", issues: enrichIssues(raw) };
     } catch (e) {
       return { ok: false, reason: "error", message: e instanceof Error ? e.message : String(e) };
     }
   }
 
-  private async viaGh(gh: { owner: string; repo: string }, cwd: string): Promise<TrackedIssue[]> {
+  private async viaGh(gh: { owner: string; repo: string }, cwd: string): Promise<RawIssue[]> {
     const { stdout } = await run(
       "gh",
       [
@@ -85,42 +90,46 @@ export class IssuesService {
         "--repo",
         `${gh.owner}/${gh.repo}`,
         "--state",
-        "open",
+        "all",
         "--limit",
-        "100",
+        "200",
         "--json",
-        "number,title,url,state,labels",
+        "number,title,url,state,stateReason,labels,body",
       ],
-      { cwd, maxBuffer: 10 * 1024 * 1024 },
+      { cwd, maxBuffer: 20 * 1024 * 1024 },
     );
     const rows = JSON.parse(stdout) as Array<{
       number: number;
       title: string;
       url: string;
       state: string;
+      stateReason: string | null;
       labels: Array<{ name: string }>;
+      body: string | null;
     }>;
     return rows.map((r) => ({
       number: r.number,
       title: r.title,
       url: r.url,
       state: r.state.toLowerCase() === "closed" ? "closed" : "open",
+      stateReason: r.stateReason ?? null,
       labels: r.labels.map((l) => l.name),
+      body: r.body ?? "",
     }));
   }
 
-  private async viaRest(gh: { owner: string; repo: string }): Promise<TrackedIssue[]> {
+  private async viaRest(gh: { owner: string; repo: string }): Promise<RawIssue[]> {
     const token = await githubToken();
     const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
       "User-Agent": "peach-pi",
     };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/issues?state=open&per_page=100`;
+    const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/issues?state=all&per_page=100`;
     const res = await fetch(url, { headers });
     if (!res.ok) throw new Error(`GitHub API ${res.status}`);
     const raw = (await res.json()) as RestIssue[];
-    return raw.map(mapRestIssue).filter((i): i is TrackedIssue => i !== null);
+    return raw.map(mapRestIssue).filter((i): i is RawIssue => i !== null);
   }
 }
 

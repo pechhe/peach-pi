@@ -39,21 +39,38 @@ test("parseGithubRepo: garbage returns null", () => {
   assert.equal(parseGithubRepo("not a url"), null);
 });
 
-test("mapRestIssue: maps fields and normalises labels", () => {
+test("mapRestIssue: maps fields, body, state_reason and normalises labels", () => {
   const mapped = mapRestIssue({
     number: 7,
     title: "HUD finish-cue routing",
     html_url: "https://github.com/pechhe/peach-pi/issues/7",
-    state: "open",
+    state: "closed",
+    state_reason: "completed",
+    body: "## Parent\n\n#2\n",
     labels: [{ name: "ready-for-agent" }, "prd"],
   });
   assert.deepEqual(mapped, {
     number: 7,
     title: "HUD finish-cue routing",
     url: "https://github.com/pechhe/peach-pi/issues/7",
-    state: "open",
+    state: "closed",
+    stateReason: "completed",
     labels: ["ready-for-agent", "prd"],
+    body: "## Parent\n\n#2\n",
   });
+});
+
+test("mapRestIssue: null body becomes empty string", () => {
+  const mapped = mapRestIssue({
+    number: 1,
+    title: "t",
+    html_url: "u",
+    state: "open",
+    state_reason: null,
+    body: null,
+    labels: [],
+  });
+  assert.equal(mapped?.body, "");
 });
 
 test("mapRestIssue: filters out pull requests", () => {
@@ -62,6 +79,8 @@ test("mapRestIssue: filters out pull requests", () => {
     title: "a PR",
     html_url: "https://github.com/pechhe/peach-pi/pull/99",
     state: "open",
+    state_reason: null,
+    body: "",
     labels: [],
     pull_request: { url: "..." },
   });

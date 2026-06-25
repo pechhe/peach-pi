@@ -132,15 +132,32 @@ export type AppView =
   | "work-queue"
   | "playroom";
 
-/** One open issue from the project's tracker, as shown in the Work Queue.
- *  Slice 1 carries only the flat fields; PRD nesting + blocked-by + acceptance
- *  criteria are parsed in a later slice. */
+/** Derived workflow status for a Work Queue issue.
+ *  - `done`: closed-as-completed (a merged PR closes its issue as completed)
+ *  - `ready`: open and every blocker is done
+ *  - `blocked`: open with at least one unmet blocker */
+export type IssueStatus = "done" | "ready" | "blocked";
+
+/** One issue from the project's tracker, enriched with the structure parsed
+ *  from its body (`## Parent`, `## Blocked by`, `## Acceptance criteria`), the
+ *  `prd` label, and a derived {@link IssueStatus}. */
 export interface TrackedIssue {
   number: number;
   title: string;
   url: string;
   state: "open" | "closed";
   labels: string[];
+  /** True when the issue carries the `prd` label. */
+  isPrd: boolean;
+  /** Parent PRD issue number from `## Parent`, or null. */
+  parent: number | null;
+  /** Issue numbers this one is `## Blocked by`. */
+  blockedBy: number[];
+  /** `## Acceptance criteria` checklist item texts. */
+  acceptanceCriteria: string[];
+  status: IssueStatus;
+  /** Blockers that are not yet done — drives the greyed-out "blocked by #N" UI. */
+  unmetBlockers: number[];
 }
 
 /** Result of listing a project's tracker issues. A project with no git remote
