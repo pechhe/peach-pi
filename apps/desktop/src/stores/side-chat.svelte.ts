@@ -17,6 +17,8 @@ class SideChatStore {
   error = $state<string | null>(null);
   /** History list for the current thread (newest first). */
   history = $state<SideConversation[]>([]);
+  /** Composer draft, held here so the floating BTW cap can also submit it. */
+  draft = $state("");
   private started = false;
 
   init(): void {
@@ -61,6 +63,14 @@ class SideChatStore {
     this.buffer = "";
     this.streaming = false;
     this.active = await api.invoke("side:start", this.threadId, modelOverride ?? null);
+  }
+
+  /** Send the current draft (used by the floating BTW cap and Enter key). */
+  async submitDraft(): Promise<void> {
+    const q = this.draft.trim();
+    if (!q || this.streaming) return;
+    this.draft = "";
+    await this.ask(q);
   }
 
   async ask(question: string): Promise<void> {

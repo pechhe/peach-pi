@@ -9,7 +9,6 @@
   import History from "@lucide/svelte/icons/history";
   import X from "@lucide/svelte/icons/x";
 
-  let input = $state("");
   let showHistory = $state(false);
 
   // Subdued starter prompts shown in the empty state.
@@ -33,13 +32,6 @@
     }
   });
 
-  async function send() {
-    const q = input.trim();
-    if (!q) return;
-    input = "";
-    await sideChat.ask(q);
-  }
-
   async function useSuggestion(text: string) {
     if (sideChat.streaming) return;
     await sideChat.ask(text);
@@ -48,7 +40,7 @@
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void send();
+      void sideChat.submitDraft();
     }
   }
 
@@ -61,7 +53,7 @@
 
 {#if sideChat.open}
   <aside
-    class="btw-panel absolute top-2 right-2 bottom-2 z-30 flex w-[23rem] flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
+    class="btw-panel relative my-2 mr-2 flex w-[23rem] shrink-0 flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
     transition:fly={{ x: 380, duration: 220 }}
   >
     <!-- Header -->
@@ -211,27 +203,16 @@
 
     <!-- Input -->
     <div class="border-t border-border p-3">
-      <div class="flex items-end gap-2 rounded-lg border border-border-strong bg-surface py-1.5 pr-1.5 pl-2.5">
+      <!-- No send button here: the floating BTW cap sits over this slot (it never
+           moves) and acts as send. Reserve room on the right for it. -->
+      <div class="flex items-end rounded-lg border border-border-strong bg-surface py-2 pr-[3.25rem] pl-3">
         <textarea
-          bind:value={input}
+          bind:value={sideChat.draft}
           onkeydown={onKeydown}
           rows="1"
           placeholder="Ask a side question…"
           class="max-h-32 flex-1 resize-none self-center bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
         ></textarea>
-        <!-- The floating BTW button "becomes" the send control once inside the
-             panel. Wrapping in .composer-device reuses the metal cap styling. -->
-        <div class="composer-device shrink-0">
-          <button
-            class="btw-btn btw-send"
-            data-has-input={input.trim() && !sideChat.streaming ? "" : undefined}
-            onclick={() => send()}
-            title="Send (Enter)"
-            aria-label="Send side question"
-          >
-            <span class="btw-btn__label">BTW</span>
-          </button>
-        </div>
       </div>
     </div>
   </aside>
@@ -244,20 +225,5 @@
       0 1px 2px rgba(0, 0, 0, 0.12),
       -2px 6px 16px -6px rgba(0, 0, 0, 0.22),
       -6px 14px 40px -16px rgba(0, 0, 0, 0.28);
-  }
-
-  /* In-panel BTW cap acts as send: smaller, no row margin. Never greyed —
-     the engraved label glows orange once there's something to send. */
-  .composer-device .btw-send {
-    width: 38px;
-    min-width: 38px;
-    height: 38px;
-    margin: 0;
-  }
-  .composer-device .btw-send[data-has-input] .btw-btn__label {
-    color: oklch(0.74 0.185 52);
-    text-shadow:
-      0 1px 0 oklch(1 0.002 250 / 0.55),
-      0 0 7px oklch(0.78 0.2 55 / 0.65);
   }
 </style>

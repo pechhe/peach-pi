@@ -705,13 +705,22 @@
   margin-right: 12px;
 }
 
-/* Floating variant: anchored to the footer's bottom-right, outside the chassis. */
+/* Floating variant: fixed to the viewport's bottom-right so the cap never moves
+   when the /btw panel docks in — the panel slides under it and the cap becomes
+   the panel's send button in place. */
 .composer-device .btw-btn--floating {
-  position: absolute;
+  position: fixed;
   right: 24px;
   bottom: 24px;
   margin: 0;
-  z-index: 5;
+  z-index: 50;
+}
+/* Sendable: the engraved BTW glows orange, mirroring the send dial. */
+.composer-device .btw-btn[data-has-input] .btw-btn__label {
+  color: oklch(0.74 0.185 52);
+  text-shadow:
+    0 1px 0 oklch(1 0.002 250 / 0.55),
+    0 0 7px oklch(0.78 0.2 55 / 0.65);
 }
 .composer-device .btw-btn svg {
   position: relative;

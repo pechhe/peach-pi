@@ -1414,13 +1414,19 @@
     </div>
   </div>
 
-  <!-- Side conversation (/btw): floats at the footer's bottom-right, outside the chassis.
-       Hidden on the centered new-thread state (no message sent yet). The cap stays put
-       — the panel slides in as an overlay over the top of it, then back off on close. -->
+  <!-- Side conversation (/btw): fixed to the viewport's bottom-right so the cap never
+       moves. The docked panel slides in under it; once open the cap becomes the panel's
+       send button in place (no hide/reappear). Hidden only on the centered new state. -->
   {#if !centered}
   <button
     class="btw-btn btw-btn--floating"
     data-press="self"
+    data-has-input={sideChat.open &&
+      sideChat.threadId === thread.id &&
+      sideChat.draft.trim() &&
+      !sideChat.streaming
+      ? ""
+      : undefined}
     onpointerdown={(e) => {
       if (e.button !== 0) return;
       btwRelease = pressClick();
@@ -1429,8 +1435,10 @@
       if (e.button !== 0) return;
       btwRelease?.();
       btwRelease = null;
-      const closing = sideChat.open && sideChat.threadId === thread.id;
-      closing ? sideChat.close() : void sideChat.openPanel(thread.id);
+      // Open the panel, or — when it's already open for this thread — act as its
+      // send button. (Close via the panel's ×.)
+      const panelOpen = sideChat.open && sideChat.threadId === thread.id;
+      panelOpen ? void sideChat.submitDraft() : void sideChat.openPanel(thread.id);
     }}
     onpointercancel={() => { btwRelease = null; }}
     data-testid="open-side-chat"
