@@ -132,11 +132,9 @@ export class AutomationService {
         thread = await this.threadService.createChat();
       } else if (automation.environment === "worktree") {
         const wt = await this.createWorktree(automation.projectId);
-        thread = await this.threadService.createThread(
-          automation.projectId,
-          wt.worktreeId,
-          wt.worktreeDir,
-        );
+        thread = await this.threadService.createThread(automation.projectId, {
+          worktreeId: wt.worktreeId,
+        });
       } else {
         thread = await this.threadService.createThread(automation.projectId);
       }

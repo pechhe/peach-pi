@@ -518,6 +518,8 @@ async function boot(): Promise<void> {
       "projects:reorder": appService.reorderProjects.bind(appService),
       "projects:setCollapsed": appService.setProjectCollapsed.bind(appService),
       "worktrees:rename": appService.renameWorktree.bind(appService),
+      "worktrees:archive": appService.archive.bind(appService),
+      "threads:create": threadService.createThread.bind(threadService),
       "threads:createChat": threadService.createChat.bind(threadService),
       "threads:prompt": threadService.prompt.bind(threadService),
       "threads:runCommand": threadService.runCommand.bind(threadService),
@@ -539,6 +541,7 @@ async function boot(): Promise<void> {
       "threads:listTurns": threadService.listTurns.bind(threadService),
       "threads:rewind": threadService.rewind.bind(threadService),
       "threads:archive": threadService.archive.bind(threadService),
+      "threads:setEnvironment": threadService.setEnvironment.bind(threadService),
       "threads:unarchive": threadService.unarchive.bind(threadService),
       "threads:steer": threadService.steer.bind(threadService),
       "threads:promoteFollowUpToSteer": threadService.promoteFollowUpToSteer.bind(threadService),
@@ -596,6 +599,7 @@ async function boot(): Promise<void> {
       "git:pushLocal": gitService.pushLocal.bind(gitService),
       // remote session hosting (ADR-0009)
       "remote:hostStatus": remoteHost.status.bind(remoteHost),
+      "remote:setHostEnabled": remoteHost.setHostEnabled.bind(remoteHost),
       "remote:listTailnetPeers": listTailnetPeers,
       "remote:listHosts": remoteClient.listHosts.bind(remoteClient),
       "remote:addHost": remoteClient.addHost.bind(remoteClient),
@@ -668,56 +672,10 @@ async function boot(): Promise<void> {
         const dir = await gitService.createWorktree(projectId);
         return appService.addWorktree(projectId, dir);
       },
-      "worktrees:archive": async (worktreeId) => {
-        const wt = appService.worktree(worktreeId);
-        if (!wt) return;
-        const project = appService.snapshot().projects.find((p) => p.id === wt.projectId);
-        const threadIds = appService.archiveWorktree(worktreeId);
-        for (const tid of threadIds) threadService.archive(tid);
-        if (project) await gitService.removeWorktree(project.path, wt.dir);
-      },
-      "threads:create": async (projectId, opts) => {
-        let worktreeId: string | null = null;
-        let worktreeDir: string | undefined;
-        if (opts?.worktreeId) {
-          const wt = appService.worktree(opts.worktreeId);
-          if (!wt) throw new Error(`Unknown worktree: ${opts.worktreeId}`);
-          worktreeId = wt.id;
-          worktreeDir = wt.dir;
-        } else if (opts?.worktree) {
-          // Legacy one-shot: create a worktree record + git checkout together.
-          const dir = await gitService.createWorktree(projectId);
-          const wt = appService.addWorktree(projectId, dir);
-          worktreeId = wt.id;
-          worktreeDir = wt.dir;
-        }
-        return threadService.createThread(projectId, worktreeId, worktreeDir);
-      },
       "threads:delete": (id) => {
         // Deleting one thread leaves the worktree record + dir intact; teardown
         // happens only when the whole worktree is archived.
         threadService.delete(id);
-      },
-      "threads:setEnvironment": async (threadId, worktree) => {
-        const before = appService.snapshot().threads.find((t) => t.id === threadId);
-        if (!before?.projectId) return;
-        if ((before.worktreeDir != null) === worktree) return;
-        // Resolve a freshly-created worktree record + dir before disposing.
-        if (worktree) {
-          const dir = await gitService.createWorktree(before.projectId);
-          const wt = appService.addWorktree(before.projectId, dir);
-          await threadService.setEnvironment(threadId, wt.id, wt.dir);
-        } else {
-          await threadService.setEnvironment(threadId, null, undefined);
-          // Tear down the old worktree record + git checkout.
-          if (before.worktreeId) {
-            const project = appService.snapshot().projects.find((p) => p.id === before.projectId);
-            if (project && before.worktreeDir) {
-              await gitService.removeWorktree(project.path, before.worktreeDir);
-            }
-            appService.archiveWorktree(before.worktreeId);
-          }
-        }
       },
       "resources:readMarkdown": async (filePath) => (await import("node:fs/promises")).readFile(filePath, "utf8"),
       "agentBrowser:install": () => agentBrowserService.install((channel, payload) => emit(channel, payload)),
@@ -734,23 +692,6 @@ async function boot(): Promise<void> {
       "hud:setClickThrough": (ignore) =>
         hudWindow?.setIgnoreMouseEvents(ignore, { forward: true }),
       "hud:releaseFocus": () => hudWindow?.blur(),
-      "remote:setHostEnabled": async (enabled) => {
-        if (enabled) await remoteHost.start();
-        else await remoteHost.stop();
-        // Best-effort: front the relay with Tailscale Serve HTTPS on enable so the
-        // watch app can reach it without a separate step. Swallowed errors are
-        // surfaced via connectInfo (serveActive=false) in the UI.
-        if (enabled) {
-          try {
-            const s = await remoteHost.status();
-            await enableServe(s.port);
-          } catch {
-            // Tailscale missing / not logged in — UI shows the QR once Serve comes up.
-          }
-        }
-        emit("event:remoteHostStatus", undefined);
-        return remoteHost.status();
-      },
       "remote:regenerateToken": async () => {
         await remoteHost.regenerateToken();
         return remoteHost.status();

@@ -650,6 +650,26 @@ export class RemoteHostService {
     res.end(JSON.stringify(body));
   }
 
+  /** Toggle serving on/off and front the relay with Tailscale Serve HTTPS
+   *  on enable. Choreography that previously leaked across the IPC seam into
+   *  main.ts's `remote:setHostEnabled` handler (ADR: sink orchestrators into
+   *  the service that owns the responsibility). Swallowed Tailscale failures
+   *  surface via connectInfo (serveActive=false) rather than throwing. */
+  async setHostEnabled(enabled: boolean): Promise<RemoteHostConfig> {
+    if (enabled) await this.start();
+    else await this.stop();
+    if (enabled) {
+      try {
+        const s = await this.status();
+        await this.enableServe?.(s.port);
+      } catch {
+        // Tailscale missing / not logged in — UI shows the QR once Serve comes up.
+      }
+    }
+    this.onStatusChange?.();
+    return this.status();
+  }
+
   async regenerateToken(): Promise<string> {
     this.token = randomBytes(24).toString("hex");
     await this.persist();
