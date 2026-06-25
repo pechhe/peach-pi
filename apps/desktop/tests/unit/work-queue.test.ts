@@ -5,6 +5,7 @@ import {
   isPrdLabels,
   enrichIssues,
   groupWorkQueue,
+  mergedClosedIssues,
   issueBranchName,
   issueWorktreeName,
   buildSeedPrompt,
@@ -102,32 +103,52 @@ function raw(over: Partial<RawIssue> & Pick<RawIssue, "number">): RawIssue {
   };
 }
 
-test("enrichIssues: derives done from closed-as-completed only", () => {
+test("enrichIssues: a closed issue is done (resolved, not actionable)", () => {
   const issues = enrichIssues([
     raw({ number: 17, state: "closed", stateReason: "completed" }),
     raw({ number: 30, state: "closed", stateReason: "not_planned" }),
   ]);
   assert.equal(issues.find((i) => i.number === 17)!.status, "done");
-  // closed-as-not_planned is NOT done — it must not satisfy dependents.
-  assert.equal(issues.find((i) => i.number === 30)!.status, "ready");
+  assert.equal(issues.find((i) => i.number === 30)!.status, "done");
 });
 
-test("enrichIssues: ready when all blockers done, blocked otherwise", () => {
+test("enrichIssues: blocker satisfied only by a merged PR, not by closure", () => {
+  // #17 open → #18 blocked.
   const open17 = enrichIssues([
     raw({ number: 17 }),
     raw({ number: 18, body: "## Blocked by\n\n- #17\n" }),
   ]);
-  const i18 = open17.find((i) => i.number === 18)!;
-  assert.equal(i18.status, "blocked");
-  assert.deepEqual(i18.unmetBlockers, [17]);
+  assert.equal(open17.find((i) => i.number === 18)!.status, "blocked");
 
-  const done17 = enrichIssues([
+  // #17 closed WITHOUT a merged PR → #18 stays blocked (does not unblock).
+  const closedUnmerged = enrichIssues([
     raw({ number: 17, state: "closed", stateReason: "completed" }),
     raw({ number: 18, body: "## Blocked by\n\n- #17\n" }),
   ]);
-  const ready18 = done17.find((i) => i.number === 18)!;
+  const i18 = closedUnmerged.find((i) => i.number === 18)!;
+  assert.equal(i18.status, "blocked");
+  assert.deepEqual(i18.unmetBlockers, [17]);
+
+  // #17's PR merged → #18 flips to ready.
+  const merged17 = enrichIssues(
+    [
+      raw({ number: 17, state: "closed", stateReason: "completed" }),
+      raw({ number: 18, body: "## Blocked by\n\n- #17\n" }),
+    ],
+    { merged: new Set([17]) },
+  );
+  const ready18 = merged17.find((i) => i.number === 18)!;
   assert.equal(ready18.status, "ready");
   assert.deepEqual(ready18.unmetBlockers, []);
+});
+
+test("mergedClosedIssues: links via PR body keywords and branch convention", () => {
+  const set = mergedClosedIssues([
+    { body: "This closes #17 and fixes #5.", headRefName: "feature/x", mergedAt: "2026-01-01" },
+    { body: "no keyword here", headRefName: "agent/issue-19-start-agent", mergedAt: "2026-01-02" },
+    { body: "resolves #99", headRefName: "agent/issue-99-x", mergedAt: null }, // not merged
+  ]);
+  assert.deepEqual([...set].sort((a, b) => a - b), [5, 17, 19]);
 });
 
 test("enrichIssues: no blockers means ready", () => {
@@ -171,7 +192,9 @@ test("issueBranchName / issueWorktreeName: deterministic slugged identifiers", (
 });
 
 test("enrichIssues: marks in-progress issues from the worktree set", () => {
-  const issues = enrichIssues([raw({ number: 17 }), raw({ number: 18 })], new Set([17]));
+  const issues = enrichIssues([raw({ number: 17 }), raw({ number: 18 })], {
+    inProgress: new Set([17]),
+  });
   assert.equal(issues.find((i) => i.number === 17)!.inProgress, true);
   assert.equal(issues.find((i) => i.number === 18)!.inProgress, false);
 });

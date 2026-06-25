@@ -59,25 +59,45 @@ export function parseIssueBody(body: string): {
   return { parent: parentRefs[0] ?? null, blockedBy, acceptanceCriteria };
 }
 
-/** An issue is `done` when closed as completed. A merged PR closes its issue
- *  as completed, so this also captures the "PR merged" case; issues closed as
- *  `not_planned` (duplicate / won't-do) are deliberately not treated as done. */
-function isDone(raw: RawIssue): boolean {
-  return raw.state === "closed" && raw.stateReason === "completed";
+/** A pull request as fetched, reduced to what links it to an issue and tells
+ *  us whether it merged. `mergedAt` is null for never-merged PRs. */
+export interface RawPull {
+  body: string;
+  headRefName: string;
+  mergedAt: string | null;
+}
+
+/** Issue numbers closed by a *merged* PR — the only thing that satisfies a
+ *  blocker. Linkage is detected from the PR body (`closes/fixes/resolves #N`)
+ *  and from our branch convention (`agent/issue-<n>-…`). Pure — unit-tested. */
+export function mergedClosedIssues(pulls: RawPull[]): Set<number> {
+  const out = new Set<number>();
+  for (const pr of pulls) {
+    if (!pr.mergedAt) continue;
+    for (const m of pr.body.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
+      out.add(Number(m[1]));
+    }
+    const b = /^agent\/issue-(\d+)-/.exec(pr.headRefName);
+    if (b) out.add(Number(b[1]));
+  }
+  return out;
 }
 
 /** Parse + derive status for every issue against the full set (so blocker
- *  satisfaction can be resolved). `inProgressNumbers` marks issues that already
- *  have an agent worktree. Pure — unit-tested. */
+ *  satisfaction can be resolved). A blocker is satisfied only when it is in
+ *  `merged` (its PR merged) — an issue merely closed without a merged PR does
+ *  not unblock its dependents. An issue's own `done` status means it is closed
+ *  (resolved, hence not actionable). Pure — unit-tested. */
 export function enrichIssues(
   raw: RawIssue[],
-  inProgressNumbers: ReadonlySet<number> = new Set(),
+  opts: { merged?: ReadonlySet<number>; inProgress?: ReadonlySet<number> } = {},
 ): TrackedIssue[] {
-  const doneNumbers = new Set(raw.filter(isDone).map((r) => r.number));
+  const merged = opts.merged ?? new Set<number>();
+  const inProgressNumbers = opts.inProgress ?? new Set<number>();
   return raw.map((r) => {
     const { parent, blockedBy, acceptanceCriteria } = parseIssueBody(r.body);
-    const done = doneNumbers.has(r.number);
-    const unmetBlockers = blockedBy.filter((b) => !doneNumbers.has(b));
+    const done = r.state === "closed";
+    const unmetBlockers = blockedBy.filter((b) => !merged.has(b));
     const status: IssueStatus = done ? "done" : unmetBlockers.length === 0 ? "ready" : "blocked";
     return {
       number: r.number,

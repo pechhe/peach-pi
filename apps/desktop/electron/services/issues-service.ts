@@ -1,6 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { enrichIssues, type RawIssue, type WorkQueueResult } from "@peach-pi/shared-types";
+import {
+  enrichIssues,
+  mergedClosedIssues,
+  type RawIssue,
+  type RawPull,
+  type WorkQueueResult,
+} from "@peach-pi/shared-types";
 
 /** Worktree record names of the form `issue-<n>` → the set of in-progress issue
  *  numbers. Non-matching names (e.g. "Worktree 2") are ignored. */
@@ -90,9 +96,16 @@ export class IssuesService {
 
     try {
       const useGh = await ghAvailable();
-      const raw = useGh ? await this.viaGh(gh, cwd) : await this.viaRest(gh);
+      const [raw, pulls] = useGh
+        ? await Promise.all([this.viaGh(gh, cwd), this.viaGhPulls(gh, cwd)])
+        : await Promise.all([this.viaRest(gh), this.viaRestPulls(gh)]);
+      const merged = mergedClosedIssues(pulls);
       const inProgress = inProgressFrom(this.getWorktreeNames(projectId));
-      return { ok: true, source: useGh ? "gh" : "rest", issues: enrichIssues(raw, inProgress) };
+      return {
+        ok: true,
+        source: useGh ? "gh" : "rest",
+        issues: enrichIssues(raw, { merged, inProgress }),
+      };
     } catch (e) {
       return { ok: false, reason: "error", message: e instanceof Error ? e.message : String(e) };
     }
@@ -135,6 +148,35 @@ export class IssuesService {
     }));
   }
 
+  private async viaGhPulls(gh: { owner: string; repo: string }, cwd: string): Promise<RawPull[]> {
+    const { stdout } = await run(
+      "gh",
+      [
+        "pr",
+        "list",
+        "--repo",
+        `${gh.owner}/${gh.repo}`,
+        "--state",
+        "merged",
+        "--limit",
+        "200",
+        "--json",
+        "body,headRefName,mergedAt",
+      ],
+      { cwd, maxBuffer: 20 * 1024 * 1024 },
+    );
+    const rows = JSON.parse(stdout) as Array<{
+      body: string | null;
+      headRefName: string;
+      mergedAt: string | null;
+    }>;
+    return rows.map((r) => ({
+      body: r.body ?? "",
+      headRefName: r.headRefName,
+      mergedAt: r.mergedAt,
+    }));
+  }
+
   private async viaRest(gh: { owner: string; repo: string }): Promise<RawIssue[]> {
     const token = await githubToken();
     const headers: Record<string, string> = {
@@ -147,6 +189,26 @@ export class IssuesService {
     if (!res.ok) throw new Error(`GitHub API ${res.status}`);
     const raw = (await res.json()) as RestIssue[];
     return raw.map(mapRestIssue).filter((i): i is RawIssue => i !== null);
+  }
+
+  private async viaRestPulls(gh: { owner: string; repo: string }): Promise<RawPull[]> {
+    const token = await githubToken();
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "peach-pi",
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/pulls?state=closed&per_page=100`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+    const raw = (await res.json()) as Array<{
+      body: string | null;
+      merged_at: string | null;
+      head: { ref: string };
+    }>;
+    return raw
+      .filter((p) => p.merged_at)
+      .map((p) => ({ body: p.body ?? "", headRefName: p.head.ref, mergedAt: p.merged_at }));
   }
 }
 
