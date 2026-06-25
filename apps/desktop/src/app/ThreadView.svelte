@@ -8,6 +8,7 @@
     | { type: "item"; item: TranscriptItem }
     | { type: "group"; id: string; items: ToolItem[] };
   import { transcripts } from "../stores/transcripts.svelte";
+  import { remoteClient } from "../stores/remote-client.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
   import { mapTurns } from "../lib/transcript/turns";
   import { playClick } from "../lib/sound/button-click-sound";
@@ -120,6 +121,9 @@
   let findQuery = $state("");
   let findIndex = $state(0);
   let findBar = $state<FindBar | null>(null);
+
+  // Fetch this machine's client identity once (for the control indicator).
+  $effect(() => { remoteClient.init(); });
 
   // When a search-overlay body-match is clicked, open the FindBar with the
   // original search term so the user lands directly on the relevant text.
@@ -613,8 +617,37 @@
         {status}
       </span>
     {/each}
+    {#if thread.remoteHostId}
+      {@const inControl = !!remoteClient.id && thread.remoteControllerId === remoteClient.id}
+      {@const controllerName = thread.remoteControllerName ?? "another client"}
+      <span
+        class="shrink-0 rounded-full border border-border-strong bg-surface px-2 py-0.5 text-[10px] {inControl ? 'text-accent' : 'text-muted'}"
+        title={inControl
+          ? `You're steering on ${thread.remoteHostName ?? 'another machine'}`
+          : `Steered by ${controllerName} on ${thread.remoteHostName ?? 'another machine'}`}
+      >
+        ⦿ {thread.remoteHostName ?? "remote"} · {inControl ? "in control" : controllerName}
+      </span>
+      {#if thread.remoteThreadId}
+        <Tooltip text={inControl ? "Hand back control" : "Take control"}>
+          <button
+            class="rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft"
+            onclick={() =>
+              void api.invoke(
+                inControl ? "remote:releaseControl" : "remote:takeControl",
+                thread.remoteHostId!,
+                thread.remoteThreadId!,
+              )}
+            data-testid="control-toggle"
+          >{inControl ? "Hand back" : "Take control"}</button
+          >
+        </Tooltip>
+      {/if}
+    {/if}
     <div class="ml-auto flex items-center gap-1">
-      <GitWidget {thread} />
+      {#if !thread.remoteHostId}
+        <GitWidget {thread} />
+      {/if}
       {#if thread.projectId}
         <DevTapWidget {thread} {onSelectThread} />
       {/if}
@@ -627,23 +660,25 @@
           >
         </Tooltip>
       {/if}
-      <Tooltip text="Open in Finder">
-        <button
-          class="rounded px-2 py-0.5 text-faint hover:bg-surface hover:text-fg-soft"
-          onclick={() => api.invoke('app:openFolder', thread.id)}
-          data-testid="open-folder"
-        ><FolderOpen size={14} /></button
-        >
-      </Tooltip>
-      <Tooltip text="Terminal (⌃`)">
-        <button
-          class="rounded px-2 py-0.5 font-mono text-[11px] {terminal.visible
-            ? 'bg-surface-2 text-fg'
-            : 'text-faint hover:bg-surface hover:text-fg-soft'}"
-          onclick={() => terminal.toggle()}
-          data-testid="terminal-toggle">&gt;_</button
-        >
-      </Tooltip>
+      {#if !thread.remoteHostId}
+        <Tooltip text="Open in Finder">
+          <button
+            class="rounded px-2 py-0.5 text-faint hover:bg-surface hover:text-fg-soft"
+            onclick={() => api.invoke('app:openFolder', thread.id)}
+            data-testid="open-folder"
+          ><FolderOpen size={14} /></button
+          >
+        </Tooltip>
+        <Tooltip text="Terminal (⌃`)">
+          <button
+            class="rounded px-2 py-0.5 font-mono text-[11px] {terminal.visible
+              ? 'bg-surface-2 text-fg'
+              : 'text-faint hover:bg-surface hover:text-fg-soft'}"
+            onclick={() => terminal.toggle()}
+            data-testid="terminal-toggle">&gt;_</button
+          >
+        </Tooltip>
+      {/if}
     </div>
     {/if}
   </header>
@@ -814,7 +849,7 @@
             {#if !isStreaming && item.text}
               <div class="assistant-actions">
                 <CopyButton text={item.text} />
-                {#if thread.status !== "running" && turnMap.endById.has(item.id)}
+                {#if thread.status !== "running" && turnMap.endById.has(item.id) && !thread.remoteHostId}
                   {@const t = turnMap.endById.get(item.id)!}
                   <button
                     type="button"

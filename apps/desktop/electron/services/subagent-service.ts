@@ -18,6 +18,16 @@ import { ProjectRepo } from "../persistence/repositories.ts";
  * (word-split, quote-aware), so the wrapper path MUST be shell-quoted: on
  * macOS it lives under "~/Library/Application Support/<App Name>/", which
  * always contains spaces.
+ *
+ * We run cli.js via the app's Helper binary, not the main app executable.
+ * macOS LaunchServices registers any process that launches an .app's
+ * CFBundleExecutable as a fresh foreground instance of that app — so spawning
+ * the main binary (even with ELECTRON_RUN_AS_NODE=1) makes a "pi" foreground
+ * app appear in the Dock with the generic executable icon, bouncing for the
+ * whole subagent lifetime. The Helper .app's Info.plist sets LSUIElement=true,
+ * so its instances are background apps that never hit the Dock. Helper paths
+ * mirror the app name in both dev (Electron.app → "Electron Helper") and
+ * packaged (Peach Pi.app → "Peach Pi Helper").
  */
 export function setupSubagentEnvironment(userDataDir: string): void {
   if (process.env.PI_SUBAGENT_PI_COMMAND) return; // user override wins
@@ -27,17 +37,43 @@ export function setupSubagentEnvironment(userDataDir: string): void {
     // root; packaged: app.asar/node_modules).
     const cli = findUp(__dirname, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
     if (!cli) return;
+    const nodeRuntime = resolveNodeHelper() ?? process.execPath;
     mkdirSync(userDataDir, { recursive: true });
     const wrapper = path.join(userDataDir, "pi-wrapper.sh");
     writeFileSync(
       wrapper,
-      `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexec "${process.execPath}" "${cli}" "$@"\n`,
+      `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexec "${nodeRuntime}" "${cli}" "$@"\n`,
     );
     chmodSync(wrapper, 0o755);
     process.env.PI_SUBAGENT_PI_COMMAND = shellQuote(wrapper);
   } catch (err) {
     console.error("subagent env setup failed:", err);
   }
+}
+
+/**
+ * Locate the app's background Helper executable (LSUIElement=true) so spawned
+ * node child processes don't register as a foreground app and bounce the Dock.
+ * Returns null if the helper isn't where we expect (caller falls back to the
+ * main executable).
+ */
+function resolveNodeHelper(): string | null {
+  // process.execPath = <App>.app/Contents/MacOS/<App>; walk up to the .app.
+  const macOSDir = path.dirname(process.execPath);
+  const contentsDir = path.dirname(macOSDir);
+  const appBundle = path.dirname(contentsDir);
+  const appName = path.basename(appBundle, ".app");
+  if (!appName) return null;
+  const helper = path.join(
+    appBundle,
+    "Contents",
+    "Frameworks",
+    `${appName} Helper.app`,
+    "Contents",
+    "MacOS",
+    `${appName} Helper`,
+  );
+  return existsSync(helper) ? helper : null;
 }
 
 /**

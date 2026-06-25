@@ -71,6 +71,24 @@ export interface Thread {
   archivedAt?: string;
   createdAt: string;
   lastActivityAt: string;
+  /** Set on synthetic threads mirrored from a remote master (ADR-0009/0010).
+   *  Local threads leave these undefined. The renderer uses them to tag the
+   *  sidebar row and to route transcript/steer traffic to the remote host
+   *  instead of the local pi process. `id` is a composite
+   *  `remote:<hostId>:<remoteThreadId>` to avoid colliding with local ids. */
+  remoteHostId?: string;
+  /** The master's own thread id (the id to use on the wire). */
+  remoteThreadId?: ThreadId;
+  /** Display label of the master, for the sidebar's remote section header. */
+  remoteHostName?: string;
+  /** The master's project name for this thread, so the sidebar can nest it
+   *  under the real project rather than one flat host section. */
+  remoteProjectName?: string;
+  /** The client id currently holding the steering lease on the master, or
+   *  null when free. The renderer compares this to its own client id. */
+  remoteControllerId?: string | null;
+  /** Display name of the controlling client ("another laptop" when not you). */
+  remoteControllerName?: string | null;
 }
 
 export type ThreadKind = "thread" | "chat";
@@ -193,6 +211,19 @@ export interface RemoteSessionInfo {
   threadId: ThreadId;
   title: string;
   status: ThreadStatus;
+  /** The session's project on the master (null for chats), so the laptop can
+   *  nest remote threads under their real project names in the sidebar. */
+  projectId: ProjectId | null;
+  projectName: string | null;
+  /** The client currently holding the steering lease (null = free). The lease
+   *  auto-acquires on attach, auto-lapses when the tap drops, and can be
+   *  force-taken. See lease.ts. */
+  controllerId: string | null;
+  controllerName: string | null;
+  leaseExpiresAt: string | null;
+  /** Whether a client marked this thread done/archived; propagated to all
+   *  clients so the controller finishing it archives it everywhere. */
+  archived: boolean;
   /** Git origin URL of the session's repo, so the laptop can match a local
    *  project to fetch checkpoint branches from. */
   originUrl: string | null;
@@ -206,6 +237,59 @@ export interface RemoteProjectInfo {
   id: ProjectId;
   name: string;
 }
+
+/** Behavioral settings a master exposes over `GET /settings`, so a client can
+ *  adopt them on connect (ADR-0011, one-time pull on connect; not reset on
+ *  disconnect). UI/window state is intentionally excluded (machine-specific). */
+export interface RemoteSettingsSnapshot {
+  piSettings: PiSettings;
+  autoCompact: AutoCompactSettings;
+  utilityModel: ModelInfo | null;
+}
+
+/** Allowlisted `~/.pi/agent` files ported over `GET /pi-config` on connect
+ *  (ADR-0011). Excludes machine-identity / local-path files:
+ *  peach-remote-host.json (the client's own serving identity),
+ *  peach-connectors*.json + mcp.json (local binary paths / OAuth clients),
+ *  caches (peach-*-cache.json, codex-pool.json, package*.json, .DS_Store). */
+export const PORTABLE_PI_CONFIG_FILES = [
+  "models.json",
+  "auth.json",
+  "settings.json",
+  ".env",
+  ".env.local",
+  "caveman.json",
+  "vision-proxy.json",
+  "promptsmith-settings.json",
+  "fancy-footer.json",
+  "peach-vision-consent.json",
+  "peach-custom-connections.json",
+  "peach-bws.json",
+  /** Extension enable/disable list (pi settings' packages/extensions arrays). */
+  "package.json",
+] as const;
+
+/** Directories under ~/.pi/agent to sync wholesale (blind overwrite of each
+ *  file, recursed), so extensions + skills — and the per-skill
+ *  `disable-model-invocation` frontmatter flag that gates system-prompt
+ *  injection — carry over from the master (ADR-0011). */
+export const PORTABLE_PI_DIRS = ["skills", "extensions"] as const;
+
+/** Glob patterns to skip when walking PORTABLE_PI_DIRS: each machine
+ *  regenerates these locally, so blind-overwriting them would be wasted work
+ *  (and could clobber a machine's own install). */
+export const PORTABLE_PI_DIR_SKIP = [
+  "node_modules/**",
+  ".cache/**",
+  "**/package-lock.json",
+] as const;
+
+/** Response of `GET /pi-config`: filename → file contents (null when the
+ *  master doesn't have that file). Keys are relative to ~/.pi/agent — flat
+ *  names for allowlisted files, or `skills/<name>/...` / `extensions/...`
+ *  paths for the synced directory trees. The client overwrites each present
+ *  file into its own ~/.pi/agent. */
+export type PiConfigPayload = Record<string, string | null>;
 
 /** A checkpoint snapshot the master recorded for a thread. */
 export interface RemoteCheckpoint {

@@ -215,15 +215,13 @@ export class PiUpdateService {
    * Same path-safety gate as `deleteSkill`: the file must sit directly inside a
    * `skills` directory under a known root. When `disabled` is true the skill
    * is hidden from the system prompt (trigger-only via `/skill:name`); false
-   * restores injection. Packaged skills are not editable here.
+   * restores injection. Packaged skills are not editable here. Changes apply
+   *  to new sessions; the running session keeps its current skill set.
    */
   async setSkillInvocation(
     filePath: string,
     disabled: boolean,
   ): Promise<{ ok: boolean; error?: string }> {
-    if (this.hasActiveRuns()) {
-      return { ok: false, error: "A run is active — try again when idle." };
-    }
     if (!existsSync(filePath)) return { ok: false, error: "Path no longer exists." };
     let real: string;
     try {
@@ -234,7 +232,9 @@ export class PiUpdateService {
     if (path.basename(real) !== "SKILL.md") {
       return { ok: false, error: "Refusing to edit: not a SKILL.md file." };
     }
-    if (path.basename(path.dirname(real)) !== "skills") {
+    // `real` is `.../skills/<name>/SKILL.md`; the skill folder sits directly
+    // inside a `skills` directory — validate the grandparent's basename.
+    if (path.basename(path.dirname(path.dirname(real))) !== "skills") {
       return { ok: false, error: "Refusing to edit: not a local skill." };
     }
     const allowedRoots = [homedir() + path.sep, ...this.getProjectRoots().map((r) => r + path.sep)];
@@ -285,13 +285,10 @@ export class PiUpdateService {
    *  install spec (`npm:…`/`git:…`) for packages or the resolved path for
    *  local extensions. Disabling moves the key from `packages`/`extensions`
    *  into the peach-managed `peachDisabledExtensions` stash so pi stops loading
-   *  it; enabling moves it back. Preserves all other settings keys. Applies to
-   *  new sessions.
+   *  it; enabling moves it back. Preserves all other settings keys. Applies
+   *  to new sessions; a running session keeps its current extensions.
    */
   async setEnabledExtension(key: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> {
-    if (this.hasActiveRuns()) {
-      return { ok: false, error: "A run is active — try again when idle." };
-    }
     try {
       const raw = JSON.parse(await readFile(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
       const packages = Array.isArray(raw.packages) ? [...(raw.packages as string[])] : [];

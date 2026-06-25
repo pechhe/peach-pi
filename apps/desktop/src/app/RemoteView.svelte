@@ -1,14 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
-    applyTranscriptOps,
     type RemoteHostConfig,
     type RemoteConnectInfo,
     type RemoteHostConnection,
     type RemoteTailnetPeer,
-    type RemoteSessionInfo,
-    type RemoteTapFrame,
-    type TranscriptItem,
   } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
@@ -19,11 +15,9 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
-  import Download from "@lucide/svelte/icons/download";
   import Smartphone from "@lucide/svelte/icons/smartphone";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import CopyButton from "./CopyButton.svelte";
-  import StreamingText from "./StreamingText.svelte";
   import { Switch } from "../components/ui/switch";
 
   // ── Master side: host serving status ────────────────────────────────
@@ -36,7 +30,6 @@
 
   // ── Client side: saved master connections ───────────────────────────
   let hosts = $state<RemoteHostConnection[]>([]);
-  let sessions = $state<Record<string, RemoteSessionInfo[]>>({});
   let error = $state("");
 
   // New-host form.
@@ -52,17 +45,6 @@
   let newLink = $state("");
   let linkError = $state("");
   let showManual = $state(false);
-
-  // ── Attached tap state ──────────────────────────────────────────────
-  // A single attached session at a time (v1). The transcript is folded from
-  // remote tap frames exactly like the local event:transcript stream.
-  let attached = $state<{ hostId: string; threadId: string } | null>(null);
-  let remoteTranscript = $state<TranscriptItem[]>([]);
-  let remoteSeq = $state(0);
-  let lastCheckpoint = $state<string | null>(null);
-  let tapStatus = $state("");
-  let pulling = $state(false);
-  let pullResult = $state<{ worktreePath: string; sha: string } | null>(null);
 
   async function loadHost() {
     [hostStatus, hosts] = await Promise.all([
@@ -188,77 +170,14 @@
   }
 
   async function removeHost(id: string) {
-    if (attached?.hostId === id) detach();
     await api.invoke("remote:removeHost", id);
     hosts = await api.invoke("remote:listHosts");
-    delete sessions[id];
-  }
-
-  async function listSessions(hostId: string) {
-    try {
-      sessions[hostId] = await api.invoke("remote:listSessions", hostId);
-      error = "";
-    } catch (e) {
-      error = String((e as Error).message ?? e);
-    }
-  }
-
-  function attach(hostId: string, threadId: string) {
-    if (attached) detach();
-    remoteTranscript = [];
-    remoteSeq = 0;
-    lastCheckpoint = null;
-    pullResult = null;
-    tapStatus = "connecting…";
-    attached = { hostId, threadId };
-    api.invoke("remote:attach", hostId, threadId);
-  }
-
-  function detach() {
-    api.invoke("remote:detach");
-    attached = null;
-    tapStatus = "";
-  }
-
-  async function pullToTest(hostId: string, threadId: string) {
-    pulling = true;
-    pullResult = null;
-    try {
-      pullResult = await api.invoke("remote:pullToTest", hostId, threadId);
-      error = "";
-    } catch (e) {
-      error = String((e as Error).message ?? e);
-    } finally {
-      pulling = false;
-    }
-  }
-
-  // Fold tap frames into the read-only transcript (reuses the shared model).
-  function onFrame(frame: RemoteTapFrame) {
-    if (!attached) return;
-    if (frame.threadId !== attached.threadId) return;
-    if (frame.kind === "backfill") {
-      remoteTranscript = [...frame.items];
-      remoteSeq = frame.seq;
-      tapStatus = "live";
-    } else if (frame.kind === "transcript") {
-      // Drop frames already folded into the backfill snapshot.
-      if (frame.seq <= remoteSeq) return;
-      remoteTranscript = applyTranscriptOps(remoteTranscript, frame.ops);
-      remoteSeq = frame.seq;
-    } else if (frame.kind === "checkpoint") {
-      lastCheckpoint = frame.sha;
-    } else if (frame.kind === "bye") {
-      tapStatus = `disconnected (${frame.reason})`;
-    }
   }
 
   onMount(() => {
     loadHost();
     loadLocalProjects();
     void remoteFirst.load();
-    const off = api.on("event:remoteTap", onFrame);
-    return off;
   });
 </script>
 
@@ -542,96 +461,26 @@
       {/if}
 
       {#each hosts as h (h.id)}
-        <div class="mb-2 rounded-lg border border-border bg-surface-2 p-3">
-          <div class="mb-2 flex items-center gap-2">
-            <span class="text-[13px] font-medium text-fg">{h.name}</span>
-            <span class="font-mono text-[11px] text-faint">{h.host}:{h.port}</span>
-            <button
-              class="ml-auto rounded p-1 text-muted hover:bg-surface-3 hover:text-fg"
-              onclick={() => listSessions(h.id)}
-              title="List sessions"
-            >
-              <RefreshCw size={12} />
-            </button>
-            <button
-              class="rounded p-1 text-muted hover:bg-red-500/20 hover:text-red-400"
-              onclick={() => removeHost(h.id)}
-              title="Remove"
-            >
-              <Trash2 size={12} />
-            </button>
-          </div>
-
-          {#each sessions[h.id] ?? [] as s (s.threadId)}
-            <div class="flex items-center gap-2 rounded px-2 py-1.5 text-[13px] hover:bg-surface-3">
-              <button
-                class="truncate text-left text-fg hover:text-accent"
-                onclick={() => attach(h.id, s.threadId)}
-              >
-                {s.title || s.threadId}
-              </button>
-              <span class="text-[10px] text-faint">{s.status}</span>
-              {#if s.lastCheckpointSha}
-                <button
-                  class="ml-auto flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-muted hover:bg-surface-3 hover:text-fg"
-                  onclick={() => pullToTest(h.id, s.threadId)}
-                  disabled={pulling}
-                  title="Pull checkpoint into a worktree"
-                >
-                  <Download size={11} /> Pull to test
-                </button>
-              {/if}
-            </div>
-          {/each}
-          {#if sessions[h.id] && (sessions[h.id]?.length ?? 0) === 0}
-            <p class="px-2 py-1 text-xs text-faint">No sessions served.</p>
-          {/if}
-          {#if pullResult && attached?.hostId === h.id}
-            <div class="mt-2 rounded border border-green-500/30 bg-green-500/10 px-2 py-1.5 text-[11px] text-green-400">
-              Pulled <span class="font-mono">{pullResult.sha.slice(0, 8)}</span> →
-              <span class="font-mono">{pullResult.worktreePath}</span>
-            </div>
-          {/if}
+        <div class="mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
+          <Radio size={13} class="shrink-0 text-faint" />
+          <span class="text-[13px] font-medium text-fg">{h.name}</span>
+          <span class="truncate font-mono text-[11px] text-faint">{h.host}</span>
+          <button
+            class="ml-auto rounded p-1 text-muted hover:bg-red-500/20 hover:text-red-400"
+            onclick={() => removeHost(h.id)}
+            title="Disconnect"
+          >
+            <Trash2 size={12} />
+          </button>
         </div>
       {/each}
+      {#if hosts.length > 0}
+        <p class="px-1 pt-1 text-[11px] leading-relaxed text-faint">
+          Threads from connected masters appear in the sidebar, tagged remote — open
+          and steer them like local threads.
+        </p>
+      {/if}
     </section>
 
-    <!-- ── Attached read-only transcript ────────────────────────── -->
-    {#if attached}
-      <section>
-        <h3 class="mb-2 flex items-center justify-between text-xs font-semibold tracking-wide text-faint uppercase">
-          <span>Attached — {attached.threadId.slice(0, 8)}</span>
-          <span class="flex items-center gap-2">
-            <span class="text-faint normal-case">{tapStatus}</span>
-            <button class="rounded-md px-2 py-0.5 text-[11px] text-muted hover:bg-surface-3 hover:text-fg" onclick={detach}>
-              detach
-            </button>
-          </span>
-        </h3>
-        <div class="rounded-lg border border-border bg-surface p-3">
-          {#each remoteTranscript as item (item.id)}
-            {#if item.kind === "user"}
-              <div class="mb-2 text-[13px] text-fg">
-                <span class="text-xs text-faint">you</span>
-                <p class="whitespace-pre-wrap">{item.text}</p>
-              </div>
-            {:else if item.kind === "assistant"}
-              <div class="mb-2 text-[13px] text-fg">
-                <StreamingText text={item.text} streaming={item.streaming} revealKey={item.id} />
-              </div>
-            {:else if item.kind === "tool"}
-              <div class="mb-2 rounded border border-border bg-surface-2 px-2 py-1 text-[11px] text-muted">
-                <span class="font-mono text-accent">{item.toolName}</span> {item.argsSummary}
-              </div>
-            {:else if item.kind === "notice"}
-              <div class="mb-2 text-[11px] text-faint">{item.text}</div>
-            {/if}
-          {/each}
-          {#if remoteTranscript.length === 0}
-            <p class="text-xs text-faint">No transcript yet — waiting for the master…</p>
-          {/if}
-        </div>
-      </section>
-    {/if}
   </div>
 </div>

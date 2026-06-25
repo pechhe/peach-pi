@@ -179,7 +179,29 @@
     return `${Math.floor(h / 24)}d`;
   }
 
-  const chats = $derived(threads.filter((t) => t.projectId === null));
+  const chats = $derived(threads.filter((t) => t.projectId === null && !t.remoteHostId));
+  // Threads mirrored from remote masters, grouped per host → per project so
+  // they nest under the master's real project names (each row is also tagged
+  // remote).
+  const remoteGroups = $derived.by(() => {
+    const byHost = new Map<string, { name: string; projects: Map<string, Thread[]> }>();
+    for (const t of threads) {
+      if (!t.remoteHostId) continue;
+      const h =
+        byHost.get(t.remoteHostId) ??
+        { name: t.remoteHostName ?? "Remote", projects: new Map<string, Thread[]>() };
+      const pname = t.remoteProjectName ?? "Chats";
+      const arr = h.projects.get(pname) ?? [];
+      arr.push(t);
+      h.projects.set(pname, arr);
+      byHost.set(t.remoteHostId, h);
+    }
+    return [...byHost.entries()].map(([id, h]) => ({
+      id,
+      name: h.name,
+      projects: [...h.projects.entries()].map(([name, projectThreads]) => ({ name, threads: projectThreads })),
+    }));
+  });
 
   function partition(list: Thread[]) {
     return {
@@ -458,7 +480,17 @@
       data-press="self"
       onclick={() => selectThread(thread.id)}
     >
-      {#if woke}
+      {#if thread.remoteHostId}
+        <Radio
+          size={13}
+          class="shrink-0 {thread.status === 'completed'
+            ? 'text-accent'
+            : thread.status === 'failed'
+              ? 'text-danger'
+              : 'text-faint'}"
+          title="Remote session on {thread.remoteHostName ?? 'another machine'}"
+        />
+      {:else if woke}
         <BellRing
           size={13}
           class="shrink-0 text-warning"
@@ -948,6 +980,27 @@
       {@render collapsible("chats:past", "Done", chatGroups.archived, "archived")}
     </div>
   </div>
+
+  <!-- Remote masters: threads watched on another machine (ADR-0009/0010) -->
+  {#each remoteGroups as group (group.id)}
+    <div class="border-t border-border/60 px-3 pt-3 pb-3">
+      <div class="flex items-center justify-between px-1 pb-1.5">
+        <span class="engraved flex items-center gap-1.5 text-xs font-semibold tracking-wide text-faint uppercase">
+          <Radio size={12} /> {group.name}
+        </span>
+      </div>
+      <div class="max-h-64 overflow-y-auto">
+        {#each group.projects as proj (proj.name)}
+          <div class="px-1.5 pt-1 pb-0.5 text-[10px] font-medium tracking-wide text-fainter uppercase">{proj.name}</div>
+          <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
+            {#each proj.threads as thread (thread.id)}
+              {@render threadRow(thread, "active")}
+            {/each}
+          </MovingHighlight>
+        {/each}
+      </div>
+    </div>
+  {/each}
 </aside>
 
 <ConfirmDialog

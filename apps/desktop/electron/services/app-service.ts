@@ -1,10 +1,13 @@
 import { basename } from "node:path";
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import type {
   AppSnapshot,
   AutoCompactSettings,
   ModelInfo,
   Project,
+  Thread,
   UiState,
   Worktree,
 } from "@peach-pi/shared-types";
@@ -13,6 +16,7 @@ import { seedHudThreadId } from "@peach-pi/shared-types";
 import {
   AUTO_COMPACT_KV_KEY,
   AutomationRepo,
+  REMOTE_CLIENT_ID_KV_KEY,
   UTILITY_MODEL_KV_KEY,
   defaultUiState,
   KvRepo,
@@ -36,6 +40,9 @@ export class AppService {
   private automations: AutomationRepo;
   private snoozeTimer: NodeJS.Timeout | null = null;
   private emit: Emit;
+  /** Supplies synthetic threads mirrored from remote masters (set by main.ts),
+   *  merged into the snapshot so they render in the sidebar tagged as remote. */
+  private remoteThreads: () => Thread[] = () => [];
 
   constructor(db: AppDb, emit: Emit) {
     this.emit = emit;
@@ -61,11 +68,27 @@ export class AppService {
     if (this.snoozeTimer) clearInterval(this.snoozeTimer);
   }
 
+  /** Register the provider of remote-master threads (RemoteClientService). */
+  setRemoteThreadsProvider(provider: () => Thread[]): void {
+    this.remoteThreads = provider;
+  }
+
+  /** This machine's stable client identity for remote steering leases + archive
+   *  attribution (ADR-0011). Lazily generated, persisted in KV. */
+  getRemoteClientId(): { id: string; name: string } {
+    let id = this.kv.get<string>(REMOTE_CLIENT_ID_KV_KEY);
+    if (!id) {
+      id = randomUUID();
+      this.kv.set(REMOTE_CLIENT_ID_KV_KEY, id);
+    }
+    return { id, name: hostname() };
+  }
+
   snapshot(): AppSnapshot {
     return {
       projects: this.projects.all(),
       worktrees: this.worktrees.all(),
-      threads: this.threads.all(),
+      threads: [...this.threads.all(), ...this.remoteThreads()],
       automations: this.automations.all(),
       ui: this.loadUiState(),
     };

@@ -135,6 +135,9 @@ export const ipcContracts = {
   "app:getUtilityModel": invoke<[], ModelInfo | null>(),
   /** Persist the "utility" model choice. Pass null to clear (fall back to defaults). */
   "app:setUtilityModel": invoke<[model: ModelInfo | null], ModelInfo | null>(),
+  /** This machine's stable remote-client identity, for the control indicator
+   *  (ADR-0011). */
+  "app:getRemoteClientId": invoke<[], { id: string; name: string }>(),
   /** Read the auto-compaction thresholds (percent + optional token cap). */
   "app:getAutoCompact": invoke<[], AutoCompactSettings>(),
   /** Persist the auto-compaction thresholds. */
@@ -721,6 +724,34 @@ export const ipcContracts = {
   }),
   /** Detach from a session tap. */
   "remote:detach": invoke<[], void>(),
+  /** Write path (ADR-0010): forward a composer action to a master's session so
+   *  a remote thread can be steered/messaged/aborted from this sidebar. */
+  "remote:message": invoke<[hostId: string, threadId: ThreadId, text: string], void>((id, tid) => {
+    requireNonEmptyString(id, "hostId");
+    requireNonEmptyString(tid, "threadId");
+  }),
+  "remote:steer": invoke<[hostId: string, threadId: ThreadId, text: string], void>((id, tid) => {
+    requireNonEmptyString(id, "hostId");
+    requireNonEmptyString(tid, "threadId");
+  }),
+  "remote:abort": invoke<[hostId: string, threadId: ThreadId], void>((id, tid) => {
+    requireNonEmptyString(id, "hostId");
+    requireNonEmptyString(tid, "threadId");
+  }),
+  /** Take/release the steering lease on a remote thread (ADR-0011). */
+  "remote:takeControl": invoke<[hostId: string, threadId: ThreadId], void>((id, tid) => {
+    requireNonEmptyString(id, "hostId");
+    requireNonEmptyString(tid, "threadId");
+  }),
+  "remote:releaseControl": invoke<[hostId: string, threadId: ThreadId], void>((id, tid) => {
+    requireNonEmptyString(id, "hostId");
+    requireNonEmptyString(tid, "threadId");
+  }),
+  /** The controller finishing a remote thread archives it everywhere (ADR-0011). */
+  "remote:archive": invoke<[hostId: string, threadId: ThreadId], void>((id, tid) => {
+    requireNonEmptyString(id, "hostId");
+    requireNonEmptyString(tid, "threadId");
+  }),
   /** Fetch a checkpoint branch from a master's origin into a local worktree.
    *  Matches the session's origin URL to a local project, fetches
    *  `wip/<threadId>`, and checks it out into an isolated worktree. */

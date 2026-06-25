@@ -731,3 +731,7 @@ export const UTILITY_MODEL_KV_KEY = "utility-model";
 
 /** KV key for the auto-compaction thresholds. */
 export const AUTO_COMPACT_KV_KEY = "auto-compact";
+
+/** KV key for this machine's stable remote-client identity (ADR-0011): used
+ *  to attribute steering leases + archive actions across machines. */
+export const REMOTE_CLIENT_ID_KV_KEY = "remote-client-id";

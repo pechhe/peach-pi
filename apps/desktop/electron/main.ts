@@ -1,5 +1,8 @@
 import { app, BrowserWindow, dialog, globalShortcut, Notification, screen, shell } from "electron";
 import path from "node:path";
+import { homedir } from "node:os";
+import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { PORTABLE_PI_CONFIG_FILES, PORTABLE_PI_DIRS } from "@peach-pi/shared-types";
 import { openDb } from "./persistence/db.ts";
 import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
 import { AppService } from "./services/app-service.ts";
@@ -72,6 +75,32 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
   webp: "image/webp",
 };
 
+/** Recursively list files under `root` (paths relative to `root`, posix
+ *  slashes), skipping node_modules/.cache/lockfiles so each machine keeps its
+ *  own regenerable install state. Used by the pi-config pull (ADR-0011) to
+ *  blind-overwrite the extensions/ + skills/ trees. */
+async function collectTreeFiles(root: string): Promise<string[]> {
+  const out: string[] = [];
+  async function walk(dir: string, prefix: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // missing dir on this machine: nothing to serve
+    }
+    for (const e of entries) {
+      if (e.name === "node_modules" || e.name === ".cache") continue;
+      const rel = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.name === "package-lock.json") continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(full, rel);
+      else out.push(rel);
+    }
+  }
+  await walk(root, "");
+  return out;
+}
+
 /** Read a local image file as base64. Returns null on unsupported ext or I/O error. */
 async function readImageFile(
   filePath: string,
@@ -110,7 +139,12 @@ async function saveSkillFile(skillName: string, filePath: string): Promise<strin
 }
 
 // Boot sequence only. Feature logic lives in services.
-if (!app.requestSingleInstanceLock()) {
+// Single-instance lock keeps end users from spawning duplicates. Opt out via
+// PEACH_PI_ALLOW_MULTI_INSTANCE=1 so a dev build can run alongside a packaged
+// build (or vice versa) for side-by-side testing.
+if (process.env.PEACH_PI_ALLOW_MULTI_INSTANCE === "1") {
+  void boot();
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   void boot();
@@ -233,6 +267,34 @@ async function boot(): Promise<void> {
         .snapshot()
         .projects.filter((p) => !p.archivedAt)
         .map((p) => ({ id: p.id, name: p.name })),
+    settings: async () => ({
+      piSettings: await getPiSettings(),
+      autoCompact: appService.getAutoCompact(),
+      utilityModel: appService.getUtilityModel(),
+    }),
+    piConfig: async () => {
+      const dir = path.join(homedir(), ".pi", "agent");
+      const out: Record<string, string | null> = {};
+      // Flat allowlisted files (models/auth/settings/.../package.json — the
+      // extension enable list lives here).
+      for (const name of PORTABLE_PI_CONFIG_FILES) {
+        try {
+          out[name] = await readFile(path.join(dir, name), "utf8");
+        } catch {
+          out[name] = null;
+        }
+      }
+      // Directory trees (ADR-0011): extensions + skills, so the per-skill
+      // `disable-model-invocation` frontmatter (system-prompt injection
+      // on/off) carries over. Skip node_modules/.cache/lockfiles — each
+      // machine regenerates those locally.
+      for (const sub of PORTABLE_PI_DIRS) {
+        const root = path.join(dir, sub);
+        const files = await collectTreeFiles(root);
+        for (const rel of files) out[`${sub}/${rel}`] = await readFile(path.join(root, rel), "utf8");
+      }
+      return out;
+    },
     // Steer-back verbs (ADR-0010): thin forwarders to the same services the
     // desktop renderer drives. `message` mirrors the desktop composer's plain
     // send — prompt when idle, follow-up queue while running.
@@ -240,6 +302,10 @@ async function boot(): Promise<void> {
       message: (threadId, text) => threadService.prompt(threadId, text),
       steer: (threadId, text) => threadService.steer(threadId, text),
       abort: (threadId) => threadService.abort(threadId),
+      archiveThread: (threadId) => {
+        threadService.archive(threadId);
+        return Promise.resolve();
+      },
       deleteQueued: (threadId, kind, index) =>
         kind === "steer"
           ? threadService.deleteSteer(threadId, index)
@@ -276,7 +342,46 @@ async function boot(): Promise<void> {
     },
     path.join(app.getPath("userData"), "worktrees"),
   );
-  void remoteClient.load();
+  // Fold remote-master threads into the app snapshot so they render in the
+  // normal sidebar (tagged remote); republish whenever the poll refreshes them.
+  appService.setRemoteThreadsProvider(() => remoteClient.remoteThreadsSnapshot());
+  remoteClient.onChange = () => emit("event:snapshot", appService.snapshot());
+  // One-time settings pull on connect (ADR-0011): adopt the master's behavioral
+  // settings into this client, with a guard so the utility model is only
+  // applied if its provider resolves on this machine.
+  remoteClient.applySettings = async (settings) => {
+    await setPiSettings(settings.piSettings);
+    appService.setAutoCompact(settings.autoCompact);
+    if (settings.utilityModel) {
+      try {
+        const known = (await import("@peach-pi/pi-client").then((m) => m.listAvailableModels()))
+          .map((m) => `${m.provider}:${m.id}`);
+        if (known.includes(`${settings.utilityModel.provider}:${settings.utilityModel.id}`)) {
+          appService.setUtilityModel(settings.utilityModel);
+        }
+      } catch {
+        // Model list unreadable — leave the local utility model untouched.
+      }
+    }
+    emit("event:snapshot", appService.snapshot());
+  };
+  // Overwrite the allowlisted ~/.pi/agent files from the master (ADR-0011).
+  remoteClient.applyPiConfig = async (payload) => {
+    const dir = path.join(homedir(), ".pi", "agent");
+    await mkdir(dir, { recursive: true });
+    for (const [name, contents] of Object.entries(payload)) {
+      if (contents == null) continue;
+      const dest = path.join(dir, name);
+      // Blind-overwrite flat files + the synced skills//extensions/ trees
+      // (ADR-0011). `name` may carry subdirs (e.g. `skills/foo/SKILL.md`),
+      // so create the parent first. */
+      await mkdir(path.dirname(dest), { recursive: true });
+      await writeFile(dest, contents, "utf8");
+    }
+  };
+  void remoteClient.load().then(() => remoteClient.ensurePolling());
+  // Attribute steering leases + archive actions to this machine (ADR-0011).
+  remoteClient.clientIdentity = () => appService.getRemoteClientId();
 
   const subagentService = new SubagentService(db);
   const graphifyService = new GraphifyService(db);
@@ -363,6 +468,7 @@ async function boot(): Promise<void> {
     },
     "app:getUtilityModel": () => appService.getUtilityModel(),
     "app:setUtilityModel": (model) => appService.setUtilityModel(model),
+    "app:getRemoteClientId": () => appService.getRemoteClientId(),
     "app:getAutoCompact": () => appService.getAutoCompact(),
     "app:setAutoCompact": (settings) => appService.setAutoCompact(settings),
     "app:getPiSettings": () => getPiSettings(),
@@ -641,6 +747,12 @@ async function boot(): Promise<void> {
     "remote:listSessions": (hostId) => remoteClient.listSessions(hostId),
     "remote:attach": (hostId, threadId) => remoteClient.attach(hostId, threadId),
     "remote:detach": () => remoteClient.detach(),
+    "remote:message": (hostId, threadId, text) => remoteClient.message(hostId, threadId, text),
+    "remote:steer": (hostId, threadId, text) => remoteClient.steer(hostId, threadId, text),
+    "remote:abort": (hostId, threadId) => remoteClient.abort(hostId, threadId),
+    "remote:takeControl": (hostId, threadId) => remoteClient.takeControl(hostId, threadId),
+    "remote:releaseControl": (hostId, threadId) => remoteClient.releaseControl(hostId, threadId),
+    "remote:archive": (hostId, threadId) => remoteClient.archive(hostId, threadId),
     "remote:pullToTest": (hostId, threadId) => remoteClient.pullToTest(hostId, threadId),
     // Movable execution / remote-first mode (docs/remote-handoff.md).
     "handoff:getMode": () => handoffService.getMode(),

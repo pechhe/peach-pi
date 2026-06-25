@@ -767,7 +767,16 @@
     }
 
     try {
-      if (asSteer && running) {
+      if (thread.remoteHostId && thread.remoteThreadId) {
+        // Remote master thread: forward over the relay write path (ADR-0010)
+        // instead of driving a local pi process. Plan/tool-mode and images
+        // aren't carried remotely yet — text steer/message only.
+        if (asSteer && running) {
+          await api.invoke("remote:steer", thread.remoteHostId, thread.remoteThreadId, outgoingWithHints);
+        } else {
+          await api.invoke("remote:message", thread.remoteHostId, thread.remoteThreadId, outgoingWithHints);
+        }
+      } else if (asSteer && running) {
         await api.invoke("threads:steer", thread.id, outgoingWithHints);
       } else {
         await api.invoke("threads:prompt", thread.id, outgoingWithHints, images, toolMode);
@@ -950,7 +959,11 @@
       if (abortArmed) {
         abortArmed = false;
         markAborted(thread.id);
-        void api.invoke("threads:abort", thread.id);
+        if (thread.remoteHostId && thread.remoteThreadId) {
+          void api.invoke("remote:abort", thread.remoteHostId, thread.remoteThreadId);
+        } else {
+          void api.invoke("threads:abort", thread.id);
+        }
       } else {
         abortArmed = true;
         extensionUi.notify("Press Esc again to stop the model");
