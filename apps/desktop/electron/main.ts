@@ -714,7 +714,11 @@ async function boot(): Promise<void> {
       await gitService.branchWorktree(dir, issueBranchName(issue.number, issue.title));
       const wt = appService.addWorktree(projectId, dir, issueWorktreeName(issue.number));
       const thread = await threadService.createThread(projectId, wt.id, wt.dir);
-      await threadService.prompt(thread.id, buildSeedPrompt(issue));
+      const parentPrd =
+        issue.parent != null
+          ? (res.issues.find((i) => i.number === issue.parent && i.isPrd) ?? null)
+          : null;
+      await threadService.prompt(thread.id, buildSeedPrompt(issue, parentPrd));
       return { ok: true, threadId: thread.id };
     },
     "git:info": (id) => gitService.info(id),

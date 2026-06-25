@@ -6,6 +6,7 @@ import {
   enrichIssues,
   groupWorkQueue,
   mergedClosedIssues,
+  extractPrdContext,
   issueBranchName,
   issueWorktreeName,
   buildSeedPrompt,
@@ -213,6 +214,60 @@ test("buildSeedPrompt: includes body + acceptance criteria + test/PR gate", () =
   assert.match(seed, /## Definition of done/);
   assert.match(seed, /- \[ \] It works/);
   assert.match(seed, /open a pull request and then stop at the human gate/);
+});
+
+const PRD_BODY = `## Problem Statement
+
+Some problem.
+
+## User Stories
+
+- As a user I want X.
+
+## Implementation Decisions
+
+- Use the typed IPC seam.
+
+## Testing Decisions
+
+- Cover the parser with unit tests.
+
+## Out of Scope
+
+- Everything else.
+`;
+
+test("extractPrdContext: pulls only the three context sections, in order", () => {
+  const ctx = extractPrdContext(PRD_BODY);
+  assert.match(ctx, /### User Stories\n- As a user I want X\./);
+  assert.match(ctx, /### Implementation Decisions\n- Use the typed IPC seam\./);
+  assert.match(ctx, /### Testing Decisions\n- Cover the parser with unit tests\./);
+  // Non-context sections are excluded.
+  assert.doesNotMatch(ctx, /Problem Statement|Out of Scope/);
+});
+
+test("extractPrdContext: empty when none of the sections are present", () => {
+  assert.equal(extractPrdContext("## Problem Statement\n\nx\n"), "");
+});
+
+test("buildSeedPrompt: folds in parent PRD context when launched on a child", () => {
+  const [child, prd] = enrichIssues([
+    raw({ number: 17, title: "Slice", body: "## What to build\n\nBuild it.\n" }),
+    raw({ number: 16, title: "Work Queue", labels: ["prd"], body: PRD_BODY }),
+  ]);
+  const seed = buildSeedPrompt(child!, prd!);
+  assert.match(seed, /## Parent PRD #16: Work Queue/);
+  assert.match(seed, /### User Stories/);
+  assert.match(seed, /### Implementation Decisions/);
+  assert.match(seed, /### Testing Decisions/);
+  assert.match(seed, /Build it\./);
+});
+
+test("buildSeedPrompt: no parent PRD launches with only its own context", () => {
+  const [child] = enrichIssues([raw({ number: 9, title: "Refactor", body: "Just do it.\n" })]);
+  const withNull = buildSeedPrompt(child!, null);
+  assert.equal(withNull, buildSeedPrompt(child!));
+  assert.doesNotMatch(withNull, /Parent PRD/);
 });
 
 test("groupWorkQueue: done issues drop out of displayed lists", () => {

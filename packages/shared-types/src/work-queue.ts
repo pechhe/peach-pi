@@ -134,16 +134,38 @@ export function issueWorktreeName(number: number): string {
   return `issue-${number}`;
 }
 
-/** Build the seed prompt for an agent run: the issue body plus its acceptance
- *  criteria as the definition of done, and the standing test+PR gate. Pure. */
-export function buildSeedPrompt(issue: TrackedIssue): string {
+/** PRD sections worth handing an implementing agent as standing context. */
+const PRD_CONTEXT_SECTIONS = ["User Stories", "Implementation Decisions", "Testing Decisions"];
+
+/** Pull the {@link PRD_CONTEXT_SECTIONS} out of a PRD body and re-render them
+ *  as a markdown block. Empty/absent sections are skipped; returns "" when none
+ *  are present. Pure — unit-tested. */
+export function extractPrdContext(prdBody: string): string {
+  return PRD_CONTEXT_SECTIONS.map((heading) => {
+    const text = sectionLines(prdBody, heading).join("\n").trim();
+    return text ? `### ${heading}\n${text}` : "";
+  })
+    .filter((s) => s !== "")
+    .join("\n\n");
+}
+
+/** Build the seed prompt for an agent run: the issue body, the parent PRD's
+ *  standing context (User Stories / Implementation Decisions / Testing
+ *  Decisions) when launched on a child issue, the acceptance criteria as the
+ *  definition of done, and the standing test+PR gate. An issue with no parent
+ *  PRD gets only its own context. Pure — unit-tested. */
+export function buildSeedPrompt(issue: TrackedIssue, parentPrd?: TrackedIssue | null): string {
+  const prdContext = parentPrd ? extractPrdContext(parentPrd.body) : "";
+  const prdBlock = prdContext
+    ? `\n\n## Parent PRD #${parentPrd!.number}: ${parentPrd!.title}\n\n${prdContext}`
+    : "";
   const dod =
     issue.acceptanceCriteria.length > 0
       ? `\n\n## Definition of done\n${issue.acceptanceCriteria.map((c) => `- [ ] ${c}`).join("\n")}`
       : "";
   return (
     `You are implementing issue #${issue.number}: ${issue.title}.\n\n` +
-    `${issue.body.trim()}${dod}\n\n` +
+    `${issue.body.trim()}${prdBlock}${dod}\n\n` +
     `When the work is complete, run the full test suite. Once it is green, ` +
     `open a pull request and then stop at the human gate for review — do not merge.`
   );
