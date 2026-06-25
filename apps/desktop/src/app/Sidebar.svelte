@@ -36,6 +36,7 @@
   import MessageSquare from "@lucide/svelte/icons/message-square";
   import Archive from "@lucide/svelte/icons/archive";
   import GitBranchPlus from "@lucide/svelte/icons/git-branch-plus";
+  import ListChecks from "@lucide/svelte/icons/list-checks";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { TAG_META } from "../lib/tag-meta";
@@ -60,6 +61,7 @@
     onNewChat,
     onOpenView,
     onOpenTesting,
+    onOpenWorkQueue,
     onOpenSearch,
     onReloadAll,
     remoteFirst = false,
@@ -78,6 +80,7 @@
     onNewChat: () => void;
     onOpenView: (view: AppView) => void;
     onOpenTesting: (projectId: string) => void;
+    onOpenWorkQueue: (projectId: string) => void;
     onOpenSearch: () => void;
     onReloadAll: () => void;
     /** Remote-first mode on: the Remote item glows red + pulses. */
@@ -870,6 +873,18 @@
                 />
               {/if}
             </div>
+          {/if}
+          {#if group.project.kind === "repo"}
+            <Tooltip text="Open work queue">
+              <button
+                class="flex shrink-0 items-center rounded px-1 py-0.5
+                  {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}
+                  {activeView === 'work-queue' ? 'text-accent opacity-100' : 'text-faint hover:text-fg'}"
+                onclick={() => onOpenWorkQueue(group.project.id)}
+                data-testid="project-work-queue"
+                aria-label="Open work queue"><ListChecks size={14} /></button
+              >
+            </Tooltip>
           {/if}
           {#if group.toTest.length > 0}
             <Tooltip text="Open testing area">

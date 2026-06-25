@@ -129,7 +129,56 @@ export type AppView =
   | "graph"
   | "bws"
   | "remote"
+  | "work-queue"
   | "playroom";
+
+/** Derived workflow status for a Work Queue issue.
+ *  - `done`: closed-as-completed (a merged PR closes its issue as completed)
+ *  - `ready`: open and every blocker is done
+ *  - `blocked`: open with at least one unmet blocker */
+export type IssueStatus = "done" | "ready" | "blocked";
+
+/** One issue from the project's tracker, enriched with the structure parsed
+ *  from its body (`## Parent`, `## Blocked by`, `## Acceptance criteria`), the
+ *  `prd` label, and a derived {@link IssueStatus}. */
+export interface TrackedIssue {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "closed";
+  labels: string[];
+  /** True when the issue carries the `prd` label. */
+  isPrd: boolean;
+  /** Parent PRD issue number from `## Parent`, or null. */
+  parent: number | null;
+  /** Issue numbers this one is `## Blocked by`. */
+  blockedBy: number[];
+  /** `## Acceptance criteria` checklist item texts. */
+  acceptanceCriteria: string[];
+  status: IssueStatus;
+  /** Blockers that are not yet done — drives the greyed-out "blocked by #N" UI. */
+  unmetBlockers: number[];
+  /** Raw issue body (used to seed an agent run). */
+  body: string;
+  /** True when an agent worktree already exists for this issue (no relaunch). */
+  inProgress: boolean;
+}
+
+/** Result of launching an agent on an issue from the Work Queue. */
+export type StartAgentResult =
+  | { ok: true; threadId: ThreadId }
+  | { ok: false; reason: "not-ready" | "in-progress" | "error"; message?: string };
+
+/** Result of launching every ready issue under a PRD in one action. */
+export type StartAllReadyResult =
+  | { ok: true; launched: Array<{ issueNumber: number; threadId: ThreadId }> }
+  | { ok: false; reason: "error"; message?: string };
+
+/** Result of listing a project's tracker issues. A project with no git remote
+ *  or a non-GitHub remote resolves to a placeholder reason rather than erroring. */
+export type WorkQueueResult =
+  | { ok: true; source: "gh" | "rest"; issues: TrackedIssue[] }
+  | { ok: false; reason: "no-remote" | "not-github" | "error"; message?: string };
 
 /** Base64 image crossing the IPC boundary with a prompt. */
 export interface ImagePayload {

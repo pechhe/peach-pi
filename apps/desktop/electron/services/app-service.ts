@@ -168,8 +168,12 @@ export class AppService {
     this.publish();
   }
 
-  addWorktree(projectId: string, dir: string): Worktree {
-    const wt = this.worktrees.insert({ projectId, dir, name: this.worktrees.nextName(projectId) });
+  addWorktree(projectId: string, dir: string, name?: string): Worktree {
+    const wt = this.worktrees.insert({
+      projectId,
+      dir,
+      name: name ?? this.worktrees.nextName(projectId),
+    });
     this.publish();
     return wt;
   }

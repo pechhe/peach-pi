@@ -12,6 +12,7 @@ import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
 import { GraphifyService } from "./services/graphify-service.ts";
+import { IssuesService } from "./services/issues-service.ts";
 import { SideChatService } from "./services/side-chat-service.ts";
 import { DevTapInstallService } from "./services/devtap-install-status.ts";
 import { getCavemanState, setCavemanEnabled, setCavemanLevel } from "./services/caveman.ts";
@@ -454,6 +455,26 @@ async function boot(): Promise<void> {
     });
     const dir = result.filePaths[0];
     return result.canceled || !dir ? null : appService.addProject(dir);
+  }
+
+  // Launch one agent on an isolated worktree+branch for a ready issue, seeded
+  // with the issue (and its parent PRD) context. Shared by the single-issue
+  // `workQueue:startAgent` and the PRD-level `workQueue:startAllReady`.
+  async function launchIssueAgent(
+    projectId: string,
+    issue: TrackedIssue,
+    allIssues: TrackedIssue[],
+  ): Promise<string> {
+    const dir = await gitService.createWorktree(projectId);
+    await gitService.branchWorktree(dir, issueBranchName(issue.number, issue.title));
+    const wt = appService.addWorktree(projectId, dir, issueWorktreeName(issue.number));
+    const thread = await threadService.createThread(projectId, wt.id, wt.dir);
+    const parentPrd =
+      issue.parent != null
+        ? (allIssues.find((i) => i.number === issue.parent && i.isPrd) ?? null)
+        : null;
+    await threadService.prompt(thread.id, buildSeedPrompt(issue, parentPrd));
+    return thread.id;
   }
 
   // Declarative pass-throughs: channel → bound method / bare function. The

@@ -50,6 +50,9 @@ import type {
   VisionProxyInstallState,
   Project,
   ProjectId,
+  StartAgentResult,
+  StartAllReadyResult,
+  WorkQueueResult,
   QueueState,
   RecordingState,
   RecordingStopResult,
@@ -399,6 +402,19 @@ export const ipcContracts = {
   >((filePath) => requireNonEmptyString(filePath, "filePath")),
 
   // git (per-thread working directory)
+  // work queue — per-project tracker issues (read-only) for the Work Queue view
+  "workQueue:list": invoke<[projectId: ProjectId], WorkQueueResult>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+  /** Launch an agent on a ready issue: new thread on an isolated worktree+branch. */
+  "workQueue:startAgent": invoke<[projectId: ProjectId, issueNumber: number], StartAgentResult>(
+    (id) => requireNonEmptyString(id, "projectId"),
+  ),
+  /** Launch an agent on every ready (unblocked, not-in-progress) child of a PRD. */
+  "workQueue:startAllReady": invoke<[projectId: ProjectId, prdNumber: number], StartAllReadyResult>(
+    (id) => requireNonEmptyString(id, "projectId"),
+  ),
+
   "git:info": invoke<[threadId: ThreadId], GitInfo>((id) => requireNonEmptyString(id, "threadId")),
   "git:changedFiles": invoke<[threadId: ThreadId], GitChangedFile[]>(),
   "git:fileDiff": invoke<[threadId: ThreadId, filePath: string], string>(),

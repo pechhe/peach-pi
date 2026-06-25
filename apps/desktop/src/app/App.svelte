@@ -32,6 +32,7 @@
   import ConnectorsView from "./ConnectorsView.svelte";
   import BwsView from "./BwsView.svelte";
   import TestingView from "./TestingView.svelte";
+  import WorkQueueView from "./WorkQueueView.svelte";
   import RemoteView from "./RemoteView.svelte";
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
@@ -85,6 +86,7 @@
   let view = $state<AppView>("thread");
   // Per-project scope for views that are scoped to one project (Testing).
   let testingProjectId = $state<string | null>(null);
+  let workQueueProjectId = $state<string | null>(null);
 
   // ── New thread ───────────────────────────────────────────────────────
   // Threads are created eagerly: clicking "new thread" makes a real thread (and
@@ -269,6 +271,7 @@
     view = entry.view;
     selectedThreadId = entry.threadId;
     if (entry.view === "testing") testingProjectId = entry.projectId ?? null;
+    if (entry.view === "work-queue") workQueueProjectId = entry.projectId ?? null;
     if (entry.threadId) void api.invoke("app:setSelectedThread", entry.threadId); // overlay prompt target
   }
   function pushNav(entry: NavEntry) {
@@ -304,6 +307,9 @@
   }
   function openTesting(projectId: string) {
     pushNav({ view: "testing", threadId: null, projectId });
+  }
+  function openWorkQueue(projectId: string) {
+    pushNav({ view: "work-queue", threadId: null, projectId });
   }
   function openSettings(query = "") {
     settingsQuery = query;
@@ -414,6 +420,7 @@
     onNewChat={() => startNewThread(null)}
     onOpenView={openView}
     onOpenTesting={openTesting}
+    onOpenWorkQueue={openWorkQueue}
     onNewThread={newThreadInProject}
     onNewWorktree={newWorktreeInProject}
     onOpenSearch={() => (searchOpen = true)}
@@ -463,7 +470,7 @@
       </div>
     {/if}
     <div bind:this={contentEl} class="sidebar-content relative z-10 mb-2 mr-2 mt-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[16px] bg-surface shadow-[-4px_7px_18px_-6px_rgba(0,0,0,0.14),-4px_6px_10px_-4px_rgba(0,0,0,0.18)]" style="margin-left: {contentLeft}px">
-    {#key view === "thread" ? `thread:${selectedThreadId}` : view === "testing" ? `testing:${testingProjectId}` : view}
+    {#key view === "thread" ? `thread:${selectedThreadId}` : view === "testing" ? `testing:${testingProjectId}` : view === "work-queue" ? `work-queue:${workQueueProjectId}` : view}
     <div class="view-enter flex min-h-0 flex-1">
     {#if view === "settings"}
       <SettingsView initialQuery={settingsQuery} onOpenPlayroom={() => openView("playroom")} />
@@ -493,6 +500,12 @@
       <PlayroomView />
     {:else if view === "graph"}
       <GraphView projectId={selectedThread?.projectId ?? null} />
+    {:else if view === "work-queue"}
+      <WorkQueueView
+        projects={snapshot.current.projects}
+        projectId={workQueueProjectId}
+        onLaunched={selectThread}
+      />
     {:else if view === "testing"}
       <TestingView
         projects={snapshot.current.projects}
