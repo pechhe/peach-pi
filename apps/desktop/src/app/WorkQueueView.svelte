@@ -1,18 +1,43 @@
 <script lang="ts">
   import type { Project } from "@peach-pi/shared-types";
   import { groupWorkQueue } from "@peach-pi/shared-types";
+  import { api } from "../lib/ipc";
   import { workQueue } from "../stores/work-queue.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Play from "@lucide/svelte/icons/play";
 
   let {
     projects,
     projectId,
+    onLaunched,
   }: {
     projects: Project[];
     projectId: string | null;
+    onLaunched: (threadId: string) => void;
   } = $props();
 
   const project = $derived(projectId ? (projects.find((p) => p.id === projectId) ?? null) : null);
+
+  let launching = $state<number | null>(null);
+  let launchError = $state("");
+
+  async function startAgent(issueNumber: number) {
+    if (!projectId || launching !== null) return;
+    launching = issueNumber;
+    launchError = "";
+    try {
+      const res = await api.invoke("workQueue:startAgent", projectId, issueNumber);
+      if (res.ok) {
+        await workQueue.load(projectId);
+        onLaunched(res.threadId);
+      } else {
+        launchError = `Couldn’t start #${issueNumber} (${res.reason})`;
+        await workQueue.load(projectId);
+      }
+    } finally {
+      launching = null;
+    }
+  }
 
   // Load whenever the viewed project changes.
   $effect(() => {
@@ -40,6 +65,9 @@
   </header>
 
   <div class="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+    {#if launchError}
+      <p class="mb-2 text-xs text-red-500" data-testid="work-queue-launch-error">{launchError}</p>
+    {/if}
     {#if workQueue.loading && !result}
       <p class="text-sm text-faint">Loading issues…</p>
     {:else if result && !result.ok}
@@ -93,9 +121,17 @@
                       class="min-w-0 flex-1 truncate text-[13px] text-fg hover:underline"
                       >{issue.title}</a
                     >
-                    {#if issue.status === "ready"}
-                      <span class="num-badge num-badge--accent" data-testid="status-ready"
-                        >ready</span
+                    {#if issue.inProgress}
+                      <span class="shrink-0 text-xs text-faint" data-testid="status-in-progress"
+                        >in progress</span
+                      >
+                    {:else if issue.status === "ready"}
+                      <button
+                        class="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"
+                        onclick={() => startAgent(issue.number)}
+                        disabled={launching !== null}
+                        data-testid="start-agent"
+                        ><Play size={12} /> {launching === issue.number ? "Starting…" : "Start agent"}</button
                       >
                     {:else if issue.status === "blocked"}
                       <span class="shrink-0 text-xs text-faint" data-testid="status-blocked"

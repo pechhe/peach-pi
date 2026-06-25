@@ -238,6 +238,11 @@ async function boot(): Promise<void> {
   threadService.setGitService(gitService);
   const issuesService = new IssuesService(
     (id) => appService.snapshot().projects.find((p) => p.id === id)?.path ?? null,
+    (id) =>
+      appService
+        .snapshot()
+        .worktrees.filter((w) => w.projectId === id && !w.archivedAt)
+        .map((w) => w.name),
   );
   // Lift a conversation thread into a remote work unit before each prompt when
   // remote-first mode is on (returns a status note; the hook swallows errors).
@@ -694,6 +699,24 @@ async function boot(): Promise<void> {
     "graphify:report": (id) => graphifyService.report(id),
     "devtap:projectStatus": (id) => devTapInstallService.status(id),
     "workQueue:list": (projectId) => issuesService.list(projectId),
+    "workQueue:startAgent": async (projectId, issueNumber) => {
+      const { issueBranchName, issueWorktreeName, buildSeedPrompt } = await import(
+        "@peach-pi/shared-types"
+      );
+      const res = await issuesService.list(projectId);
+      if (!res.ok) return { ok: false, reason: "error", message: res.reason };
+      const issue = res.issues.find((i) => i.number === issueNumber);
+      if (!issue) return { ok: false, reason: "error", message: "Issue not found" };
+      if (issue.inProgress) return { ok: false, reason: "in-progress" };
+      if (issue.status !== "ready") return { ok: false, reason: "not-ready" };
+
+      const dir = await gitService.createWorktree(projectId);
+      await gitService.branchWorktree(dir, issueBranchName(issue.number, issue.title));
+      const wt = appService.addWorktree(projectId, dir, issueWorktreeName(issue.number));
+      const thread = await threadService.createThread(projectId, wt.id, wt.dir);
+      await threadService.prompt(thread.id, buildSeedPrompt(issue));
+      return { ok: true, threadId: thread.id };
+    },
     "git:info": (id) => gitService.info(id),
     "git:changedFiles": (id) => gitService.changedFiles(id),
     "git:fileDiff": (id, filePath) => gitService.fileDiff(id, filePath),

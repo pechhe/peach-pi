@@ -5,6 +5,9 @@ import {
   isPrdLabels,
   enrichIssues,
   groupWorkQueue,
+  issueBranchName,
+  issueWorktreeName,
+  buildSeedPrompt,
   type RawIssue,
 } from "@peach-pi/shared-types";
 
@@ -157,6 +160,36 @@ test("groupWorkQueue: groups under PRD, lists Unparented, flags childless", () =
     unparented.issues.map((i) => i.number),
     [9],
   );
+});
+
+test("issueBranchName / issueWorktreeName: deterministic slugged identifiers", () => {
+  assert.equal(
+    issueBranchName(19, "One-click Start agent (gated!)"),
+    "agent/issue-19-one-click-start-agent-gated",
+  );
+  assert.equal(issueWorktreeName(19), "issue-19");
+});
+
+test("enrichIssues: marks in-progress issues from the worktree set", () => {
+  const issues = enrichIssues([raw({ number: 17 }), raw({ number: 18 })], new Set([17]));
+  assert.equal(issues.find((i) => i.number === 17)!.inProgress, true);
+  assert.equal(issues.find((i) => i.number === 18)!.inProgress, false);
+});
+
+test("buildSeedPrompt: includes body + acceptance criteria + test/PR gate", () => {
+  const [issue] = enrichIssues([
+    raw({
+      number: 19,
+      title: "Start agent",
+      body: "## What to build\n\nDo the thing.\n\n## Acceptance criteria\n\n- [ ] It works\n",
+    }),
+  ]);
+  const seed = buildSeedPrompt(issue!);
+  assert.match(seed, /issue #19: Start agent/);
+  assert.match(seed, /Do the thing\./);
+  assert.match(seed, /## Definition of done/);
+  assert.match(seed, /- \[ \] It works/);
+  assert.match(seed, /open a pull request and then stop at the human gate/);
 });
 
 test("groupWorkQueue: done issues drop out of displayed lists", () => {

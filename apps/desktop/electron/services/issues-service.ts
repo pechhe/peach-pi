@@ -2,6 +2,17 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { enrichIssues, type RawIssue, type WorkQueueResult } from "@peach-pi/shared-types";
 
+/** Worktree record names of the form `issue-<n>` → the set of in-progress issue
+ *  numbers. Non-matching names (e.g. "Worktree 2") are ignored. */
+function inProgressFrom(worktreeNames: string[]): Set<number> {
+  const nums = new Set<number>();
+  for (const name of worktreeNames) {
+    const m = /^issue-(\d+)$/.exec(name);
+    if (m) nums.add(Number(m[1]));
+  }
+  return nums;
+}
+
 const run = promisify(execFile);
 
 /** Parse a git remote (ssh or https) into a GitHub owner/repo. Returns null for
@@ -53,9 +64,14 @@ export function mapRestIssue(raw: RestIssue): RawIssue | null {
  *  contract. */
 export class IssuesService {
   private getProjectPath: (projectId: string) => string | null;
+  private getWorktreeNames: (projectId: string) => string[];
 
-  constructor(getProjectPath: (projectId: string) => string | null) {
+  constructor(
+    getProjectPath: (projectId: string) => string | null,
+    getWorktreeNames: (projectId: string) => string[] = () => [],
+  ) {
     this.getProjectPath = getProjectPath;
+    this.getWorktreeNames = getWorktreeNames;
   }
 
   async list(projectId: string): Promise<WorkQueueResult> {
@@ -75,7 +91,8 @@ export class IssuesService {
     try {
       const useGh = await ghAvailable();
       const raw = useGh ? await this.viaGh(gh, cwd) : await this.viaRest(gh);
-      return { ok: true, source: useGh ? "gh" : "rest", issues: enrichIssues(raw) };
+      const inProgress = inProgressFrom(this.getWorktreeNames(projectId));
+      return { ok: true, source: useGh ? "gh" : "rest", issues: enrichIssues(raw, inProgress) };
     } catch (e) {
       return { ok: false, reason: "error", message: e instanceof Error ? e.message : String(e) };
     }

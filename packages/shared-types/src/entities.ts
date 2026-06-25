@@ -158,7 +158,16 @@ export interface TrackedIssue {
   status: IssueStatus;
   /** Blockers that are not yet done — drives the greyed-out "blocked by #N" UI. */
   unmetBlockers: number[];
+  /** Raw issue body (used to seed an agent run). */
+  body: string;
+  /** True when an agent worktree already exists for this issue (no relaunch). */
+  inProgress: boolean;
 }
+
+/** Result of launching an agent on an issue from the Work Queue. */
+export type StartAgentResult =
+  | { ok: true; threadId: ThreadId }
+  | { ok: false; reason: "not-ready" | "in-progress" | "error"; message?: string };
 
 /** Result of listing a project's tracker issues. A project with no git remote
  *  or a non-GitHub remote resolves to a placeholder reason rather than erroring. */

@@ -67,8 +67,12 @@ function isDone(raw: RawIssue): boolean {
 }
 
 /** Parse + derive status for every issue against the full set (so blocker
- *  satisfaction can be resolved). Pure — unit-tested. */
-export function enrichIssues(raw: RawIssue[]): TrackedIssue[] {
+ *  satisfaction can be resolved). `inProgressNumbers` marks issues that already
+ *  have an agent worktree. Pure — unit-tested. */
+export function enrichIssues(
+  raw: RawIssue[],
+  inProgressNumbers: ReadonlySet<number> = new Set(),
+): TrackedIssue[] {
   const doneNumbers = new Set(raw.filter(isDone).map((r) => r.number));
   return raw.map((r) => {
     const { parent, blockedBy, acceptanceCriteria } = parseIssueBody(r.body);
@@ -87,8 +91,42 @@ export function enrichIssues(raw: RawIssue[]): TrackedIssue[] {
       acceptanceCriteria,
       status,
       unmetBlockers,
+      body: r.body,
+      inProgress: inProgressNumbers.has(r.number),
     };
   });
+}
+
+const slugify = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "issue";
+
+/** The agent branch for an issue: `agent/issue-<n>-<slug>`. Pure. */
+export function issueBranchName(number: number, title: string): string {
+  return `agent/issue-${number}-${slugify(title)}`;
+}
+
+/** The worktree record name that links a worktree to its issue. Pure. */
+export function issueWorktreeName(number: number): string {
+  return `issue-${number}`;
+}
+
+/** Build the seed prompt for an agent run: the issue body plus its acceptance
+ *  criteria as the definition of done, and the standing test+PR gate. Pure. */
+export function buildSeedPrompt(issue: TrackedIssue): string {
+  const dod =
+    issue.acceptanceCriteria.length > 0
+      ? `\n\n## Definition of done\n${issue.acceptanceCriteria.map((c) => `- [ ] ${c}`).join("\n")}`
+      : "";
+  return (
+    `You are implementing issue #${issue.number}: ${issue.title}.\n\n` +
+    `${issue.body.trim()}${dod}\n\n` +
+    `When the work is complete, run the full test suite. Once it is green, ` +
+    `open a pull request and then stop at the human gate for review — do not merge.`
+  );
 }
 
 /** A display group in the Work Queue: a PRD with its direct child issues, or

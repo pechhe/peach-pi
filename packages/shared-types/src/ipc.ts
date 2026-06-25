@@ -50,6 +50,7 @@ import type {
   VisionProxyInstallState,
   Project,
   ProjectId,
+  StartAgentResult,
   WorkQueueResult,
   QueueState,
   RecordingState,
@@ -403,6 +404,10 @@ export const ipcContracts = {
   // work queue — per-project tracker issues (read-only) for the Work Queue view
   "workQueue:list": invoke<[projectId: ProjectId], WorkQueueResult>((id) =>
     requireNonEmptyString(id, "projectId"),
+  ),
+  /** Launch an agent on a ready issue: new thread on an isolated worktree+branch. */
+  "workQueue:startAgent": invoke<[projectId: ProjectId, issueNumber: number], StartAgentResult>(
+    (id) => requireNonEmptyString(id, "projectId"),
   ),
 
   "git:info": invoke<[threadId: ThreadId], GitInfo>((id) => requireNonEmptyString(id, "threadId")),

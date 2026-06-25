@@ -383,6 +383,13 @@ export class GitService {
     return dir;
   }
 
+  /** Create and switch a (detached) worktree onto a named branch. Used by the
+   *  Work Queue to give an agent worktree a deterministic `agent/issue-<n>-…`
+   *  branch at launch instead of waiting for the lazy first-commit branch. */
+  async branchWorktree(dir: string, branch: string): Promise<void> {
+    await git(["switch", "-c", branch], dir);
+  }
+
   // ── Rewind snapshots (Phase 2) ──────────────────────────────────────
   // Capture the full working tree (incl. untracked) as a dangling commit.
   // Non-destructive: a throwaway index (GIT_INDEX_FILE) keeps the real index

@@ -504,6 +504,7 @@
       <WorkQueueView
         projects={snapshot.current.projects}
         projectId={workQueueProjectId}
+        onLaunched={selectThread}
       />
     {:else if view === "testing"}
       <TestingView
