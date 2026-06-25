@@ -4,6 +4,7 @@ import HudComposer from "./app/HudComposer.svelte";
 import { theme } from "./lib/theme.svelte";
 import { streamReveal } from "./lib/stream-reveal.svelte";
 import { modelPrefs } from "./lib/model-prefs.svelte";
+import { loaderPrefs } from "./lib/loader-prefs.svelte";
 import { initDevTapRenderer } from "./devtap-renderer.ts";
 import { suppressNativeTooltips } from "./lib/suppress-native-tooltips.ts";
 import { TRAFFIC_LIGHT_BOTTOM } from "@peach-pi/shared-types";
@@ -35,6 +36,8 @@ theme.init();
 streamReveal.init();
 // Load global model-selector prefs (pinned slots, hidden models).
 modelPrefs.init();
+// Load curated dot-matrix loader selections per surface (square/hex/triangle).
+loaderPrefs.init();
 
 // Auto-hide scrollbar thumb: reveal only while actively scrolling.
 // Matches the Composer textarea's `.is-scrolling` pattern, applied globally.

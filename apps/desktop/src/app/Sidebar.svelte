@@ -520,7 +520,7 @@
               ? 'text-accent'
               : ''}">{thread.title}</span>
       {#if thread.status === "running"}
-        <BrailleSpinner class="session-spinner ml-auto mr-1 shrink-0" title="Thinking…" />
+        <BrailleSpinner class="session-spinner ml-auto mr-0 shrink-0" title="Thinking…" shape="hex" />
       {:else if variant === "active"}
         <span class="ml-auto shrink-0 text-[10px] text-fainter">{relativeTime(thread.lastActivityAt, now)}</span>
       {/if}

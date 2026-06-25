@@ -17,7 +17,9 @@
   },
   "pnpm": {
     "overrides": {
-      "yauzl": "^3.3.1"
+      "yauzl": "^3.3.1",
+      "motion-dom": "12.38.0",
+      "framer-motion": "12.38.0"
     }
   },
   "devDependencies": {

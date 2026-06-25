@@ -92,7 +92,7 @@
       <li class="agent-entity__node agent-entity__node--{node.tone}">
         <span class="agent-entity__time">{node.at}</span>
         <span class="agent-entity__marker agent-entity__marker--{node.tone}" aria-hidden="true">
-          {#if node.tone === "active"}<BrailleSpinner class="agent-entity__node-spinner" />{:else if node.tone === "done"}<Check size={12} />{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={12} />{/if}
+          {#if node.tone === "active"}<BrailleSpinner class="agent-entity__node-spinner" shape="triangle" />{:else if node.tone === "done"}<Check size={12} />{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={12} />{/if}
         </span>
         <div class="agent-entity__body">
           <span class="agent-entity__node-title">{node.title}</span>

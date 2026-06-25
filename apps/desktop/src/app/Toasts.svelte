@@ -1,46 +1,57 @@
 <script lang="ts">
+  // Adapter: renders the ported beui AnimatedToastStack driven by the
+  // existing `extensionUi` singleton store. The store API (notify / pushToast /
+  // dismiss) and its 5000ms auto-dismiss timers are unchanged, so the 12+
+  // call sites and the `event:notice` IPC path keep working untouched.
+  // Each store toast is mapped to an AnimatedToast with:
+  //   info→"info", warning→"neutral", error→"error" status
+  // (peach-pi has no "warning" status; neutral renders muted.)
+  // duration:0 disables the beui hook's own timers (store owns timing).
   import { extensionUi } from "../stores/extension-ui.svelte";
+  import AnimatedToastStack from "../lib/beui/animated-toast-stack.svelte";
+  import type { AnimatedToast } from "../lib/beui/use-animated-toast-stack.svelte";
+  import type { ToastStatus } from "../lib/beui/use-animated-toast-stack.svelte";
+  import { createRawSnippet } from "svelte";
 
-  // Centre over the content area (right of the sidebar), not the whole window.
-  let { sidebarWidth = 0 }: { sidebarWidth?: number } = $props();
+  const LEVEL_TO_STATUS: Record<"info" | "warning" | "error", ToastStatus> = {
+    info: "info",
+    warning: "neutral",
+    error: "error",
+  };
 
-  const colors = {
-    info: "border-border-strong bg-surface text-fg",
-    warning: "border-warning-border bg-warning-surface text-warning",
-    error: "border-danger-border bg-danger-surface text-danger",
-  } as const;
+  const text = (s: string) => createRawSnippet(() => ({ render: () => s }));
+
+  const toasts = $derived<AnimatedToast[]>(
+    extensionUi.toasts.map((t) => ({
+      id: String(t.id),
+      title: text(t.message),
+      status: LEVEL_TO_STATUS[t.level],
+      duration: 0,
+      dismissible: true,
+      action: t.action
+        ? {
+            label: text(t.action!.label),
+            onClick: () => {
+              t.action?.run();
+              extensionUi.dismiss(t.id);
+            },
+          }
+        : undefined,
+    })),
+  );
+
+  const onDismiss = (id: string) => extensionUi.dismiss(Number(id));
 </script>
 
-{#if extensionUi.toasts.length > 0}
+{#if toasts.length > 0}
+  <!-- Anchored bottom-right of the window (sidebar is on the left, so this is
+       inside the content area). beui stack renders flex-col-reverse so newer
+       toasts stack upward; enter/exit/drag animations are handled by beui. -->
   <div
-    class="fixed top-3 z-50 flex w-80 -translate-x-1/2 flex-col gap-2"
-    style="left: calc((100vw + {sidebarWidth}px) / 2); -webkit-app-region: no-drag"
+    class="fixed bottom-6 right-4 z-50 flex w-80 flex-col"
+    style="-webkit-app-region: no-drag"
     data-testid="toasts"
   >
-    {#each extensionUi.toasts as toast (toast.id)}
-      <div
-        class="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs shadow-xl {colors[toast.level]}"
-        class:cursor-pointer={toast.action}
-        role={toast.action ? "button" : undefined}
-        tabindex={toast.action ? 0 : undefined}
-        onclick={toast.action ? () => { toast.action?.run(); extensionUi.dismiss(toast.id); } : undefined}
-        onkeydown={toast.action ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toast.action?.run(); extensionUi.dismiss(toast.id); } } : undefined}
-      >
-        {#if toast.icon}
-          {@const Icon = toast.icon}
-          <Icon class="size-4 shrink-0 opacity-80" />
-        {/if}
-        <span class="select-text flex-1">{toast.message}</span>
-        {#if toast.action}
-          <button
-            class="shrink-0 rounded px-2 py-0.5 font-medium underline-offset-2 hover:underline"
-            onclick={(e) => {
-              e.stopPropagation();
-              toast.action?.run();
-              extensionUi.dismiss(toast.id);
-            }}>{toast.action.label}</button>
-        {/if}
-      </div>
-    {/each}
+    <AnimatedToastStack {toasts} {onDismiss} placement="static" position="bottom-right" class="w-full max-w-none" />
   </div>
 {/if}

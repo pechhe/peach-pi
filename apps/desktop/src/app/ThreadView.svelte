@@ -8,6 +8,7 @@
     | { type: "item"; item: TranscriptItem }
     | { type: "group"; id: string; items: ToolItem[] };
   import { transcripts } from "../stores/transcripts.svelte";
+  import { sendAnim } from "../stores/send-anim.svelte";
   import { remoteClient } from "../stores/remote-client.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
   import { mapTurns } from "../lib/transcript/turns";
@@ -18,7 +19,6 @@
   import GitWidget from "./GitWidget.svelte";
   import Tooltip from "./Tooltip.svelte";
   import DevTapWidget from "./DevTapWidget.svelte";
-  import Workflow from "@lucide/svelte/icons/workflow";
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -69,11 +69,10 @@
     return off;
   });
 
-  let { thread, onSetEnvironment, onOpenGraph, onSelectThread, onNewThread, pendingFind, onFindConsumed }: {
+  let { thread, onSetEnvironment, onSelectThread, onNewThread, pendingFind, onFindConsumed }: {
     thread: Thread;
     /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
     onSetEnvironment?: (threadId: string, worktree: boolean) => void | Promise<void>;
-    onOpenGraph: () => void;
     /** Navigate to a thread (used by the DevTap install action). */
     onSelectThread?: (threadId: string) => void;
     /** Start a new thread in the current project (`/new` system command). */
@@ -317,6 +316,29 @@
   // and never triggers the dock animation.
   const isEmpty = $derived(items.length === 0 && isNewThread(thread.title));
 
+  // ── Send animation ──────────────────────────────────────────────────
+  // A freshly-sent user message pops up into the page from its bottom-right
+  // corner (WhatsApp-style). One-shot imperative action rather than a reactive
+  // class: transcript ids are positional (u0/a1/u2…) and a `reset` op can
+  // renumber them, recreating these keyed nodes. The action runs once per node
+  // creation and only pops when it can claim a *fresh* send mark — consumed
+  // exactly once at send. So history-load and id-churn re-creations never pop.
+  const prefersReducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  function sendPop(node: HTMLElement, threadId: string) {
+    if (prefersReducedMotion || !sendAnim.claim(threadId)) return;
+    node.style.animation = "none"; // suppress the default item-enter so they don't stack
+    node.style.transformOrigin = "bottom right";
+    node.animate(
+      [
+        { opacity: 0, transform: "translateY(10px) scale(0.72)" },
+        { opacity: 1, transform: "translateY(0) scale(1)" },
+      ],
+      { duration: 340, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+    );
+  }
+
   // ── Composer docking (FLIP) ─────────────────────────────────────────
   // The composer node is shared between the centred new-thread state and the
   // bottom-docked state. When the first message promotes the thread, FLIP the
@@ -510,37 +532,54 @@
   // Distance from the bottom we still treat as "following". Small: only a
   // genuine return to the bottom re-arms the pin.
   const NEAR_BOTTOM = 24;
+  // Following only disengages once the user has scrolled up by at least this
+  // many px CUMULATIVELY in one upward gesture. Trackpad inertia emits tiny
+  // negative-deltaY events long after the finger lifts; without a threshold
+  // those silently kill following with no user intent. ~3 lines is enough to
+  // be intentional yet catch a real "scroll up to read" motion.
+  const SCROLL_UP_THRESHOLD = 80;
   let lastScrollTop = 0;
+  // Accumulated upward distance since the last downward/near-bottom motion.
+  // Resets on any downward scroll or landing at the bottom.
+  let upwardAccum = 0;
 
-  // Detect intent by DIRECTION, not distance-to-bottom. A distance test can't
-  // tell "user nudged up 80px" from "near bottom", and streaming token growth
-  // never moves scrollTop — so direction is unambiguous:
-  //   • scrollTop decreased  → user scrolled up   → stop following.
-  //   • within NEAR_BOTTOM    → at the bottom      → resume following.
-  // Programmatic pins only ever increase scrollTop to the bottom, so they
-  // land in the second case and never falsely trip scrolledUp.
+  // Intent-based following. A single tiny `scrollTop` dip during streaming
+  // (layout shifts, composer resize, tool-block insert) used to flip
+  // scrolledUp on and drop following for the rest of the turn. Instead, we
+  // accumulate sustained upward motion and only disengage past a threshold.
   function onScroll() {
     const el = scrollEl;
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-    // Direction wins over distance: an upward nudge counts as intent even
-    // inside the NEAR_BOTTOM band, otherwise a slow scroll up never escapes
-    // the band — onScroll keeps re-arming the pin and snaps the user back.
-    if (el.scrollTop < lastScrollTop) scrolledUp = true;
-    else if (gap <= NEAR_BOTTOM) scrolledUp = false;
+    const delta = el.scrollTop - lastScrollTop;
     lastScrollTop = el.scrollTop;
+    if (delta < 0) {
+      upwardAccum += -delta;
+      if (upwardAccum >= SCROLL_UP_THRESHOLD) scrolledUp = true;
+    } else {
+      // Any downward motion cancels a pending upward-intent accumulation.
+      upwardAccum = 0;
+      if (gap <= NEAR_BOTTOM) scrolledUp = false;
+    }
   }
 
-  // Trackpad/wheel up is intent even before the scroll lands; set immediately
-  // so a pin queued for this frame can't beat the user to it.
+  // Trackpad/wheel up signals intent; but a single inertia tick shouldn't
+  // drop following. We arm a pending-intent that only commits once the
+  // resulting onScroll (or sustained wheeling) clears the threshold.
   function onWheel(e: WheelEvent) {
-    if (e.deltaY < 0) scrolledUp = true;
+    if (e.deltaY < 0) {
+      upwardAccum += -e.deltaY;
+      if (upwardAccum >= SCROLL_UP_THRESHOLD) scrolledUp = true;
+    } else {
+      upwardAccum = 0;
+    }
   }
 
   function scrollToBottom() {
     const el = scrollEl;
     if (!el) return;
     scrolledUp = false;
+    upwardAccum = 0;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }
 
@@ -562,6 +601,19 @@
         didInitialScroll = true;
       });
       return;
+    }
+    // Sticky re-arm: when a new item lands and the user is still near the
+    // bottom, re-engage following. A transient trackpad-inertia tick can
+    // otherwise leave scrolledUp=true with the user only a few px above the
+    // bottom; without this, they silently stop following the new turn. Only
+    // apply when actually near the bottom — a real "reading old history"
+    // (scrolled far up) must keep its place.
+    if (scrolledUp) {
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (gap <= NEAR_BOTTOM) {
+        scrolledUp = false;
+        upwardAccum = 0;
+      }
     }
     if (!scrolledUp) {
       requestAnimationFrame(() => {
@@ -651,15 +703,6 @@
       {#if thread.projectId}
         <DevTapWidget {thread} {onSelectThread} />
       {/if}
-      {#if thread.projectId}
-        <Tooltip text="Project knowledge graph">
-          <button
-            class="rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft"
-            onclick={onOpenGraph}
-            data-testid="graph-toggle"><Workflow size={14} /></button
-          >
-        </Tooltip>
-      {/if}
       {#if !thread.remoteHostId}
         <Tooltip text="Open in Finder">
           <button
@@ -713,14 +756,14 @@
       {#snippet toolRow(item: ToolItem)}
         <details class="item-enter group -my-1.5 text-xs" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
           <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
-            {#if item.status === "running"}
-              <BrailleSpinner class="working-label__spinner shrink-0" />
-            {:else if item.status === "error"}
+            {#if item.status === "error"}
               <span class="shrink-0 text-danger">✕</span>
-            {:else}
+            {:else if item.status !== "running"}
               <span class="shrink-0 text-fainter">✓</span>
             {/if}
-            <span class="shrink-0 font-mono font-medium text-muted">{item.toolName}</span>
+            <span
+              class="shrink-0 font-mono font-medium {item.status === 'running' ? 'tool-name--running' : 'text-muted'}"
+              >{item.toolName}</span>
             <span class="truncate font-mono text-fainter">{item.argsSummary}</span>
             <span class="ml-auto shrink-0 text-fainter transition-transform group-open:rotate-90">›</span>
           </summary>
@@ -747,7 +790,7 @@
         {:else}
           {@const item = row.item}
           {#if item.kind === "user"}
-          <div class="item-enter flex max-w-[85%] flex-col gap-2 self-end" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
+          <div class="item-enter flex max-w-[85%] flex-col gap-2 self-end" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId} use:sendPop={thread.id}>
             {#if item.images && item.images.length > 0}
               <div class="flex flex-wrap justify-end gap-2">
                 {#each item.images as img, i (i)}

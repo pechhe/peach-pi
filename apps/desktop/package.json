@@ -27,6 +27,7 @@
     "clsx": "^2.1.1",
     "dompurify": "^3.4.9",
     "marked": "^18.0.5",
+    "motion-sv": "^0.1.12",
     "node-pty": "^1.1.0",
     "qrcode": "^1.5.4",
     "semver": "^7.8.4",

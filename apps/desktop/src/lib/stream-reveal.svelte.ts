@@ -29,8 +29,8 @@ export interface StreamSpeedOption {
 }
 
 export const STREAM_LOOKS: StreamLookOption[] = [
-  { id: "plain", label: "Plain fade", description: "Words simply fade in — no blur, the lightest reveal." },
-  { id: "blur", label: "Blur (default)", description: "Words resolve from soft-focus into sharp as they fade in." },
+  { id: "plain", label: "Plain fade (default)", description: "Words simply fade in — no blur, the lightest reveal." },
+  { id: "blur", label: "Blur", description: "Words resolve from soft-focus into sharp as they fade in." },
   { id: "blur-rise", label: "Blur + rise", description: "Blur reveal with a subtle upward settle, like text flowing in." },
   { id: "warm", label: "Warm ink", description: "Each new word starts in the accent colour and settles to ink." },
   { id: "glow", label: "Glow", description: "A faint accent glow trails each freshly revealed word, then fades." },
@@ -44,16 +44,16 @@ export const STREAM_SPEEDS: StreamSpeedOption[] = [
 
 /** Maps a look preset to the space-separated `data-stream-fx` tokens the `.sw` CSS reads. */
 const LOOK_TOKENS: Record<StreamLook, string> = {
-  plain: "plain",
-  blur: "blur", // baseline blur-to-sharp is always on; this token is a no-op label
-  "blur-rise": "rise",
+  plain: "plain", // baseline is now a plain opacity fade; this token is a no-op label
+  blur: "blur", // re-enables blur-to-sharp on top of the plain fade
+  "blur-rise": "blur rise",
   warm: "warm",
   glow: "glow",
 };
 
 const LOOK_KEY = "peachpi:streamLook";
 const SPEED_KEY = "peachpi:streamSpeed";
-const DEFAULT_LOOK: StreamLook = "blur";
+const DEFAULT_LOOK: StreamLook = "plain";
 const DEFAULT_SPEED: StreamSpeed = "medium";
 
 function readStored<T extends string>(key: string, valid: readonly T[], fallback: T): T {

@@ -558,7 +558,7 @@ export class SideChatRepo {
 
   listForThread(threadId: string): SideConversation[] {
     const rows = this.db
-      .prepare("SELECT * FROM side_conversations WHERE thread_id = ? ORDER BY created_at DESC")
+      .prepare("SELECT * FROM side_conversations WHERE thread_id = ? ORDER BY created_at DESC, rowid DESC")
       .all(threadId) as unknown as SideConversationRow[];
     return rows.map(toSideConversation);
   }

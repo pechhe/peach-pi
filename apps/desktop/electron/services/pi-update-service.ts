@@ -25,9 +25,9 @@ const BOOT_DELAY_MS = 5 * 1000; // let the window settle before touching the net
  * and periodically while the app runs.
  *
  * GUI apps don't inherit the login-shell PATH, so we probe common install dirs
- * for the pi CLI (same problem GraphifyService solves). Updates swap extension
- * module files on disk, which breaks any pi session that imports them mid-run,
- * so every run is gated on `hasActiveRuns` returning false.
+ * for the pi CLI. Updates swap extension module files on disk, which breaks
+ * any pi session that imports them mid-run, so every run is gated on
+ * `hasActiveRuns` returning false.
  */
 export class PiUpdateService {
   private kv: KvRepo;

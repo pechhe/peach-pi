@@ -29,6 +29,7 @@ test("a thread is served iff its project is served", () => {
   const h = new RemoteHostService(
     deps([{ id: "t1", projectId: "p1" }, { id: "t2", projectId: "p2" }]) as RelayDeps,
   );
+  h.setServeAll(false); // serveAll defaults on; opt out to test per-project serving
   assert.equal(h.isServedThread("t1"), false);
   h.setProjectServed("p1", true);
   assert.equal(h.isServedThread("t1"), true);
@@ -66,6 +67,7 @@ test("servedProjects is ignored while serveAll is on", () => {
   const h = new RemoteHostService(
     deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
   );
+  h.setServeAll(false); // serveAll defaults on
   h.setProjectServed("p1", false); // explicitly NOT serving p1
   assert.equal(h.isServedThread("t1"), false);
   h.setServeAll(true); // ...but serveAll overrides
@@ -76,6 +78,7 @@ test("status() reflects serveAll and servedProjects", async () => {
   const h = new RemoteHostService(
     deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
   );
+  h.setServeAll(false); // serveAll defaults on; opt out to test servedProjects
   h.setProjectServed("p1", true);
   h.setProjectServed("p2", true);
   let s = await h.status();
@@ -102,6 +105,7 @@ test("isServedProject tracks toggles and serveAll", () => {
   const h = new RemoteHostService(
     deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
   );
+  h.setServeAll(false); // serveAll defaults on
   assert.equal(h.isServedProject("p1"), false);
   h.setProjectServed("p1", true);
   assert.equal(h.isServedProject("p1"), true);

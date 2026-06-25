@@ -2,7 +2,11 @@ import { app, BrowserWindow, dialog, globalShortcut, Notification, screen, shell
 import path from "node:path";
 import { homedir } from "node:os";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
-import { PORTABLE_PI_CONFIG_FILES, PORTABLE_PI_DIRS } from "@peach-pi/shared-types";
+import {
+  PORTABLE_PI_CONFIG_FILES,
+  PORTABLE_PI_DIRS,
+  type EventChannel,
+} from "@peach-pi/shared-types";
 import { openDb } from "./persistence/db.ts";
 import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
 import { AppService } from "./services/app-service.ts";
@@ -162,7 +166,8 @@ async function boot(): Promise<void> {
   // from the ADR-0009 RemoteHostService below; shares the same kv db handle.
   // The service declares a loose Emit shape (channel: string, payload: unknown)
   // so it loads in plain Node for unit tests; adapt the typed emitter here.
-  const handoffEmit = ((channel: string, payload: unknown) => emit(channel, payload as never)) as
+  const handoffEmit = ((channel: string, payload: unknown) =>
+    emit(channel as EventChannel, payload as never)) as
     Parameters<typeof createHandoffService>[1];
   const handoffService = createHandoffService(db, handoffEmit);
   setDevTapStateProvider(() => ({ app: appService.snapshot() }));
@@ -414,7 +419,6 @@ async function boot(): Promise<void> {
   remoteClient.clientIdentity = () => appService.getRemoteClientId();
 
   const subagentService = new SubagentService(db);
-  const graphifyService = new GraphifyService(db);
   const sideChatService = new SideChatService(db, emit, threadService, gitService);
   const devTapInstallService = new DevTapInstallService(db);
   const piUpdateService = new PiUpdateService(db, emit, () =>
@@ -620,11 +624,6 @@ async function boot(): Promise<void> {
       "files:readImage": readImageFile,
       "subagents:listAgents": subagentService.listAgents.bind(subagentService),
       "subagents:updateAgent": subagentService.updateAgent.bind(subagentService),
-      "graphify:status": graphifyService.status.bind(graphifyService),
-      "graphify:build": graphifyService.build.bind(graphifyService),
-      "graphify:update": graphifyService.update.bind(graphifyService),
-      "graphify:openViewer": graphifyService.openViewer.bind(graphifyService),
-      "graphify:report": graphifyService.report.bind(graphifyService),
       "devtap:projectStatus": devTapInstallService.status.bind(devTapInstallService),
       "git:info": gitService.info.bind(gitService),
       "git:changedFiles": gitService.changedFiles.bind(gitService),

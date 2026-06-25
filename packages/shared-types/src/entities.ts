@@ -126,7 +126,6 @@ export type AppView =
   | "automations"
   | "connections"
   | "testing"
-  | "graph"
   | "bws"
   | "remote"
   | "work-queue"
@@ -581,17 +580,6 @@ export interface SubagentAgentPatch {
   model?: string | null;
   thinking?: string | null;
   description?: string | null;
-}
-
-/** Knowledge-graph state for a project (graphify CLI, graphify-out/). */
-export interface GraphifyStatus {
-  /** graphify binary found on this machine. */
-  available: boolean;
-  hasGraph: boolean;
-  nodeCount: number;
-  edgeCount: number;
-  builtAt: string | null;
-  building: boolean;
 }
 
 /** Whether the DevTap runtime tap is installed in a project. */

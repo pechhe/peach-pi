@@ -29,6 +29,7 @@
   import { autoCompact } from "../stores/auto-compact.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { sideChat } from "../stores/side-chat.svelte";
+  import { sendAnim } from "../stores/send-anim.svelte";
   import { commandPrefs } from "../stores/command-prefs.svelte";
   import { markAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
@@ -774,11 +775,13 @@
         if (asSteer && running) {
           await api.invoke("remote:steer", thread.remoteHostId, thread.remoteThreadId, outgoingWithHints);
         } else {
+          sendAnim.mark(thread.id);
           await api.invoke("remote:message", thread.remoteHostId, thread.remoteThreadId, outgoingWithHints);
         }
       } else if (asSteer && running) {
         await api.invoke("threads:steer", thread.id, outgoingWithHints);
       } else {
+        sendAnim.mark(thread.id);
         await api.invoke("threads:prompt", thread.id, outgoingWithHints, images, toolMode);
       }
     } catch (err) {

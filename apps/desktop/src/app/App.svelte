@@ -27,7 +27,6 @@
   import ExtensionsView from "./ExtensionsView.svelte";
   import AutomationsView from "./AutomationsView.svelte";
   import PlayroomView from "./PlayroomView.svelte";
-  import GraphView from "./GraphView.svelte";
   import RecordingBar from "./RecordingBar.svelte";
   import ConnectorsView from "./ConnectorsView.svelte";
   import BwsView from "./BwsView.svelte";
@@ -517,7 +516,6 @@
       <ThreadView
         thread={selectedThread}
         onSetEnvironment={setThreadEnvironment}
-        onOpenGraph={() => openView("graph")}
         onSelectThread={selectThread}
         onNewThread={newThreadForCurrentProject}
         pendingFind={pendingFindQuery}
@@ -542,8 +540,6 @@
     <SidePanel />
     {#if searchOpen}
       <SearchOverlay
-        projects={snapshot.current.projects}
-        threads={snapshot.current.threads}
         onSelect={selectThread}
         onClose={() => (searchOpen = false)}
         onNewThread={newThreadForCurrentProject}
@@ -567,7 +563,7 @@
   <ImageLightbox />
   <TextAttachmentViewer />
   <SkillDialog />
-  <Toasts sidebarWidth={sidebarCollapsed ? 0 : sidebarWidth} />
+  <Toasts />
   <PiHealthBanner />
 </div>
 

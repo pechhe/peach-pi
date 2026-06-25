@@ -13,3 +13,4 @@ apps/desktop/build/cua-driver/
 .pi/devtap.jsonl
 .pi/devtap/
 .vercel
+apps/desktop/.vite-build-check/

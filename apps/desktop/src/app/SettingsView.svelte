@@ -39,6 +39,7 @@
   import { Switch } from "../components/ui/switch";
   import ModelScopeSelect from "../components/ui/model-scope-select/model-scope-select.svelte";
   import DoneBurstPlayground from "./DoneBurstPlayground.svelte";
+  import DotMatrixPlayground from "./DotMatrixPlayground.svelte";
   import ThemeControls from "./ThemeControls.svelte";
   import SubagentsSection from "./SubagentsSection.svelte";
   import Check from "@lucide/svelte/icons/check";
@@ -62,6 +63,8 @@
     caveman: "caveman intensity level composer toggle",
     hud: "hud auto-reveal expand chat thread finishes",
     doneAnimation: "done animation mark done card animation preview play",
+    loaders:
+      "loaders dot matrix spinner square hex triangle sidebar chat agents hourglass neon drift glow bloom animate",
     streaming: "streaming text assistant replies reveal stream",
     sounds: "sounds button clicks done chime mute",
     doneChime: "done chime celebration cue thread finishes preview",
@@ -588,6 +591,19 @@
           <p class="text-xs text-faint">Pick the "mark Done" card animation. Press Play to preview each.</p>
         </div>
         <DoneBurstPlayground />
+      </section>
+      {/if}
+
+      {#if hit("loaders")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="mb-3">
+          <h2 class="text-sm text-fg">Dot matrix loaders</h2>
+          <p class="text-xs text-faint">
+            Curate which spinners appear where. Square → chat, Hex → sidebar, Triangle → agents.
+            A random loader from the selected set is picked each time one appears.
+          </p>
+        </div>
+        <DotMatrixPlayground />
       </section>
       {/if}
 

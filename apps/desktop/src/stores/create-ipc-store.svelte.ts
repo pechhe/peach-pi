@@ -1,4 +1,9 @@
-import type { InvokeArgs, InvokeChannel, InvokeResult } from "@peach-pi/shared-types";
+import type {
+  InvokeArgs,
+  InvokeChannel,
+  InvokeResult,
+  NoArgInvokeChannel,
+} from "@peach-pi/shared-types";
 import { api } from "../lib/ipc";
 
 /**
@@ -21,7 +26,10 @@ export interface IpcStore<T, SetArgs extends unknown[]> {
   set(...args: SetArgs): Promise<void>;
 }
 
-export function createIpcStore<LoadCh extends InvokeChannel, SetCh extends InvokeChannel>(opts: {
+export function createIpcStore<
+  LoadCh extends NoArgInvokeChannel,
+  SetCh extends InvokeChannel,
+>(opts: {
   loadChannel: LoadCh;
   setChannel: SetCh;
   default: InvokeResult<LoadCh>;
@@ -32,11 +40,11 @@ export function createIpcStore<LoadCh extends InvokeChannel, SetCh extends Invok
   const load = async (force = false): Promise<void> => {
     if (!force && loaded) return;
     loaded = true;
-    value = await api.invoke(opts.loadChannel);
+    value = (await api.invoke(opts.loadChannel as NoArgInvokeChannel)) as InvokeResult<LoadCh>;
   };
 
   const set = async (...args: InvokeArgs<SetCh>): Promise<void> => {
-    value = await api.invoke(opts.setChannel, ...args);
+    value = (await api.invoke(opts.setChannel, ...args)) as InvokeResult<LoadCh>;
   };
 
   return {

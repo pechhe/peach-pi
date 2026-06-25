@@ -23,7 +23,6 @@ import type {
   GitMergeResult,
   GitPrResult,
   GitPushLocalResult,
-  GraphifyStatus,
   CustomConnection,
   CustomConnectionInput,
   ProposedConnectionConfig,
@@ -384,15 +383,6 @@ export const ipcContracts = {
   "automations:runNow": invoke<[id: string], void>(),
   "automations:runs": invoke<[id: string], AutomationRun[]>(),
   "automations:previewNext": invoke<[cron: string], string | null>(),
-
-  // graphify knowledge graph (per project)
-  "graphify:status": invoke<[projectId: string], GraphifyStatus>((id) =>
-    requireNonEmptyString(id, "projectId"),
-  ),
-  "graphify:build": invoke<[projectId: string], { ok: boolean; error?: string }>(),
-  "graphify:update": invoke<[projectId: string], { ok: boolean; error?: string }>(),
-  "graphify:openViewer": invoke<[projectId: string], boolean>(),
-  "graphify:report": invoke<[projectId: string], string | null>(),
 
   // subagents (pi-subagents extension roster)
   "subagents:listAgents": invoke<[projectId: string | null], SubagentAgentInfo[]>(),
@@ -880,6 +870,10 @@ export type InvokeArgs<K extends InvokeChannel> =
   IpcContracts[K] extends InvokeContract<infer A, infer _R> ? A : never;
 export type InvokeResult<K extends InvokeChannel> =
   IpcContracts[K] extends InvokeContract<infer _A, infer R> ? R : never;
+/** Invoke channels that take no arguments (for load/set store mirrors). */
+export type NoArgInvokeChannel = {
+  [K in InvokeChannel]: InvokeArgs<K> extends [] ? K : never;
+}[InvokeChannel];
 export type EventPayload<K extends EventChannel> =
   IpcContracts[K] extends EventContract<infer P> ? P : never;
 

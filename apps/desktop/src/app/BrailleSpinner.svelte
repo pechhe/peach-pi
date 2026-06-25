@@ -1,23 +1,35 @@
 <script lang="ts">
-  // Braille spinner ported from peche-pi: 10 frames @ 80ms, tinted with the
-  // theme accent. Used standalone (sidebar) and inside <WorkingLabel>.
-  const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-  const FRAME_INTERVAL_MS = 80;
+  // Dot-matrix loader (sv-matrix port). Replaces the old braille glyph spinner.
+  // Takes a grid `shape` so different surfaces use different geometries:
+  // square = chat surface, hex = sidebar, triangle = agents. Picks a random one
+  // from the user's curated selection each mount, with the glow (bloom) effect
+  // enabled. Dots are tinted with currentColor, so they inherit the theme accent
+  // from .working-label__spinner / .session-spinner. Keeps the original
+  // `class` / `title` prop surface so existing call sites are unchanged.
+  import DotMatrixLoader from "../components/ui/dot-matrix/DotMatrixLoader.svelte";
+  import type { LoaderShape } from "../components/ui/dot-matrix/registry.svelte";
 
-  let { class: klass = "", title }: { class?: string; title?: string } = $props();
-
-  let frame = $state(0);
-
-  $effect(() => {
-    const id = setInterval(() => {
-      frame = (frame + 1) % FRAMES.length;
-    }, FRAME_INTERVAL_MS);
-    return () => clearInterval(id);
-  });
+  let {
+    class: klass = "",
+    title,
+    shape = "square",
+    size = 18,
+    dotSize = 3,
+  }: {
+    class?: string;
+    title?: string;
+    shape?: LoaderShape;
+    size?: number;
+    dotSize?: number;
+  } = $props();
 </script>
 
-<span
-  class="working-spinner {klass}"
-  role={title ? "img" : undefined}
-  aria-label={title}
-  aria-hidden={title ? undefined : true}>{FRAMES[frame]}</span>
+<DotMatrixLoader
+  class={klass}
+  {shape}
+  {size}
+  {dotSize}
+  aria-label={title ?? "Loading"}
+  aria-hidden={title ? undefined : true}
+  animated
+/>
