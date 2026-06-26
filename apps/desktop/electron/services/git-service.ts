@@ -12,6 +12,7 @@ import type {
   GitMergeResult,
   GitPrResult,
   GitMergePrResult,
+  GitPullResult,
   GitPushLocalResult,
   ModelInfo,
 } from "@peach-pi/shared-types";
@@ -398,6 +399,26 @@ export class GitService {
       return { ok: true, branch };
     } catch (err) {
       return { ok: false, error: `Push failed: ${String(err)}` };
+    }
+  }
+
+  /** Fast-forward the current branch from origin when behind. Only fast-
+   *  forwards (no merge commit) so a diverged tree surfaces an error to the
+   *  human instead of silently creating merge work. */
+  async pull(threadId: string): Promise<GitPullResult> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd) return { ok: false, error: "No working directory" };
+    if (!(await gitOk(["rev-parse", "--git-dir"], cwd)))
+      return { ok: false, error: "Not a git repository" };
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    if (branch === "HEAD") return { ok: false, error: "Detached HEAD" };
+    if (!(await gitOk(["rev-parse", "--abbrev-ref", "@{u}"], cwd)))
+      return { ok: false, error: "No upstream branch to pull from" };
+    try {
+      await git(["pull", "--ff-only"], cwd);
+      return { ok: true, branch };
+    } catch (err) {
+      return { ok: false, error: `Pull failed: ${String(err)}` };
     }
   }
 

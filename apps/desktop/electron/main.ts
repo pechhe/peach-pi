@@ -704,6 +704,7 @@ async function boot(): Promise<void> {
       "git:mergePr": gitService.mergePr.bind(gitService),
       "git:mergeToLocal": gitService.mergeToLocal.bind(gitService),
       "git:pushLocal": gitService.pushLocal.bind(gitService),
+      "git:pull": gitService.pull.bind(gitService),
       // remote session hosting (ADR-0009)
       "remote:hostStatus": remoteHost.status.bind(remoteHost),
       "remote:setHostEnabled": remoteHost.setHostEnabled.bind(remoteHost),

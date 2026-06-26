@@ -21,6 +21,7 @@ import type {
   GitCommitPushResult,
   GitInfo,
   GitMergeResult,
+  GitPullResult,
   GitPrResult,
   GitMergePrResult,
   GitPushLocalResult,
@@ -436,6 +437,9 @@ export const ipcContracts = {
     requireNonEmptyString(id, "threadId"),
   ),
   "git:pushLocal": invoke<[threadId: ThreadId], GitPushLocalResult>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
+  "git:pull": invoke<[threadId: ThreadId], GitPullResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
 

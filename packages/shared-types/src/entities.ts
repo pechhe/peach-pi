@@ -535,6 +535,11 @@ export type GitPushLocalResult =
   | { ok: true; branch: string }
   | { ok: false; error: string };
 
+/** Pull the current branch from origin (fast-forward when behind). */
+export type GitPullResult =
+  | { ok: true; branch: string }
+  | { ok: false; error: string };
+
 /** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */
 export interface AutomationModel {
   provider: string;

@@ -13,6 +13,7 @@
   let creatingPr = $state(false);
   let merging = $state(false);
   let pushingLocal = $state(false);
+  let pulling = $state(false);
   let cleaningUp = $state(false);
   let commitMessage = $state("");
   let lastResult = $state("");
@@ -167,6 +168,21 @@
     }
   }
 
+  // Fast-forward the current branch from origin when behind.
+  async function pull() {
+    if (pulling) return;
+    pulling = true;
+    lastResult = "";
+    try {
+      const result = await api.invoke("git:pull", thread.id);
+      lastResult = result.ok ? `✓ Pulled ${result.branch}` : `✕ ${result.error}`;
+      await refresh();
+      if (open) files = await api.invoke("git:changedFiles", thread.id);
+    } finally {
+      pulling = false;
+    }
+  }
+
   // Cleanup, post-merge. mode "delete" removes worktree + thread; mode "local"
   // keeps the thread (rejoins it to the local project repo).
   async function cleanup(mode: "delete" | "local") {
@@ -206,7 +222,17 @@
         <span class="num-badge">{info.changedCount}</span>
       {/if}
       {#if info.ahead}<span class="text-faint">↑{info.ahead}</span>{/if}
-      {#if info.behind}<span class="text-faint">↓{info.behind}</span>{/if}
+      {#if info.behind}
+        <button
+          class="rounded px-1 text-faint transition-colors hover:bg-surface hover:text-fg-soft disabled:opacity-40"
+          onclick={pull}
+          disabled={pulling}
+          data-testid="git-pull"
+          title={pulling ? "Pulling…" : `Pull ${info.behind} commit${info.behind === 1 ? "" : "s"} from origin`}
+        >
+          {pulling ? "↻" : `↓${info.behind}`}
+        </button>
+      {/if}
     </button>
 
     {#if open}
