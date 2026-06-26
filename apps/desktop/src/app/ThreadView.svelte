@@ -6,7 +6,40 @@
   type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
   type Row =
     | { type: "item"; item: TranscriptItem }
-    | { type: "group"; id: string; items: ToolItem[] };
+    | { type: "group"; id: string; items: ToolItem[] }
+    | { type: "turn"; id: string; rows: Row[]; summary: string };
+
+  /** First line of the first substantive assistant text in the turn, else a
+   *  tool-breakdown summary. Shown on the collapsed turn fold. */
+  function turnSummary(items: readonly TranscriptItem[]): string {
+    const first = items.find((it) => it.kind === "assistant" && it.text.trim());
+    if (first && first.kind === "assistant") {
+      return first.text.trim().split("\n")[0]!.slice(0, 120);
+    }
+    const tools = items.filter((it): it is ToolItem => it.kind === "tool");
+    if (tools.length) return toolBreakdown(tools);
+    return "Reasoning";
+  }
+
+  /** Collapse consecutive successful ("done") tool calls into a sub-foldable
+   *  group. Running/error tools — and lone successes — stay standalone so
+   *  anything needing eyes is never hidden. */
+  function groupToolRuns(items: readonly TranscriptItem[]): Row[] {
+    const out: Row[] = [];
+    let group: ToolItem[] = [];
+    const flush = () => {
+      if (group.length === 0) return;
+      if (group.length === 1) out.push({ type: "item", item: group[0]! });
+      else out.push({ type: "group", id: `toolgroup-${group[0]!.id}`, items: group });
+      group = [];
+    };
+    for (const it of items) {
+      if (it.kind === "tool" && it.status === "done") group.push(it);
+      else { flush(); out.push({ type: "item", item: it }); }
+    }
+    flush();
+    return out;
+  }
   import { transcripts } from "../stores/transcripts.svelte";
   import { sendAnim } from "../stores/send-anim.svelte";
   import { remoteClient } from "../stores/remote-client.svelte";
@@ -446,27 +479,68 @@
     return map;
   });
 
-  // Collapse runs of successful ("done") tool calls into a single foldable
-  // group row. Running/error tools — and lone successes — stay as their own
-  // rows so anything that needs eyes is never hidden.
+  // Group each user turn into one foldable card containing its reasoning,
+  // tool calls, and intermediate assistant text — Codex-style. The final
+  // substantive assistant answer of the turn stays visible after the fold,
+  // so copy/Rewind anchors and the streamed answer never get hidden. Pure
+  // single-item turns (e.g. a lone text answer, no tools) are left as-is.
   const rows = $derived.by(() => {
     const out: Row[] = [];
-    let group: ToolItem[] = [];
-    const flush = () => {
-      if (group.length === 0) return;
-      if (group.length === 1) out.push({ type: "item", item: group[0]! });
-      else out.push({ type: "group", id: `toolgroup-${group[0]!.id}`, items: group });
-      group = [];
+    let turn: TranscriptItem[] = [];
+    const flushTurn = () => {
+      if (turn.length === 0) return;
+      const items0 = turn;
+      turn = [];
+      // Find the final substantive assistant answer (with text, after all
+      // tool calls). Anything after it would be stray trailing items.
+      let lastAns = -1;
+      for (let i = 0; i < items0.length; i++) {
+        const it = items0[i]!;
+        if (it.kind === "assistant" && it.text.trim() && !isSteerMessage(it)) {
+          lastAns = i;
+        }
+      }
+      // No substantive answer, or a lone item / answer-only turn — keep
+      // tool-run grouping only, no turn fold.
+      if (lastAns === -1 || items0.length === 1 || lastAns === 0) {
+        out.push(...groupToolRuns(items0));
+        return;
+      }
+      const folded = items0.slice(0, lastAns);
+      const answer = items0[lastAns]!;
+      const trailing = items0.slice(lastAns + 1);
+      // Fold only when there is real prep to hide (>=2 items before answer).
+      if (folded.length >= 2) {
+        out.push({
+          type: "turn",
+          id: `userturn-${items0[0]!.id}`,
+          rows: groupToolRuns(folded),
+          summary: turnSummary(items0),
+        });
+      } else {
+        out.push(...groupToolRuns(folded));
+      }
+      // Final answer stays visible, standalone, after the fold.
+      out.push({ type: "item", item: answer });
+      // Rare trailing items (e.g. a stray tool after the answer).
+      out.push(...groupToolRuns(trailing));
     };
     for (const it of items) {
-      if (it.kind === "tool" && it.status === "done") {
-        group.push(it);
-      } else {
-        flush();
+      if (
+        it.kind === "user" ||
+        it.kind === "subagent" ||
+        it.kind === "compaction" ||
+        it.kind === "retry" ||
+        it.kind === "notice" ||
+        isSteerMessage(it)
+      ) {
+        flushTurn();
         out.push({ type: "item", item: it });
+      } else {
+        turn.push(it);
       }
     }
-    flush();
+    flushTurn();
     return out;
   });
 
@@ -920,7 +994,7 @@
           {/if}
         </details>
       {/snippet}
-      {#each rows as row (row.type === "group" ? row.id : row.item.id)}
+      {#snippet renderRow(row: Row)}
         {#if row.type === "group"}
           <details class="collapse-anim tool-enter group/tools -my-1.5 text-xs" data-item-id={row.id}>
             <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
@@ -932,6 +1006,21 @@
             <div class="mt-1 flex flex-col gap-1 border-l-2 border-border pl-1.5">
               {#each row.items as it (it.id)}
                 {@render toolRow(it)}
+              {/each}
+            </div>
+          </details>
+        {:else if row.type === "turn"}
+          {@const live = row.rows.some((r) => r.type === "item" && ((r.item.kind === "assistant" && r.item.streaming) || (r.item.kind === "tool" && r.item.status === "running")))}
+          <details class="collapse-anim tool-enter group/turn -my-1.5 text-xs" data-item-id={row.id} open={live && thread.status === "running"}>
+            <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
+              <span class="shrink-0 text-fainter">✓</span>
+              <span class="shrink-0 font-mono font-medium text-muted">Reasoning</span>
+              <span class="truncate font-mono text-fainter">{row.summary}</span>
+              <span class="ml-auto shrink-0 text-fainter transition-transform duration-200 ease-out group-open/turn:rotate-90">›</span>
+            </summary>
+            <div class="mt-1 flex flex-col gap-0.5 border-l-2 border-border pl-1.5">
+              {#each row.rows as r (r.type === "group" ? r.id : r.type === "turn" ? r.id : r.item.id)}
+                {@render renderRow(r)}
               {/each}
             </div>
           </details>
@@ -1084,12 +1173,33 @@
               {/if}
             </button>
           {/if}
+          {:else if item.kind === "retry"}
+            <div
+              class="item-enter flex w-full items-center gap-2 rounded-lg border bg-surface/60 px-3 py-2 text-xs font-semibold text-muted transition-colors select-none {item.running ? 'border-border-strong/30' : 'border-danger-border/40'}"
+              data-item-id={item.id}
+              class:thread-find-hit={item.id === currentMatchId}
+              data-testid="retry-card"
+            >
+              {#if item.running}
+                <BrailleSpinner class="working-label__spinner shrink-0" shape="triangle" size={16} dotSize={2.5} />
+                <span class="font-semibold text-danger">Connection failed</span>
+                <span class="font-medium text-faint">· attempt {item.attempt}/{item.maxAttempts} — retrying…</span>
+              {:else}
+                <span class="shrink-0 text-danger" aria-hidden="true">⚠</span>
+                <span class="font-semibold text-danger">Connection failed</span>
+                <span class="font-medium text-faint">· attempt {item.attempt}/{item.maxAttempts} — gave up</span>
+              {/if}
+              <span class="ml-auto shrink-0 text-fainter truncate max-w-[60%]" title={item.error}>{item.error}</span>
+            </div>
           {:else if isSteerMessage(item)}
             <!-- steer messages already surfaced in SubagentCard journey — skip -->
           {:else}
             <p class="item-enter text-center text-xs text-faint italic" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>{item.text}</p>
           {/if}
         {/if}
+      {/snippet}
+      {#each rows as row (row.type === "group" ? row.id : row.type === "turn" ? row.id : row.item.id)}
+        {@render renderRow(row)}
       {/each}
       {#if rewound && rewound.settledLen !== null && rewound.threadId === thread.id}
         {@const tail = rewound.before.slice(rewound.settledLen)}

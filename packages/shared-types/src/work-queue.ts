@@ -60,10 +60,13 @@ export function parseIssueBody(body: string): {
 }
 
 /** A pull request as fetched, reduced to what links it to an issue and tells
- *  us whether it merged. `mergedAt` is null for never-merged PRs. */
+ *  us whether it merged /
+ *  is open. `state` is the PR's GitHub state; `mergedAt` is null for any
+ *  unmerged PR (open or closed-unmerged). Pure — unit-tested. */
 export interface RawPull {
   body: string;
   headRefName: string;
+  state: "open" | "closed";
   mergedAt: string | null;
 }
 
@@ -83,6 +86,23 @@ export function mergedClosedIssues(pulls: RawPull[]): Set<number> {
   return out;
 }
 
+/** Issue numbers linked to an OPEN (unmerged) PR — via the same linkage
+ *  rules as {@link mergedClosedIssues}: the PR body's `closes/fixes/resolves
+ *  #N` keyword and the `agent/issue-<n>-…` branch convention. A PR that is
+ *  closed without being merged does not count as open. Pure — unit-tested. */
+export function openPrIssues(pulls: RawPull[]): Set<number> {
+  const out = new Set<number>();
+  for (const pr of pulls) {
+    if (pr.mergedAt || pr.state !== "open") continue;
+    for (const m of pr.body.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)) {
+      out.add(Number(m[1]));
+    }
+    const b = /^agent\/issue-(\d+)-/.exec(pr.headRefName);
+    if (b) out.add(Number(b[1]));
+  }
+  return out;
+}
+
 /** Parse + derive status for every issue against the full set (so blocker
  *  satisfaction can be resolved). A blocker is satisfied only when it is in
  *  `merged` (its PR merged) — an issue merely closed without a merged PR does
@@ -90,10 +110,11 @@ export function mergedClosedIssues(pulls: RawPull[]): Set<number> {
  *  (resolved, hence not actionable). Pure — unit-tested. */
 export function enrichIssues(
   raw: RawIssue[],
-  opts: { merged?: ReadonlySet<number>; inProgress?: ReadonlySet<number> } = {},
+  opts: { merged?: ReadonlySet<number>; inProgress?: ReadonlySet<number>; openPrs?: ReadonlySet<number> } = {},
 ): TrackedIssue[] {
   const merged = opts.merged ?? new Set<number>();
   const inProgressNumbers = opts.inProgress ?? new Set<number>();
+  const openPrNumbers = opts.openPrs ?? new Set<number>();
   return raw.map((r) => {
     const { parent, blockedBy, acceptanceCriteria } = parseIssueBody(r.body);
     const done = r.state === "closed";
@@ -113,6 +134,7 @@ export function enrichIssues(
       unmetBlockers,
       body: r.body,
       inProgress: inProgressNumbers.has(r.number),
+      hasOpenPr: openPrNumbers.has(r.number),
     };
   });
 }

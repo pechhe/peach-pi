@@ -48,6 +48,14 @@ export interface RecorderEvent {
   reason?: "manual" | "threshold" | "overflow";
   aborted?: boolean;
   errorMessage?: string;
+  // Auto-retry events (mirror of the SDK `auto_retry_start` / `auto_retry_end`
+  // events, kept structural). Emitted by the SDK on connection failures when
+  // auto-retry is enabled (~/.pi/agent/settings.json `retry`).
+  attempt?: number;
+  maxAttempts?: number;
+  delayMs?: number;
+  success?: boolean;
+  finalError?: string;
 }
 
 function blocksToText(content: unknown, type: "text" | "thinking"): string {
@@ -252,6 +260,11 @@ export class TranscriptRecorder {
    *  (app auto-compact, extension smart-compact, SDK builtin); a queue keeps
    *  every start→end pair closing the correct card so none orphan-spins. */
   private activeCompactionIds: string[] = [];
+  /** Id of the in-stream auto-retry card (if any). A connection failure with
+   *  auto-retry enabled emits `auto_retry_start` → this card spins + shows
+   *  attempt N/max. `auto_retry_end` clears or finalises it. One card per
+   *  retry sequence — subsequent attempts update the same card in place. */
+  private retryId: string | null = null;
 
   transcript(): TranscriptItem[] {
     return this.items;
@@ -292,6 +305,7 @@ export class TranscriptRecorder {
     this.seq = 0;
     this.activeAssistantId = null;
     this.activeCompactionIds = [];
+    this.retryId = null;
     for (const m of messages) this.upsert(this.messageToItem(m, false));
     return [{ op: "reset", items: this.items }];
   }
@@ -306,6 +320,7 @@ export class TranscriptRecorder {
     this.seq = 0;
     this.activeAssistantId = null;
     this.activeCompactionIds = [];
+    this.retryId = null;
     for (const entry of entries) {
       const item = this.entryToItem(entry);
       if (item) this.upsert(item);
@@ -520,6 +535,54 @@ export class TranscriptRecorder {
           ];
         }
         return [];
+      }
+      case "auto_retry_start": {
+        // Open or update an in-stream retry card. The SDK emits one
+        // `auto_retry_start` per attempt (attempt increments 1..maxAttempts),
+        // so reuse the same card id across the whole retry sequence: each
+        // upsert overwrites the previous card in place, giving the grouped
+        // "Connection failed N/M" count the user asked for.
+        const id = this.retryId ?? `retry-${Date.now()}`;
+        this.retryId = id;
+        const attempt = event.attempt ?? 1;
+        const maxAttempts = event.maxAttempts ?? attempt;
+        return [
+          this.upsertOp({
+            id,
+            kind: "retry",
+            running: true,
+            attempt,
+            maxAttempts,
+            error: event.errorMessage ?? "Connection failed",
+          }),
+        ];
+      }
+      case "auto_retry_end": {
+        // Success → drop the card (the run continues normally and the next
+        // assistant message_end replaces the failed one). Failure → finalise
+        // the card with the finalError; the thread's `failed` status comes
+        // from the existing runOutcome path, so the card just needs to stop
+        // spinning.
+        const id = this.retryId;
+        this.retryId = null;
+        if (!id) return [];
+        if (event.success) return [this.deleteOp(id)];
+        const existing = this.items.find((i) => i.id === id);
+        const attempt =
+          event.attempt ??
+          (existing?.kind === "retry" ? existing.attempt : 1);
+        const maxAttempts =
+          existing?.kind === "retry" ? existing.maxAttempts : attempt;
+        return [
+          this.upsertOp({
+            id,
+            kind: "retry",
+            running: false,
+            attempt,
+            maxAttempts,
+            error: event.finalError ?? "Connection failed",
+          }),
+        ];
       }
       default:
         return [];

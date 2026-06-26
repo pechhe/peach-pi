@@ -161,6 +161,10 @@ export interface TrackedIssue {
   body: string;
   /** True when an agent worktree already exists for this issue (no relaunch). */
   inProgress: boolean;
+  /** True when an open (unmerged) PR is linked to this issue via the agent
+   *  branch convention (`agent/issue-<n>-…`) or a `closes/fixes/resolves #N`
+   *  keyword. Drives the merge-queue eligibility UI. */
+  hasOpenPr: boolean;
 }
 
 /** Result of launching an agent on an issue from the Work Queue. */
@@ -183,6 +187,44 @@ export type CloseIssueResult =
 export type WorkQueueResult =
   | { ok: true; source: "gh" | "rest"; issues: TrackedIssue[] }
   | { ok: false; reason: "no-remote" | "not-github" | "error"; message?: string };
+
+/** Number of open tracker issues for a project (sidebar badge). 0 when the
+ *  project has no GitHub remote or the count can't be fetched. */
+export type WorkQueueOpenCountResult = { ok: true; count: number } | { ok: false; count: 0 };
+
+/** Outcome of merging one issue's PR in a batch-merge run. Each phase is
+ *  recorded so the UI can show where a failed item stopped. */
+export type MergeBatchItemResult =
+  | {
+      ok: true;
+      issueNumber: number;
+      prUrl: string;
+      tests: "passed" | "skipped";
+    }
+  | {
+      ok: false;
+      issueNumber: number;
+      phase: "rebase" | "tests" | "merge";
+      error: string;
+    };
+
+/** Result of `workQueue:mergeBatch`: a per-item outcome for every issue in
+ *  the requested order. The whole batch is never a single failure — each item
+ *  runs independently and a conflict aborts *that one* before main is touched. */
+export type MergeBatchResult =
+  | { ok: true; items: MergeBatchItemResult[] }
+  | { ok: false; reason: "error"; message?: string };
+
+/** One progress event from `workQueue:mergeBatch`. `phase` is the step that
+ *  is running (or just finished) for `issueNumber`; `done` marks the final
+ *  outcome and carries the per-item result. */
+export interface MergeProgressPayload {
+  projectId: ProjectId;
+  issueNumber: number;
+  phase: "rebase" | "tests" | "merge";
+  done: boolean;
+  item: MergeBatchItemResult;
+}
 
 /** Base64 image crossing the IPC boundary with a prompt. */
 export interface ImagePayload {
@@ -539,6 +581,14 @@ export type GitPushLocalResult =
 export type GitPullResult =
   | { ok: true; branch: string }
   | { ok: false; error: string };
+
+/** Rebase a thread's branch onto the latest default branch and run the
+ *  project's tests. Used by the batch-merge flow to bring a worktree branch
+ *  up to date against main before its PR is merged, so the merge is clean.
+ *  `tests: "skipped"` when no test runner is detected (no package.json). */
+export type GitRebaseTestResult =
+  | { ok: true; branch: string; base: string; tests: "passed" | "skipped" }
+  | { ok: false; error: string }
 
 /** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */
 export interface AutomationModel {

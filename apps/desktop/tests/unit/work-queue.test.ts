@@ -6,6 +6,7 @@ import {
   enrichIssues,
   groupWorkQueue,
   mergedClosedIssues,
+  openPrIssues,
   extractPrdContext,
   issueBranchName,
   issueWorktreeName,
@@ -145,11 +146,30 @@ test("enrichIssues: blocker satisfied only by a merged PR, not by closure", () =
 
 test("mergedClosedIssues: links via PR body keywords and branch convention", () => {
   const set = mergedClosedIssues([
-    { body: "This closes #17 and fixes #5.", headRefName: "feature/x", mergedAt: "2026-01-01" },
-    { body: "no keyword here", headRefName: "agent/issue-19-start-agent", mergedAt: "2026-01-02" },
-    { body: "resolves #99", headRefName: "agent/issue-99-x", mergedAt: null }, // not merged
+    { body: "This closes #17 and fixes #5.", headRefName: "feature/x", state: "closed", mergedAt: "2026-01-01" },
+    { body: "no keyword here", headRefName: "agent/issue-19-start-agent", state: "closed", mergedAt: "2026-01-02" },
+    { body: "resolves #99", headRefName: "agent/issue-99-x", state: "open", mergedAt: null }, // not merged
   ]);
   assert.deepEqual([...set].sort((a, b) => a - b), [5, 17, 19]);
+});
+
+test("openPrIssues: links via PR body keywords and branch convention", () => {
+  const set = openPrIssues([
+    { body: "Closes #17.", headRefName: "feature/x", state: "open", mergedAt: null },
+    { body: "no keyword here", headRefName: "agent/issue-19-start-agent", state: "open", mergedAt: null },
+    { body: "resolves #99", headRefName: "agent/issue-99-x", state: "closed", mergedAt: "2026-01-02" }, // merged → not open
+    { body: "fixes #5", headRefName: "agent/issue-5-x", state: "closed", mergedAt: null }, // closed-unmerged → not open
+  ]);
+  assert.deepEqual([...set].sort((a, b) => a - b), [17, 19]);
+});
+
+test("enrichIssues: hasOpenPr mirrors the openPrs set", () => {
+  const issues = enrichIssues([raw({ number: 17 }), raw({ number: 18 }), raw({ number: 19 })], {
+    openPrs: new Set([17, 19]),
+  });
+  assert.equal(issues.find((i) => i.number === 17)!.hasOpenPr, true);
+  assert.equal(issues.find((i) => i.number === 18)!.hasOpenPr, false);
+  assert.equal(issues.find((i) => i.number === 19)!.hasOpenPr, true);
 });
 
 test("enrichIssues: no blockers means ready", () => {

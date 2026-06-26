@@ -11,6 +11,7 @@
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { scopedModels } from "../stores/scoped-models.svelte";
   import { remoteFirst } from "../stores/remote-first.svelte";
+  import { workQueue } from "../stores/work-queue.svelte";
   import { sideChat } from "../stores/side-chat.svelte";
   import { usage } from "../stores/usage.svelte";
   import { usagePrefs } from "../stores/usage-prefs.svelte";
@@ -410,6 +411,17 @@
     preloadSounds();
     preloadDoneSamples();
     return installGlobalButtonPress();
+  });
+
+  // Load sidebar open-issue counts once projects are first available.
+  let countsLoaded = false;
+  $effect(() => {
+    const projects = snapshot.current?.projects;
+    if (countsLoaded || !projects || projects.length === 0) return;
+    countsLoaded = true;
+    void workQueue.loadCounts(
+      projects.filter((p) => p.kind === "repo").map((p) => p.id),
+    );
   });
 </script>
 

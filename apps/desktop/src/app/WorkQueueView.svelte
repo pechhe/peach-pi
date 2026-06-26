@@ -3,8 +3,10 @@
   import { groupWorkQueue } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { workQueue } from "../stores/work-queue.svelte";
+  import { mergeQueue } from "../stores/merge-queue.svelte";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Play from "@lucide/svelte/icons/play";
+  import GitMerge from "@lucide/svelte/icons/git-merge";
 
   let {
     projects,
@@ -101,7 +103,41 @@
   const groupHasReady = (g: { issues: { status: string; inProgress: boolean }[] }) =>
     g.issues.some((i) => i.status === "ready" && !i.inProgress);
 
-  // Load whenever the viewed project changes.
+  // ── Merge Queue selection mode ────────────────────────────────────
+  // When on, each issue with an open PR shows a checkbox. The bottom action
+  // bar runs `workQueue:mergeBatch` on the selected issues in selection order.
+  let mergeMode = $state(false);
+  let selected = $state<number[]>([]);
+  const mergeEligible = (i: { hasOpenPr: boolean; status: string; inProgress: boolean }) =>
+    i.hasOpenPr && i.status !== "done" && !i.inProgress;
+
+  function toggleSelect(issueNumber: number) {
+    selected = selected.includes(issueNumber)
+      ? selected.filter((n) => n !== issueNumber)
+      : [...selected, issueNumber];
+  }
+
+  function enterMergeMode() {
+    mergeMode = true;
+    selected = [];
+  }
+
+  function exitMergeMode() {
+    mergeMode = false;
+    selected = [];
+    mergeQueue.reset();
+  }
+
+  const batchRunning = $derived(mergeQueue.inProgress);
+
+  async function runMerge() {
+    if (!projectId || selected.length === 0 || batchRunning) return;
+    const order = [...selected];
+    await mergeQueue.run(projectId, order);
+    await workQueue.load(projectId);
+  }
+
+  // Reload whenever the viewed project changes.
   $effect(() => {
     void workQueue.load(projectId);
   });
@@ -127,6 +163,15 @@
           {launchingAll ? "Starting…" : `Start all ready (${allReady.length})`}
         </button>
       {/if}
+      <button
+        class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-fg hover:bg-surface-2 disabled:opacity-50 titlebar-no-drag"
+        onclick={mergeMode ? exitMergeMode : enterMergeMode}
+        disabled={batchRunning}
+        data-testid="merge-mode-toggle"
+      >
+        <GitMerge size={12} />
+        {mergeMode ? "Cancel" : "Merge queue"}
+      </button>
       <button
         class="text-faint hover:text-fg"
         onclick={() => workQueue.load(projectId)}
@@ -198,6 +243,16 @@
                     data-testid="work-queue-item"
                     data-status={issue.status}
                   >
+                    {#if mergeMode}
+                      <input
+                        type="checkbox"
+                        class="size-3.5 shrink-0 accent-fg"
+                        checked={selected.includes(issue.number)}
+                        disabled={!mergeEligible(issue) || batchRunning}
+                        onchange={() => toggleSelect(issue.number)}
+                        data-testid="merge-select"
+                      />
+                    {/if}
                     <span class="shrink-0 font-mono text-xs text-faint">#{issue.number}</span>
                     <a
                       href={issue.url}
@@ -222,6 +277,23 @@
                       <span class="shrink-0 text-xs text-faint" data-testid="status-blocked"
                         >blocked by {issue.unmetBlockers.map((n) => `#${n}`).join(", ")}</span
                       >
+                    {/if}
+                    {#if mergeQueue.byIssue.get(issue.number)}
+                      {@const p = mergeQueue.byIssue.get(issue.number)!}
+                      <span
+                        class="shrink-0 text-xs {p.item.ok ? 'text-emerald-500' : 'text-amber-600'}"
+                        data-testid="merge-status"
+                      >
+                        {#if p.item.ok}
+                          merged ✓
+                        {:else if p.phase === 'rebase'}
+                          rebase conflict ⚠
+                        {:else if p.phase === 'tests'}
+                          tests failed ⚠
+                        {:else}
+                          merge failed ⚠
+                        {/if}
+                      </span>
                     {/if}
                     <details class="group relative shrink-0">
                       <summary
@@ -272,6 +344,26 @@
             {/if}
           </section>
         {/each}
+      </div>
+    {/if}
+
+    {#if mergeMode}
+      <div
+        class="sticky bottom-0 flex shrink-0 items-center justify-between border-t border-border bg-surface-2 px-6 py-3 titlebar-no-drag"
+        data-testid="merge-action-bar"
+      >
+        <span class="text-xs text-fg-soft">
+          {selected.length} selected · rebase → test → merge on main
+        </span>
+        <button
+          class="flex items-center gap-1 rounded-md bg-fg px-3 py-1.5 text-xs text-surface hover:bg-fg/90 disabled:opacity-50"
+          onclick={runMerge}
+          disabled={selected.length === 0 || batchRunning}
+          data-testid="merge-batch-run"
+        >
+          <GitMerge size={12} />
+          {batchRunning ? "Merging…" : `Merge ${selected.length} → main`}
+        </button>
       </div>
     {/if}
   </div>

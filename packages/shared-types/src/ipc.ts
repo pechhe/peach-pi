@@ -25,6 +25,10 @@ import type {
   GitPrResult,
   GitMergePrResult,
   GitPushLocalResult,
+  GitRebaseTestResult,
+  MergeBatchResult,
+  MergeProgressPayload,
+  WorkQueueOpenCountResult,
   CustomConnection,
   CustomConnectionInput,
   ProposedConnectionConfig,
@@ -422,6 +426,20 @@ export const ipcContracts = {
   "workQueue:reopenIssue": invoke<[projectId: ProjectId, issueNumber: number], CloseIssueResult>(
     (id) => requireNonEmptyString(id, "projectId"),
   ),
+  /** Count of open issues for a project (sidebar badge). Lightweight: no PR
+   *  fetch or enrichment. Always returns a number (0 on any failure). */
+  "workQueue:openCount": invoke<[projectId: ProjectId], WorkQueueOpenCountResult>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+  /** Merge a batch of open-PR issues into main in the given order. For each
+   *  issue: rebase its branch onto current main and run tests in its own
+   *  worktree, then merge its PR on GitHub (squash + delete branch), then pull
+   *  main locally. A conflict aborts that one item before main is touched; the
+   *  batch continues with the next. */
+  "workQueue:mergeBatch": invoke<
+    [projectId: ProjectId, issueNumbers: number[]],
+    MergeBatchResult
+  >((id) => requireNonEmptyString(id, "projectId")),
 
   "git:info": invoke<[threadId: ThreadId], GitInfo>((id) => requireNonEmptyString(id, "threadId")),
   "git:changedFiles": invoke<[threadId: ThreadId], GitChangedFile[]>(),
@@ -440,6 +458,12 @@ export const ipcContracts = {
     requireNonEmptyString(id, "threadId"),
   ),
   "git:pull": invoke<[threadId: ThreadId], GitPullResult>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
+  /** Rebase a thread's branch onto the latest default branch and run tests.
+   *  Used by the batch-merge flow to bring a worktree branch up to date against
+   *  main in its own isolated cwd before its PR is merged. */
+  "git:rebaseAndTest": invoke<[threadId: ThreadId], GitRebaseTestResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
 
@@ -891,6 +915,9 @@ export const ipcContracts = {
   /** Skills/extensions/prompts changed on disk (delete/uninstall). Renderer
    *  re-runs `resources:inspect`. */
   "event:resourcesChanged": event<void>(),
+  /** Per-item progress from a `workQueue:mergeBatch` run. Fires for each issue
+   *  as it moves through rebase → tests → merge, and with the final outcome. */
+  "event:mergeProgress": event<MergeProgressPayload>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

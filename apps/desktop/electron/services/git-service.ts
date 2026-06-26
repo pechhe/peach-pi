@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -14,6 +14,7 @@ import type {
   GitMergePrResult,
   GitPullResult,
   GitPushLocalResult,
+  GitRebaseTestResult,
   ModelInfo,
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
@@ -419,16 +420,31 @@ export class GitService {
     const ahead = Number((await git(["rev-list", "--count", "@{u}..HEAD"], cwd)).trim());
     const behind = Number((await git(["rev-list", "--count", "HEAD..@{u}"], cwd)).trim());
     if (behind === 0) return { ok: true, branch };
+    // Refuse to rebase/ff with a dirty tree — gives a cleaner message than the
+    // raw git error ("cannot pull with rebase: You have unstaged changes").
+    if ((await git(["status", "--porcelain"], cwd)).trim()) {
+      return {
+        ok: false,
+        error: "Cannot pull with uncommitted changes. Commit or stash them first.",
+      };
+    }
     const rebase = ahead > 0;
     try {
       await git(rebase ? ["pull", "--rebase"] : ["pull", "--ff-only"], cwd);
       return { ok: true, branch };
     } catch (err) {
+      const msg = String(err);
+      // Rebase may have stopped for conflict resolution (not a hard failure).
+      const inProgress = await gitOk(["--no-optional-locks", "rev-parse", "--git-path", "rebase-merge"], cwd);
+      if (inProgress) {
+        return {
+          ok: false,
+          error: "Pull stopped at a merge conflict. Resolve it, then run `git rebase --continue` (or `git rebase --abort` to roll back).",
+        };
+      }
       return {
         ok: false,
-        error: rebase
-          ? `Rebase failed: ${String(err)}. Resolve conflicts then \`git rebase --continue\`, or \`git rebase --abort\` to roll back.`
-          : `Pull failed: ${String(err)}`,
+        error: `Pull failed: ${msg}`,
       };
     }
   }
@@ -518,6 +534,58 @@ export class GitService {
     } catch {
       return false;
     }
+  }
+
+  /** Rebase this thread's branch onto the latest default branch (fetched from
+   *  origin) and run the project's tests. Used by the batch-merge flow: each
+   *  worktree branch built against an older main is brought up to date in its
+   *  own isolated cwd before its PR is merged, so conflicts surface here —
+   *  not on main — and main stays linear. Aborts cleanly on rebase conflict.
+   *  Tests are skipped (not failed) when no `pnpm test` runner is detected. */
+  async rebaseAndTest(threadId: string): Promise<GitRebaseTestResult> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd) return { ok: false, error: "No working directory" };
+    if (!(await gitOk(["rev-parse", "--git-dir"], cwd)))
+      return { ok: false, error: "Not a git repository" };
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    if (!branch || branch === "HEAD") return { ok: false, error: "Detached HEAD — commit first" };
+    const base = await this.defaultBranch(cwd);
+    if (!base) return { ok: false, error: "No default branch (origin/HEAD)" };
+    // Fetch the latest default branch so the rebase is against current main,
+    // not whatever the worktree last saw.
+    await git(["fetch", "origin", base], cwd).catch(() => undefined);
+    // Refuse to rebase with a dirty tree — cleaner than git's raw error.
+    if ((await git(["status", "--porcelain"], cwd)).trim()) {
+      return { ok: false, error: "Cannot rebase with uncommitted changes. Commit or stash them first." };
+    }
+    try {
+      await git(["rebase", `origin/${base}`], cwd);
+    } catch {
+      // Rebase stopped on a conflict. Abort so the worktree is left clean —
+      // the caller decides whether to retry, resolve manually, or skip.
+      if (await gitOk(["rev-parse", "--git-path", "rebase-merge"], cwd)) {
+        await git(["rebase", "--abort"], cwd).catch(() => undefined);
+      }
+      return { ok: false, error: `Rebase conflict on ${branch} — aborted` };
+    }
+    const testCmd = await this.detectTestCommand(cwd);
+    if (!testCmd) return { ok: true, branch, base, tests: "skipped" };
+    try {
+      await runExec(testCmd[0], testCmd[1], { cwd, maxBuffer: 10 * 1024 * 1024 });
+    } catch (err) {
+      const e = err as { stderr?: string; stdout?: string; message?: string };
+      const tail = (e.stderr || e.stdout || e.message || "").trim().split("\n").slice(-8).join("\n");
+      return { ok: false, error: `Tests failed on ${branch}:\n${tail}` };
+    }
+    return { ok: true, branch, base, tests: "passed" };
+  }
+
+  /** Resolve the project's test command, or null when no runner is detected.
+   *  `pnpm test` when a package.json is present (the project's own gate per
+   *  its AGENTS.md); otherwise null so non-JS repos skip the test step. */
+  private async detectTestCommand(cwd: string): Promise<[string, string[]] | null> {
+    if (!existsSync(path.join(cwd, "package.json"))) return null;
+    return ["pnpm", ["test"]];
   }
 
   async removeWorktree(projectPath: string, worktreeDir: string): Promise<void> {

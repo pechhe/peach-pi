@@ -51,6 +51,17 @@ export type TranscriptItem =
   | { id: string; kind: "notice"; text: string }
   | {
       id: string;
+      kind: "retry";
+      running: boolean;
+      /** 1-indexed attempt number (attempts 1..maxAttempts). */
+      attempt: number;
+      /** Max retries the SDK auto-retry will make before giving up. */
+      maxAttempts: number;
+      /** Provider/runtime error that triggered this retry attempt. */
+      error: string;
+    }
+  | {
+      id: string;
       kind: "compaction";
       running: boolean;
       reason: "manual" | "threshold" | "overflow";

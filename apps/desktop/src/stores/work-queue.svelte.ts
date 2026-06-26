@@ -11,6 +11,10 @@ class WorkQueueStore {
   result = $state<WorkQueueResult | null>(null);
   loading = $state(false);
   projectId = $state<string | null>(null);
+  /** Open-issue counts for the sidebar badge, keyed by project id. Loaded
+   *  once on mount via {@link loadCounts} and refreshed alongside the Work
+   *  Queue view. Always a number (0 means zero issues or fetch failure). */
+  counts = $state<Map<string, number>>(new Map());
 
   async load(projectId: string | null): Promise<void> {
     this.projectId = projectId;
@@ -24,6 +28,24 @@ class WorkQueueStore {
     } finally {
       if (this.projectId === projectId) this.loading = false;
     }
+  }
+
+  /** Fetch open-issue counts for every repo project. Best-effort: failures and
+   *  non-GitHub projects land as 0. Called once on mount. */
+  async loadCounts(projectIds: string[]): Promise<void> {
+    await Promise.all(
+      projectIds.map(async (id) => {
+        const res = await api.invoke("workQueue:openCount", id);
+        this.counts.set(id, res.ok ? res.count : 0);
+        // Reassign to trigger reactivity across the Map.
+        this.counts = new Map(this.counts);
+      }),
+    );
+  }
+
+  /** Count for a single project (cached). 0 when unknown / not fetched. */
+  countFor(projectId: string): number {
+    return this.counts.get(projectId) ?? 0;
   }
 }
 

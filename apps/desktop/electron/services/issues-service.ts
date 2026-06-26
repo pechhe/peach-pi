@@ -3,9 +3,11 @@ import { promisify } from "node:util";
 import {
   enrichIssues,
   mergedClosedIssues,
+  openPrIssues,
   type CloseIssueResult,
   type RawIssue,
   type RawPull,
+  type WorkQueueOpenCountResult,
   type WorkQueueResult,
 } from "@peach-pi/shared-types";
 
@@ -101,11 +103,12 @@ export class IssuesService {
         ? await Promise.all([this.viaGh(gh, cwd), this.viaGhPulls(gh, cwd)])
         : await Promise.all([this.viaRest(gh), this.viaRestPulls(gh)]);
       const merged = mergedClosedIssues(pulls);
+      const openPrs = openPrIssues(pulls);
       const inProgress = inProgressFrom(this.getWorktreeNames(projectId));
       return {
         ok: true,
         source: useGh ? "gh" : "rest",
-        issues: enrichIssues(raw, { merged, inProgress }),
+        issues: enrichIssues(raw, { merged, inProgress, openPrs }),
       };
     } catch (e) {
       return { ok: false, reason: "error", message: e instanceof Error ? e.message : String(e) };
@@ -158,22 +161,24 @@ export class IssuesService {
         "--repo",
         `${gh.owner}/${gh.repo}`,
         "--state",
-        "merged",
+        "all",
         "--limit",
         "200",
         "--json",
-        "body,headRefName,mergedAt",
+        "body,headRefName,state,mergedAt",
       ],
       { cwd, maxBuffer: 20 * 1024 * 1024 },
     );
     const rows = JSON.parse(stdout) as Array<{
       body: string | null;
       headRefName: string;
+      state: string;
       mergedAt: string | null;
     }>;
     return rows.map((r) => ({
       body: r.body ?? "",
       headRefName: r.headRefName,
+      state: r.state.toLowerCase() === "closed" ? "closed" : "open",
       mergedAt: r.mergedAt,
     }));
   }
@@ -199,17 +204,21 @@ export class IssuesService {
       "User-Agent": "peach-pi",
     };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/pulls?state=closed&per_page=100`;
+    const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/pulls?state=all&per_page=100`;
     const res = await fetch(url, { headers });
     if (!res.ok) throw new Error(`GitHub API ${res.status}`);
     const raw = (await res.json()) as Array<{
       body: string | null;
+      state: string;
       merged_at: string | null;
       head: { ref: string };
     }>;
-    return raw
-      .filter((p) => p.merged_at)
-      .map((p) => ({ body: p.body ?? "", headRefName: p.head.ref, mergedAt: p.merged_at }));
+    return raw.map((p) => ({
+      body: p.body ?? "",
+      headRefName: p.head.ref,
+      state: p.state.toLowerCase() === "closed" ? "closed" : "open",
+      mergedAt: p.merged_at,
+    }));
   }
 
   /** Resolve owner/repo for a project's GitHub origin, or null if the project
@@ -275,6 +284,50 @@ export class IssuesService {
       return { ok: true };
     } catch (e) {
       return { ok: false, reason: "error", message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Count of OPEN issues for a project (the sidebar badge). Lightweight: no
+   *  PR fetch, no enrichment — just `gh issue list --state open` (or the REST
+   *  issues endpoint). Returns `{ ok: false, count: 0 }` for non-GitHub /
+   *  no-remote projects. */
+  async openCount(projectId: string): Promise<WorkQueueOpenCountResult> {
+    const gh = await this.resolveGithub(projectId);
+    if ("ok" in gh) return { ok: false, count: 0 };
+    try {
+      const useGh = await ghAvailable();
+      if (useGh) {
+        const { stdout } = await run(
+          "gh",
+          [
+            "issue",
+            "list",
+            "--repo",
+            `${gh.owner}/${gh.repo}`,
+            "--state",
+            "open",
+            "--limit",
+            "200",
+            "--json",
+            "number",
+          ],
+          { cwd: gh.cwd, maxBuffer: 20 * 1024 * 1024 },
+        );
+        return { ok: true, count: (JSON.parse(stdout) as unknown[]).length };
+      }
+      const token = await githubToken();
+      const headers: Record<string, string> = {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "peach-pi",
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/issues?state=open&per_page=100`;
+      const res = await fetch(url, { headers });
+      if (!res.ok) return { ok: false, count: 0 };
+      const raw = (await res.json()) as Array<{ pull_request?: unknown }>;
+      return { ok: true, count: raw.filter((i) => !i.pull_request).length };
+    } catch {
+      return { ok: false, count: 0 };
     }
   }
 }

@@ -82,71 +82,111 @@
     }
   }
 
-  // ── Eased bottom-follow (mirrors ThreadView's main glide) ──────────
-  // Same time-based exponential decay + continuous-while-streaming loop as the
-  // main thread scroll, so bursts inside the capped box flow instead of
-  // lurching. Keeping one loop armed through the whole streaming run avoids
-  // the settle→restart-from-rest jank a per-burst lerp produces.
-  const GLIDE_TAU = 0.14; // seconds; higher = gentler.
+  // ── Batched bottom-follow ─────────────────────────────────────────
+  // The thinking box is tiny (≤50vh). The earlier per-frame eased glide
+  // (ease scrollTop toward the live bottom every rAF) read as micro-jitter
+  // here: the typewriter grows scrollHeight in uneven per-frame steps (1 word
+  // / 3 words / 1 word …), and because the eased velocity is proportional to
+  // the remaining gap, each growth step pulses the velocity. The eye is
+  // sensitive to *velocity change*, not position, so on this small surface
+  // that reads as micro-variations in scroll speed.
+  //
+  // Fix: don't chase the bottom every frame. Let content accumulate a small
+  // buffer below the fold and only then run ONE closed-form ease-out tween
+  // to the bottom — a calm nudge, then a pause while the buffer rebuilds,
+  // then another nudge. Each tween is fixed-duration with a target captured
+  // at start, so its perceived speed is constant (no coupling to per-frame
+  // growth), and tween frames don't even read scrollHeight (no reflow).
+  //
+  // SCROLL_BATCH_PX = how much unscrolled content we tolerate below the fold
+  // before nudging. ~3 lines of the small thinking text; big enough to read
+  // as a deliberate "a few lines appeared" motion, small enough to never lag
+  // the freshest reasoning by more than a blink.
+  const SCROLL_BATCH_PX = 48;
+  // Tween duration. Short enough that a nudge feels instant-calm, long enough
+  // to read as eased rather than a hard snap.
+  const SCROLL_TWEEN_MS = 240;
+  const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
   let glideRaf = 0;
-  let gliding = false;
-  let lastTs = 0;
-  function glideToBottom() {
-    const el = scrollEl;
-    if (!el || gliding) return;
-    gliding = true;
-    glideActive = true;
-    lastTs = 0;
-    // Tag the element once at glide start so the global auto-hide-scrollbar
-    // listener (main.ts) skips every programmatic scroll while we follow a
-    // streaming turn, and onScroll doesn't re-evaluate atBottom off the
-    // glide's own trailing dip. Previously this was set+deleted EVERY frame
-    // (two DOM attribute mutations per rAF tick); the comment said it stayed
-    // set throughout the glide — so set it once here and clear once at end.
-    el.dataset.glideScroll = "1";
-    glidingScroll = true;
-    const stop = () => {
-      gliding = false;
-      glideActive = false;
-      glidingScroll = false;
-      const e = scrollEl;
-      if (e) delete e.dataset.glideScroll;
-    };
-    const step = (ts: number) => {
-      const e = scrollEl;
-      if (!e || !atBottom) {
-        stop();
-        return;
+  // Active nudge; null while idle/buffering (waiting for content to accrue).
+  let tween: { from: number; to: number; t0: number } | null = null;
+
+  function followLoop(ts: number) {
+    const e = scrollEl;
+    if (!e) {
+      glideRaf = 0;
+      return;
+    }
+    // User scrolled up and no tween to finish — stop following; the effect
+    // re-arms if they return to the bottom (atBottom flips back true).
+    if (!atBottom && !tween) {
+      stopFollow();
+      return;
+    }
+
+    if (tween) {
+      // Advance the in-flight nudge. Target captured at start → constant
+      // perceived speed, immune to per-frame scrollHeight jitter.
+      if (!atBottom) {
+        tween = null; // abandoned mid-tween on scroll-up
+      } else {
+        const p = Math.min(1, (ts - tween.t0) / SCROLL_TWEEN_MS);
+        e.scrollTop = tween.from + (tween.to - tween.from) * easeOut(p);
+        if (p >= 1) tween = null;
       }
-      if (!lastTs) lastTs = ts;
-      const dt = Math.min(0.05, (ts - lastTs) / 1000);
-      lastTs = ts;
+    } else if (!streaming) {
+      // Stream ended: settle exactly to the bottom (clears any leftover
+      // buffer < SCROLL_BATCH_PX so the final line isn't left tucked below).
       const target = e.scrollHeight - e.clientHeight;
-      const diff = target - e.scrollTop;
-      if (diff <= 0.5 && !streaming) {
-        e.scrollTop = target;
-        stop();
+      if (atBottom && target - e.scrollTop > 0.5) e.scrollTop = target;
+      else {
+        stopFollow();
         return;
       }
-      const factor = 1 - Math.exp(-dt / GLIDE_TAU);
-      e.scrollTop = e.scrollTop + diff * factor;
-      glideRaf = requestAnimationFrame(step);
-    };
-    glideRaf = requestAnimationFrame(step);
+    } else if (atBottom) {
+      // Streaming, idle: let a buffer accrue, nudge once it crosses threshold.
+      const target = e.scrollHeight - e.clientHeight;
+      if (target - e.scrollTop >= SCROLL_BATCH_PX) {
+        tween = { from: e.scrollTop, to: target, t0: ts };
+      }
+    }
+    glideRaf = requestAnimationFrame(followLoop);
   }
 
-  // Pin to the bottom while streaming (top scrolls off) unless the user
-  // scrolled up to re-read. Tracks `text` so it re-runs as reasoning grows;
-  // the eased loop retargets every frame to the live bottom.
-  $effect(() => {
+  function startFollow() {
     const el = scrollEl;
-    if (!el) return;
+    if (!el || glideRaf) return;
+    glideActive = true;
+    // Suppress the scrollbar thumb (incl. :hover) for the whole follow and
+    // skip onScroll's atBottom logic for our programmatic scrolls — set once
+    // here, clear once on stopFollow. (Was a per-frame set/delete before.)
+    el.dataset.glideScroll = "1";
+    glidingScroll = true;
+    glideRaf = requestAnimationFrame(followLoop);
+  }
+
+  function stopFollow() {
+    glideActive = false;
+    glidingScroll = false;
+    tween = null;
+    const e = scrollEl;
+    if (e) delete e.dataset.glideScroll;
+  }
+
+  // Arm the batched follow while pinned to the bottom. Tracks `text` so a
+  // burst re-checks the buffer promptly (startFollow no-ops if already armed).
+  // When streaming ends we do NOT stop here — followLoop runs a final settle
+  // to the exact bottom and self-terminates.
+  $effect(() => {
     void text;
-    if (streaming && atBottom) glideToBottom();
+    if (scrollEl && streaming && atBottom) startFollow();
   });
 
   $effect(() => {
-    return () => cancelAnimationFrame(glideRaf);
+    return () => {
+      cancelAnimationFrame(glideRaf);
+      stopFollow();
+    };
   });
 
   // Rail height = the visible box height (clientHeight), tweened. The rail is

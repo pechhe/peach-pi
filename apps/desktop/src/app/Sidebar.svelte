@@ -4,6 +4,7 @@
   import { api } from "../lib/ipc";
   import { SvelteSet } from "svelte/reactivity";
   import { extensionUi } from "../stores/extension-ui.svelte";
+  import { workQueue } from "../stores/work-queue.svelte";
   import { FLEET_WIDGET_KEY, parseFleet } from "../lib/subagent/fleet";
   import { playButtonSecondary, playRotary } from "../lib/sound/button-click-sound";
   import SnoozePicker from "./SnoozePicker.svelte";
@@ -936,16 +937,30 @@
             </Tooltip>
           </div>
           {#if group.project.kind === "repo"}
-            <Tooltip text="Open work queue">
-              <button
-                class="flex shrink-0 items-center rounded px-1 py-0.5
-                  {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}
-                  {activeView === 'work-queue' ? 'text-accent opacity-100' : 'text-faint hover:text-fg'}"
-                onclick={() => onOpenWorkQueue(group.project.id)}
-                data-testid="project-work-queue"
-                aria-label="Open work queue"><ListChecks size={14} /></button
-              >
-            </Tooltip>
+            {@const openCount = workQueue.countFor(group.project.id)}
+            {#if openCount > 0}
+              <Tooltip text="Open work queue">
+                <button
+                  class="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px]
+                    {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : ''}
+                    {activeView === 'work-queue' ? 'text-accent' : 'text-faint hover:text-fg'}"
+                  onclick={() => onOpenWorkQueue(group.project.id)}
+                  data-testid="project-work-queue"
+                  aria-label="Open work queue"><ListChecks size={14} /><span>{openCount}</span></button
+                >
+              </Tooltip>
+            {:else}
+              <Tooltip text="Open work queue">
+                <button
+                  class="flex shrink-0 items-center rounded px-1 py-0.5
+                    {isCollapsed(group.project.id) ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}
+                    {activeView === 'work-queue' ? 'text-accent opacity-100' : 'text-faint hover:text-fg'}"
+                  onclick={() => onOpenWorkQueue(group.project.id)}
+                  data-testid="project-work-queue"
+                  aria-label="Open work queue"><ListChecks size={14} /></button
+                >
+              </Tooltip>
+            {/if}
           {/if}
           {#if group.snoozed.length > 0}
             <div class="relative flex shrink-0 items-center">

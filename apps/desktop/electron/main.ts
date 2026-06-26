@@ -7,6 +7,7 @@ import {
   PORTABLE_PI_DIRS,
   type EventChannel,
   type TrackedIssue,
+  type MergeBatchItemResult,
   issueBranchName,
   issueWorktreeName,
   buildSeedPrompt,
@@ -696,6 +697,53 @@ async function boot(): Promise<void> {
         issuesService.close(projectId, issueNumber, reason),
       "workQueue:reopenIssue": (projectId, issueNumber) =>
         issuesService.reopen(projectId, issueNumber),
+      "workQueue:openCount": (projectId) => issuesService.openCount(projectId),
+      "workQueue:mergeBatch": async (projectId, issueNumbers) => {
+        // Look up the thread (hence the git cwd) for each issue via its worktree
+        // record name `issue-<n>`. Issues without a known worktree thread are
+        // returned as rebase-phase failures — the caller can still proceed on
+        // the rest.
+        const snap = appService.snapshot();
+        const projectWorktrees = snap.worktrees.filter(
+          (w) => w.projectId === projectId && w.archivedAt == null,
+        );
+        const items: MergeBatchItemResult[] = [];
+        for (const issueNumber of issueNumbers) {
+          const wt = projectWorktrees.find((w) => w.name === `issue-${issueNumber}`);
+          const thread = wt ? snap.threads.find((t) => t.worktreeId === wt.id) : undefined;
+          if (!thread) {
+            const item: MergeBatchItemResult = {
+              ok: false,
+              issueNumber,
+              phase: "rebase",
+              error: "No worktree thread for this issue",
+            };
+            items.push(item);
+            emit("event:mergeProgress", { projectId, issueNumber, phase: "rebase", done: true, item });
+            continue;
+          }
+          const rebaseRes = await gitService.rebaseAndTest(thread.id);
+          if (!rebaseRes.ok) {
+            const item = { ok: false as const, issueNumber, phase: rebaseRes.error.includes("Tests") ? ("tests" as const) : ("rebase" as const), error: rebaseRes.error };
+            items.push(item);
+            emit("event:mergeProgress", { projectId, issueNumber, phase: item.phase, done: true, item });
+            continue;
+          }
+          const mergeRes = await gitService.mergePr(thread.id);
+          const item: MergeBatchItemResult = mergeRes.ok
+            ? { ok: true, issueNumber, prUrl: mergeRes.prUrl, tests: rebaseRes.tests }
+            : { ok: false, issueNumber, phase: "merge", error: mergeRes.error };
+          items.push(item);
+          emit("event:mergeProgress", { projectId, issueNumber, phase: "merge", done: true, item });
+          if (mergeRes.ok) {
+            // Pull main locally so the next item in the batch sees a current
+            // project repo. Best-effort — a pull failure does not fail the
+            // merge that already landed on GitHub.
+            await gitService.pull(thread.id).catch(() => undefined);
+          }
+        }
+        return { ok: true, items };
+      },
       "git:info": gitService.info.bind(gitService),
       "git:changedFiles": gitService.changedFiles.bind(gitService),
       "git:fileDiff": gitService.fileDiff.bind(gitService),
@@ -705,6 +753,7 @@ async function boot(): Promise<void> {
       "git:mergeToLocal": gitService.mergeToLocal.bind(gitService),
       "git:pushLocal": gitService.pushLocal.bind(gitService),
       "git:pull": gitService.pull.bind(gitService),
+      "git:rebaseAndTest": gitService.rebaseAndTest.bind(gitService),
       // remote session hosting (ADR-0009)
       "remote:hostStatus": remoteHost.status.bind(remoteHost),
       "remote:setHostEnabled": remoteHost.setHostEnabled.bind(remoteHost),
