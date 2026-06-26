@@ -1,6 +1,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { RemoteFirstMode, ThreadHandoffStatus, ThreadId } from "@peach-pi/shared-types";
+import type {
+  RemoteFirstMode,
+  ThreadHandoffStatus,
+  ThreadId,
+  TypedEmit,
+} from "@peach-pi/shared-types";
 import type { AppDb } from "../../persistence/db.ts";
 import { KvRepo } from "../../persistence/repositories.ts";
 import {
@@ -10,11 +15,14 @@ import {
   type Machine,
 } from "@peach-pi/remote-handoff";
 
-/** Minimal emit signature: the emitter registered in main.ts broadcasts an
- *  event payload to all renderer windows. Defined locally (not imported from
- *  ipc/registry.ts) so this module loads in plain Node for unit tests —
- *  registry.ts imports `electron`, which isn't available in the test runner. */
-export type Emit = (channel: string, payload: unknown) => void;
+/**
+ * Typed broadcast emitter (channel → payload, keyed by the IPC contract).
+ * Imported from shared-types rather than declared locally: it is a pure type
+ * (erased at runtime) so it pulls no `electron` dependency, preserving plain-
+ * Node loadability for unit tests. The concrete factory lives in
+ * `ipc/registry.ts` (it needs `BrowserWindow.webContents.send` at runtime).
+ */
+export type Emit = TypedEmit;
 
 /**
  * Remote-first mode + per-thread movable execution, layered on the
