@@ -177,6 +177,19 @@ export type StartAllReadyResult =
   | { ok: true; launched: Array<{ issueNumber: number; threadId: ThreadId }> }
   | { ok: false; reason: "error"; message?: string };
 
+/** Result of breaking a childless PRD down into issues (runs the to-issues
+ *  skill on a thread rooted in the project working dir — no worktree). */
+export type BreakdownPrdResult =
+  | { ok: true; threadId: ThreadId }
+  | { ok: false; reason: "error"; message?: string };
+
+/** Result of launching an agent directly on a PRD (worktree + branch, seeded
+ *  with the PRD body). Used when a PRD has no child issues and the user
+ *  prefers one agent over a breakdown. */
+export type StartPrdAgentResult =
+  | { ok: true; threadId: ThreadId }
+  | { ok: false; reason: "error"; message?: string };
+
 /** Result of closing or reopening an issue from the Work Queue. */
 export type CloseIssueResult =
   | { ok: true }

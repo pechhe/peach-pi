@@ -1,6 +1,22 @@
 <script lang="ts">
   import type { Component } from "svelte";
-  import { slide, fly } from "svelte/transition";
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
+
+  // Step entrance: collapse height + fade together so the card grows smoothly
+  // as the new step flows in. Pairs with the connector draw-down below.
+  function flowStep(node: Element, { duration = 380 } = {}) {
+    const cs = getComputedStyle(node);
+    const h = parseFloat(cs.height);
+    const pt = parseFloat(cs.paddingTop);
+    const pb = parseFloat(cs.paddingBottom);
+    return {
+      duration,
+      easing: cubicOut,
+      css: (t: number) =>
+        `height:${t * h}px;padding-top:${t * pt}px;padding-bottom:${t * pb}px;opacity:${t};overflow:hidden;`,
+    };
+  }
   import Compass from "@lucide/svelte/icons/compass";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Wrench from "@lucide/svelte/icons/wrench";
@@ -99,8 +115,8 @@
       {#key node.id}
       <li
         class="agent-entity__node agent-entity__node--{node.tone}"
-        in:slide={{ duration: 320, axis: "y" }}
-        out:slide={{ duration: 200, axis: "y" }}
+        in:flowStep={{ duration: 380 }}
+        out:flowStep={{ duration: 220 }}
       >
         <span class="agent-entity__marker agent-entity__marker--{node.tone}" aria-hidden="true">
           {#if node.tone === "active"}<BrailleSpinner class="agent-entity__node-spinner" shape="triangle" />{:else if node.tone === "pending"}<span class="agent-entity__shimmer-dot" aria-hidden="true"></span>{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={11} />{:else if node.tone === "blocked"}<span class="agent-entity__node-bang" aria-hidden="true">!</span>{/if}
@@ -217,14 +233,14 @@
     position: absolute;
     left: 9px;
     top: 24px;    /* marker bottom (20) + 4px gap */
-    bottom: -6px;
+    bottom: 0;    /* stop at node edge → ~4px gap above next marker */
     width: 2px;
-    transform: translateX(-50%);
+    transform: translateX(-50%) scaleY(0);
+    transform-origin: top center;
     background: color-mix(in srgb, var(--ae-accent) 45%, var(--color-border));
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    transition: transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) 0.06s;
   }
-  .agent-entity__node:not(:last-child)::before { opacity: 1; }
+  .agent-entity__node:not(:last-child)::before { transform: translateX(-50%) scaleY(1); }
 
   /* plain nodes — no colored boxes */
   .agent-entity__marker {

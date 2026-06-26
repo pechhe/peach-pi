@@ -1,5 +1,14 @@
 import { api } from "../lib/ipc";
-import type { WorkQueueResult } from "@peach-pi/shared-types";
+import type { TrackedIssue, WorkQueueResult } from "@peach-pi/shared-types";
+
+/** Open issues that count toward the sidebar badge: every open issue except
+ *  a PRD that has sub-issues (slices are run directly, not the PRD itself). */
+function badgeCount(issues: TrackedIssue[]): number {
+  const parents = new Set(issues.filter((i) => i.parent !== null).map((i) => i.parent!));
+  return issues.filter(
+    (i) => i.state === "open" && !(i.isPrd && parents.has(i.number)),
+  ).length;
+}
 
 /**
  * Per-project Work Queue: the project's open tracker issues. Business logic
@@ -24,10 +33,22 @@ class WorkQueueStore {
     try {
       const res = await api.invoke("workQueue:list", projectId);
       // Ignore a stale response if the viewed project changed mid-flight.
-      if (this.projectId === projectId) this.result = res;
+      if (this.projectId === projectId) {
+        this.result = res;
+        // Keep the sidebar badge in sync with the freshly loaded data so it
+        // never lags behind a close/reopen done since mount. A PRD with sub
+        // issues isn't counted: we run agents on the slices, not the PRD.
+        this.setCount(projectId, res.ok ? badgeCount(res.issues) : 0);
+      }
     } finally {
       if (this.projectId === projectId) this.loading = false;
     }
+  }
+
+  /** Set the cached open count for one project, triggering Map reactivity. */
+  setCount(projectId: string, count: number): void {
+    this.counts.set(projectId, count);
+    this.counts = new Map(this.counts);
   }
 
   /** Fetch open-issue counts for every repo project. Best-effort: failures and

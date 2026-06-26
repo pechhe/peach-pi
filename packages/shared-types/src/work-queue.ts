@@ -151,6 +151,11 @@ export function issueBranchName(number: number, title: string): string {
   return `agent/issue-${number}-${slugify(title)}`;
 }
 
+/** The agent branch for a PRD run directly (no breakdown): `agent/prd-<n>-<slug>`. Pure. */
+export function prdBranchName(number: number, title: string): string {
+  return `agent/prd-${number}-${slugify(title)}`;
+}
+
 /** The worktree record name that links a worktree to its issue. Pure. */
 export function issueWorktreeName(number: number): string {
   return `issue-${number}`;
@@ -194,6 +199,29 @@ export function buildSeedPrompt(issue: TrackedIssue, parentPrd?: TrackedIssue | 
   );
 }
 
+/** Build the seed prompt for running the to-issues skill on a childless PRD.
+ *  The skill reads the PRD body and files issues under it. Pure. */
+export function buildPrdBreakdownPrompt(prd: TrackedIssue): string {
+  return (
+    `/skill:to-issues\n\n` +
+    `PRD #${prd.number}: ${prd.title}\n\n` +
+    `${prd.body.trim()}`
+  );
+}
+
+/** Build the seed prompt for running an agent directly on a PRD (no child
+ *  issues). The PRD body is the task; the PR closes the PRD issue itself.
+ *  Pure. */
+export function buildPrdAgentPrompt(prd: TrackedIssue): string {
+  return (
+    `You are implementing PRD #${prd.number}: ${prd.title}.\n\n` +
+    `${prd.body.trim()}\n\n` +
+    `When the work is complete, run the full test suite. Once it is green, ` +
+    `open a pull request whose body includes \`Closes #${prd.number}\` so the ` +
+    `PRD issue closes on merge, then stop at the human gate for review — do not merge.`
+  );
+}
+
 /** A display group in the Work Queue: a PRD with its direct child issues, or
  *  the catch-all Unparented group (`prd` is null). `childless` flags a PRD with
  *  no children at all (needs breakdown). */
@@ -203,31 +231,28 @@ export interface WorkQueueGroup {
   issues: TrackedIssue[];
 }
 
-/** Group enriched issues for display: one group per PRD (listing its direct,
- *  not-done children) followed by an Unparented group of non-PRD issues with no
- *  PRD parent. Done issues are omitted from the displayed lists but still inform
- *  childless detection and blocker gating. Pure — unit-tested. */
+/** Group enriched issues for display: one group per PRD (listing all its
+ *  direct children, including done ones so closed work stays grouped under its
+ *  PRD) followed by an Unparented group of non-PRD issues with no PRD parent.
+ *  Done issues inform childless detection and blocker gating unchanged.
+ *  Pure — unit-tested. */
 export function groupWorkQueue(issues: TrackedIssue[]): WorkQueueGroup[] {
   const prds = issues.filter((i) => i.isPrd);
   const prdNumbers = new Set(prds.map((p) => p.number));
-  const visible = (i: TrackedIssue) => i.status !== "done";
+  const byNumber = (a: TrackedIssue, b: TrackedIssue) => a.number - b.number;
 
-  const groups: WorkQueueGroup[] = prds
-    .filter(visible)
-    .sort((a, b) => a.number - b.number)
-    .map((prd) => {
-      const children = issues.filter((i) => i.parent === prd.number);
-      return {
-        prd,
-        childless: children.length === 0,
-        issues: children.filter(visible).sort((a, b) => a.number - b.number),
-      };
-    });
+  const groups: WorkQueueGroup[] = prds.sort(byNumber).map((prd) => {
+    const children = issues.filter((i) => i.parent === prd.number);
+    return {
+      prd,
+      childless: children.length === 0,
+      issues: children.sort(byNumber),
+    };
+  });
 
   const unparented = issues
     .filter((i) => !i.isPrd && (i.parent === null || !prdNumbers.has(i.parent)))
-    .filter(visible)
-    .sort((a, b) => a.number - b.number);
+    .sort(byNumber);
   if (unparented.length > 0) {
     groups.push({ prd: null, childless: false, issues: unparented });
   }

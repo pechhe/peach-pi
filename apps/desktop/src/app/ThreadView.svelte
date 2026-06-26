@@ -6,35 +6,45 @@
   type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
   type Row =
     | { type: "item"; item: TranscriptItem }
-    | { type: "group"; id: string; items: ToolItem[] }
-    | { type: "turn"; id: string; rows: Row[]; summary: string };
+    | { type: "group"; id: string; items: TranscriptItem[]; hasThinking: boolean };
 
-  /** First line of the first substantive assistant text in the turn, else a
-   *  tool-breakdown summary. Shown on the collapsed turn fold. */
-  function turnSummary(items: readonly TranscriptItem[]): string {
-    const first = items.find((it) => it.kind === "assistant" && it.text.trim());
-    if (first && first.kind === "assistant") {
-      return first.text.trim().split("\n")[0]!.slice(0, 120);
-    }
+  /** Summary for a folded prep run. Thinking present → "Reasoning"; tools
+   *  only → tool-name breakdown like the old tool group. */
+  function groupSummary(items: readonly TranscriptItem[]): string {
     const tools = items.filter((it): it is ToolItem => it.kind === "tool");
-    if (tools.length) return toolBreakdown(tools);
-    return "Reasoning";
+    const hasThinking = items.some((it) => it.kind === "assistant");
+    if (hasThinking) return tools.length ? `Reasoning · ${tools.length} tool calls` : "Reasoning";
+    if (tools.length === 1) return tools[0]!.toolName || tools[0]!.argsSummary || "tool";
+    return toolBreakdown(tools);
   }
 
-  /** Collapse consecutive successful ("done") tool calls into a sub-foldable
-   *  group. Running/error tools — and lone successes — stay standalone so
-   *  anything needing eyes is never hidden. */
-  function groupToolRuns(items: readonly TranscriptItem[]): Row[] {
+  /** Collapse runs of successful ("done") tool calls AND thinking-only
+   *  assistant items into one foldable reasoning card. Anything with real
+   *  answer content (assistant-with-text, user, subagent, compaction, retry,
+   *  notice, steer, running/error tools) flushes the run and stands alone. */
+  function groupPrepRuns(all: readonly TranscriptItem[]): Row[] {
     const out: Row[] = [];
-    let group: ToolItem[] = [];
+    let group: TranscriptItem[] = [];
     const flush = () => {
       if (group.length === 0) return;
-      if (group.length === 1) out.push({ type: "item", item: group[0]! });
-      else out.push({ type: "group", id: `toolgroup-${group[0]!.id}`, items: group });
+      if (group.length === 1) {
+        // A lone foldable item keeps its existing standalone render.
+        out.push({ type: "item", item: group[0]! });
+      } else {
+        out.push({
+          type: "group",
+          id: `group-${group[0]!.id}`,
+          items: group,
+          hasThinking: group.some((it) => it.kind === "assistant"),
+        });
+      }
       group = [];
     };
-    for (const it of items) {
-      if (it.kind === "tool" && it.status === "done") group.push(it);
+    for (const it of all) {
+      const foldable =
+        (it.kind === "tool" && it.status === "done") ||
+        (it.kind === "assistant" && !it.text.trim() && !it.error && !!it.thinking);
+      if (foldable) group.push(it);
       else { flush(); out.push({ type: "item", item: it }); }
     }
     flush();
@@ -479,70 +489,14 @@
     return map;
   });
 
-  // Group each user turn into one foldable card containing its reasoning,
-  // tool calls, and intermediate assistant text — Codex-style. The final
-  // substantive assistant answer of the turn stays visible after the fold,
-  // so copy/Rewind anchors and the streamed answer never get hidden. Pure
-  // single-item turns (e.g. a lone text answer, no tools) are left as-is.
-  const rows = $derived.by(() => {
-    const out: Row[] = [];
-    let turn: TranscriptItem[] = [];
-    const flushTurn = () => {
-      if (turn.length === 0) return;
-      const items0 = turn;
-      turn = [];
-      // Find the final substantive assistant answer (with text, after all
-      // tool calls). Anything after it would be stray trailing items.
-      let lastAns = -1;
-      for (let i = 0; i < items0.length; i++) {
-        const it = items0[i]!;
-        if (it.kind === "assistant" && it.text.trim() && !isSteerMessage(it)) {
-          lastAns = i;
-        }
-      }
-      // No substantive answer, or a lone item / answer-only turn — keep
-      // tool-run grouping only, no turn fold.
-      if (lastAns === -1 || items0.length === 1 || lastAns === 0) {
-        out.push(...groupToolRuns(items0));
-        return;
-      }
-      const folded = items0.slice(0, lastAns);
-      const answer = items0[lastAns]!;
-      const trailing = items0.slice(lastAns + 1);
-      // Fold only when there is real prep to hide (>=2 items before answer).
-      if (folded.length >= 2) {
-        out.push({
-          type: "turn",
-          id: `userturn-${items0[0]!.id}`,
-          rows: groupToolRuns(folded),
-          summary: turnSummary(items0),
-        });
-      } else {
-        out.push(...groupToolRuns(folded));
-      }
-      // Final answer stays visible, standalone, after the fold.
-      out.push({ type: "item", item: answer });
-      // Rare trailing items (e.g. a stray tool after the answer).
-      out.push(...groupToolRuns(trailing));
-    };
-    for (const it of items) {
-      if (
-        it.kind === "user" ||
-        it.kind === "subagent" ||
-        it.kind === "compaction" ||
-        it.kind === "retry" ||
-        it.kind === "notice" ||
-        isSteerMessage(it)
-      ) {
-        flushTurn();
-        out.push({ type: "item", item: it });
-      } else {
-        turn.push(it);
-      }
-    }
-    flushTurn();
-    return out;
-  });
+  // Fold runs of prep (successful tool calls + thinking-only assistant
+  // items) into one expandable "Reasoning" card, Codex-style. Every
+  // substantive assistant-with-text stays visible and standalone — so a turn
+  // with several narration + answer blocks renders each answer outside the
+  // fold, with only the recon/tool runs between them collapsed. Running/error
+  // tools, subagents, compactions, retries, notices and steer messages also
+  // flush the run and stay standalone (never hide things needing eyes).
+  const rows = $derived.by(() => groupPrepRuns(items));
 
   // ── Rewind (pi session tree + git file revert) ──────────────────────
   // pi keeps every turn as an append-only tree; rewinding moves the leaf to
@@ -996,31 +950,30 @@
       {/snippet}
       {#snippet renderRow(row: Row)}
         {#if row.type === "group"}
-          <details class="collapse-anim tool-enter group/tools -my-1.5 text-xs" data-item-id={row.id}>
+          {@const live = row.items.some((it) => (it.kind === "assistant" && it.streaming) || (it.kind === "tool" && it.status === "running"))}
+          <details class="collapse-anim tool-enter group/tools -my-1.5 text-xs" data-item-id={row.id} open={live && thread.status === "running"}>
             <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
               <span class="shrink-0 text-fainter">✓</span>
-              <span class="shrink-0 font-mono font-medium text-muted">{row.items.length} tool calls</span>
-              <span class="truncate font-mono text-fainter">{toolBreakdown(row.items)}</span>
+              <span class="shrink-0 font-mono font-medium text-muted">{row.hasThinking ? "Reasoning" : `${row.items.length} tool calls`}</span>
+              <span class="truncate font-mono text-fainter">{groupSummary(row.items)}</span>
               <span class="ml-auto shrink-0 text-fainter transition-transform duration-200 ease-out group-open/tools:rotate-90">›</span>
             </summary>
             <div class="mt-1 flex flex-col gap-1 border-l-2 border-border pl-1.5">
               {#each row.items as it (it.id)}
-                {@render toolRow(it)}
-              {/each}
-            </div>
-          </details>
-        {:else if row.type === "turn"}
-          {@const live = row.rows.some((r) => r.type === "item" && ((r.item.kind === "assistant" && r.item.streaming) || (r.item.kind === "tool" && r.item.status === "running")))}
-          <details class="collapse-anim tool-enter group/turn -my-1.5 text-xs" data-item-id={row.id} open={live && thread.status === "running"}>
-            <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
-              <span class="shrink-0 text-fainter">✓</span>
-              <span class="shrink-0 font-mono font-medium text-muted">Reasoning</span>
-              <span class="truncate font-mono text-fainter">{row.summary}</span>
-              <span class="ml-auto shrink-0 text-fainter transition-transform duration-200 ease-out group-open/turn:rotate-90">›</span>
-            </summary>
-            <div class="mt-1 flex flex-col gap-0.5 border-l-2 border-border pl-1.5">
-              {#each row.rows as r (r.type === "group" ? r.id : r.type === "turn" ? r.id : r.item.id)}
-                {@render renderRow(r)}
+                {#if it.kind === "assistant"}
+                  <div class="item-enter assistant-message group/assistant text-[13.5px] leading-relaxed text-fg">
+                    {#if it.thinking}
+                      <details class="collapse-anim group mb-1 text-xs text-faint">
+                        <summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">
+                          <span class="mr-1 inline-block transition-transform group-open:rotate-90">›</span>Thinking
+                        </summary>
+                        <ThinkingBlock text={it.thinking} streaming={false} revealKey={`${it.id}:thinking`} />
+                      </details>
+                    {/if}
+                  </div>
+                {:else if it.kind === "tool"}
+                  {@render toolRow(it)}
+                {/if}
               {/each}
             </div>
           </details>
@@ -1198,7 +1151,7 @@
           {/if}
         {/if}
       {/snippet}
-      {#each rows as row (row.type === "group" ? row.id : row.type === "turn" ? row.id : row.item.id)}
+      {#each rows as row (row.type === "group" ? row.id : row.item.id)}
         {@render renderRow(row)}
       {/each}
       {#if rewound && rewound.settledLen !== null && rewound.threadId === thread.id}

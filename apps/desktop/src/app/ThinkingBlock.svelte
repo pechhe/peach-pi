@@ -102,10 +102,9 @@
   // before nudging. ~3 lines of the small thinking text; big enough to read
   // as a deliberate "a few lines appeared" motion, small enough to never lag
   // the freshest reasoning by more than a blink.
-  const SCROLL_BATCH_PX = 48;
-  // Tween duration. Short enough that a nudge feels instant-calm, long enough
-  // to read as eased rather than a hard snap.
-  const SCROLL_TWEEN_MS = 240;
+  const SCROLL_BATCH_PX = 60;
+  // Tween duration. Slow enough to feel like a calm drift, not a nudge.
+  const SCROLL_TWEEN_MS = 320;
   const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
   let glideRaf = 0;
   // Active nudge; null while idle/buffering (waiting for content to accrue).
@@ -227,6 +226,12 @@
   .thinking-scroll {
     max-height: 50vh;
     overflow-y: auto;
+    /* Reserve the scrollbar gutter even before overflow so the box doesn't
+       lose 8px of content width the instant text passes 50vh — that width
+       change reflowed every streamed line and read as jitter exactly at the
+       growth→scroll transition. Thumb stays transparent (see below) so this
+       only stabilises layout, no visual cost. */
+    scrollbar-gutter: stable;
     /* Matches the old text-xs / leading-relaxed / text-faint on the div. */
     font-size: 0.75rem;
     line-height: 1.625;

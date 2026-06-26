@@ -20,8 +20,16 @@
 
   let launching = $state<number | null>(null);
   let launchingPrd = $state<number | null>(null);
+  let launchingBreakdown = $state<number | null>(null);
+  let launchingPrdAgent = $state<number | null>(null);
   let launchError = $state("");
-  const busy = $derived(launching !== null || launchingPrd !== null || launchingAll);
+  const busy = $derived(
+    launching !== null ||
+      launchingPrd !== null ||
+      launchingBreakdown !== null ||
+      launchingPrdAgent !== null ||
+      launchingAll,
+  );
 
   async function startAgent(issueNumber: number) {
     if (!projectId || busy) return;
@@ -50,6 +58,36 @@
       await workQueue.load(projectId);
     } finally {
       launchingPrd = null;
+    }
+  }
+
+  async function breakdownPrd(prdNumber: number) {
+    if (!projectId || busy) return;
+    launchingBreakdown = prdNumber;
+    launchError = "";
+    try {
+      const res = await api.invoke("workQueue:breakdownPrd", projectId, prdNumber);
+      if (!res.ok) {
+        launchError = `Couldn’t break down #${prdNumber} (${res.reason}${res.message ? `: ${res.message}` : ""})`;
+      }
+      await workQueue.load(projectId);
+    } finally {
+      launchingBreakdown = null;
+    }
+  }
+
+  async function startPrdAgent(prdNumber: number) {
+    if (!projectId || busy) return;
+    launchingPrdAgent = prdNumber;
+    launchError = "";
+    try {
+      const res = await api.invoke("workQueue:startPrdAgent", projectId, prdNumber);
+      if (!res.ok) {
+        launchError = `Couldn’t start PRD #${prdNumber} (${res.reason}${res.message ? `: ${res.message}` : ""})`;
+      }
+      await workQueue.load(projectId);
+    } finally {
+      launchingPrdAgent = null;
     }
   }
 
@@ -201,7 +239,7 @@
         {/if}
       </p>
     {:else if groups.length === 0}
-      <p class="text-sm text-faint" data-testid="work-queue-empty">No open issues.</p>
+      <p class="text-sm text-faint" data-testid="work-queue-empty">No issues.</p>
     {:else}
       <div class="flex flex-col gap-5" data-testid="work-queue-list">
         {#each groups as group (group.prd ? `prd-${group.prd.number}` : "unparented")}
@@ -212,9 +250,21 @@
                 <h2 class="text-[13px] font-medium text-fg-soft">{group.prd.title}</h2>
                 <span class="num-badge">prd</span>
                 {#if group.childless}
-                  <span
-                    class="rounded px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
-                    data-testid="prd-childless">needs breakdown</span
+                  <button
+                    class="ml-auto flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"
+                    onclick={() => breakdownPrd(group.prd!.number)}
+                    disabled={busy}
+                    data-testid="breakdown-prd"
+                    ><Play size={12} />
+                    {launchingBreakdown === group.prd!.number ? "Breaking down…" : "Break down"}</button
+                  >
+                  <button
+                    class="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"
+                    onclick={() => startPrdAgent(group.prd!.number)}
+                    disabled={busy}
+                    data-testid="start-prd-agent"
+                    ><Play size={12} />
+                    {launchingPrdAgent === group.prd!.number ? "Starting…" : "Start agent"}</button
                   >
                 {/if}
                 {#if groupHasReady(group)}
@@ -239,7 +289,8 @@
                 {#each group.issues as issue (issue.number)}
                   <li
                     class="flex items-center gap-3 rounded-md border border-border bg-surface px-3 py-2
-                      {issue.status === 'blocked' ? 'opacity-50' : ''}"
+                      {issue.status === 'blocked' ? 'opacity-50' : ''}
+                      {issue.status === 'done' ? 'opacity-60' : ''}"
                     data-testid="work-queue-item"
                     data-status={issue.status}
                   >
@@ -265,6 +316,8 @@
                       <span class="shrink-0 text-xs text-faint" data-testid="status-in-progress"
                         >in progress</span
                       >
+                    {:else if issue.status === "done"}
+                      <span class="shrink-0 text-xs text-faint" data-testid="status-done">done</span>
                     {:else if issue.status === "ready"}
                       <button
                         class="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"

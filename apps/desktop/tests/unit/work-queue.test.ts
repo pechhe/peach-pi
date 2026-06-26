@@ -11,6 +11,9 @@ import {
   issueBranchName,
   issueWorktreeName,
   buildSeedPrompt,
+  prdBranchName,
+  buildPrdBreakdownPrompt,
+  buildPrdAgentPrompt,
   type RawIssue,
 } from "@peach-pi/shared-types";
 
@@ -313,16 +316,17 @@ test("startAllReady selection: only ready, not-in-progress children of the PRD",
   );
 });
 
-test("groupWorkQueue: done issues drop out of displayed lists", () => {
+test("groupWorkQueue: done issues stay grouped under their PRD", () => {
   const issues = enrichIssues([
     raw({ number: 16, labels: ["prd"] }),
     raw({ number: 17, state: "closed", stateReason: "completed", body: "## Parent\n\n#16\n" }),
     raw({ number: 18, body: "## Parent\n\n#16\n" }),
   ]);
   const prd16 = groupWorkQueue(issues).find((g) => g.prd?.number === 16)!;
+  // Done children stay listed so closed work stays grouped under its PRD.
   assert.deepEqual(
     prd16.issues.map((i) => i.number),
-    [18],
+    [17, 18],
   );
   // #17 still exists as a child, so the PRD is not flagged childless.
   assert.equal(prd16.childless, false);

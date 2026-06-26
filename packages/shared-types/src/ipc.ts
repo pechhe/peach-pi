@@ -57,6 +57,8 @@ import type {
   ProjectId,
   StartAgentResult,
   StartAllReadyResult,
+  BreakdownPrdResult,
+  StartPrdAgentResult,
   WorkQueueResult,
   CloseIssueResult,
   QueueState,
@@ -409,6 +411,16 @@ export const ipcContracts = {
   ),
   /** Launch an agent on every ready (unblocked, not-in-progress) child of a PRD. */
   "workQueue:startAllReady": invoke<[projectId: ProjectId, prdNumber: number], StartAllReadyResult>(
+    (id) => requireNonEmptyString(id, "projectId"),
+  ),
+  /** Break a childless PRD down into issues by running the to-issues skill on
+   *  a thread rooted in the project working dir (no worktree). */
+  "workQueue:breakdownPrd": invoke<[projectId: ProjectId, prdNumber: number], BreakdownPrdResult>(
+    (id) => requireNonEmptyString(id, "projectId"),
+  ),
+  /** Launch an agent directly on a childless PRD: new thread on an isolated
+   *  worktree+branch, seeded with the PRD body. */
+  "workQueue:startPrdAgent": invoke<[projectId: ProjectId, prdNumber: number], StartPrdAgentResult>(
     (id) => requireNonEmptyString(id, "projectId"),
   ),
   /** Launch an agent on every ready (unblocked, not-in-progress) issue across

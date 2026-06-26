@@ -11,6 +11,9 @@ import {
   issueBranchName,
   issueWorktreeName,
   buildSeedPrompt,
+  prdBranchName,
+  buildPrdBreakdownPrompt,
+  buildPrdAgentPrompt,
 } from "@peach-pi/shared-types";
 import { openDb } from "./persistence/db.ts";
 import { createEmitter, registerIpcHandlers } from "./ipc/registry.ts";
@@ -692,6 +695,32 @@ async function boot(): Promise<void> {
           launched.push({ issueNumber: issue.number, threadId });
         }
         return { ok: true, launched };
+      },
+      // Break a childless PRD into issues via the to-issues skill. Runs on a
+      // thread rooted in the project working dir — no worktree, since the
+      // skill edits the tracker (gh issue create), not repo files.
+      "workQueue:breakdownPrd": async (projectId, prdNumber) => {
+        const res = await issuesService.list(projectId);
+        if (!res.ok) return { ok: false, reason: "error", message: res.reason };
+        const prd = res.issues.find((i) => i.number === prdNumber && i.isPrd);
+        if (!prd) return { ok: false, reason: "error", message: "PRD not found" };
+        const thread = await threadService.createThread(projectId);
+        await threadService.prompt(thread.id, buildPrdBreakdownPrompt(prd));
+        return { ok: true, threadId: thread.id };
+      },
+      // Launch an agent directly on a childless PRD: isolated worktree+branch,
+      // seeded with the PRD body. The resulting PR closes the PRD issue itself.
+      "workQueue:startPrdAgent": async (projectId, prdNumber) => {
+        const res = await issuesService.list(projectId);
+        if (!res.ok) return { ok: false, reason: "error", message: res.reason };
+        const prd = res.issues.find((i) => i.number === prdNumber && i.isPrd);
+        if (!prd) return { ok: false, reason: "error", message: "PRD not found" };
+        const dir = await gitService.createWorktree(projectId);
+        await gitService.branchWorktree(dir, prdBranchName(prd.number, prd.title));
+        const wt = appService.addWorktree(projectId, dir, `prd-${prd.number}`);
+        const thread = await threadService.createThread(projectId, { worktreeId: wt.id });
+        await threadService.prompt(thread.id, buildPrdAgentPrompt(prd));
+        return { ok: true, threadId: thread.id };
       },
       "workQueue:closeIssue": (projectId, issueNumber, reason) =>
         issuesService.close(projectId, issueNumber, reason),
