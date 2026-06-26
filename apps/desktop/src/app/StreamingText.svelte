@@ -101,12 +101,11 @@
   // Rough chars-per-word (incl. trailing space) to turn a char backlog into a
   // word count for the interval calc.
   const AVG_WORD_LEN = 6;
-  // Hard ceiling on words revealed in a single frame so an extreme burst still
-  // unfurls over a few frames instead of dumping one giant block.
-  const MAX_WORDS_PER_FRAME = 10;
-  // Per-word fade scheduling (see `waveCursor`).
-  const WAVE_STAGGER = 30;
-  const MAX_AHEAD = 450;
+  // Hard ceiling on words revealed in a single frame. Kept small so even an
+  // extreme burst unfurls as thin batches (a few words/frame) across frames —
+  // each word gets the build `now`, and a 560ms fade means a 16ms-apart batch
+  // reads as a continuous gliding wave rather than a block.
+  const MAX_WORDS_PER_FRAME = 3;
   // A word is safe to bake into the cached prefix once its fade has fully
   // completed: --sw-dur (stream-word-fx in app.css, default 560ms) + a safety
   // margin so an animating word is never frozen mid-fade.
@@ -191,14 +190,15 @@
   // every already-present word to a far-past delay (final frame, no fade) so
   // jumping to full text doesn't flash-fade the whole message.
   let firstBuild = true;
-  // Wave scheduler for the per-word fade. As words enter the DOM each gets a
-  // reveal timestamp a little after the previous one (WAVE_STAGGER), so even a
-  // multi-word frame fades in left-to-right rather than as a block. Floored at
-  // `now` (a slow trickle reveals in real time) and capped at now+MAX_AHEAD so
-  // the wave never schedules unboundedly into the future — bounded lag, stable
-  // ordering. Resets naturally on remount.
-  let waveCursor = 0;
-  // word index → first time (performance.now) we saw it. Drives per-word delay.
+  // Per-word reveal time = the build `now` at which the word first entered the
+  // DOM. We deliberately do NOT forward-stagger words into the future: the rAF
+  // reveals words at an adaptive, chronological cadence, so reveal order is
+  // strictly monotonic, and assigning each fresh word the current build time
+  // means fade order can never invert (no "word appearing ahead of the
+  // leftmost"). The rAF's per-word interval is itself the wave — a slow trickle
+  // reveals ~1 word/frame (a smooth per-word fade); bursts reveal a few
+  // (capped by MAX_WORDS_PER_FRAME) which fade near-simultaneously, then the
+  // next frame's batch. No cap to bunch against, no floor to fight.
   const revealTimes = mem.times;
   // Sampled (revealedIdx, time) history from the rAF tick. `html` uses it to
   // find the slice that finished animating SETTLE_MS ago → cacheable prefix.
@@ -320,12 +320,10 @@
         // flash-fade of the whole backlog. Only words revealed while the user
         // is actively watching (first build already done) get the per-word wave.
         if (!revealTimes.has(key)) {
-          if (forceStatic || firstBuild) {
-            revealTimes.set(key, now - 1_000_000);
-          } else {
-            waveCursor = Math.min(now + MAX_AHEAD, Math.max(now, waveCursor + WAVE_STAGGER));
-            revealTimes.set(key, waveCursor);
-          }
+          // forceStatic (graduated prefix) + firstBuild (history mount) anchor
+          // words to a far-past delay → final frame, no fade. Live tail words
+          // get the current build `now` — see the note above on why no stagger.
+          revealTimes.set(key, forceStatic || firstBuild ? now - 1_000_000 : now);
         }
         const span = doc.createElement("span");
         span.className = "sw";

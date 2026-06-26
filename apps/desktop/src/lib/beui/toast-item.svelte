@@ -110,7 +110,7 @@
                 exit={reduce.current ? { opacity: 0 } : { opacity: 0, y: -8, filter: "blur(6px)" }}
                 transition={CONTENT_TRANSITION}
               >
-                <p class={cn("truncate text-sm font-medium leading-5 text-fg", classNames?.title)}>
+                <p class={cn("line-clamp-2 text-sm font-medium leading-5 text-fg", classNames?.title)}>
                   {@render toast.title()}
                 </p>
                 {#if toast.description}

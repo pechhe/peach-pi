@@ -31,6 +31,11 @@
   const rail = tweened(0, { duration: reduceMotion ? 0 : 110, easing: (t) => t });
 
   let scrollEl: HTMLDivElement | undefined = $state();
+  // True while the eased glide loop is driving scrollTop — used to suppress the
+  // scrollbar thumb (incl. :hover) during auto-follow so nothing shows while
+  // streaming. Real user scrolls still reveal it via the global .is-scrolling
+  // pattern once the glide is idle.
+  let glideActive = $state(false);
   // User is parked at the bottom of the thinking surface — keep pinning there.
   // A scroll-up clears it so re-reading earlier reasoning isn't yanked away.
   let atBottom = true;
@@ -90,11 +95,13 @@
     const el = scrollEl;
     if (!el || gliding) return;
     gliding = true;
+    glideActive = true;
     lastTs = 0;
     const step = (ts: number) => {
       const e = scrollEl;
       if (!e || !atBottom) {
         gliding = false;
+        glideActive = false;
         glidingScroll = false;
         return;
       }
@@ -106,6 +113,7 @@
       if (diff <= 0.5 && !streaming) {
         e.scrollTop = target;
         gliding = false;
+        glideActive = false;
         glidingScroll = false;
         return;
       }
@@ -160,7 +168,7 @@
 </script>
 
 <div class="thinking-block">
-  <div class="thinking-scroll" bind:this={scrollEl} onscroll={onScroll} onwheel={onWheel}>
+  <div class="thinking-scroll" class:glide-active={glideActive} bind:this={scrollEl} onscroll={onScroll} onwheel={onWheel}>
     <StreamingText {text} {streaming} plain {cursor} {revealKey} />
   </div>
   <span class="thinking-rail" style="height:{$rail}px"></span>
@@ -180,6 +188,14 @@
     font-size: 0.75rem;
     line-height: 1.625;
     color: var(--color-faint);
+  }
+  /* While the eased glide is auto-following, force the thumb fully transparent
+     (incl. :hover) so nothing shows during streaming. The cursor parked over the
+     box would otherwise reveal the thumb via the global :hover rule. Real user
+     scrolls (glide idle) still get the thumb via the .is-scrolling pattern. */
+  .thinking-scroll.glide-active::-webkit-scrollbar-thumb,
+  .thinking-scroll.glide-active::-webkit-scrollbar-thumb:hover {
+    background: transparent;
   }
   .thinking-rail {
     position: absolute;

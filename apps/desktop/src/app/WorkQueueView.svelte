@@ -54,6 +54,35 @@
     }
   }
 
+  let closing = $state<number | null>(null);
+  const busyWithIssue = (n: number) => launching === n || closing === n;
+
+  async function closeIssue(issueNumber: number, reason: "completed" | "not_planned") {
+    if (!projectId) return;
+    closing = issueNumber;
+    launchError = "";
+    try {
+      const res = await api.invoke("workQueue:closeIssue", projectId, issueNumber, reason);
+      if (!res.ok) launchError = `Couldn’t close #${issueNumber} (${res.reason})`;
+      await workQueue.load(projectId);
+    } finally {
+      closing = null;
+    }
+  }
+
+  async function reopenIssue(issueNumber: number) {
+    if (!projectId) return;
+    closing = issueNumber;
+    launchError = "";
+    try {
+      const res = await api.invoke("workQueue:reopenIssue", projectId, issueNumber);
+      if (!res.ok) launchError = `Couldn’t reopen #${issueNumber} (${res.reason})`;
+      await workQueue.load(projectId);
+    } finally {
+      closing = null;
+    }
+  }
+
   const groupHasReady = (g: { issues: { status: string; inProgress: boolean }[] }) =>
     g.issues.some((i) => i.status === "ready" && !i.inProgress);
 
@@ -166,6 +195,49 @@
                         >blocked by {issue.unmetBlockers.map((n) => `#${n}`).join(", ")}</span
                       >
                     {/if}
+                    <details class="group relative shrink-0">
+                      <summary
+                        class="flex size-6 cursor-pointer list-none items-center justify-center rounded-md text-faint hover:bg-surface-2 hover:text-fg"
+                        aria-label="_issue actions"
+                        data-testid="issue-actions-menu"
+                        >⋯</summary
+                      >
+                      <div
+                        class="absolute right-0 top-full z-10 mt-1 w-48 rounded-md border border-border bg-surface-2 py-1 text-xs shadow-lg"
+                        data-testid="issue-actions-dropdown"
+                      >
+                        <button
+                          class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"
+                          onclick={async () => {
+                            await closeIssue(issue.number, "completed");
+                            (document.activeElement as HTMLElement)?.blur?.();
+                          }}
+                          disabled={busyWithIssue(issue.number)}
+                          data-testid="close-completed"
+                          >Mark done (completed)</button
+                        >
+                        <button
+                          class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"
+                          onclick={async () => {
+                            await closeIssue(issue.number, "not_planned");
+                            (document.activeElement as HTMLElement)?.blur?.();
+                          }}
+                          disabled={busyWithIssue(issue.number)}
+                          data-testid="close-not-planned"
+                          >Close (not planned)</button
+                        >
+                        <button
+                          class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"
+                          onclick={async () => {
+                            await reopenIssue(issue.number);
+                            (document.activeElement as HTMLElement)?.blur?.();
+                          }}
+                          disabled={busyWithIssue(issue.number)}
+                          data-testid="reopen"
+                          >Reopen</button
+                        >
+                      </div>
+                    </details>
                   </li>
                 {/each}
               </ul>
