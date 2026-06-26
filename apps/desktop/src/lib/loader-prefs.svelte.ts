@@ -15,6 +15,7 @@ import {
 	DEFAULT_TRIANGLE,
 	type LoaderShape,
 } from "../components/ui/dot-matrix/registry.svelte";
+import { arrayPref, type ArrayPref } from "./local-prefs";
 
 const KEY: Record<LoaderShape, string> = {
 	square: "peachpi:dotMatrixLoaders:square",
@@ -26,6 +27,12 @@ const DEFAULTS: Record<LoaderShape, readonly string[]> = {
 	square: DEFAULT_SQUARE,
 	hex: DEFAULT_HEX,
 	triangle: DEFAULT_TRIANGLE,
+};
+
+const prefs: Record<LoaderShape, ArrayPref> = {
+	square: arrayPref(KEY.square),
+	hex: arrayPref(KEY.hex),
+	triangle: arrayPref(KEY.triangle),
 };
 
 function readStored(shape: LoaderShape): string[] {
@@ -40,11 +47,7 @@ function readStored(shape: LoaderShape): string[] {
 }
 
 function persist(shape: LoaderShape, ids: string[]): void {
-	try {
-		localStorage.setItem(KEY[shape], JSON.stringify(ids));
-	} catch {
-		/* ignore */
-	}
+	prefs[shape].write(ids);
 }
 
 class LoaderPrefsStore {

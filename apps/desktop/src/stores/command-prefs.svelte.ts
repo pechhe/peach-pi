@@ -5,26 +5,9 @@
  * in sync. A command is keyed `"<kind>:<name>"`.
  */
 
-const STARRED_KEY = "peachpi:commandStarred";
+import { arrayPref } from "../lib/local-prefs";
 
-function readArray(key: string): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeArray(key: string, value: string[]): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* ignore */
-  }
-}
+const starred = arrayPref("peachpi:commandStarred");
 
 class CommandPrefsStore {
   starredKeys = $state<string[]>([]);
@@ -34,9 +17,9 @@ class CommandPrefsStore {
   init(): void {
     if (this.initialized) return;
     this.initialized = true;
-    this.starredKeys = readArray(STARRED_KEY);
-    window.addEventListener("storage", (e) => {
-      if (e.key === STARRED_KEY) this.starredKeys = readArray(STARRED_KEY);
+    this.starredKeys = starred.read();
+    starred.sync(() => {
+      this.starredKeys = starred.read();
     });
   }
 
@@ -48,7 +31,7 @@ class CommandPrefsStore {
     this.starredKeys = this.starredKeys.includes(key)
       ? this.starredKeys.filter((k) => k !== key)
       : [...this.starredKeys, key];
-    writeArray(STARRED_KEY, this.starredKeys);
+    starred.write(this.starredKeys);
   }
 }
 

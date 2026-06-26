@@ -1,3 +1,4 @@
+import { arrayPref, mapPref } from "../lib/local-prefs";
 import type { ProviderUsageSummary } from "@peach-pi/shared-types";
 
 /**
@@ -7,52 +8,14 @@ import type { ProviderUsageSummary } from "@peach-pi/shared-types";
  * `storage` event keeps every window in sync.
  */
 
-const KEY = "peachpi:usageHighlights";
+const HIGHLIGHTS_KEY = "peachpi:usageHighlights";
 const HIDDEN_KEY = "peachpi:usageHidden";
-
-function readMap<T>(key: string): Record<string, T> {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, T>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeMap<T>(key: string, value: Record<string, T>): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* ignore */
-  }
-}
-
-function readArray(key: string): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeArray(key: string, value: string[]): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* ignore */
-  }
-}
+const highlightsPref = mapPref(HIGHLIGHTS_KEY);
+const hiddenPref = arrayPref(HIDDEN_KEY);
 
 function reload(store: UsagePrefsStore): void {
-  store.highlights = readMap<string[]>(KEY);
-  store.hidden = readArray(HIDDEN_KEY);
+  store.highlights = highlightsPref.read<string[]>();
+  store.hidden = hiddenPref.read();
 }
 
 class UsagePrefsStore {
@@ -68,7 +31,7 @@ class UsagePrefsStore {
     this.initialized = true;
     reload(this);
     window.addEventListener("storage", (e) => {
-      if (e.key === KEY || e.key === HIDDEN_KEY || e.key === null) reload(this);
+      if (e.key === HIGHLIGHTS_KEY || e.key === HIDDEN_KEY || e.key === null) reload(this);
     });
   }
 
@@ -85,7 +48,7 @@ class UsagePrefsStore {
       ? cur.filter((k) => k !== metricKey)
       : [...cur, metricKey];
     this.highlights = { ...this.highlights, [provider]: next };
-    writeMap(KEY, this.highlights);
+    highlightsPref.write(this.highlights);
   }
 
   /** Reset a provider to its default featured metric (clear any pins). */
@@ -93,14 +56,14 @@ class UsagePrefsStore {
     const next = { ...this.highlights };
     delete next[provider];
     this.highlights = next;
-    writeMap(KEY, this.highlights);
+    highlightsPref.write(this.highlights);
   }
 
   /** Explicitly show nothing for `provider` in the sidebar line, while keeping
    *  it visible in the popover (unpin all, vs `toggleHidden`). */
   unpinAll(provider: string): void {
     this.highlights = { ...this.highlights, [provider]: [] };
-    writeMap(KEY, this.highlights);
+    highlightsPref.write(this.highlights);
   }
 
   isHidden(provider: string): boolean {
@@ -112,13 +75,13 @@ class UsagePrefsStore {
     this.hidden = this.hidden.includes(provider)
       ? this.hidden.filter((p) => p !== provider)
       : [...this.hidden, provider];
-    writeArray(HIDDEN_KEY, this.hidden);
+    hiddenPref.write(this.hidden);
   }
 
   /** Reveal every hidden provider. */
   showAll(): void {
     this.hidden = [];
-    writeArray(HIDDEN_KEY, this.hidden);
+    hiddenPref.write([]);
   }
 }
 

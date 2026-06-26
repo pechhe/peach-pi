@@ -6,27 +6,10 @@
  * sync so the choice is global across the app.
  */
 
-const PINNED_KEY = "peachpi:modelPinned";
-const HIDDEN_KEY = "peachpi:modelHidden";
+import { arrayPref } from "./local-prefs";
 
-function readArray(key: string): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeArray(key: string, value: string[]): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* ignore */
-  }
-}
+const pinned = arrayPref("peachpi:modelPinned");
+const hidden = arrayPref("peachpi:modelHidden");
 
 class ModelPrefsStore {
   pinnedKeys = $state<string[]>([]);
@@ -37,28 +20,30 @@ class ModelPrefsStore {
   init(): void {
     if (this.initialized) return;
     this.initialized = true;
-    this.pinnedKeys = readArray(PINNED_KEY);
-    this.hiddenKeys = readArray(HIDDEN_KEY);
-    window.addEventListener("storage", (e) => {
-      if (e.key === PINNED_KEY) this.pinnedKeys = readArray(PINNED_KEY);
-      else if (e.key === HIDDEN_KEY) this.hiddenKeys = readArray(HIDDEN_KEY);
+    this.pinnedKeys = pinned.read();
+    this.hiddenKeys = hidden.read();
+    pinned.sync(() => {
+      this.pinnedKeys = pinned.read();
+    });
+    hidden.sync(() => {
+      this.hiddenKeys = hidden.read();
     });
   }
 
   setPinned(keys: string[]): void {
     this.pinnedKeys = keys;
-    writeArray(PINNED_KEY, keys);
+    pinned.write(keys);
   }
 
   hide(key: string): void {
     if (this.hiddenKeys.includes(key)) return;
     this.hiddenKeys = [...this.hiddenKeys, key];
-    writeArray(HIDDEN_KEY, this.hiddenKeys);
+    hidden.write(this.hiddenKeys);
   }
 
   clearHidden(): void {
     this.hiddenKeys = [];
-    writeArray(HIDDEN_KEY, []);
+    hidden.write([]);
   }
 }
 
