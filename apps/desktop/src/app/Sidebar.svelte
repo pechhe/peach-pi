@@ -259,11 +259,18 @@
         (w) => w.projectId === p.id && !w.archivedAt,
       );
       const masterActive = parts.active.filter((t) => !t.worktreeId);
-      const worktreeGroups = projWorktrees.map((w) => ({
-        worktree: w,
-        active: parts.active.filter((t) => t.worktreeId === w.id),
-      }));
-      return { project: p, ...parts, masterActive, worktreeGroups };
+      // Worktrees with 0–1 active threads render as flat tinted rows.
+      // Worktrees with ≥2 active threads collapse under a nested header.
+      const worktreeFlat = projWorktrees
+        .map((w) => ({ worktree: w, active: parts.active.filter((t) => t.worktreeId === w.id) }))
+        .filter((wg) => wg.active.length <= 1);
+      const worktreeNested = projWorktrees
+        .map((w) => ({ worktree: w, active: parts.active.filter((t) => t.worktreeId === w.id) }))
+        .filter((wg) => wg.active.length >= 2);
+      // Flat threads in display order: under their single-thread worktree,
+      // then orphan single-thread worktrees show their one thread.
+      const worktreeFlatActive = worktreeFlat.flatMap((wg) => wg.active);
+      return { project: p, ...parts, masterActive, worktreeFlat, worktreeFlatActive, worktreeNested };
     }),
   );
   const chatGroups = $derived(partition(chats));
@@ -314,7 +321,7 @@
   const previewOrder = $derived([
     ...byProject
       .filter((g) => !isCollapsed(g.project.id))
-      .flatMap((g) => [...g.masterActive, ...g.worktreeGroups.flatMap((wg) => wg.active)]),
+      .flatMap((g) => [...g.masterActive, ...g.worktreeFlatActive, ...g.worktreeNested.flatMap((wg) => wg.active)]),
     ...chatGroups.active,
   ].map((t) => t.id));
 
@@ -521,7 +528,7 @@
   }
 </script>
 
-{#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived")}
+{#snippet threadRow(thread: Thread, variant: "active" | "snoozed" | "toTest" | "archived", worktreeName?: string)}
   {@const isActive = activeView === "thread" && selectedThreadId === thread.id}
   {@const Tag = TAG_META[thread.tag ?? "other"]}
   {@const woke = variant === "active" && !!thread.wokeFromSnoozeAt}
@@ -592,6 +599,9 @@
               : thread.status === 'completed' && !isActive
                 ? 'text-accent'
                 : ''}">{thread.title}</span>
+      {#if worktreeName}
+        <span class="shrink-0 truncate text-[10px] text-accent/60">· {worktreeName}</span>
+      {/if}
       {#if thread.status === "running" || fleetActiveIds.has(thread.id)}
         <BrailleSpinner class="session-spinner ml-auto mr-0 shrink-0" title="Thinking…" shape="hex" />
       {:else if variant === "active"}
@@ -1012,66 +1022,68 @@
           class:done-panel--animated={!reduceMotion}
         >
           <div class="done-panel__inner--grow">
-          <!-- Master (project main checkout). Only nest under a "Master"
-               folder header when an active worktree exists; otherwise the
-               project's main threads render flat (no extra nesting layer). -->
-          {#if group.worktreeGroups.length > 0}
-            <div class="flex items-center justify-between rounded px-2 pt-1.5 pb-0.5" role="group" aria-label="Master">
-              <span class="flex items-center gap-1 text-[11px] font-medium text-muted">
-                <Folder size={12} class="shrink-0" /> Master
-                {#if group.masterActive.length > 0}
-                  <span class="text-fainter">· {group.masterActive.length}</span>
-                {/if}
-              </span>
-              <Tooltip text="Add thread to master">
-                <button
-                  class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
-                  onclick={() => newThread(group.project.id)}
-                  aria-label="Add thread to master"><Plus size={12} /></button
-                >
-              </Tooltip>
-            </div>
-          {/if}
+          <!-- Local (project main checkout). Renders flat; no extra
+               header layer — worktrees get their own section below. -->
           <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
             {#each group.masterActive as thread (thread.id)}
               {@render threadRow(thread, "active")}
             {/each}
           </MovingHighlight>
 
-          <!-- Active worktrees — each gets its own header + nested threads.
-               Tinted via an inset accent border to distinguish from master. -->
-          {#each group.worktreeGroups as wg (wg.worktree.id)}
-            <div class="worktree-header flex items-center justify-between rounded-md px-2 py-0.5" role="group" aria-label={wg.worktree.name}>
-              <span class="flex min-w-0 items-center gap-1 text-[11px] font-medium text-muted">
-                <GitBranch size={12} class="shrink-0 text-accent/70" />
-                <span class="truncate">{wg.worktree.name}</span>
-                {#if wg.active.length > 0}
-                  <span class="text-fainter">· {wg.active.length}</span>
+          {#if group.worktreeFlatActive.length > 0 || group.worktreeNested.length > 0}
+            <!-- Worktrees section. Tinted to distinguish from local.
+                 Single-thread worktrees render as flat tinted rows;
+                 ≥2 threads collapse under a nested header. -->
+            <div class="worktrees-section" role="group" aria-label="Worktrees">
+              <div class="worktrees-section__label">
+                <GitBranch size={11} class="shrink-0 text-accent/70" />
+                <span>Worktrees</span>
+                {#if group.worktreeFlatActive.length + group.worktreeNested.reduce((n, wg) => n + wg.active.length, 0) > 0}
+                  <span class="text-fainter">· {group.worktreeFlatActive.length + group.worktreeNested.reduce((n, wg) => n + wg.active.length, 0)}</span>
                 {/if}
-              </span>
-              <div class="flex items-center gap-0.5 opacity-0 hover:opacity-100">
-                <Tooltip text="Add thread to worktree">
-                  <button
-                    class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
-                    onclick={() => newThread(group.project.id, wg.worktree.id)}
-                    aria-label="Add thread to worktree"><Plus size={12} /></button
-                  >
-                </Tooltip>
-                <Tooltip text="Archive worktree and its threads">
-                  <button
-                    class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-danger"
-                    onclick={() => archiveWorktree(wg.worktree)}
-                    aria-label="Archive worktree"><Archive size={12} /></button
-                  >
-                </Tooltip>
               </div>
-            </div>
-            <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
-              {#each wg.active as thread (thread.id)}
-                {@render threadRow(thread, "active")}
+
+              <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
+                {#each group.worktreeFlatActive as thread (thread.id)}
+                  {@const wg = group.worktreeFlat.find((w) => w.active[0]?.id === thread.id)}
+                  {@render threadRow(thread, "active", wg?.worktree.name)}
+                {/each}
+              </MovingHighlight>
+
+              {#each group.worktreeNested as wg (wg.worktree.id)}
+                <div class="worktree-header flex items-center justify-between rounded-md px-2 py-0.5" role="group" aria-label={wg.worktree.name}>
+                  <span class="flex min-w-0 items-center gap-1 text-[11px] font-medium text-muted">
+                    <GitBranch size={12} class="shrink-0 text-accent/70" />
+                    <span class="truncate">{wg.worktree.name}</span>
+                    {#if wg.active.length > 0}
+                      <span class="text-fainter">· {wg.active.length}</span>
+                    {/if}
+                  </span>
+                  <div class="flex items-center gap-0.5 opacity-0 hover:opacity-100">
+                    <Tooltip text="Add thread to worktree">
+                      <button
+                        class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-fg"
+                        onclick={() => newThread(group.project.id, wg.worktree.id)}
+                        aria-label="Add thread to worktree"><Plus size={12} /></button
+                      >
+                    </Tooltip>
+                    <Tooltip text="Archive worktree and its threads">
+                      <button
+                        class="rounded p-0.5 text-fainter hover:bg-surface-2 hover:text-danger"
+                        onclick={() => archiveWorktree(wg.worktree)}
+                        aria-label="Archive worktree"><Archive size={12} /></button
+                      >
+                    </Tooltip>
+                  </div>
+                </div>
+                <MovingHighlight itemSelector=".session-row" activeSelector=".session-row--active" {previewSelector}>
+                  {#each wg.active as thread (thread.id)}
+                    {@render threadRow(thread, "active")}
+                  {/each}
+                </MovingHighlight>
               {/each}
-            </MovingHighlight>
-          {/each}
+            </div>
+          {/if}
 
           {@render collapsible(`ar:${group.project.id}`, "Done", group.archived, "archived")}
           </div>
@@ -1142,6 +1154,28 @@
      shown via .main-nav-item--active. */
   .main-nav-item:focus-visible {
     outline: none;
+  }
+
+  /* ── worktrees section: tinted container distinguishing worktree
+     threads from local master. Single-thread worktrees render flat
+     inside; ≥2 threads collapse under a .worktree-header. ───────── */
+  .worktrees-section {
+    margin-top: 4px;
+    padding: 2px 0;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface) 96%);
+    box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  .worktrees-section__label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   /* ── worktree header: tinted to distinguish from master ───────── */

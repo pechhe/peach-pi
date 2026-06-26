@@ -19,7 +19,7 @@ import type {
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
-import { git, gitEnv, gitOk, toHttpsRepoUrl } from "@peach-pi/remote-handoff";
+import { git, gitEnv, gitOk, gitRead, gitReadOk, toHttpsRepoUrl } from "@peach-pi/remote-handoff";
 
 const runExec = promisify(execFile);
 
@@ -104,17 +104,17 @@ export class GitService {
       isWorktree: Boolean(this.threads.get(threadId)?.worktreeDir),
       mergedToLocal: false,
     };
-    if (!cwd || !(await gitOk(["rev-parse", "--git-dir"], cwd))) return empty;
+    if (!cwd || !(await gitReadOk(["rev-parse", "--git-dir"], cwd))) return empty;
 
-    const head = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    const head = (await gitRead(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
     const branch = head === "HEAD" ? null : head; // HEAD = detached
-    const status = await git(["status", "--porcelain"], cwd);
+    const status = await gitRead(["status", "--porcelain"], cwd);
     const changedCount = status.split("\n").filter(Boolean).length;
 
     let insertions = 0;
     let deletions = 0;
     try {
-      const stat = (await git(["diff", "--shortstat", "HEAD"], cwd)).trim();
+      const stat = (await gitRead(["diff", "--shortstat", "HEAD"], cwd)).trim();
       insertions = Number(/(\d+) insertion/.exec(stat)?.[1] ?? 0);
       deletions = Number(/(\d+) deletion/.exec(stat)?.[1] ?? 0);
     } catch {
@@ -124,7 +124,7 @@ export class GitService {
     let ahead = 0;
     let behind = 0;
     try {
-      const counts = (await git(["rev-list", "--left-right", "--count", "@{u}...HEAD"], cwd)).trim();
+      const counts = (await gitRead(["rev-list", "--left-right", "--count", "@{u}...HEAD"], cwd)).trim();
       const [b, a] = counts.split(/\s+/).map(Number);
       behind = b ?? 0;
       ahead = a ?? 0;
@@ -151,9 +151,9 @@ export class GitService {
     const projectPath = this.projectPathFor(threadId);
     if (!projectPath) return false;
     try {
-      const wtHead = (await git(["rev-parse", "HEAD"], cwd)).trim();
-      const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
-      return await gitOk(["merge-base", "--is-ancestor", wtHead, target], projectPath);
+      const wtHead = (await gitRead(["rev-parse", "HEAD"], cwd)).trim();
+      const target = (await gitRead(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
+      return await gitReadOk(["merge-base", "--is-ancestor", wtHead, target], projectPath);
     } catch {
       return false;
     }
@@ -162,7 +162,7 @@ export class GitService {
   /** Repo default branch from origin/HEAD; null when undetermined. */
   private async defaultBranch(cwd: string): Promise<string | null> {
     try {
-      const ref = (await git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd)).trim();
+      const ref = (await gitRead(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd)).trim();
       return ref.replace(/^origin\//, "") || null;
     } catch {
       return null;
@@ -359,6 +359,19 @@ export class GitService {
     const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
     if (target === branch) return { ok: false, error: `Local repo is on ${branch}` };
 
+    // Refuse to fold worktree work onto the repo's default branch (e.g.
+    // `master`/`main`). Merging there rewrites the shared checkout's working
+    // tree and history mechanicaly — the contamination source for "master
+    // keeps gaining errors while worktree threads run". Switch the local
+    // repo to a feature branch first, then merge.
+    const defaultBranch = await this.defaultBranch(projectPath);
+    if (defaultBranch && target === defaultBranch) {
+      return {
+        ok: false,
+        error: `Local repo is on the default branch (${target}). Check out a feature branch before merging — merging onto ${target} dirties the shared checkout.`,
+      };
+    }
+
     // Stash any uncommitted local work so the --no-ff merge has a clean tree,
     // then restore it on top of the merge (the "integrate while dirty" pattern).
     const localDirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
@@ -455,31 +468,24 @@ export class GitService {
     if (!project) throw new Error(`Unknown project: ${projectId}`);
     mkdirSync(this.worktreesDir, { recursive: true });
 
-    // Create the worktree first at HEAD. The project repo is never touched,
-    // so a failure here (or below) leaves nothing lost — unlike a stash-and-
-    // move, which empties the project checkout before the worktree is seeded.
-    const dir = path.join(this.worktreesDir, randomUUID());
-    await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
-
-    // Seed the worktree as a COPY of the local working state (including
-    // uncommitted changes) without disturbing the project checkout. The full
-    // working tree is snapshotted into a throwaway tree object via an isolated
-    // index, then the fresh worktree is reset onto it. HEAD stays at base, so
-    // `git status` in the worktree shows the same uncommitted set as the
-    // project repo. Same non-destructive technique as snapshot() below.
+    // Create the worktree at HEAD. The project repo is never touched, so
+    // a failure here leaves nothing lost — unlike a stash-and-move, which
+    // empties the project checkout before the worktree is seeded.
+    //
+    // Refuse to spawn an isolated worktree from a dirty project checkout: the
+    // previous "seed = copy of uncommitted master" behaviour carried whatever
+    // was lying around (often contamination an earlier agent left on the
+    // shared checkout) into every new worktree, so the smear propagated across
+    // siblings. Isolated work must start from a clean, committed base — commit
+    // or stash the main checkout first.
     const dirty = Boolean((await git(["status", "--porcelain"], project.path)).trim());
     if (dirty) {
-      const indexFile = path.join(tmpdir(), `peach-pi-lidx-${randomUUID()}`);
-      const env = { GIT_INDEX_FILE: indexFile };
-      try {
-        await gitEnv(["read-tree", "HEAD"], project.path, env);
-        await gitEnv(["add", "-A"], project.path, env);
-        const tree = (await gitEnv(["write-tree"], project.path, env)).trim();
-        await git(["read-tree", "--reset", "-u", tree], dir);
-      } finally {
-        rmSync(indexFile, { force: true });
-      }
+      throw new Error(
+        "Project working tree is dirty. Commit or stash on the main checkout before spinning an isolated worktree — new worktrees start from a clean base to avoid propagating uncommitted changes.",
+      );
     }
+    const dir = path.join(this.worktreesDir, randomUUID());
+    await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
     return dir;
   }
 

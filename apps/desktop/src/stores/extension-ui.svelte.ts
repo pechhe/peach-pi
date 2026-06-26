@@ -19,14 +19,15 @@ interface Toast extends NoticePayload {
 /**
  * Status keys whose setStatus() pill is suppressed in the thread header.
  * "caveman" has a dedicated toggle in the Composer.
- * "vision-proxy" config lives in Settings.
+ * "vision-proxy" / "multimodal-proxy" (pi-vision-proxy runtime progress +
+ * steady-state) config lives in Settings.
  * "mcp" (pi-mcp-adapter: "MCP: X/Y servers") is a session-global
  * connection count, not thread-specific — the per-thread header pill is
  * the wrong surface. MCP servers are configured in ~/.pi/agent/mcp.json
  * and managed via the pi-mcp-adapter extension (`/mcp` commands); a
  * dedicated MCP panel belongs in the Connections view, not the title bar.
  */
-const HIDDEN_STATUS_KEYS = new Set(["caveman", "vision-proxy", "mcp"]);
+const HIDDEN_STATUS_KEYS = new Set(["caveman", "vision-proxy", "multimodal-proxy", "mcp"]);
 
 /** Extension dialog queue + toast notifications + per-thread status text. */
 class ExtensionUiStore {

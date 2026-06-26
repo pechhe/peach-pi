@@ -36,6 +36,26 @@ export async function gitOk(args: string[], cwd: string): Promise<boolean> {
   }
 }
 
+/** Run a read-only git probe with --no-optional-locks so it never creates or
+ *  waits on the optional index/refs lockfiles. All worktrees of one repo
+ *  share the same .git object DB; a plain `git status` / `git diff` from the
+ *  main process contends with writers (agents committing in sibling
+ *  worktrees), so every read probe should go through this. `--no-optional-locks`
+ *  is a global option and must precede the subcommand. */
+export async function gitRead(args: string[], cwd: string): Promise<string> {
+  return git(["--no-optional-locks", ...args], cwd);
+}
+
+/** Read-only git probe, boolean form. See `gitRead`. */
+export async function gitReadOk(args: string[], cwd: string): Promise<boolean> {
+  try {
+    await gitRead(args, cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Run git with extra env (e.g. GIT_INDEX_FILE for an isolated index). */
 export async function gitEnv(
   args: string[],

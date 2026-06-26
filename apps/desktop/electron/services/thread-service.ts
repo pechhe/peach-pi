@@ -853,10 +853,18 @@ export class ThreadService {
           if (this.compacting.has(threadId)) return;
           if (message.startsWith("Smart auto-compact")) return;
           // Vision proxy runtime notices ("analyzing…", "analyzed N/M",
-          // "cancelled", slash-command confirmations) are noise during normal
-          // use. Keep `error`-level ones so genuinely broken vision calls
-          // surface, but suppress the rest.
-          if (message.startsWith("[vision-proxy]") && level !== "error") return;
+          // "cancelled", slash-command confirmations, consent/mode/model echoes)
+          // are noise during normal use. The extension was renamed
+          // `pi-vision-proxy` → emits `[multimodal-proxy]` prefixed notices and
+          // bare `Vision proxy …` echoes; older builds emitted `[vision-proxy]`.
+          // Keep `error`-level ones so genuinely broken vision calls surface.
+          if (
+            level !== "error" &&
+            (message.startsWith("[vision-proxy]") ||
+              message.startsWith("[multimodal-proxy]") ||
+              message.startsWith("Vision proxy"))
+          )
+            return;
           this.emit("event:notice", { threadId, message, level });
         },
         onExtensionStatus: (key, text) =>

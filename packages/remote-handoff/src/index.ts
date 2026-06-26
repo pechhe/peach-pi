@@ -26,6 +26,8 @@ export {
   gitEnv,
   gitOk,
   gitOrFail,
+  gitRead,
+  gitReadOk,
   toHttpsRepoUrl,
 } from "./git-cli.ts";
 

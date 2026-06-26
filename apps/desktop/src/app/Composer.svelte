@@ -1,7 +1,6 @@
 <script lang="ts">
-  import type { CommandInfo, Connection, CustomConnection, ReferencedConnection, ReferencedSecret, Thread } from "@peach-pi/shared-types";
-  import { buildConnectionsHint, buildSecretsHint } from "../lib/composer/hints";
-  import { composeOutgoingPrompt } from "../lib/composer/mode";
+  import type { CommandInfo, ReferencedConnection, ReferencedSecret, Thread } from "@peach-pi/shared-types";
+  import { buildOutgoing } from "../lib/composer/submit";
   import {
     extractFilesFromDataTransfer,
     extractImageFilePathsFromClipboardData,
@@ -18,7 +17,6 @@
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
-  import Star from "@lucide/svelte/icons/star";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import X from "@lucide/svelte/icons/x";
   import Tooltip from "./Tooltip.svelte";
@@ -42,6 +40,8 @@
   import ModelScopeSelect from "../components/ui/model-scope-select/model-scope-select.svelte";
   import QuickSlots from "./composer/QuickSlots.svelte";
   import ConnectorIcon from "./ConnectorIcon.svelte";
+  import SlashMenu from "./composer/SlashMenu.svelte";
+  import ConnectionsMenu, { type ConnMenuItem, type SecMenuItem } from "./composer/ConnectionsMenu.svelte";
 
   let { thread, onRewind, onNewThread, centered = false }: {
     thread: Thread;
@@ -139,13 +139,6 @@
       console.error("slot command failed", err);
     });
   }
-  // The slash command list loads lazily; the slot picker needs it on demand.
-  function ensureCommands() {
-    if (commandsLoadedFor !== thread.id) {
-      commandsLoadedFor = thread.id;
-      void api.invoke("threads:listCommands", thread.id).then((c) => (commands = c));
-    }
-  }
 
   async function pickModel(provider: string, id: string) {
     playRotary();
@@ -188,11 +181,6 @@
   // Set when a pasted token looks like a secret; shows the "store in BWS" offer.
   let pastedSecret = $state<DetectedSecret | null>(null);
   let commands = $state<CommandInfo[]>([]);
-  let commandsLoadedFor = $state<string | null>(null);
-  let slashIndex = $state(0);
-  // Active browse filter for the slash menu ("starred", "all", or a kind).
-  type SlashFilter = "starred" | "all" | CommandInfo["kind"];
-  let slashFilter = $state<SlashFilter>("starred");
   // Caret position, tracked so the slash menu can trigger anywhere (not just
   // at the start of the message).
   let cursor = $state(0);
@@ -222,7 +210,9 @@
 
   // ── Slash menu ─────────────────────────────────────────────────────────
   // The active `/token` immediately left of the caret: must start the line or
-  // follow whitespace, and contain no whitespace itself.
+  // follow whitespace, and contain no whitespace itself. Caret stays host-side
+  // (it also drives Esc menu-cancel + the skill-chip text-indent); SlashMenu
+  // receives the resolved `query` and runs its own match/filter logic.
   const slashContext = $derived.by(() => {
     void draft.text; // re-evaluate as the text changes
     const before = draft.text.slice(0, cursor);
@@ -248,89 +238,21 @@
     { name: "scoped-models", description: "Pick which models appear in the composer", kind: "system" },
   ];
   const systemCommandNames = new Set(systemCommandList.map((c) => c.name));
-  const allCommands = $derived<CommandInfo[]>([...systemCommandList, ...commands]);
-  const starKey = (c: CommandInfo) => `${c.kind}:${c.name}`;
-  const hasStarred = $derived(allCommands.some((c) => commandPrefs.isStarred(starKey(c))));
-  // While searching, "Starred" (the browse default) widens to "All" so a query
-  // finds everything; an explicitly chosen tab still narrows the search. Used
-  // for both matching and the active-tab highlight.
-  const effectiveFilter = $derived<SlashFilter>(
-    slashQuery && slashFilter === "starred" ? "all" : slashFilter,
-  );
-  const slashMatches = $derived.by(() => {
-    if (slashQuery === null) return [];
-    const filter = effectiveFilter;
-    return allCommands
-      .filter((c) =>
-        filter === "all"
-          ? true
-          : filter === "starred"
-            ? commandPrefs.isStarred(starKey(c))
-            : c.kind === filter,
-      )
-      .filter((c) => c.name.toLowerCase().includes(slashQuery))
-      .sort((a, b) => {
-        const ap = a.name.toLowerCase().startsWith(slashQuery) ? 0 : 1;
-        const bp = b.name.toLowerCase().startsWith(slashQuery) ? 0 : 1;
-        return ap - bp;
-      })
-      .slice(0, 50);
-  });
-  // Kinds that actually have commands — drives which browse tabs to show.
-  const slashKindsPresent = $derived(new Set(allCommands.map((c) => c.kind)));
-
-  $effect(() => {
-    if (slashQuery !== null && commandsLoadedFor !== thread.id) {
+  // The host owns the lazy command-list load (so the chip-auto-collapse effect
+  // + QuickSlots + SlashMenu share one source) and feeds it down as
+  // `loadedCommands`. SlashMenu derives allCommands = system + loaded.
+  let commandsLoadedFor = $state<string | null>(null);
+  let slashIndex = $state(0);
+  function ensureCommands() {
+    if (commandsLoadedFor !== thread.id) {
       commandsLoadedFor = thread.id;
       void api.invoke("threads:listCommands", thread.id).then((c) => (commands = c));
     }
-  });
-  $effect(() => {
-    void slashMatches;
-    slashIndex = 0;
-  });
-  // Reset the browse filter each time the menu closes: reopen on "Starred" if
-  // anything is starred, otherwise "All".
-  $effect(() => {
-    if (slashQuery === null) slashFilter = hasStarred ? "starred" : "all";
-  });
-
-  const commandKindLabel: Record<CommandInfo["kind"], string> = {
-    skill: "skill",
-    extension: "extension",
-    prompt: "prompt",
-    system: "system",
-  };
-  // Per-kind badge colour so skills/extensions/prompts/system read apart.
-  const commandKindBadge: Record<CommandInfo["kind"], string> = {
-    skill: "bg-emerald-500/15 text-emerald-700",
-    extension: "bg-sky-500/15 text-sky-700",
-    prompt: "bg-violet-500/15 text-violet-700",
-    system: "bg-amber-500/15 text-amber-700",
-  };
-  const slashTabs: Array<{ key: SlashFilter; label: string }> = [
-    { key: "starred", label: "Starred" },
-    { key: "all", label: "All" },
-    { key: "system", label: "System" },
-    { key: "extension", label: "Extensions" },
-    { key: "skill", label: "Skills" },
-    { key: "prompt", label: "Prompts" },
-  ];
-  // Visible tabs in order (Starred + All + kinds that have commands); Tab
-  // cycles these.
-  const slashVisibleTabs = $derived(
-    slashTabs.filter(
-      (t) =>
-        t.key === "all" ||
-        t.key === "starred" ||
-        slashKindsPresent.has(t.key as CommandInfo["kind"]),
-    ),
-  );
-  function cycleSlashFilter(dir: 1 | -1) {
-    const keys = slashVisibleTabs.map((t) => t.key);
-    const i = keys.indexOf(slashFilter);
-    slashFilter = keys[(i + dir + keys.length) % keys.length]!;
   }
+  // Load lazily when the slash menu opens (same as before extraction).
+  $effect(() => {
+    if (slashQuery !== null) ensureCommands();
+  });
 
   const commandIcon = {
     skill: BookOpen,
@@ -435,99 +357,12 @@
   });
 
   // ── @-connections menu ────────────────────────────────────────────────
-  // Typing `@` opens a picker of available connections (custom HTTP + connected
-  // Composio toolkits). Picking one pins a chip to the composer and prepends a
-  // hint to the outgoing prompt so the model prefers it. The underlying tools
-  // (custom_request / connector_execute) are always available; @ is a nudge +
-  // an exact-name handoff that skips a discovery round-trip.
-  type ConnMenuItem = {
-    kind: "custom" | "composio";
-    name: string;
-    toolkitSlug?: string;
-    baseUrl?: string;
-    logoUrl: string | null;
-  };
-  let connectionsCatalog = $state<ConnMenuItem[]>([]);
-  let connectionsLoaded = $state(false);
-
-  // Connections are global, not per-thread; load once on first `@` and refresh
-  // when the connector set changes.
-  async function ensureConnections() {
-    if (connectionsLoaded) return;
-    connectionsLoaded = true;
-    try {
-      const [composio, custom] = await Promise.all([
-        api.invoke("connectors:list"),
-        api.invoke("customConnections:list"),
-      ]);
-      const bySlug = new Map<string, ConnMenuItem>();
-      for (const c of composio as Connection[]) {
-        if (c.status !== "ACTIVE") continue; // pending/expired aren't callable yet
-        if (bySlug.has(c.toolkitSlug)) continue; // one row per toolkit (N accounts)
-        bySlug.set(c.toolkitSlug, {
-          kind: "composio",
-          name: c.name,
-          toolkitSlug: c.toolkitSlug,
-          logoUrl: c.logoUrl,
-        });
-      }
-      const customs = (custom as CustomConnection[]).map((c) => ({
-        kind: "custom" as const,
-        name: c.name,
-        baseUrl: c.baseUrl,
-        logoUrl: c.logoUrl,
-      }));
-      connectionsCatalog = [...customs, ...bySlug.values()];
-    } catch {
-      connectionsLoaded = false; // allow retry on next `@`
-    }
-  }
-
-  /** Refresh the cached catalog when connections change elsewhere in the app
-   *  (ConnectorsView add/remove/reconnect) so the `@` picker stays current. */
-  $effect(() => {
-    const off = api.on("event:connectorsChanged", () => {
-      connectionsLoaded = false;
-      connectionsCatalog = [];
-    });
-    return off;
-  });
-
-  // BWS secrets available to pin with `@`. Values are never loaded — only
-  // names + ids + project, so the picker (and any future transcript) shows no
-  // cleartext. Refreshed when the Secrets view mutates the set.
-  type SecMenuItem = { id: string; name: string; projectId: string };
-  let secretsCatalog = $state<SecMenuItem[]>([]);
-  let secretsLoaded = $state(false);
-
-  async function ensureSecrets() {
-    if (secretsLoaded) return;
-    secretsLoaded = true;
-    try {
-      const status = await api.invoke("bws:status");
-      if (!status.authenticated || !status.projectId) {
-        secretsCatalog = [];
-        return;
-      }
-      const list = await api.invoke("bws:listSecrets", status.projectId);
-      secretsCatalog = (list as { id: string; key: string; projectId: string }[]).map((s) => ({
-        id: s.id,
-        name: s.key,
-        projectId: s.projectId,
-      }));
-    } catch {
-      secretsLoaded = false;
-    }
-  }
-
-  $effect(() => {
-    const off = api.on("event:bwsChanged", () => {
-      secretsLoaded = false;
-      secretsCatalog = [];
-    });
-    return off;
-  });
-
+  // Typing `@` opens the ConnectionsMenu picker (custom HTTP + Composio
+  // toolkits + BWS secrets). The child owns the catalogs, ensure* loaders,
+  // event invalidation, and match filtering; the host owns caret context,
+  // the active index (bindable), and the chip pin/remove (draft mutations +
+  // textarea refocus). Underlying tools (custom_request / connector_execute)
+  // are always available; @ is a nudge + an exact-name handoff.
   // Active `@token` immediately left of the caret (same framing rules as the
   // slash menu: must start a line or follow whitespace, no whitespace inside).
   const atContext = $derived.by(() => {
@@ -541,43 +376,12 @@
     return { start: at, query: token.toLowerCase() };
   });
   const atQuery = $derived(atContext?.query ?? null);
-  const atMatches = $derived.by(() => {
-    if (atQuery === null) return [];
-    const q = atQuery;
-    return connectionsCatalog
-      .filter((c) => c.name.toLowerCase().includes(q))
-      .sort((a, b) => {
-        const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-        const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
-        return ap - bp;
-      })
-      .slice(0, 20);
-  });
   let atIndex = $state(0);
-  $effect(() => {
-    if (atQuery !== null) {
-      void ensureConnections();
-      void ensureSecrets();
-    }
-  });
-  $effect(() => {
-    void atMatches;
-    atIndex = 0;
-  });
-
-  // Same framing as atMatches but for BWS secrets.
-  const secretMatches = $derived.by(() => {
-    if (atQuery === null) return [];
-    const q = atQuery;
-    return secretsCatalog
-      .filter((s) => s.name.toLowerCase().includes(q))
-      .sort((a, b) => {
-        const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-        const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
-        return ap - bp;
-      })
-      .slice(0, 20);
-  });
+  // Imperative handle into ConnectionsMenu for ArrowUp/Down/Enter navigation
+  // from the textarea keydown matrix.
+  let connectionsMenu = $state<{ handleMenuKey: (e: KeyboardEvent) => boolean } | null>(null);
+  // Imperative handle into SlashMenu for Tab/ArrowUp/Down/Enter navigation.
+  let slashMenu = $state<{ handleMenuKey: (e: KeyboardEvent) => boolean } | null>(null);
 
   function pickConnection(c: ConnMenuItem) {
     const ctx = atContext;
@@ -741,37 +545,14 @@
     }
     if (!fromPointer) playButtonClick("click");
 
-    const fileRefs = draft.attachments
-      .filter((a) => a.kind === "file")
-      .map((a) => `Attached file: ${a.kind === "file" ? a.fsPath : ""}`);
-    const textBlocks = draft.attachments
-      .filter((a) => a.kind === "text")
-      .map((a) => (a.kind === "text" ? `${a.name}:\n\n${a.content}` : ""));
-    const images = draft.attachments
-      .filter((a) => a.kind === "image")
-      .map((a) => (a.kind === "image" ? { mimeType: a.mimeType, data: a.data } : null!))
-      .filter(Boolean);
-
+    // Build the outgoing payload + resolve the IPC routing branch in one pure
+    // call (lib/composer/submit.ts). submit() only dispatches + restores the
+    // draft on failure + marks the send button animation — see table test for
+    // the remote/local/steer/plan-mode routing matrix.
     const isSlashCommand = !!draft.command || raw.startsWith("/");
-    const body = [raw, ...textBlocks, ...fileRefs].filter(Boolean).join("\n\n");
-    const outgoing = draft.command
-      ? [`/${draft.command.name}`, body].filter(Boolean).join(" ")
-      : isSlashCommand
-        ? body
-        : composeOutgoingPrompt(body, {
-            mode: draft.mode,
-            isFirst: !draft.planPromptSent,
-          });
-    // Prepend the @-connections + @-secrets hints (nudges + exact names/ids)
-    // before anything; the hints are orthogonal to mode/slash-wrapping.
-    // clearText() runs below, so draft.connections/secrets still hold the
-    // pinned sets here.
-    const connectionsHint = buildConnectionsHint(draft.connections);
-    const secretsHint = buildSecretsHint(draft.secrets);
-    const hints = [connectionsHint, secretsHint].filter(Boolean).join("\n\n");
-    const outgoingWithHints = hints ? `${hints}\n\n${outgoing}` : outgoing;
-    const toolMode = draft.mode === "plan" && !isSlashCommand ? "readOnly" : "all";
+    const built = buildOutgoing(draft, thread, asSteer);
 
+    // Snapshot before clearText so a failed dispatch can restore the draft.
     const snapshotText = draft.text;
     const snapshotAttachments = draft.attachments;
     const snapshotCommand = draft.command;
@@ -783,21 +564,33 @@
     }
 
     try {
-      if (thread.remoteHostId && thread.remoteThreadId) {
-        // Remote master thread: forward over the relay write path (ADR-0010)
-        // instead of driving a local pi process. Plan/tool-mode and images
-        // aren't carried remotely yet — text steer/message only.
-        if (asSteer && running) {
-          await api.invoke("remote:steer", thread.remoteHostId, thread.remoteThreadId, outgoingWithHints);
-        } else {
+      // Dispatch the built prompt. Local prompt + remote:message mark the
+      // send button animation; steer does not (it injects into a running turn,
+      // no new send). Each branch narrows the BuiltOutgoing union so the
+      // channel/args tuple stays type-safe (mirrors the four-case original).
+      switch (built.channel) {
+        case "threads:prompt": {
           sendAnim.mark(thread.id);
-          await api.invoke("remote:message", thread.remoteHostId, thread.remoteThreadId, outgoingWithHints);
+          const [id, text, images, toolMode] = built.args;
+          await api.invoke("threads:prompt", id, text, images, toolMode);
+          break;
         }
-      } else if (asSteer && running) {
-        await api.invoke("threads:steer", thread.id, outgoingWithHints);
-      } else {
-        sendAnim.mark(thread.id);
-        await api.invoke("threads:prompt", thread.id, outgoingWithHints, images, toolMode);
+        case "threads:steer": {
+          const [id, text] = built.args;
+          await api.invoke("threads:steer", id, text);
+          break;
+        }
+        case "remote:message": {
+          sendAnim.mark(thread.id);
+          const [hostId, remoteId, text] = built.args;
+          await api.invoke("remote:message", hostId, remoteId, text);
+          break;
+        }
+        case "remote:steer": {
+          const [hostId, remoteId, text] = built.args;
+          await api.invoke("remote:steer", hostId, remoteId, text);
+          break;
+        }
       }
     } catch (err) {
       // Restore draft on failure.
@@ -888,56 +681,12 @@
       removeSecret(draft.secrets.length - 1);
       return;
     }
-    // Tab cycles the browse-filter tabs (Shift+Tab backwards) whenever the
-    // menu is open, even with no matches.
-    if (slashQuery !== null && e.key === "Tab") {
-      e.preventDefault();
-      cycleSlashFilter(e.shiftKey ? -1 : 1);
-      return;
-    }
-    // @-menu navigation (connections + secrets combined into one virtual list;
-    // mutually exclusive with the slash menu: a token can't be both `/…` and
-    // `@…` at the caret without intervening whitespace).
-    const atTotal = atMatches.length + secretMatches.length;
-    if (atQuery !== null && atTotal > 0) {
-      if (atIndex >= atTotal) atIndex = 0;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        atIndex = (atIndex + 1) % atTotal;
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        atIndex = (atIndex - 1 + atTotal) % atTotal;
-        return;
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        if (atIndex < atMatches.length) {
-          pickConnection(atMatches[atIndex]!);
-        } else {
-          pickSecret(secretMatches[atIndex - atMatches.length]!);
-        }
-        return;
-      }
-    }
-    if (slashMatches.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        slashIndex = (slashIndex + 1) % slashMatches.length;
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        slashIndex = (slashIndex - 1 + slashMatches.length) % slashMatches.length;
-        return;
-      }
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        pickSlash(slashMatches[slashIndex]!);
-        return;
-      }
-    }
+    // @-menu navigation (delegated to ConnectionsMenu; mutually exclusive with
+    // the slash menu: a token can't be both `/…` and `@…` at the caret
+    // without intervening whitespace).
+    if (atQuery !== null && connectionsMenu?.handleMenuKey(e)) return;
+    // Slash-menu navigation (Tab cycles tabs; ArrowUp/Down/Enter when matches).
+    if (slashQuery !== null && slashMenu?.handleMenuKey(e)) return;
     // Up arrow when composer is empty and queue has follow-ups → recall last queued message.
     if (e.key === "ArrowUp" && !draft.text.trim() && queue.followUp.length > 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
       e.preventDefault();
@@ -1012,122 +761,24 @@
         }}
       />
     {/if}
-    <!-- Slash menu -->
-    {#if slashQuery !== null}
-      <div
-        class="absolute bottom-full mb-2 w-full overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
-        data-testid="slash-menu"
-      >
-        <!-- Browse tabs: click to filter by kind; Tab cycles them. -->
-        <div class="flex items-center gap-1 border-b border-border-strong px-2 py-1.5">
-          {#each slashVisibleTabs as tab (tab.key)}
-            <button
-              class="rounded px-2 py-0.5 text-[11px] font-medium
-                {effectiveFilter === tab.key
-                  ? tab.key === 'all'
-                    ? 'bg-surface-3 text-fg'
-                    : tab.key === 'starred'
-                      ? 'bg-amber-400/20 text-amber-700'
-                      : commandKindBadge[tab.key]
-                  : 'text-faint hover:bg-surface-2'}"
-              onclick={() => (slashFilter = tab.key)}>{tab.label}</button
-            >
-          {/each}
-          <span class="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-faint">
-            <kbd
-              class="rounded border border-border-strong bg-surface-2 px-1 py-0.5 font-sans text-[10px] leading-none"
-              >⇥ Tab</kbd
-            >
-            to switch
-          </span>
-        </div>
-        <div class="max-h-96 overflow-y-auto">
-          {#each slashMatches as cmd, i (cmd.kind + ":" + cmd.name)}
-            {@const starred = commandPrefs.isStarred(starKey(cmd))}
-            <div
-              class="flex items-center {i === slashIndex ? 'bg-surface-2' : ''} hover:bg-surface-2"
-            >
-              <button
-                class="flex min-w-0 flex-1 items-baseline gap-2 px-3 py-1.5 text-left text-sm"
-                onclick={() => pickSlash(cmd)}
-              >
-                <span class="shrink-0 whitespace-nowrap font-mono text-fg">/{cmd.name}</span>
-                <span class="min-w-0 truncate text-xs text-faint">{cmd.description}</span>
-                <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide {commandKindBadge[cmd.kind]}">{commandKindLabel[cmd.kind]}</span>
-              </button>
-              <button
-                class="shrink-0 px-2 py-1.5 {starred ? 'text-amber-500' : 'text-faint hover:text-amber-500'}"
-                title={starred ? "Unstar" : "Star"}
-                aria-label={starred ? "Unstar command" : "Star command"}
-                onclick={() => commandPrefs.toggle(starKey(cmd))}
-              >
-                <Star size={14} class={starred ? "fill-amber-400" : ""} />
-              </button>
-            </div>
-          {:else}
-            <div class="px-3 py-2 text-xs text-faint">
-              {slashFilter === "starred" && !slashQuery
-                ? "No starred commands yet — click the ★ to add one"
-                : "No matching commands"}
-            </div>
-          {/each}
-        </div>
-      </div>
-    {/if}
+    <!-- Slash menu (child: match/filter/tabs/markup; host owns caret + picks) -->
+    <SlashMenu
+      bind:this={slashMenu}
+      query={slashQuery}
+      systemCommands={systemCommandList}
+      loadedCommands={commands}
+      bind:index={slashIndex}
+      onPick={pickSlash}
+    />
 
-    <!-- @-menu: connections + secrets -->
-    {#if atQuery !== null}
-      <div
-        class="absolute bottom-full mb-2 w-full overflow-hidden rounded-lg border border-border-strong bg-surface shadow-xl"
-        data-testid="connections-menu"
-      >
-        <div class="border-b border-border-strong px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-fainter">
-          Connections &amp; Secrets <span class="font-normal normal-case text-fainter">· pick to pin @</span>
-        </div>
-        <div class="max-h-80 overflow-y-auto">
-          {#if !connectionsLoaded || !secretsLoaded}
-            <div class="px-3 py-2 text-xs text-faint">Loading…</div>
-          {:else if atMatches.length === 0 && secretMatches.length === 0}
-            <div class="px-3 py-2 text-xs text-faint">
-              {connectionsCatalog.length === 0 && secretsCatalog.length === 0
-                ? "No connections or secrets yet — add one in Connections / Secrets"
-                : "No matching items"}
-            </div>
-          {:else}
-            {#if atMatches.length > 0}
-              <div class="border-b border-border-strong/50 px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Connections</div>
-              {#each atMatches as c, i (c.kind + ":" + c.name)}
-                <div class="flex items-center {i === atIndex ? 'bg-surface-2' : ''} hover:bg-surface-2">
-                  <button
-                    class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
-                    onclick={() => pickConnection(c)}
-                  >
-                    <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={18} />
-                    <span class="min-w-0 truncate text-fg">{c.name}</span>
-                    <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide {c.kind === 'custom' ? 'bg-violet-500/15 text-violet-700' : 'bg-sky-500/15 text-sky-700'}">{c.kind}</span>
-                  </button>
-                </div>
-              {/each}
-            {/if}
-            {#if secretMatches.length > 0}
-              <div class="border-b border-border-strong/50 px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Secrets</div>
-              {#each secretMatches as s, j (s.id)}
-                <div class="flex items-center {atMatches.length + j === atIndex ? 'bg-surface-2' : ''} hover:bg-surface-2">
-                  <button
-                    class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
-                    onclick={() => pickSecret(s)}
-                  >
-                    <KeyRound size={18} class="shrink-0 text-amber-600" />
-                    <span class="min-w-0 truncate font-mono text-fg">{s.name}</span>
-                    <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-amber-500/15 text-amber-700">secret</span>
-                  </button>
-                </div>
-              {/each}
-            {/if}
-          {/if}
-        </div>
-      </div>
-    {/if}
+    <!-- @-menu: connections + secrets (child owns catalogs/matches/markup) -->
+    <ConnectionsMenu
+      bind:this={connectionsMenu}
+      query={atQuery}
+      bind:index={atIndex}
+      onPickConnection={pickConnection}
+      onPickSecret={pickSecret}
+    />
 
     <!-- Queued messages shelf (Codex/Cursor-style chip rail) -->
     {#if queue.followUp.length > 0}
@@ -1399,7 +1050,7 @@
 
           <!-- Quick-access drawer: a row of custom actions. -->
           <QuickSlots
-            commands={allCommands}
+            commands={[...systemCommandList, ...commands]}
             cavemanEnabled={caveman.enabled}
             onToggleCaveman={toggleCaveman}
             onInjectSkill={injectSkill}

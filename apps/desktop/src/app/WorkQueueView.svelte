@@ -32,7 +32,7 @@
       if (res.ok) {
         await workQueue.load(projectId);
       } else {
-        launchError = `Couldn’t start #${issueNumber} (${res.reason})`;
+        launchError = `Couldn’t start #${issueNumber} (${res.reason}${res.message ? `: ${res.message}` : ""})`;
         await workQueue.load(projectId);
       }
     } finally {
@@ -46,7 +46,7 @@
     launchError = "";
     try {
       const res = await api.invoke("workQueue:startAllReady", projectId, prdNumber);
-      if (!res.ok) launchError = `Couldn’t start ready issues (${res.reason})`;
+      if (!res.ok) launchError = `Couldn’t start ready issues (${res.reason}${res.message ? `: ${res.message}` : ""})`;
       await workQueue.load(projectId);
     } finally {
       launchingPrd = null;
@@ -64,7 +64,7 @@
     launchError = "";
     try {
       const res = await api.invoke("workQueue:startAllReadyGlobal", projectId);
-      if (!res.ok) launchError = `Couldn’t start ready issues (${res.reason})`;
+      if (!res.ok) launchError = `Couldn’t start ready issues (${res.reason}${res.message ? `: ${res.message}` : ""})`;
       await workQueue.load(projectId);
     } finally {
       launchingAll = false;
@@ -80,7 +80,7 @@
     launchError = "";
     try {
       const res = await api.invoke("workQueue:closeIssue", projectId, issueNumber, reason);
-      if (!res.ok) launchError = `Couldn’t close #${issueNumber} (${res.reason})`;
+      if (!res.ok) launchError = `Couldn’t close #${issueNumber} (${res.reason}${res.message ? `: ${res.message}` : ""})`;
       await workQueue.load(projectId);
     } finally {
       closing = null;
@@ -93,7 +93,7 @@
     launchError = "";
     try {
       const res = await api.invoke("workQueue:reopenIssue", projectId, issueNumber);
-      if (!res.ok) launchError = `Couldn’t reopen #${issueNumber} (${res.reason})`;
+      if (!res.ok) launchError = `Couldn’t reopen #${issueNumber} (${res.reason}${res.message ? `: ${res.message}` : ""})`;
       await workQueue.load(projectId);
     } finally {
       closing = null;
