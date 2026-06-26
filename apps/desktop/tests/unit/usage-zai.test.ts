@@ -1,12 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ZaiUsageProvider,
   isFiveHour,
   isWeekly,
   zaiWindow,
   extractZaiLimits,
   type ZaiLimit,
-} from "../../electron/services/usage-adapters.ts";
+} from "../../electron/services/usage/providers/zai.ts";
+
+// ── pure-shape helpers (unchanged from prior tests) ─────────────────────
 
 test("isFiveHour: matches the numeric limit code (unit=3,number=5)", () => {
   assert.ok(isFiveHour({ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 41 }));
@@ -60,7 +63,6 @@ test("zaiWindow: rejects non-numeric percentage", () => {
 });
 
 test("extractZaiLimits: reads limits from the real {code,data:{limits}} envelope", () => {
-  // Real shape captured from api.z.ai/api/monitor/usage/quota/limit.
   const body = {
     code: 200,
     msg: "Operation successful",
@@ -74,7 +76,6 @@ test("extractZaiLimits: reads limits from the real {code,data:{limits}} envelope
   };
   const limits = extractZaiLimits(body);
   assert.equal(limits.length, 3);
-  // The 5-hour + weekly windows must resolve from this envelope.
   assert.equal(zaiWindow(limits.find(isFiveHour))?.remainingPct, 25);
   assert.equal(zaiWindow(limits.find(isWeekly))?.remainingPct, 85);
 });
@@ -90,4 +91,94 @@ test("extractZaiLimits: empty when the envelope is absent/malformed", () => {
   assert.deepEqual(extractZaiLimits({}), []);
   assert.deepEqual(extractZaiLimits({ data: {} }), []);
   assert.deepEqual(extractZaiLimits({ data: { limits: "not-an-array" } }), []);
+});
+
+// ── run() with a fake CredentialSource (no models.json / no network) ────
+
+function fakeApiKeySource(value: string | undefined, configured: boolean) {
+  const cred = { kind: "api-key" as const, value: value ?? "", baseUrl: undefined };
+  return {
+    provider: "zai",
+    kind: "api-key" as const,
+    configured: async () => configured,
+    resolve: async () => cred,
+  };
+}
+
+test("ZaiUsageProvider.run: shapes a quota response using the resolved api-key credential", async () => {
+  // Stub the module-level fetch so no real network leaves the process.
+  const original = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = ((input: any, init: any) => {
+    calls.push(typeof input === "string" ? input : String(input));
+    // Mirror the documented {code,data:{limits}} envelope.
+    const body = {
+      code: 200,
+      data: {
+        limits: [
+          { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 75, nextResetTime: 1782310087196 },
+          { type: "TOKENS_LIMIT", unit: 6, number: 1, percentage: 15, nextResetTime: 1782820958976 },
+        ],
+      },
+    };
+    return Promise.resolve(
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }),
+    ) as any;
+    void init;
+  }) as any;
+
+  try {
+    const provider = new ZaiUsageProvider(fakeApiKeySource("fake-zai-key", true) as any);
+    const result = await provider.run({ kind: "api-key", value: "fake-zai-key" });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0], "https://api.z.ai/api/monitor/usage/quota/limit");
+    assert.equal(result.state, "ok");
+    assert.equal(result.summary?.kind, "quota");
+    const q = result.summary as { kind: "quota"; fiveHours: { remainingPct: number } | null; weekly: { remainingPct: number } | null };
+    assert.equal(q.fiveHours?.remainingPct, 25);
+    assert.equal(q.weekly?.remainingPct, 85);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("ZaiUsageProvider.run: unknown state when no windows resolve", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (() =>
+    Promise.resolve(
+      new Response(JSON.stringify({ code: 200, data: { limits: [] } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )) as any;
+  try {
+    const provider = new ZaiUsageProvider();
+    const result = await provider.run({ kind: "api-key", value: "k" });
+    assert.equal(result.state, "unknown");
+    assert.equal(result.summary, null);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("ZaiUsageProvider.run: surfaces a fetch failure note on HTTP error", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (() =>
+    Promise.resolve(new Response("upstream error", { status: 500 }))) as any;
+  try {
+    const provider = new ZaiUsageProvider();
+    const result = await provider.run({ kind: "api-key", value: "k" });
+    assert.equal(result.state, "unknown");
+    assert.equal(result.summary, null);
+    assert.match(result.note ?? "", /^Fetch failed: HTTP 500/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("ZaiUsageProvider.run: ignores non-api-key credentials", async () => {
+  const provider = new ZaiUsageProvider();
+  const result = await provider.run({ kind: "manual", note: "n/a" });
+  assert.equal(result.state, "unknown");
+  assert.equal(result.summary, null);
 });

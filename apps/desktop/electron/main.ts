@@ -50,7 +50,7 @@ import { ConnectionSetupService } from "./services/connection-setup-service.ts";
 import { McpService } from "./services/mcp-service.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
-import { UsageService } from "./services/usage-service.ts";
+import { UsageService } from "./services/usage/usage-service.ts";
 import { ConnectorResolver } from "./services/connector-resolver.ts";
 import { ensureConnectorExtension } from "./services/connector-extension.ts";
 import { ensurePeachVisionConsentExtension } from "./services/peach-vision-consent-extension.ts";
