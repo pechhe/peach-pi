@@ -23,6 +23,8 @@
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import Play from "@lucide/svelte/icons/play";
+  import GitPullRequest from "@lucide/svelte/icons/git-pull-request";
   import Circle from "@lucide/svelte/icons/circle";
   import X from "@lucide/svelte/icons/x";
   import KeyRound from "@lucide/svelte/icons/key-round";
@@ -45,6 +47,7 @@
   import { recording } from "../stores/recording.svelte";
   import { lightbox } from "../stores/lightbox.svelte";
   import { terminal } from "../stores/terminal.svelte";
+  import { workQueue } from "../stores/work-queue.svelte";
   import FindBar from "./FindBar.svelte";
 
   // Logo lookup for @-connection badges. The hint text only carries names, so we
@@ -122,6 +125,52 @@
   let findQuery = $state("");
   let findIndex = $state(0);
   let findBar = $state<FindBar | null>(null);
+
+  // Per-thread dev-server + merge affordances (issue-agent workflow).
+  let devRunning = $state(false);
+  let merging = $state(false);
+  let mergeMsg = $state("");
+
+  async function runDevServer() {
+    if (!thread.projectId || devRunning) return;
+    devRunning = true;
+    mergeMsg = "";
+    try {
+      const script = await api.invoke("dev:detectCommand", thread.projectId);
+      if (!script) {
+        mergeMsg = "No dev script in package.json";
+        return;
+      }
+      await api.invoke("terminal:runCommand", thread.id, `pnpm ${script}`);
+      terminal.visible = true;
+    } catch (e) {
+      mergeMsg = `Couldn’t run dev server: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      devRunning = false;
+    }
+  }
+
+  async function mergePr() {
+    if (merging) return;
+    merging = true;
+    mergeMsg = "";
+    try {
+      const res = await api.invoke("git:mergePr", thread.id);
+      if (!res.ok) {
+        mergeMsg = `Merge failed: ${res.error}`;
+        return;
+      }
+      // The PR’s `Closes #N` body auto-closes the linked issue on GitHub;
+      // archive this worktree now that its branch is merged + deleted.
+      if (thread.worktreeId) await api.invoke("worktrees:archive", thread.worktreeId);
+      await workQueue.load(thread.projectId ?? null);
+      onSelectThread(thread.id);
+    } catch (e) {
+      mergeMsg = `Merge failed: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      merging = false;
+    }
+  }
 
   // Fetch this machine's client identity once (for the control indicator).
   $effect(() => { remoteClient.init(); });
@@ -556,6 +605,14 @@
   function onScroll() {
     const el = scrollEl;
     if (!el) return;
+    // During the eased bottom-follow glide we set data-glide-scroll once at
+    // glide start (see glideToBottom). Skip the layout-triggering math below
+    // for those programmatic scrolls — otherwise every glide frame forces a
+    // reflow via scrollHeight read and re-evaluates scrolledUp for no reason.
+    if (el.dataset.glideScroll) {
+      lastScrollTop = el.scrollTop;
+      return;
+    }
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     const delta = el.scrollTop - lastScrollTop;
     lastScrollTop = el.scrollTop;
@@ -609,10 +666,21 @@
     if (!el || gliding) return;
     gliding = true;
     lastGlideTs = 0;
+    // Tag the element once at glide start so the global auto-hide-scrollbar
+    // listener (main.ts) skips every programmatic scroll while we follow a
+    // streaming turn. Previously this was set+deleted EVERY frame (two DOM
+    // attribute mutations per rAF tick — a major per-frame cost during long
+    // streaming runs). Set once here, delete once at glide end.
+    el.dataset.glideScroll = "1";
+    const stop = () => {
+      gliding = false;
+      const e = scrollEl;
+      if (e) delete e.dataset.glideScroll;
+    };
     const step = (ts: number) => {
       const e = scrollEl;
       if (!e || scrolledUp) {
-        gliding = false;
+        stop();
         return;
       }
       if (!lastGlideTs) lastGlideTs = ts;
@@ -628,24 +696,11 @@
       const running = thread.status === "running";
       if (diff <= 0.5 && !running) {
         e.scrollTop = target;
-        gliding = false;
+        stop();
         return;
       }
       const factor = 1 - Math.exp(-dt / GLIDE_TAU);
-      // Tag this as a programmatic scroll so the global auto-hide-scrollbar
-      // listener (main.ts) skips it — the thumb stays hidden while we follow a
-      // streaming turn, and only real user scrolls reveal it.
-      e.dataset.glideScroll = "1";
       e.scrollTop = e.scrollTop + diff * factor;
-      // Clear deferred: the scroll event from the assignment above is queued
-      // asynchronously and fires after this step returns, so a sync delete
-      // would race it (flag already gone when the listener fires).
-      // setTimeout(0) lands after the queued event, covering it; the next
-      // step re-sets the flag before this fires, so it stays set throughout
-      // the continuous glide.
-      setTimeout(() => {
-        delete e.dataset.glideScroll;
-      }, 0);
       glideRaf = requestAnimationFrame(step);
     };
     glideRaf = requestAnimationFrame(step);
@@ -795,6 +850,29 @@
             data-testid="terminal-toggle">&gt;_</button
           >
         </Tooltip>
+        {#if thread.worktreeId}
+          <Tooltip text="Run dev server in this worktree">
+            <button
+              class="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft disabled:opacity-50"
+              onclick={runDevServer}
+              disabled={devRunning}
+              data-testid="run-dev-server"
+            ><Play size={13} /> {devRunning ? "Starting…" : "Dev"}</button
+            >
+          </Tooltip>
+          <Tooltip text="Merge this worktree's PR (squash + delete branch)">
+            <button
+              class="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-faint hover:bg-surface hover:text-fg-soft disabled:opacity-50"
+              onclick={mergePr}
+              disabled={merging || thread.status === 'running'}
+              data-testid="merge-pr"
+            ><GitPullRequest size={13} /> {merging ? "Merging…" : "Merge PR"}</button
+            >
+          </Tooltip>
+        {/if}
+        {#if mergeMsg}
+          <span class="text-[10px] text-red-500" data-testid="merge-msg">{mergeMsg}</span>
+        {/if}
       {/if}
     </div>
     {/if}

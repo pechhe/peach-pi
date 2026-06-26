@@ -22,6 +22,7 @@ import type {
   GitInfo,
   GitMergeResult,
   GitPrResult,
+  GitMergePrResult,
   GitPushLocalResult,
   CustomConnection,
   CustomConnectionInput,
@@ -405,6 +406,11 @@ export const ipcContracts = {
   "workQueue:startAllReady": invoke<[projectId: ProjectId, prdNumber: number], StartAllReadyResult>(
     (id) => requireNonEmptyString(id, "projectId"),
   ),
+  /** Launch an agent on every ready (unblocked, not-in-progress) issue across
+   *  all PRDs + the unparented group. */
+  "workQueue:startAllReadyGlobal": invoke<[projectId: ProjectId], StartAllReadyResult>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
   /** Close a tracker issue as completed or not planned (escape hatch for
    *  shipped-but-not-auto-closed issues). */
   "workQueue:closeIssue": invoke<
@@ -421,6 +427,11 @@ export const ipcContracts = {
   "git:fileDiff": invoke<[threadId: ThreadId, filePath: string], string>(),
   "git:commitPush": invoke<[threadId: ThreadId, message?: string], GitCommitPushResult>(),
   "git:createPr": invoke<[threadId: ThreadId], GitPrResult>((id) => requireNonEmptyString(id, "threadId")),
+  /** Merge a thread's open PR on GitHub (squash + delete branch). Human-gated:
+   *  the "Merge PR" button shows after the human has verified the work. */
+  "git:mergePr": invoke<[threadId: ThreadId], GitMergePrResult>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
   "git:mergeToLocal": invoke<[threadId: ThreadId], GitMergeResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
@@ -435,6 +446,18 @@ export const ipcContracts = {
   "terminal:input": invoke<[threadId: ThreadId, data: string], void>(),
   "terminal:resize": invoke<[threadId: ThreadId, cols: number, rows: number], void>(),
   "terminal:kill": invoke<[threadId: ThreadId], void>(),
+  /** Open the thread's terminal (in its worktree cwd) and run a command. Used
+   *  by the per-thread "Run dev server" button: opens the terminal and sends
+   *  the project's detected dev command. Returns the detected command. */
+  "terminal:runCommand": invoke<[threadId: ThreadId, command: string], { ran: boolean }>(
+    (id) => requireNonEmptyString(id, "threadId"),
+  ),
+  /** Detect the project's dev command from package.json scripts (prefers
+   *  `dev`, then `start`, then `develop`). Returns null if none found or no
+   *  package.json. */
+  "dev:detectCommand": invoke<[projectId: ProjectId], string | null>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
 
   // HUD — persistent floating composer window
   "hud:hide": invoke<[], void>(),

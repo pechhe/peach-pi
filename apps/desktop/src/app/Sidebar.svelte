@@ -586,9 +586,11 @@
           ? 'text-fainter'
           : woke
             ? 'text-warning'
-            : thread.status === 'completed' && !isActive
-              ? 'text-accent'
-              : ''}">{thread.title}</span>
+            : thread.status === 'failed'
+              ? 'text-danger'
+              : thread.status === 'completed' && !isActive
+                ? 'text-accent'
+                : ''}">{thread.title}</span>
       {#if thread.status === "running" || fleetActiveIds.has(thread.id)}
         <BrailleSpinner class="session-spinner ml-auto mr-0 shrink-0" title="Thinking…" shape="hex" />
       {:else if variant === "active"}

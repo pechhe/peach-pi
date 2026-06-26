@@ -46,6 +46,21 @@ const PARK_FOR_TESTING_PROMPT =
   "One row. Feature: what we built, one short sentence. Test: quickest way to " +
   "check it, one short sentence.";
 
+/** The status to stamp a thread with when its run goes idle: "failed" if
+ *  the most recent assistant message ended in error (connection drop, provider
+ *  cutoff, out of tokens, etc.), otherwise "completed". The SDK does not
+ *  reject prompt() for mid-stream provider failures — it emits message_end
+ *  with stopReason "error" (and the recorder mirrors that as item.error),
+ *  then agent_end — so onRunningChange(false) is the only signal we get.
+ *  Without this check a failed run is indistinguishable from a clean finish. */
+function runOutcome(items: TranscriptItem[]): Thread["status"] {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i]!;
+    if (item.kind === "assistant") return item.error ? "failed" : "completed";
+  }
+  return "completed";
+}
+
 /** Last assistant message text in a transcript, or undefined if none. */
 function lastAssistantText(items: TranscriptItem[]): string | undefined {
   for (let i = items.length - 1; i >= 0; i--) {
@@ -800,7 +815,8 @@ export class ThreadService {
       cwd,
       {
         onOps: (ops) => this.queueOps(threadId, ops),
-        onRunningChange: (running) => this.setStatus(threadId, running ? "running" : "completed"),
+        onRunningChange: (running) =>
+          this.setStatus(threadId, running ? "running" : this.runOutcome(threadId)),
         onQueueChange: (steering, followUp) => {
           this.emit("event:queue", { threadId, steering, followUp });
           this.emitFrame({ kind: "queue", threadId, steering, followUp });
@@ -877,6 +893,16 @@ export class ThreadService {
     const dir = extractWorktreeAddPath(args);
     if (!dir) return;
     void this.gitService.adoptSiblingWorktree(threadId, dir).catch(() => {});
+  }
+
+  /** Resolve the idle status for a thread's just-finished run from its
+   *  transcript's last assistant message (see runOutcome). Falls back to
+   *  "completed" when the session/transcript is unavailable (e.g. the run
+   *  never produced an assistant message, or the session was torn down). */
+  private runOutcome(threadId: string): Thread["status"] {
+    const session = this.sessions.get(threadId);
+    if (!session) return "completed";
+    return runOutcome(session.transcript());
   }
 
   private setStatus(threadId: string, status: Thread["status"]): void {

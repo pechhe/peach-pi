@@ -9,6 +9,7 @@
   import X from "@lucide/svelte/icons/x";
   import FileText from "@lucide/svelte/icons/file-text";
   import BrailleSpinner from "./BrailleSpinner.svelte";
+  import InstructionsDialog from "./InstructionsDialog.svelte";
   import type { FleetAgent } from "../lib/subagent/fleet";
   import {
     activityLog,
@@ -86,7 +87,7 @@
       </div>
     </div>
     {#if task}
-      <button class="agent-entity__action agent-entity__action--top" type="button" aria-expanded={showInstructions} onclick={() => (showInstructions = !showInstructions)}>
+      <button class="agent-entity__action agent-entity__action--top" type="button" aria-expanded={showInstructions} onclick={() => (showInstructions = true)}>
         <FileText size={14} />
         View instructions
       </button>
@@ -102,10 +103,14 @@
         out:slide={{ duration: 200, axis: "y" }}
       >
         <span class="agent-entity__marker agent-entity__marker--{node.tone}" aria-hidden="true">
-          {#if node.tone === "active"}<BrailleSpinner class="agent-entity__node-spinner" shape="triangle" />{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={11} />{:else if node.tone === "blocked"}<span class="agent-entity__node-bang" aria-hidden="true">!</span>{/if}
+          {#if node.tone === "active"}<BrailleSpinner class="agent-entity__node-spinner" shape="triangle" />{:else if node.tone === "pending"}<span class="agent-entity__shimmer-dot" aria-hidden="true"></span>{:else if node.tone === "failed" || node.tone === "cancelled"}<X size={11} />{:else if node.tone === "blocked"}<span class="agent-entity__node-bang" aria-hidden="true">!</span>{/if}
         </span>
         <div class="agent-entity__body" in:fly={{ duration: 300, y: 4, delay: 40 }}>
-          <span class="agent-entity__node-title" title={node.fullTitle ?? node.title}>{node.title}</span>
+          {#if node.tone === "pending"}
+            <span class="agent-entity__shimmer" aria-label="Waiting for first activity">Spawned</span>
+          {:else}
+            <span class="agent-entity__node-title" title={node.fullTitle ?? node.title}>{node.title}</span>
+          {/if}
           {#if node.subtitle}<p class="agent-entity__node-sub" title={node.subtitle}>{node.subtitle}</p>{/if}
         </div>
       </li>
@@ -114,10 +119,12 @@
   </ol>
 
   {#if showInstructions && task}
-    <div class="agent-entity__instructions">
-      <div class="agent-entity__section-label">Instructions</div>
-      <pre class="agent-entity__pre">{task}</pre>
-    </div>
+    <InstructionsDialog
+      bind:open={showInstructions}
+      title="Agent instructions"
+      subtitle={entity.name}
+      content={task}
+    />
   {/if}
 </article>
 
@@ -125,9 +132,9 @@
   .agent-entity {
     --ae-accent: var(--color-accent);
     display: grid;
-    gap: 12px;
+    gap: 8px;
     max-width: 720px;
-    padding: 14px 16px;
+    padding: 10px 12px;
     border: 1px solid color-mix(in srgb, var(--ae-accent) 26%, var(--color-border));
     border-radius: 14px;
     background: color-mix(in srgb, var(--ae-accent) 4%, var(--color-surface));
@@ -139,10 +146,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 38px;
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
     color: var(--ae-accent);
     background: color-mix(in srgb, var(--ae-accent) 16%, transparent);
   }
@@ -152,8 +159,8 @@
   .agent-entity__title-line {
     display: flex;
     align-items: baseline;
-    gap: 8px;
-    font-size: 14px;
+    gap: 6px;
+    font-size: 12.5px;
     line-height: 1.2;
   }
   .agent-entity__type { font-weight: 700; color: var(--ae-accent); }
@@ -163,8 +170,8 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 10px;
-    font-size: 12px;
+    gap: 8px;
+    font-size: 10.5px;
     color: var(--color-muted);
   }
 
@@ -190,16 +197,16 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 4px;
+    gap: 2px;
   }
 
   .agent-entity__node {
     position: relative;
     display: grid;
-    grid-template-columns: 22px 1fr;
-    column-gap: 12px;
+    grid-template-columns: 18px 1fr;
+    column-gap: 9px;
     align-items: start;
-    padding: 6px 0;
+    padding: 3px 0;
   }
   /* connector to the next node — centered on the marker column (11px = half
      marker). Hidden on the last node; fades in via opacity when a node stops
@@ -208,9 +215,9 @@
   .agent-entity__node::before {
     content: "";
     position: absolute;
-    left: 11px;
-    top: 32px;    /* marker bottom (28) + 4px gap */
-    bottom: -8px; /* next marker top (12 from this node's bottom) - 4px gap */
+    left: 9px;
+    top: 24px;    /* marker bottom (20) + 4px gap */
+    bottom: -6px;
     width: 2px;
     transform: translateX(-50%);
     background: color-mix(in srgb, var(--ae-accent) 45%, var(--color-border));
@@ -224,13 +231,13 @@
     grid-column: 1;
     justify-self: center;
     align-self: start;
-    margin-top: 2px;
+    margin-top: 1px;
     z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
     color: var(--color-muted);
     transition: color 0.2s ease, transform 0.2s ease;
   }
@@ -240,88 +247,105 @@
   }
   .agent-entity__marker--done::after {
     content: "";
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 999px;
     background: currentColor;
     opacity: 0.55;
   }
+  .agent-entity__marker--pending { color: var(--ae-accent); }
   .agent-entity__marker--active { color: var(--ae-accent); }
   .agent-entity__marker--blocked { color: #f08c2e; }
   .agent-entity__marker--failed,
   .agent-entity__marker--cancelled { color: var(--color-danger); }
-  .agent-entity__node-bang { font-size: 11px; font-weight: 700; }
+  .agent-entity__node-bang { font-size: 10px; font-weight: 700; }
+
+  .agent-entity__shimmer-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--ae-accent) 70%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ae-accent) 55%, transparent);
+    animation: ae-pending-pulse 1.4s ease-out infinite;
+  }
+  @keyframes ae-pending-pulse {
+    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ae-accent) 55%, transparent); }
+    70%  { box-shadow: 0 0 0 8px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
 
   :global(.agent-entity__node-spinner) {
-    width: 16px;
-    height: 16px;
+    width: 13px;
+    height: 13px;
     color: var(--ae-accent);
   }
 
   .agent-entity__body { grid-column: 2; min-width: 0; }
-  .agent-entity__node-title {
-    font-size: 13px;
+  /* Shimmer: word "Spawned" rendered as a moving gradient while the agent
+     is alive but hasn't reported its first activity yet. */
+  .agent-entity__shimmer {
+    font-size: 11.5px;
     font-weight: 600;
-    line-height: 20px;
+    line-height: 18px;
+    background: linear-gradient(
+      100deg,
+      var(--color-muted) 30%,
+      color-mix(in srgb, var(--ae-accent) 80%, var(--color-fg)) 50%,
+      var(--color-muted) 70%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: ae-shimmer 1.6s linear infinite;
+  }
+  @keyframes ae-shimmer {
+    0%   { background-position: 220% 0; }
+    100% { background-position: -120% 0; }
+  }
+  .agent-entity__node-title {
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.4;
     color: var(--color-fg);
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     transition: color 0.2s ease;
   }
   .agent-entity__node--blocked .agent-entity__node-title { color: #c2691a; }
   .agent-entity__node--active .agent-entity__node-title { color: var(--ae-accent); }
   .agent-entity__node-sub {
-    margin: 1px 0 0;
-    font-size: 12px;
-    line-height: 1.45;
+    margin: 0;
+    font-size: 10.5px;
+    line-height: 1.4;
     color: var(--color-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     display: -webkit-box;
-    -webkit-line-clamp: 1;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
   }
 
   .agent-entity__action {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     margin-left: auto;
     align-self: center;
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: 10.5px;
     font-weight: 600;
     color: var(--ae-accent);
     background: transparent;
     border: 1px solid color-mix(in srgb, var(--ae-accent) 32%, transparent);
-    border-radius: 7px;
-    padding: 5px 12px;
+    border-radius: 6px;
+    padding: 4px 10px;
     cursor: pointer;
     transition: background 0.15s ease;
   }
   .agent-entity__action:hover { background: color-mix(in srgb, var(--ae-accent) 12%, transparent); }
-
-  .agent-entity__instructions {
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--ae-accent) 6%, var(--color-surface));
-    border: 1px solid color-mix(in srgb, var(--ae-accent) 16%, var(--color-border));
-  }
-  .agent-entity__section-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--color-muted);
-    margin-bottom: 4px;
-  }
-  .agent-entity__pre {
-    margin: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: var(--font-mono, monospace);
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--color-fg);
-  }
 </style>

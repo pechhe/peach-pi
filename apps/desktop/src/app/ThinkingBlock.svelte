@@ -97,12 +97,25 @@
     gliding = true;
     glideActive = true;
     lastTs = 0;
+    // Tag the element once at glide start so the global auto-hide-scrollbar
+    // listener (main.ts) skips every programmatic scroll while we follow a
+    // streaming turn, and onScroll doesn't re-evaluate atBottom off the
+    // glide's own trailing dip. Previously this was set+deleted EVERY frame
+    // (two DOM attribute mutations per rAF tick); the comment said it stayed
+    // set throughout the glide — so set it once here and clear once at end.
+    el.dataset.glideScroll = "1";
+    glidingScroll = true;
+    const stop = () => {
+      gliding = false;
+      glideActive = false;
+      glidingScroll = false;
+      const e = scrollEl;
+      if (e) delete e.dataset.glideScroll;
+    };
     const step = (ts: number) => {
       const e = scrollEl;
       if (!e || !atBottom) {
-        gliding = false;
-        glideActive = false;
-        glidingScroll = false;
+        stop();
         return;
       }
       if (!lastTs) lastTs = ts;
@@ -112,27 +125,11 @@
       const diff = target - e.scrollTop;
       if (diff <= 0.5 && !streaming) {
         e.scrollTop = target;
-        gliding = false;
-        glideActive = false;
-        glidingScroll = false;
+        stop();
         return;
       }
       const factor = 1 - Math.exp(-dt / GLIDE_TAU);
-      // Tag this as a programmatic scroll so the global auto-hide-scrollbar
-      // listener skips it (no thumb while following) and onScroll doesn't
-      // re-evaluate atBottom off the glide's own trailing dip.
-      glidingScroll = true;
-      e.dataset.glideScroll = "1";
       e.scrollTop = e.scrollTop + diff * factor;
-      // Clear deferred: the scroll event from the assignment above is queued
-      // asynchronously and fires after this step returns, so a sync delete
-      // would race it and the flag would already be gone. setTimeout(0) lands
-      // after the queued event, covering it; the next step re-sets the flag
-      // before this fires, so it stays set throughout the continuous glide.
-      setTimeout(() => {
-        delete e.dataset.glideScroll;
-      }, 0);
-      glidingScroll = false;
       glideRaf = requestAnimationFrame(step);
     };
     glideRaf = requestAnimationFrame(step);
@@ -152,13 +149,19 @@
     return () => cancelAnimationFrame(glideRaf);
   });
 
-  // Rail height = the visible box height (clientHeight), tweened. ResizeObserver
-  // fires per layout step as text streams in; the tween smooths those steps into
-  // continuous growth. The rail is decorative — trailing the box by a few px is
-  // invisible against faint text and reads as fluid motion.
+  // Rail height = the visible box height (clientHeight), tweened. The rail is
+  // decorative (a 2px side bar trailing the box) and the box already grows
+  // visibly as reasoning streams, so continuous tween updates during streaming
+  // are pure churn: ResizeObserver fires per layout step, each kick drives a
+  // tweened reactive update + re-render of the rail span. Observe only while
+  // NOT streaming — the box is static then, so the rail settles to final size.
+  // During streaming the rail holds its last-set height; the visible box growth
+  // carries the motion. Trailing by a few px is invisible against faint text.
   $effect(() => {
     const el = scrollEl;
     if (!el) return;
+    if (streaming) return;
+    rail.set(el.clientHeight);
     const ro = new ResizeObserver(() => {
       rail.set(el.clientHeight);
     });

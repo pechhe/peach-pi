@@ -519,6 +519,12 @@ export type GitPrResult =
   | { ok: true; url: string }
   | { ok: false; error: string };
 
+/** Merge a thread's open PR on GitHub (squash + delete branch). Used by the
+ *  per-thread "Merge PR" button after the human has verified the work. */
+export type GitMergePrResult =
+  | { ok: true; prNumber: number; prUrl: string }
+  | { ok: false; error: string };
+
 /** Merge a worktree's branch (--no-ff) into the local project's current branch. */
 export type GitMergeResult =
   | { ok: true; target: string; branch: string; hasRemote: boolean; warning?: string }

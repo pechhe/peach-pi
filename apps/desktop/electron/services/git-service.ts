@@ -2,6 +2,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { shell } from "electron";
 import type {
   GitChangedFile,
@@ -9,12 +11,22 @@ import type {
   GitInfo,
   GitMergeResult,
   GitPrResult,
+  GitMergePrResult,
   GitPushLocalResult,
   ModelInfo,
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
 import { git, gitEnv, gitOk, toHttpsRepoUrl } from "@peach-pi/remote-handoff";
+
+const runExec = promisify(execFile);
+
+/** Run a `gh` CLI command, returning trimmed stdout. Throws on non-zero
+ *  exit or `gh` being absent. */
+async function runGh(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await runExec("gh", args, { cwd, maxBuffer: 10 * 1024 * 1024 });
+  return stdout.trim();
+}
 
 const slug = (text: string): string =>
   text
@@ -273,6 +285,32 @@ export class GitService {
     const url = `${repoUrl}/compare/${encodeURIComponent(base)}...${encodeURIComponent(branch)}?expand=1`;
     await shell.openExternal(url);
     return { ok: true, url };
+  }
+
+  /** Merge this thread's open PR on GitHub (squash + delete branch). Used by
+   *  the per-thread "Merge PR" button after the human has verified the work.
+   *  Resolves the PR for the thread's current branch via `gh pr view`, then
+   *  merges it with `--squash --delete-branch`. On success the PR's `Closes #N`
+   *  body keyword auto-closes the linked issue on GitHub. */
+  async mergePr(threadId: string): Promise<GitMergePrResult> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd) return { ok: false, error: "No working directory" };
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    if (!branch || branch === "HEAD")
+      return { ok: false, error: "No branch to merge (detached HEAD)" };
+    try {
+      const view = await runGh(
+        ["pr", "view", "--json", "number,url,state,baseRefName"],
+        cwd,
+      );
+      const pr = JSON.parse(view) as { number: number; url: string; state: string };
+      if (pr.state !== "OPEN")
+        return { ok: false, error: `PR is ${pr.state.toLowerCase()}, not open` };
+      await runGh(["pr", "merge", String(pr.number), "--squash", "--delete-branch"], cwd);
+      return { ok: true, prNumber: pr.number, prUrl: pr.url };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   /** Adopt a sibling worktree an agent created out-of-band (raw `git worktree

@@ -11,12 +11,16 @@ export function styleOpacity(opacity: number): number {
 export function styleEntriesToString(
 	entries: Record<string, string | number | undefined>
 ): string | undefined {
-	const tokens = Object.entries(entries)
-		.filter(([, value]) => value !== undefined && value !== null && value !== "")
-		.map(
-			([key, value]) => `${key}: ${typeof value === "number" ? styleOpacity(value) : value}`
-		);
-
+	// Build the token list in a single pass instead of Object.entries().filter().map()
+	// — this is called per-cell per-frame for active loaders, and the prior shape
+	// allocated two intermediate arrays (entries + filter result + map result)
+	// on every invocation. Keep behaviour identical: skip undefined/null/"".
+	const tokens: string[] = [];
+	for (const key in entries) {
+		const value = entries[key];
+		if (value === undefined || value === null || value === "") continue;
+		tokens.push(`${key}: ${typeof value === "number" ? styleOpacity(value) : value}`);
+	}
 	return tokens.length > 0 ? tokens.join("; ") : undefined;
 }
 

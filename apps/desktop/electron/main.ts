@@ -626,6 +626,22 @@ async function boot(): Promise<void> {
       "terminal:input": terminalService.input.bind(terminalService),
       "terminal:resize": terminalService.resize.bind(terminalService),
       "terminal:kill": terminalService.kill.bind(terminalService),
+      "terminal:runCommand": (threadId, command) => terminalService.runCommand(threadId, command),
+      "dev:detectCommand": async (projectId) => {
+        const project = appService.snapshot().projects.find((p) => p.id === projectId);
+        if (!project) return null;
+        try {
+          const pkgPath = path.join(project.path, "package.json");
+          const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as {
+            scripts?: Record<string, string>;
+          };
+          const scripts = pkg.scripts ?? {};
+          const cmd = scripts.dev ?? scripts.start ?? scripts.develop;
+          return cmd ? (scripts.dev ? "dev" : scripts.start ? "start" : "develop") : null;
+        } catch {
+          return null;
+        }
+      },
       "recording:start": recordingService.start.bind(recordingService),
       "recording:stop": recordingService.stop.bind(recordingService),
       "recording:cancel": recordingService.cancel.bind(recordingService),
@@ -665,6 +681,17 @@ async function boot(): Promise<void> {
         }
         return { ok: true, launched };
       },
+      "workQueue:startAllReadyGlobal": async (projectId) => {
+        const res = await issuesService.list(projectId);
+        if (!res.ok) return { ok: false, reason: "error", message: res.reason };
+        const ready = res.issues.filter((i) => i.status === "ready" && !i.inProgress);
+        const launched: Array<{ issueNumber: number; threadId: string }> = [];
+        for (const issue of ready) {
+          const threadId = await launchIssueAgent(projectId, issue, res.issues);
+          launched.push({ issueNumber: issue.number, threadId });
+        }
+        return { ok: true, launched };
+      },
       "workQueue:closeIssue": (projectId, issueNumber, reason) =>
         issuesService.close(projectId, issueNumber, reason),
       "workQueue:reopenIssue": (projectId, issueNumber) =>
@@ -674,6 +701,7 @@ async function boot(): Promise<void> {
       "git:fileDiff": gitService.fileDiff.bind(gitService),
       "git:commitPush": gitService.commitPush.bind(gitService),
       "git:createPr": gitService.createPr.bind(gitService),
+      "git:mergePr": gitService.mergePr.bind(gitService),
       "git:mergeToLocal": gitService.mergeToLocal.bind(gitService),
       "git:pushLocal": gitService.pushLocal.bind(gitService),
       // remote session hosting (ADR-0009)

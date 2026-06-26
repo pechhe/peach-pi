@@ -34,9 +34,13 @@ export class TerminalService {
 
     const thread = this.threads.get(threadId);
     if (!thread) throw new Error(`Unknown thread: ${threadId}`);
-    const cwd = thread.projectId
-      ? this.projects.all().find((p) => p.id === thread.projectId)?.path
-      : thread.chatWorkspaceDir;
+    // Prefer the thread's worktree checkout (where the agent's work actually
+    // lands) over the project's main path — opening a terminal for an
+    // issue-agent thread must land in its isolated worktree.
+    const cwd = thread.worktreeDir
+      ?? (thread.projectId
+        ? this.projects.all().find((p) => p.id === thread.projectId)?.path
+        : thread.chatWorkspaceDir);
     if (!cwd) throw new Error("No working directory for thread");
 
     const pty = await import("node-pty");
@@ -65,6 +69,18 @@ export class TerminalService {
 
   input(threadId: string, data: string): void {
     this.terms.get(threadId)?.pty.write(data);
+  }
+
+  /** Open the thread's terminal (if not already open) and send a command +
+   *  newline. Used by the "Run dev server" button. */
+  async runCommand(threadId: string, command: string): Promise<{ ran: boolean }> {
+    await this.open(threadId);
+    this.terms.get(threadId)?.pty.write(`${command}\r`);
+    this.emit("event:terminalData", {
+      threadId,
+      data: `\r\x1b[33m$ ${command}\x1b[0m\r\n`,
+    });
+    return { ran: true };
   }
 
   resize(threadId: string, cols: number, rows: number): void {

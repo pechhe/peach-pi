@@ -87,7 +87,7 @@ export const activityLog = new ActivityLog();
 
 // ── Node model ────────────────────────────────────────────────────────────────
 
-export type NodeTone = "done" | "active" | "blocked" | "failed" | "cancelled";
+export type NodeTone = "done" | "active" | "blocked" | "failed" | "cancelled" | "pending";
 
 export interface TimelineNode {
   readonly id: string;
@@ -125,13 +125,37 @@ function relAt(t: number): string {
 }
 
 /** Compress a free-form activity string into a compact step label.
- *  Keeps the first clause, caps at ~46 chars, appends an ellipsis when cut. */
+ *  Keeps up to ~2 clauses, caps at ~110 chars (wraps to 2 lines in CSS),
+ *  appends an ellipsis when cut. */
 function shortenTitle(raw: string): string {
   const s = raw.trim().replace(/\s+/g, " ").replace(/[….\s]+$/u, "");
-  if (s.length <= 46) return s;
-  const clause = s.split(/\.\s+|,\s+|:\s+|;\s+|—\s+|–\s+/u)[0] ?? s;
-  const base = (clause.length <= 46 ? clause : clause.slice(0, 46)).replace(/[\s,;:.-]+$/u, "");
+  if (s.length <= 110) return s;
+  const clauses = s.split(/(?<=[.:;!?])\s+|,\s+|—\s+|–\s+/u);
+  let out = "";
+  for (const c of clauses) {
+    if ((out + " " + c).trim().length > 110) break;
+    out = (out ? out + " " : "") + c;
+  }
+  const base = (out || s.slice(0, 110)).replace(/[\s,;:.-]+$/u, "");
   return base + "…";
+}
+
+/** Detect low-signal grunt-status lines the fleet widget rotates through.
+ *  These shouldn't get their own timeline node — fold them into the
+ *  previous node as a small subtitle instead. */
+function isGruntActivity(raw: string): boolean {
+  const s = raw.trim();
+  return /^(?:running|reading)\s+\S+(?:\s+\S+)*\s+\d+\s+files?\b/i.test(s);
+}
+
+/** Set or replace the subtitle of the last node. Returns false if there's no
+ *  suitable node to attach to (e.g. no nodes yet, or last is a tombstone). */
+function attachAsSubtitle(nodes: TimelineNode[], subtitle: string): boolean {
+  const n = nodes[nodes.length - 1];
+  if (!n) return false;
+  if (n.tone === "failed" || n.tone === "cancelled" || n.tone === "blocked") return false;
+  nodes[nodes.length - 1] = { ...n, subtitle };
+  return true;
 }
 
 /**
@@ -156,6 +180,10 @@ export function buildNodes(
   let eventSeen = 0;
   let prevCompleted = false;
   let lastActivityIdx = -1;
+  // Index of a first-spawn shimmer placeholder. Swapped out (same slot, but
+  // a different node id) the instant the first real activity arrives, so
+  // the crossfade transition reads as "shimmer → first title".
+  let pendingShimmerIdx = -1;
 
   for (const u of merged) {
     if (u.kind === "event") {
@@ -172,6 +200,21 @@ export function buildNodes(
         });
       }
       const first = eventSeen === 1;
+      // While the entity is live and we've seen no activity yet, the first
+      // spawn event renders as a shimmering placeholder rather than the
+      // literal label "Spawned". As soon as the first real activity arrives
+      // we rotate this slot into the activity title (see activity branch).
+      if (first && ev.verb === "Spawn" && isLive) {
+        pendingShimmerIdx = nodes.length;
+        nodes.push({
+          id: `${ev.callId}-pending`,
+          tone: "pending",
+          title: "",
+          at: relAt(u.t),
+        });
+        prevCompleted = ev.status === "completed";
+        continue;
+      }
       const title = ev.verb === "Resume" ? "Resumed by user" : first ? "Spawned" : "Relaunched";
       const subtitle =
         ev.verb === "Resume"
@@ -187,13 +230,36 @@ export function buildNodes(
       // Skip generic placeholders from pi-subagents — they aren't useful steps.
       const raw = u.a.activity;
       if (/^(?:thinking|working)[.……]$/i.test(raw)) continue;
-      lastActivityIdx = nodes.length;
-      nodes.push({ id: `act-${u.t}`, tone: "done", title: shortenTitle(raw), fullTitle: raw, at: relAt(u.t) });
+      // First real activity: swap the shimmer slot into the real title so
+      // the {#key node.id} transition animates "shimmer → first title".
+      if (pendingShimmerIdx >= 0) {
+        nodes[pendingShimmerIdx] = {
+          id: `act-${u.t}`,
+          tone: "done",
+          title: shortenTitle(raw),
+          fullTitle: raw,
+          at: relAt(u.t),
+        };
+        lastActivityIdx = pendingShimmerIdx;
+        pendingShimmerIdx = -1;
+      } else if (isGruntActivity(raw) && attachAsSubtitle(nodes, raw)) {
+        lastActivityIdx = nodes.length - 1;
+      } else {
+        lastActivityIdx = nodes.length;
+        nodes.push({ id: `act-${u.t}`, tone: "done", title: shortenTitle(raw), fullTitle: raw, at: relAt(u.t) });
+      }
     }
   }
 
   // Tail: reflect the live / terminal state.
   if (isLive) {
+    // While the shimmer placeholder still holds (no activity yet) it is the
+    // live indicator too — nothing else to append.
+    if (pendingShimmerIdx >= 0) {
+      const cur = nodes[pendingShimmerIdx]!;
+      nodes[pendingShimmerIdx] = { ...cur, tone: "pending", at: "Now" };
+      return nodes;
+    }
     const raw = liveActivity ?? "Working…";
     // Don't surface generic placeholders as a separate step, but always
     // surface an active node so the spinner has somewhere to live.

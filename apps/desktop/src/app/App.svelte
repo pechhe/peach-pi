@@ -17,6 +17,7 @@
   import { preloadSounds, installGlobalButtonPress } from "../lib/sound/button-click-sound";
   import { preloadDoneSamples } from "../lib/sound/done-sound";
   import { playDoneSound } from "../lib/sound/done-sound";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Sidebar from "./Sidebar.svelte";
   import ThreadView from "./ThreadView.svelte";
   import TerminalPane from "./TerminalPane.svelte";
@@ -242,6 +243,16 @@
           { label: "View", run: () => selectThread(t.id) },
           "info",
           TAG_META[t.tag ?? "other"].icon,
+        );
+      } else if (prev === "running" && t.status === "failed" && !consumeAborted(t.id)) {
+        // A failed run (connection error, provider cutoff, out of tokens, etc.)
+        // gets a distinct error-level toast instead of the success chime.
+        playDoneSound("bell");
+        extensionUi.notify(
+          `${t.title || "Thread"} failed`,
+          { label: "View", run: () => selectThread(t.id) },
+          "error",
+          CircleAlert,
         );
       }
       lastStatuses.set(t.id, t.status);
@@ -504,11 +515,7 @@
     {:else if view === "graph"}
       <GraphView projectId={selectedThread?.projectId ?? null} />
     {:else if view === "work-queue"}
-      <WorkQueueView
-        projects={snapshot.current.projects}
-        projectId={workQueueProjectId}
-        onLaunched={selectThread}
-      />
+      <WorkQueueView projects={snapshot.current.projects} projectId={workQueueProjectId} />
     {:else if view === "testing"}
       <TestingView
         projects={snapshot.current.projects}

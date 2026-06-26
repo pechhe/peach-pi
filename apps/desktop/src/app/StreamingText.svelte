@@ -204,6 +204,13 @@
   // find the slice that finished animating SETTLE_MS ago → cacheable prefix.
   // Capped; streaming bursts are short-lived. Only pushed when reveal advances.
   const revealHistory: { idx: number; t: number }[] = [];
+  // Tail memo: the live tail changes only when reveal advances or the model
+  // pushes new text or the caret toggles. In every other rAF-driven re-derive
+  // (same tail, same caret) re-running marked.parse + DOMPurify + spanWrap
+  // is pure waste — the rAF loop re-derives `html` every frame text is pending,
+  // and the typed-out tail is often stable across consecutive frames while
+  // the next word-boundary is being crossed. Cache the last-built tailHtml.
+  let lastTail: { text: string; caret: boolean; html: string } | null = null;
   // Caret idle gate: the streaming caret should only appear once the reveal
   // has been caught up + idle for a beat, not on every brief catch-up frame
   // between close deltas (which made it flicker mid-stream). `revealIdle` is
@@ -389,9 +396,18 @@
       }
       // Live tail: span-wrap fresh each frame against `now`. occ is a throwaway
       // copy seeded from the prefix counts (the tail is re-done every frame, so
-      // its counts must not pollute the prefix's running map).
+      // its counts must not pollute the prefix's running map). The tail string
+      // and caret state only change when reveal advances, new text arrives, or
+      // the caret arms/disarms — between those transitions the span-wrap output
+      // is byte-identical, so reuse the cached html and skip the parse.
       const tail = displayed.slice(mem.prefixUpTo);
+      const caret = cursor && revealIdle;
+      if (lastTail && lastTail.text === tail && lastTail.caret === caret) {
+        firstBuild = false;
+        return mem.prefixHtml + lastTail.html;
+      }
       const tailHtml = spanWrap(rawHtmlOf(tail), new Map(mem.occ), false);
+      lastTail = { text: tail, caret, html: tailHtml };
       firstBuild = false;
       return mem.prefixHtml + tailHtml;
     } catch {

@@ -132,6 +132,13 @@
 			gap: stylePx(layout.rowGap),
 		})
 	);
+	// Row gap styles are identical across every row in a single render; compute
+	// once instead of re-deriving per row inside the {#each}.
+	const rowStyle = $derived(
+		styleEntriesToString({
+			gap: stylePx(layout.gap),
+		})
+	);
 
 	const cellsById = $derived(new Map(cells.map((cell) => [cell.id, cell] as const)));
 
@@ -209,9 +216,7 @@
 				{#each renderedRows as row, rowIndex (rowIndex)}
 					<div
 						class="dmx-hex-row"
-						style={styleEntriesToString({
-							gap: stylePx(layout.gap),
-						})}
+						style={rowStyle}
 					>
 						{#each row as cell (cell.id)}
 							<span aria-hidden="true" class={cell.className} style={cell.style}
@@ -238,9 +243,7 @@
 			{#each renderedRows as row, rowIndex (rowIndex)}
 				<div
 					class="dmx-hex-row"
-					style={styleEntriesToString({
-						gap: stylePx(layout.gap),
-					})}
+					style={rowStyle}
 				>
 					{#each row as cell (cell.id)}
 						<span aria-hidden="true" class={cell.className} style={cell.style}></span>

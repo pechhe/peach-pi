@@ -216,17 +216,17 @@ export class IssuesService {
    *  is unknown, has no origin, or origin is not a GitHub remote. */
   private async resolveGithub(
     projectId: string,
-  ): Promise<{ owner: string; repo: string; cwd: string } | { ok: false; reason: string; message?: string }> {
+  ): Promise<{ owner: string; repo: string; cwd: string } | { ok: false; reason: "error"; message?: string }> {
     const cwd = this.getProjectPath(projectId);
     if (!cwd) return { ok: false, reason: "error", message: "Unknown project" };
     let remote: string;
     try {
       remote = (await run("git", ["remote", "get-url", "origin"], { cwd })).stdout.trim();
     } catch {
-      return { ok: false, reason: "no-remote" };
+      return { ok: false, reason: "error", message: "No origin remote" };
     }
     const gh = parseGithubRepo(remote);
-    if (!gh) return { ok: false, reason: "not-github" };
+    if (!gh) return { ok: false, reason: "error", message: "Not a GitHub remote" };
     return { ...gh, cwd };
   }
 

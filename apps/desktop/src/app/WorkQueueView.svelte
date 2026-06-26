@@ -9,11 +9,9 @@
   let {
     projects,
     projectId,
-    onLaunched,
   }: {
     projects: Project[];
     projectId: string | null;
-    onLaunched: (threadId: string) => void;
   } = $props();
 
   const project = $derived(projectId ? (projects.find((p) => p.id === projectId) ?? null) : null);
@@ -21,7 +19,7 @@
   let launching = $state<number | null>(null);
   let launchingPrd = $state<number | null>(null);
   let launchError = $state("");
-  const busy = $derived(launching !== null || launchingPrd !== null);
+  const busy = $derived(launching !== null || launchingPrd !== null || launchingAll);
 
   async function startAgent(issueNumber: number) {
     if (!projectId || busy) return;
@@ -31,7 +29,6 @@
       const res = await api.invoke("workQueue:startAgent", projectId, issueNumber);
       if (res.ok) {
         await workQueue.load(projectId);
-        onLaunched(res.threadId);
       } else {
         launchError = `Couldn’t start #${issueNumber} (${res.reason})`;
         await workQueue.load(projectId);
@@ -51,6 +48,24 @@
       await workQueue.load(projectId);
     } finally {
       launchingPrd = null;
+    }
+  }
+
+  let launchingAll = $state(false);
+  const allReady = $derived(
+    (result?.ok ? result.issues : []).filter((i) => i.status === "ready" && !i.inProgress),
+  );
+
+  async function startAllGlobal() {
+    if (!projectId || busy || launchingAll) return;
+    launchingAll = true;
+    launchError = "";
+    try {
+      const res = await api.invoke("workQueue:startAllReadyGlobal", projectId);
+      if (!res.ok) launchError = `Couldn’t start ready issues (${res.reason})`;
+      await workQueue.load(projectId);
+    } finally {
+      launchingAll = false;
     }
   }
 
@@ -100,15 +115,28 @@
     <h1 class="text-sm font-medium text-fg-soft">
       Work Queue{#if project}<span class="text-faint"> · {project.name}</span>{/if}
     </h1>
-    <button
-      class="text-faint hover:text-fg"
-      onclick={() => workQueue.load(projectId)}
-      data-testid="work-queue-refresh"
-      aria-label="Refresh issues"
-      title="Refresh"
-    >
-      <RefreshCw size={14} class={workQueue.loading ? "animate-spin" : ""} />
-    </button>
+    <div class="flex items-center gap-2">
+      {#if allReady.length > 0}
+        <button
+          class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-fg hover:bg-surface-2 disabled:opacity-50 titlebar-no-drag"
+          onclick={startAllGlobal}
+          disabled={busy}
+          data-testid="start-all-ready-global"
+        >
+          <Play size={12} />
+          {launchingAll ? "Starting…" : `Start all ready (${allReady.length})`}
+        </button>
+      {/if}
+      <button
+        class="text-faint hover:text-fg"
+        onclick={() => workQueue.load(projectId)}
+        data-testid="work-queue-refresh"
+        aria-label="Refresh issues"
+        title="Refresh"
+      >
+        <RefreshCw size={14} class={workQueue.loading ? "animate-spin" : ""} />
+      </button>
+    </div>
   </header>
 
   <div class="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
