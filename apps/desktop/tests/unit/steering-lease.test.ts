@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SteeringLeaseStore, LEASE_TTL_MS, type ClientIdentity } from "../../electron/services/remote-steering-lease.ts";
+import { SteeringLeaseStore, LEASE_TTL_MS, type ClientIdentity } from "../../electron/services/movable-execution/steering-lease.ts";
 
 const alice: ClientIdentity = { id: "alice", name: "Alice" };
 const bob: ClientIdentity = { id: "bob", name: "Bob" };

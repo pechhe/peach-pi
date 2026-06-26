@@ -25,13 +25,18 @@ import type {
   TranscriptDelta,
   TranscriptSnapshot,
 } from "@peach-pi/shared-types";
-import { resolveBindAddress, isValidToken, type IfaceAddress } from "./remote-tailnet.ts";
-import { checkpointTip, originUrl } from "./remote-checkpoint.ts";
+import { resolveBindAddress, isValidToken, type IfaceAddress } from "./tailnet-bind.ts";
+import { checkpointTip } from "./checkpoint.ts";
+import { readJsonBody } from "./http-shared.ts";
+import { originUrl } from "@peach-pi/remote-handoff";
+// ADR-0011: the steering lease lives behind the movable-execution seam. The
+// relay imports it (concept-B state physically lives in concept-B's directory
+// even though the relay still uses it — physical ownership ≠ logical ownership).
 import {
   SteeringLeaseStore,
   LEASE_TTL_MS,
   type ClientIdentity,
-} from "./remote-steering-lease.ts";
+} from "../movable-execution/steering-lease.ts";
 
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "peach-remote-host.json");
 
@@ -679,26 +684,6 @@ export class RemoteHostService {
 
 function reqCloseHandler(req: IncomingMessage, fn: () => void): void {
   req.on("close", fn);
-}
-
-/** Read a small JSON request body. Returns {} on empty / malformed input so
- *  route handlers can treat missing fields uniformly. Caps at 64 KiB — prompts
- *  are text, not uploads. */
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > 64 * 1024) break;
-    chunks.push(chunk as Buffer);
-  }
-  if (chunks.length === 0) return {};
-  try {
-    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
 }
 
 /** Pure auth gate (so it's testable without binding the tailnet socket).

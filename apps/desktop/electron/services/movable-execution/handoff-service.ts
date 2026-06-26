@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { RemoteFirstMode, ThreadHandoffStatus, ThreadId } from "@peach-pi/shared-types";
-import type { AppDb } from "../persistence/db.ts";
-import { KvRepo } from "../persistence/repositories.ts";
+import type { AppDb } from "../../persistence/db.ts";
+import { KvRepo } from "../../persistence/repositories.ts";
 import {
   HandoffService,
   LocalTransport,

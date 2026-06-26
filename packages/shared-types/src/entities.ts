@@ -1289,3 +1289,89 @@ export interface ThreadHandoffStatus {
   /** Whether this machine currently holds the lease (may mutate the workspace). */
   leaseHeldHere: boolean;
 }
+
+// ── remote seam contracts (ADR-0012) ────────────────────────────────────────
+// Two named seams coalesce the former `remote-*` cluster: `served-session/`
+// (ADR-0009/0010 relay) and `movable-execution/` (ADR-0011 lease + handoff).
+// The contracts below are the cross-process / cross-package shapes the two
+// seams publish; the implementations live behind their respective barrels.
+
+/** A network interface address considered for binding the served-session relay.
+ *  Pure data so the `TransportAdapter` contract can carry it without depending
+ *  on the Tailscale implementation. */
+export interface IfaceAddress {
+  name: string;
+  address: string;
+  /** IPv4 only for v1 (Tailscale hands out 100.x CGNAT addresses). */
+  family: "IPv4";
+  internal: boolean;
+}
+
+/** One-way invocation contract for the served-session relay (ADR-0012).
+ *
+ *  Server (`RelayActions`) implements; client (`relay-client`) calls. Route
+ *  literals live in one place — both sides derive their paths from this table
+ *  — instead of being duplicated across the host and client files. `control`
+ *  is a first-class entry here so the contract acknowledges every route the
+ *  client can hit (it previously toggled the relay's lease store with no
+ *  `RelayActions` entry — a documented consolidation, not new behavior).
+ *
+ *  Paths use `:threadId` for the per-session routes; the implementation builds
+ *  the real path with `encodeURIComponent(threadId)`. */
+export interface ServedSessionRoutes {
+  message: { path: "/sessions/:threadId/message"; body: { text: string } };
+  steer: { path: "/sessions/:threadId/steer"; body: { text: string } };
+  abort: { path: "/sessions/:threadId/abort"; body: Record<string, never> };
+  /** Take (default force) or release the steering lease (ADR-0011). */
+  archive: { path: "/sessions/:threadId/archive"; body: Record<string, never> };
+  control: {
+    path: "/sessions/:threadId/control";
+    body: { force?: boolean; release?: boolean };
+  };
+  deleteQueued: {
+    path: "/sessions/:threadId/queue/delete";
+    body: { kind: "steer" | "followUp"; index: number };
+  };
+  gitCommitPush: {
+    path: "/sessions/:threadId/git/commit-push";
+    body: { message?: string };
+  };
+  gitPr: { path: "/sessions/:threadId/git/pr"; body: Record<string, never> };
+  gitMerge: { path: "/sessions/:threadId/git/merge"; body: Record<string, never> };
+  createThread: { path: "/threads"; body: { projectId: ProjectId } };
+  createChat: { path: "/chats"; body: Record<string, never> };
+}
+
+/** Transport adapter for fronting the served-session relay on a mesh
+ *  (ADR-0012). v1 has exactly one implementation (Tailscale, in
+ *  `served-session/tailscale-serve.ts`). The interface exists to localize the
+ *  Tailscale coupling so the relay never shells out and a future mesh adapter
+ *  could substitute without touching the relay — a second adapter is YAGNI for
+ *  v1 because ADR-0009's security model is explicit that the mesh + bearer
+ *  token are the entire boundary; swapping the mesh changes the security
+ *  argument, not just transport. */
+export interface TransportAdapter {
+  /** Resolve the mesh-local address(es) the relay must bind to (never 0.0.0.0). */
+  resolveBindAddress(
+    config: { forceBind?: string | null },
+    interfaces?: () => Record<string, IfaceAddress[]>,
+  ): { bindIp: string } | { reject: string };
+  /** Front the loopback relay port on the mesh as HTTPS, if the mesh supports it. */
+  enableServe(relayPort: number): Promise<void>;
+  /** Whether a serve is currently active for the given relay port. */
+  serveActiveFor(relayPort: number): Promise<boolean>;
+  /** List online mesh peers the user could attach from. */
+  listPeers(): Promise<RemoteTailnetPeer[]>;
+  /** Human-readable connect info (URL + QR) for the watch PWA. */
+  getConnectInfo(opts: {
+    token: string;
+    relayPort: number;
+    enabled: boolean;
+  }): Promise<RemoteConnectInfo>;
+}
+
+/** Validate a shared relay token: must be present and non-trivially long. The
+ *  adapter exposes the tailnet security boundary's token gate; shipped here so
+ *  the shared `TransportAdapter` contract can reference it without pulling in
+ *  the Tailscale impl. */
+export type IsValidToken = (token: string | null | undefined) => token is string;

@@ -89,3 +89,17 @@ export function toHttpsRepoUrl(remote: string): string | null {
   if (https) return `https://${https[1]}`;
   return null;
 }
+
+/** Read the `origin` remote URL of a repo (normalized to https, sans .git),
+ *  or null when either of `git remote get-url origin` or the normalization
+ *  fails (no origin, non-ssh/https remote). A git-CLI concern, not a
+ *  served-session concern — the served-session checkpoint helpers call this
+ *  boundary rather than reimplementing `git remote get-url`. */
+export async function originUrl(cwd: string): Promise<string | null> {
+  try {
+    const remote = (await git(["remote", "get-url", "origin"], cwd)).trim();
+    return toHttpsRepoUrl(remote);
+  } catch {
+    return null;
+  }
+}

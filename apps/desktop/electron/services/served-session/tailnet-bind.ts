@@ -1,13 +1,10 @@
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
+import type { IfaceAddress } from "@peach-pi/shared-types";
 
-/** A network interface address considered for binding the relay. */
-export interface IfaceAddress {
-  name: string;
-  address: string;
-  /** IPv4 only for v1 (Tailscale hands out 100.x CGNAT addresses). */
-  family: "IPv4";
-  internal: boolean;
-}
+// `IfaceAddress` lives in shared-types so the `TransportAdapter` contract can
+// reference it without depending on this Tailscale impl. Re-exported here so
+// the existing tailnet-bind callers (relay + tests) keep their import path.
+export type { IfaceAddress };
 
 /** Resolve the Tailscale interface IP from the host's interfaces.
  *
