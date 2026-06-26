@@ -167,7 +167,8 @@ export function buildSeedPrompt(issue: TrackedIssue, parentPrd?: TrackedIssue | 
     `You are implementing issue #${issue.number}: ${issue.title}.\n\n` +
     `${issue.body.trim()}${prdBlock}${dod}\n\n` +
     `When the work is complete, run the full test suite. Once it is green, ` +
-    `open a pull request and then stop at the human gate for review — do not merge.`
+    `open a pull request whose body includes \`Closes #${issue.number}\` so the ` +
+    `issue closes on merge, then stop at the human gate for review — do not merge.`
   );
 }
 

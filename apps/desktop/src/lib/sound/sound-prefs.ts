@@ -6,6 +6,9 @@ const DEFAULT_VARIANT = "arpeggio";
 /** Which cue plays when the user marks a thread done (archives it). */
 const ARCHIVE_VARIANT_KEY = "peachpi:archive-sound-variant";
 const DEFAULT_ARCHIVE_VARIANT = "archive";
+/** Which cue plays when the user marks a thread for testing (the Eye action). */
+const TEST_VARIANT_KEY = "peachpi:test-sound-variant";
+const DEFAULT_TEST_VARIANT = "testBench";
 
 export function soundsMuted(): boolean {
   try {
@@ -50,6 +53,22 @@ export function getArchiveSoundVariant(): string {
 export function setArchiveSoundVariant(variant: string): void {
   try {
     localStorage.setItem(ARCHIVE_VARIANT_KEY, variant);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getTestSoundVariant(): string {
+  try {
+    return localStorage.getItem(TEST_VARIANT_KEY) ?? DEFAULT_TEST_VARIANT;
+  } catch {
+    return DEFAULT_TEST_VARIANT;
+  }
+}
+
+export function setTestSoundVariant(variant: string): void {
+  try {
+    localStorage.setItem(TEST_VARIANT_KEY, variant);
   } catch {
     /* ignore */
   }

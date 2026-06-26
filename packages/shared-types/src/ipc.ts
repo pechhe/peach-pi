@@ -52,6 +52,7 @@ import type {
   StartAgentResult,
   StartAllReadyResult,
   WorkQueueResult,
+  CloseIssueResult,
   QueueState,
   RecordingState,
   RecordingStopResult,
@@ -402,6 +403,16 @@ export const ipcContracts = {
   ),
   /** Launch an agent on every ready (unblocked, not-in-progress) child of a PRD. */
   "workQueue:startAllReady": invoke<[projectId: ProjectId, prdNumber: number], StartAllReadyResult>(
+    (id) => requireNonEmptyString(id, "projectId"),
+  ),
+  /** Close a tracker issue as completed or not planned (escape hatch for
+   *  shipped-but-not-auto-closed issues). */
+  "workQueue:closeIssue": invoke<
+    [projectId: ProjectId, issueNumber: number, reason: "completed" | "not_planned"],
+    CloseIssueResult
+  >((id) => requireNonEmptyString(id, "projectId")),
+  /** Reopen a previously closed tracker issue. */
+  "workQueue:reopenIssue": invoke<[projectId: ProjectId, issueNumber: number], CloseIssueResult>(
     (id) => requireNonEmptyString(id, "projectId"),
   ),
 

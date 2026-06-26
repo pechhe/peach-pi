@@ -1,0 +1,54 @@
+/* ── test-anim-burst.css ───────────────────────────────────────
+   Shared test-bench keyframes + per-variant animation rules.
+   Imported (non-scoped) by TestBurst and TestBurstPlayground.
+
+   Variant IDs: testBench
+
+   The testBench effect is carried on the row itself (scan sweep + stamp
+   flash + subtle move), so the burst overlay renders no ring/sparks. */
+
+.burst--testBench {
+  /* no ring/spark overlay — effect lives on the row */
+}
+
+/* ── keyframes ─────────────────────────────────────────────────
+   Timing per brief:
+     0ms    press/depress (row tightens)
+     60ms   thin scan line travels across row
+     160ms  test badge imprints (stamp flash)
+     240ms  row moves subtly into testing state
+   Total ~280ms (tighter than archiveSlide's 480ms). */
+
+@keyframes test-bench-row {
+  /* press — row tightens slightly */
+  0%   { transform: translateY(0) scale(1);     box-shadow: none; }
+  14%  { transform: translateY(0) scale(0.99);
+         box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.22); }
+  22%  { transform: translateY(0) scale(0.996); box-shadow: none; }
+  /* badge has landed by ~58% (160ms of 280ms); row holds then settles
+     into the testing state — a subtle downward nudge + dim, no slide-away
+     toward Done (the brief: don't slide it the same direction as Done). */
+  58%  { transform: translateY(4px) scale(0.99);  opacity: 0.55; }
+  100% { transform: translateY(4px) scale(0.99);  opacity: 0.55; }
+}
+
+/* ::after — the thin amber/blue calibration scan line travelling across. */
+@keyframes test-bench-scan {
+  0%   { transform: translateX(-130%); opacity: 0; }
+  20%  { opacity: 1; }
+  100% { transform: translateX(130%);  opacity: 0; }
+}
+
+/* ::before — the stamp flash when the TEST badge imprints. A brief bright
+   amber inset veil + a tight ring flash, reading as an inspection label
+   being stamped onto the row. */
+@keyframes test-bench-stamp {
+  0%, 55%  { opacity: 0; }
+  58%      { opacity: 1; }   /* imprint peaks at ~160ms */
+  100%     { opacity: 0; }
+}
+
+/* ── reduced motion ──────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .burst--testBench { animation-duration: 1ms !important; }
+}

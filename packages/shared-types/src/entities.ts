@@ -173,6 +173,11 @@ export type StartAllReadyResult =
   | { ok: true; launched: Array<{ issueNumber: number; threadId: ThreadId }> }
   | { ok: false; reason: "error"; message?: string };
 
+/** Result of closing or reopening an issue from the Work Queue. */
+export type CloseIssueResult =
+  | { ok: true }
+  | { ok: false; reason: "error"; message?: string };
+
 /** Result of listing a project's tracker issues. A project with no git remote
  *  or a non-GitHub remote resolves to a placeholder reason rather than erroring. */
 export type WorkQueueResult =

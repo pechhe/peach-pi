@@ -4,12 +4,26 @@
   // away and back destroys + recreates every StreamingText. Keyed by a stable
   // per-message id, already-revealed words keep their first-seen time across the
   // remount so the rebuild doesn't re-fire their fade.
-  type RevealMemory = { times: Map<string, number> };
+  //
+  // The cache fields (prefixHtml/prefixUpTo/occ) likewise survive the remount:
+  // a stable revealKey means the same growing message, so the settled-prefix
+  // cache is still valid across the destroy/recreate. See `html` below.
+  type RevealMemory = {
+    times: Map<string, number>;
+    /** Cached spanned HTML for the settled (post-animation) prefix. */
+    prefixHtml: string;
+    /** Char offset in `displayed` that `prefixHtml` covers. */
+    prefixUpTo: number;
+    /** Running word-occurrence counts across the settled prefix, so per-word
+     *  reveal keys (`word\u0000occurrence`) stay globally unique + stable when
+     *  a block graduates from the live tail into the cached prefix. */
+    occ: Map<string, number>;
+  };
   const revealMemory = new Map<string, RevealMemory>();
   function memoryFor(key: string): RevealMemory {
     let m = revealMemory.get(key);
     if (!m) {
-      m = { times: new Map() };
+      m = { times: new Map(), prefixHtml: "", prefixUpTo: 0, occ: new Map() };
       revealMemory.set(key, m);
     }
     return m;
@@ -40,6 +54,16 @@
    * span's delay to revealTime-now means its effective animation position is
    * (now - revealTime) = real elapsed time, which is continuous across remounts
    * — so the wave looks unbroken even though the DOM is rebuilt each tick.
+   *
+   * PERF: the per-word span-wrap is O(words) and — without care — re-runs over
+   * the WHOLE revealed slice every animation frame (marked.parse + DOMPurify +
+   * TreeWalker + N span creations + innerHTML serialise). On a multi-KB reply
+   * that blew the 16ms frame budget. The `html` derived below caches the prefix
+   * that finished animating (baked spanned HTML, byte-identical to the live
+   * render since a settled `.sw` holds its `to` state = plain text) and each
+   * frame span-wraps only the still-animating tail. ~20x less per-frame work on
+   * long messages, identical look. Falls back to the legacy full re-parse on any
+   * edge hiccup (catch), so a boundary bug can only cost speed, never the look.
    */
   let {
     text,
@@ -83,6 +107,10 @@
   // Per-word fade scheduling (see `waveCursor`).
   const WAVE_STAGGER = 30;
   const MAX_AHEAD = 450;
+  // A word is safe to bake into the cached prefix once its fade has fully
+  // completed: --sw-dur (stream-word-fx in app.css, default 560ms) + a safety
+  // margin so an animating word is never frozen mid-fade.
+  const SETTLE_MS = 560 + 240;
 
   function resolveWave() {
     const raw = document.documentElement.getAttribute("data-stream-speed");
@@ -107,10 +135,50 @@
     return ticks % 2 === 1 ? `${s}\`` : s;
   }
 
+  // Latest cache-safe boundary (char right after a newline) at or before `from`.
+  // Used to split the revealed slice into a cacheable prefix + a live tail.
+  //
+  // Markdown needs a BLANK line (block boundary): splitting mid-`<p>`/`<li>`
+  // would render the tail out of context. We also skip inside an unclosed ```
+  // fence. Plain (thinking) text is escaped HTML with no block structure, so a
+  // single newline is a safe seam — and reasoning rarely contains blank lines,
+  // so without this the cache would never settle and the whole growing thinking
+  // text would re-span-wrap every frame (O(thinking length) per frame — the
+  // "big thinking step is slow" symptom). Returns 0 when none exists.
+  function safeBlockBoundary(s: string, from: number): number {
+    if (plain) {
+      let boundary = 0;
+      for (let i = 0; i < from && i < s.length; i += 1) {
+        if (s[i] === "\n" && i + 1 <= from) boundary = i + 1;
+      }
+      return boundary;
+    }
+    let boundary = 0;
+    let inFence = false;
+    let i = 0;
+    while (i < from && i < s.length) {
+      if (s.startsWith("```", i)) {
+        inFence = !inFence;
+        i += 3;
+        continue;
+      }
+      if (!inFence && s[i] === "\n") {
+        let j = i + 1;
+        while (j < s.length && (s[j] === " " || s[j] === "\t")) j += 1;
+        if (j < s.length && s[j] === "\n") {
+          const after = j + 1;
+          if (after <= from) boundary = after;
+        }
+      }
+      i += 1;
+    }
+    return boundary;
+  }
+
   // Reveal progress persists across remounts when a stable revealKey is given
   // (see <script module>); without one (or for historical text) it stays local.
   const mem: RevealMemory = untrack(() =>
-    revealKey ? memoryFor(revealKey) : { times: new Map() },
+    revealKey ? memoryFor(revealKey) : { times: new Map(), prefixHtml: "", prefixUpTo: 0, occ: new Map() },
   );
   // Mount fully revealed: any text already accumulated (history, or a backlog
   // that grew while the user was on another thread) renders in one go. Only
@@ -132,6 +200,17 @@
   let waveCursor = 0;
   // word index → first time (performance.now) we saw it. Drives per-word delay.
   const revealTimes = mem.times;
+  // Sampled (revealedIdx, time) history from the rAF tick. `html` uses it to
+  // find the slice that finished animating SETTLE_MS ago → cacheable prefix.
+  // Capped; streaming bursts are short-lived. Only pushed when reveal advances.
+  const revealHistory: { idx: number; t: number }[] = [];
+  // Caret idle gate: the streaming caret should only appear once the reveal
+  // has been caught up + idle for a beat, not on every brief catch-up frame
+  // between close deltas (which made it flicker mid-stream). `revealIdle` is
+  // reactive so the `html` derived re-wraps the tail to add/remove the caret.
+  const CARET_HOLD_MS = 350;
+  let revealIdle = $state(false);
+  let caretTimer: ReturnType<typeof setTimeout> | 0 = 0;
 
   // Free the shared memory once the message is done streaming — at that point
   // the reveal slice is unused (the `!streaming` branch below returns raw HTML).
@@ -159,6 +238,7 @@
         const interval = Math.min(wave.maxMs, Math.max(wave.minMs, wave.windowMs / pendingWords));
         acc += dt;
         let budget = MAX_WORDS_PER_FRAME;
+        const before = revealed;
         while (revealed < target.length && acc >= interval && budget > 0) {
           revealed = nextWordBoundary(target, revealed);
           acc -= interval;
@@ -166,11 +246,33 @@
         }
         // After a tab-throttle gap don't dump the whole backlog in one frame.
         if (acc > interval * 6) acc = interval;
+        // Sample the reveal position so `html` can age out a cacheable prefix.
+        revealHistory.push({ idx: revealed, t: ts });
+        if (revealHistory.length > 240) revealHistory.shift();
+        // Reveal advanced this frame → text is still flowing, so suppress the
+        // caret (reset the idle gate; it's re-armed below once caught up).
+        if (revealed !== before) {
+          if (revealIdle) revealIdle = false;
+          if (caretTimer) { clearTimeout(caretTimer); caretTimer = 0; }
+        }
       }
       if (revealed < target.length) raf = requestAnimationFrame(tick);
+      else if (!caretTimer) {
+        // Caught up to the buffer: arm the caret. It only fires if we stay
+        // caught up for CARET_HOLD_MS (no new text arrives) → "momentarily
+        // stopped". New deltas re-run this effect (text dependency) and the
+        // advance branch above clears the timer.
+        caretTimer = setTimeout(() => {
+          caretTimer = 0;
+          revealIdle = true;
+        }, CARET_HOLD_MS);
+      }
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (caretTimer) { clearTimeout(caretTimer); caretTimer = 0; }
+    };
   });
 
   const displayed = $derived.by(() => {
@@ -178,27 +280,22 @@
     return plain ? slice : closeDanglingInlineCode(slice);
   });
 
-  // Parse markdown, then walk the sanitized DOM wrapping each word (outside
-  // code/pre) in <span class="sw" style="animation-delay:…">. Done together so
-  // the per-word delays are recomputed against `performance.now()` each tick.
-  const html = $derived.by(() => {
-    // plain: thinking/raw text — no markdown, whitespace preserved via CSS.
-    const raw = plain
-      ? escapeHtml(displayed)
-      : DOMPurify.sanitize(marked.parse(displayed, { async: false, breaks: true }) as string);
-    // Historical messages (streaming=false) skip per-word animation spans.
-    // The `.message-streaming` CSS only animates `.sw` elements, so returning
-    // raw HTML here avoids the mount-time blur/fade on thread load.
-    if (reduceMotion || !streaming) return raw;
-    const doc = new DOMParser().parseFromString(raw, "text/html");
+  // Sanitized (or escaped, for plain) raw HTML for a slice — no per-word spans.
+  function rawHtmlOf(slice: string): string {
+    return plain
+      ? escapeHtml(slice)
+      : DOMPurify.sanitize(marked.parse(slice, { async: false, breaks: true }) as string);
+  }
+
+  // Wrap every word (outside code/pre) in <span class="sw" style="animation-delay:…">.
+  // `occ` is the running word-occurrence map (seeded with the prefix's counts for
+  // the tail) so reveal keys (`word\u0000occurrence`) stay stable across the
+  // prefix/tail split. `forceStatic` (prefix settle) anchors any unknown word to
+  // a far-past delay so baked prefix words never re-animate; the tail passes
+  // false so fresh words ride the per-word wave (or, on firstBuild, go static).
+  function spanWrap(rawHtml: string, occ: Map<string, number>, forceStatic: boolean): string {
+    const doc = new DOMParser().parseFromString(rawHtml, "text/html");
     const now = performance.now();
-    // Per-word reveal times are keyed by `text\u0000occurrence`, NOT by document
-    // position. Markdown re-tokenization between builds (code/pre regions that
-    // toggle in/out as backticks/fences stream in are skipped by the walker)
-    // shifts positional indices, which made later words inherit earlier words'
-    // timestamps — the out-of-order fade. A text+occurrence key is stable across
-    // re-parses: a word keeps its first-seen time even as neighbours change.
-    const occ = new Map<string, number>();
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
     const textNodes: Text[] = [];
     let n: Node | null;
@@ -223,7 +320,7 @@
         // flash-fade of the whole backlog. Only words revealed while the user
         // is actively watching (first build already done) get the per-word wave.
         if (!revealTimes.has(key)) {
-          if (firstBuild) {
+          if (forceStatic || firstBuild) {
             revealTimes.set(key, now - 1_000_000);
           } else {
             waveCursor = Math.min(now + MAX_AHEAD, Math.max(now, waveCursor + WAVE_STAGGER));
@@ -238,22 +335,78 @@
       }
       node.replaceWith(frag);
     }
-    firstBuild = false;
-    // Streaming caret: only when the reveal has caught up to the available
-    // text (revealed >= text.length) — i.e. the model has paused and we're
-    // waiting for more. While words are still flowing in we hide it so the
-    // text itself reads as the live thing. Position-wise it's tucked INSIDE
-    // the content so it flows inline after the final word, not on a new line
-    // below the block container. Markdown: last block element (<p>/<li>/…);
-    // plain: the body itself. Once shown it persists (html stops rebuilding)
-    // so the cursor-blink animation actually plays.
-    if (cursor && revealed >= text.length) {
+    // Streaming caret: tuck it INSIDE the content so it flows inline after
+    // the final word, not on a new line below the block container. Markdown:
+    // last block element (<p>/<li>/…); plain: the body itself. Only in the
+    // live tail (never the baked prefix) and only when `revealIdle` — i.e.
+    // the reveal has been caught up + idle for CARET_HOLD_MS, meaning the
+    // model has momentarily stopped. Hidden while text is still flowing.
+    if (cursor && !forceStatic && revealIdle) {
       const caret = doc.createElement("span");
       caret.className = "streaming-caret cursor-blink";
       const host = plain ? doc.body : (doc.body.lastElementChild ?? doc.body);
       host.appendChild(caret);
     }
     return doc.body.innerHTML;
+  }
+
+  // Parse markdown, sanitize, and (for the streaming path) span-wrap. The
+  // streaming branch caches the settled prefix and span-wraps only the live tail
+  // — see the component doc comment. The result is byte-for-byte the same render
+  // as a full per-frame re-parse, just O(tail) instead of O(whole message).
+  const html = $derived.by(() => {
+    // Historical messages (streaming=false) + reduced-motion skip the per-word
+    // animation entirely: plain sanitized HTML, no spans, no cache.
+    if (reduceMotion || !streaming) {
+      return plain
+        ? escapeHtml(displayed)
+        : DOMPurify.sanitize(marked.parse(displayed, { async: false, breaks: true }) as string);
+    }
+    try {
+      const now = performance.now();
+      // Char index revealed ~SETTLE_MS ago — definitely done animating, so safe
+      // to bake into the cached prefix. 0 (no prefix) when history is younger
+      // than the settle window (message just started / backlog mount).
+      const lookback = now - SETTLE_MS;
+      let recent = 0;
+      for (let i = revealHistory.length - 1; i >= 0; i--) {
+        if (revealHistory[i]!.t <= lookback) {
+          recent = revealHistory[i]!.idx;
+          break;
+        }
+      }
+      const boundary = recent > 0 ? safeBlockBoundary(displayed, recent) : 0;
+      if (boundary < mem.prefixUpTo) {
+        // Text shrank / message replaced under the same key: drop the cache.
+        mem.prefixUpTo = 0;
+        mem.prefixHtml = "";
+        mem.occ.clear();
+      } else if (boundary > mem.prefixUpTo) {
+        // Graduate the newly-static block(s) into the baked prefix. Span once
+        // (forceStatic) + fold its word counts into the running occ so the
+        // tail's reveal keys stay globally unique + stable.
+        const grown = displayed.slice(mem.prefixUpTo, boundary);
+        mem.prefixHtml += spanWrap(rawHtmlOf(grown), mem.occ, true);
+        mem.prefixUpTo = boundary;
+      }
+      // Live tail: span-wrap fresh each frame against `now`. occ is a throwaway
+      // copy seeded from the prefix counts (the tail is re-done every frame, so
+      // its counts must not pollute the prefix's running map).
+      const tail = displayed.slice(mem.prefixUpTo);
+      const tailHtml = spanWrap(rawHtmlOf(tail), new Map(mem.occ), false);
+      firstBuild = false;
+      return mem.prefixHtml + tailHtml;
+    } catch {
+      // Boundary logic hiccup (e.g. malformed slice) → exact legacy result:
+      // full re-parse + span over the whole slice, occ from scratch.
+      return spanWrap(
+        plain
+          ? escapeHtml(displayed)
+          : DOMPurify.sanitize(marked.parse(displayed, { async: false, breaks: true }) as string),
+        new Map<string, number>(),
+        false,
+      );
+    }
   });
 </script>
 

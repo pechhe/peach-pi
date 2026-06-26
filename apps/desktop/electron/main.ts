@@ -665,6 +665,10 @@ async function boot(): Promise<void> {
         }
         return { ok: true, launched };
       },
+      "workQueue:closeIssue": (projectId, issueNumber, reason) =>
+        issuesService.close(projectId, issueNumber, reason),
+      "workQueue:reopenIssue": (projectId, issueNumber) =>
+        issuesService.reopen(projectId, issueNumber),
       "git:info": gitService.info.bind(gitService),
       "git:changedFiles": gitService.changedFiles.bind(gitService),
       "git:fileDiff": gitService.fileDiff.bind(gitService),

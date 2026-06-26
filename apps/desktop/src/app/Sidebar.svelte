@@ -31,8 +31,10 @@
   import Check from "@lucide/svelte/icons/check";
   import ArchiveRestore from "@lucide/svelte/icons/archive-restore";
   import DoneBurst from "./DoneBurst.svelte";
+  import TestBurst from "./TestBurst.svelte";
   import { doneAnim } from "../lib/done-anim.svelte";
   import { playArchiveSound } from "../lib/sound/done-sound";
+  import { playTestSound } from "../lib/sound/test-sound";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Plus from "@lucide/svelte/icons/plus";
   import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -105,6 +107,10 @@
   let snoozeAnchor: HTMLElement | null = $state(null);
   let snoozedListAnchor: HTMLElement | null = $state(null);
   let doneAnimFor = $state<string | null>(null);
+  // Thread currently playing the mark-to-test animation. Mirrors doneAnimFor:
+  // the row holds its end-state until the real threads:markToTest snapshot
+  // lands, so it doesn't spring back to normal for the gap frames.
+  let testAnimFor = $state<string | null>(null);
   // Ids whose archive animation has finished but whose archived snapshot
   // hasn't landed yet. Filtered out of the active lists so the row leaves
   // the DOM at its collapsed end-state instead of springing back to full
@@ -464,8 +470,19 @@
       run: () => void api.invoke("threads:unarchive", thread.id),
     });
   }
+  // Marking to test plays the burst first; finishMarkToTest runs the real
+  // markToTest once the animation reports back so the row survives the
+  // effect — mirroring the archive flow.
   function markThreadToTest(thread: Thread) {
+    playTestSound();
+    testAnimFor = thread.id;
+  }
+  function finishMarkToTest(thread: Thread) {
+    const idx = previewOrder.indexOf(thread.id);
+    const nextId = idx !== -1 ? (previewOrder[idx + 1] ?? previewOrder[idx - 1] ?? null) : null;
+    testAnimFor = thread.id === testAnimFor ? null : testAnimFor;
     void api.invoke("threads:markToTest", thread.id);
+    if (nextId && thread.id === selectedThreadId) onSelect(nextId);
     extensionUi.notify(`Moved “${thread.title || "Untitled"}” to testing`, {
       label: "Undo",
       run: () => void api.invoke("threads:unmarkToTest", thread.id),
@@ -514,6 +531,9 @@
     {#if doneAnimFor === thread.id}
       <DoneBurst ondone={() => finishArchive(thread)} />
     {/if}
+    {#if testAnimFor === thread.id}
+      <TestBurst ondone={() => finishMarkToTest(thread)} />
+    {/if}
     <button
       class="session-row flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-1.5 text-left text-[13px]
         {isActive ? 'session-row--active text-fg' : 'text-muted hover:text-fg'}"
@@ -527,6 +547,8 @@
       class:done-pop--confetti={doneAnimFor === thread.id && doneAnim.current === "confetti"}
       class:done-pop--twos={doneAnimFor === thread.id && doneAnim.current === "twos"}
       class:done-pop--spring={doneAnimFor === thread.id && doneAnim.current === "spring"}
+      class:test-pop={testAnimFor === thread.id}
+      class:test-pop--testBench={testAnimFor === thread.id}
       data-thread-id={thread.id}
       data-press="self"
       onclick={() => selectThread(thread.id)}
@@ -1323,8 +1345,73 @@
     100% { transform: scale(1);    }
   }
 
+  /* ── Mark-to-test animation (testBench) ──────────────────────────
+     press → row tightens → amber/blue calibration scan sweeps across →
+     TEST badge imprints (stamp veil flash) → row settles into a dimmed
+     testing state (no slide toward Done; brief downward nudge only).
+     Mirrors the archive family: effect carried on the row itself; the
+     burst overlay renders nothing. */
+  :global(.session-row.test-pop) { transform-origin: center; }
+  :global(.session-row.test-pop--testBench) {
+    position: relative;
+    overflow: hidden;
+    transform-origin: center top;
+    animation: test-bench-row 280ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  :global(.session-row.test-pop--testBench)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    /* thin amber/blue calibration scan line */
+    background: linear-gradient(
+      100deg,
+      transparent 44%,
+      oklch(0.82 0.16 75 / 0.6) 48%,
+      oklch(0.92 0.18 200 / 0.95) 50%,
+      oklch(0.82 0.16 75 / 0.6) 52%,
+      transparent 56%
+    );
+    mix-blend-mode: screen;
+    transform: translateX(-130%);
+    animation: test-bench-scan 180ms cubic-bezier(0.4, 0, 0.2, 1) 60ms forwards;
+  }
+  :global(.session-row.test-pop--testBench)::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    /* stamp imprint veil — amber inset ring + flash */
+    box-shadow:
+      inset 0 0 0 1.5px oklch(0.82 0.16 75 / 0.9),
+      inset 0 0 14px 2px oklch(0.82 0.16 75 / 0.35);
+    background: oklch(0.82 0.16 75 / 0.08);
+    opacity: 0;
+    animation: test-bench-stamp 140ms cubic-bezier(0.16, 1, 0.3, 1) 160ms forwards;
+  }
+  @keyframes test-bench-row {
+    0%   { transform: translateY(0) scale(1);      box-shadow: none; }
+    14%  { transform: translateY(0) scale(0.99);  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.22); }
+    22%  { transform: translateY(0) scale(0.996); box-shadow: none; }
+    58%  { transform: translateY(4px) scale(0.99); opacity: 0.55; }
+    100% { transform: translateY(4px) scale(0.99); opacity: 0.55; }
+  }
+  @keyframes test-bench-scan {
+    0%   { transform: translateX(-130%); opacity: 0; }
+    20%  { opacity: 1; }
+    100% { transform: translateX(130%);  opacity: 0; }
+  }
+  @keyframes test-bench-stamp {
+    0%, 55% { opacity: 0; }
+    58%     { opacity: 1; }
+    100%    { opacity: 0; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     :global(.session-row.done-pop) { animation: none !important; }
+    :global(.session-row.test-pop) { animation: none !important; }
   }
 
   /* ── auto-collapsing Done accordion ───────────────────────────── */

@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import {
   enrichIssues,
   mergedClosedIssues,
+  type CloseIssueResult,
   type RawIssue,
   type RawPull,
   type WorkQueueResult,
@@ -210,6 +211,72 @@ export class IssuesService {
       .filter((p) => p.merged_at)
       .map((p) => ({ body: p.body ?? "", headRefName: p.head.ref, mergedAt: p.merged_at }));
   }
+
+  /** Resolve owner/repo for a project's GitHub origin, or null if the project
+   *  is unknown, has no origin, or origin is not a GitHub remote. */
+  private async resolveGithub(
+    projectId: string,
+  ): Promise<{ owner: string; repo: string; cwd: string } | { ok: false; reason: string; message?: string }> {
+    const cwd = this.getProjectPath(projectId);
+    if (!cwd) return { ok: false, reason: "error", message: "Unknown project" };
+    let remote: string;
+    try {
+      remote = (await run("git", ["remote", "get-url", "origin"], { cwd })).stdout.trim();
+    } catch {
+      return { ok: false, reason: "no-remote" };
+    }
+    const gh = parseGithubRepo(remote);
+    if (!gh) return { ok: false, reason: "not-github" };
+    return { ...gh, cwd };
+  }
+
+  /** Close a tracker issue. Escape hatch for shipped-but-not-auto-closed
+   *  issues: the primary path is `Closes #N` on a merged PR; this is for the
+   *  long tail that slipped through. */
+  async close(
+    projectId: string,
+    issueNumber: number,
+    reason: "completed" | "not_planned",
+  ): Promise<CloseIssueResult> {
+    const gh = await this.resolveGithub(projectId);
+    if ("ok" in gh) return gh;
+    try {
+      const useGh = await ghAvailable();
+      if (useGh) {
+        await run(
+          "gh",
+          ["issue", "close", String(issueNumber), "--repo", `${gh.owner}/${gh.repo}`, "--reason", reason],
+          { cwd: gh.cwd },
+        );
+      } else {
+        await restUpdateIssue(gh, issueNumber, { state: "closed", state_reason: reason });
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: "error", message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Reopen a previously closed tracker issue. */
+  async reopen(projectId: string, issueNumber: number): Promise<CloseIssueResult> {
+    const gh = await this.resolveGithub(projectId);
+    if ("ok" in gh) return gh;
+    try {
+      const useGh = await ghAvailable();
+      if (useGh) {
+        await run(
+          "gh",
+          ["issue", "reopen", String(issueNumber), "--repo", `${gh.owner}/${gh.repo}`],
+          { cwd: gh.cwd },
+        );
+      } else {
+        await restUpdateIssue(gh, issueNumber, { state: "open" });
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: "error", message: e instanceof Error ? e.message : String(e) };
+    }
+  }
 }
 
 /** Whether the `gh` CLI is on PATH. */
@@ -236,4 +303,26 @@ async function githubToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** PATCH the issues endpoint to update state/state_reason (close/reopen).
+ *  Used only when `gh` is unavailable. */
+async function restUpdateIssue(
+  gh: { owner: string; repo: string },
+  issueNumber: number,
+  patch: { state: "open" | "closed"; state_reason?: string },
+): Promise<void> {
+  const token = await githubToken();
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "peach-pi",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/issues/${issueNumber}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
 }

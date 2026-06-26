@@ -72,6 +72,124 @@ export function makeSavedId(name: string): string {
   return `${SAVED_PREFIX}${slug}-${rand}`;
 }
 
+// -------------------------------------------------------------------
+// Theme mode: how the active theme is chosen.                            //
+//   single  → one fixed theme                                            //
+//   system  → a light slot + a dark slot; the active one follows the     //
+//             OS prefers-color-scheme                                    //
+//   rotate  → a light pool + a dark pool; each new calendar day a        //
+//             random pick from each pool, OS still decides light/dark    //
+// -------------------------------------------------------------------
+export type ThemeMode = "single" | "system" | "rotate";
+
+/** User's persisted theme preferences (all modes in one record).           */
+export interface ThemePrefs {
+  mode: ThemeMode;
+  /** `single` mode: the active theme id. */
+  single: string;
+  /** `system` mode: the light + dark slots. */
+  systemLight: string;
+  systemDark: string;
+  /** `rotate` mode: the pools to roll from each day. */
+  rotateLight: string[];
+  rotateDark: string[];
+  /** Rotate: the day (YYYY-MM-DD) + ids last rolled. Empty day → roll on next init. */
+  rotateDate: string;
+  rotateActiveLight: string;
+  rotateActiveDark: string;
+}
+
+/** Theme ids allowed in a light slot/pool (presets + saved themes are
+ *  filtered by scheme at use time; this is just the default seed). */
+export const DEFAULT_LIGHT_THEME = "light";
+export const DEFAULT_DARK_THEME = "default";
+
+export const DEFAULT_PREFS: ThemePrefs = {
+  mode: "single",
+  single: DEFAULT_DARK_THEME,
+  systemLight: DEFAULT_LIGHT_THEME,
+  systemDark: DEFAULT_DARK_THEME,
+  rotateLight: [],
+  rotateDark: [],
+  rotateDate: "",
+  rotateActiveLight: DEFAULT_LIGHT_THEME,
+  rotateActiveDark: DEFAULT_DARK_THEME,
+};
+
+/** Sanitize a candidate theme id for slot/pool membership: keep it only if
+ *  it resolves to a known preset, saved id, or the custom draft. */
+export function isValidThemeId(id: string, savedIds: Set<string>): boolean {
+  return id === CUSTOM_THEME_ID || isSavedId(id) && savedIds.has(id) || THEMES.some((t) => t.id === id);
+}
+
+/** Does a theme id match a given scheme? Presets/saved/custom resolve via
+ *  THEMES (no DOM needed), so this stays pure + unit-testable. */
+export function themeScheme(id: string, savedById: Map<string, SavedTheme>): Scheme {
+  if (id === CUSTOM_THEME_ID) {
+    // The custom draft's scheme is resolved by the store at call time, but for
+    // slot validation we only need presets + saved; custom in a slot is rare
+    // and falls back to dark.
+    return "dark";
+  }
+  const saved = savedById.get(id);
+  if (saved) return saved.scheme;
+  return THEMES.find((t) => t.id === id)?.scheme ?? "dark";
+}
+
+/** Today's date as YYYY-MM-DD (local). Pure + injectable for tests. */
+export function todayString(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** Pure rotation roll. Returns the rolled light/dark ids + new date, or the
+ *  passed-in prefs unchanged if no reroll is due. Reroll triggers:
+ *   - date changed (new day), OR
+ *   - an active pick is no longer in its pool (edited/removed), OR
+ *   - both pools non-empty but no active pick recorded (first enable).
+ *  An empty pool leaves its active slot at the default. Reproducible given
+ *  a seeded random via the injected `rand` (defaults to Math.random). */
+export function rollRotation(
+  prefs: ThemePrefs,
+  now: Date = new Date(),
+  rand: () => number = Math.random,
+): ThemePrefs {
+  const today = todayString(now);
+  const dayChanged = prefs.rotateDate !== today;
+  const lightMissing = prefs.rotateLight.length > 0 && !prefs.rotateLight.includes(prefs.rotateActiveLight);
+  const darkMissing = prefs.rotateDark.length > 0 && !prefs.rotateDark.includes(prefs.rotateActiveDark);
+  const firstLight = prefs.rotateLight.length > 0 && prefs.rotateDate === "";
+  const firstDark = prefs.rotateDark.length > 0 && prefs.rotateDate === "";
+  if (!dayChanged && !lightMissing && !darkMissing && !firstLight && !firstDark) {
+    return prefs;
+  }
+  const pick = (pool: string[], current: string): string => {
+    if (pool.length === 0) return current;
+    if (pool.length === 1) return pool[0] ?? current;
+    // Avoid repeating the current pick when possible.
+    const others = pool.filter((id) => id !== current);
+    if (others.length > 0) return others[Math.floor(rand() * others.length)] ?? current;
+    return pool[0] ?? current;
+  };
+  const rollLight = dayChanged || lightMissing || firstLight;
+  const rollDark = dayChanged || darkMissing || firstDark;
+  return {
+    ...prefs,
+    rotateDate: today,
+    rotateActiveLight: rollLight ? pick(prefs.rotateLight, prefs.rotateActiveLight) : prefs.rotateActiveLight,
+    rotateActiveDark: rollDark ? pick(prefs.rotateDark, prefs.rotateActiveDark) : prefs.rotateActiveDark,
+  };
+}
+
+/** Resolve the active theme id for a given system scheme under rotate mode.
+ *  Empty pool → the matching default, so rotate is never blank. */
+export function rotateIdForScheme(prefs: ThemePrefs, scheme: Scheme): string {
+  return scheme === "light" ? prefs.rotateActiveLight : prefs.rotateActiveDark;
+}
+
+
 /** A name is valid when it has non-whitespace content. */
 export function isValidThemeName(name: string): boolean {
   return name.trim().length > 0;

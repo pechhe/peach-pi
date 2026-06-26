@@ -39,12 +39,16 @@ modelPrefs.init();
 // Load curated dot-matrix loader selections per surface (square/hex/triangle).
 loaderPrefs.init();
 
-// Auto-hide scrollbar thumb: reveal only while actively scrolling.
-// Matches the Composer textarea's `.is-scrolling` pattern, applied globally.
+// Auto-hide scrollbar thumb: reveal only while the user is actively
+// scrolling. Skips programmatic scrolls driven by our eased bottom-follow
+// loops (ThreadView + ThinkingBlock mark those with data-glide-scroll) so the
+// thumb stays hidden while following a streaming turn, and only real
+// wheel/trackpad/key scrolls reveal it.
 const scrollTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
 document.addEventListener("scroll", (e) => {
   const el = e.target as Element;
   if (!(el instanceof HTMLElement)) return;
+  if (el.dataset.glideScroll) return;
   el.classList.add("is-scrolling");
   const existing = scrollTimers.get(el);
   if (existing) clearTimeout(existing);

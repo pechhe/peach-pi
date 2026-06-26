@@ -30,11 +30,21 @@ export {
   isSavedId,
   makeSavedId,
   isValidThemeName,
+  DEFAULT_PREFS,
+  DEFAULT_LIGHT_THEME,
+  DEFAULT_DARK_THEME,
+  isValidThemeId,
+  themeScheme,
+  todayString,
+  rollRotation,
+  rotateIdForScheme,
   type ThemeOption,
   type CustomPrimaries,
   type PrimaryKey,
   type SavedTheme,
   type Scheme,
+  type ThemeMode,
+  type ThemePrefs,
 } from "./theme-tokens";
 import {
   CUSTOM_THEME_ID,
@@ -43,10 +53,19 @@ import {
   isSavedId,
   makeSavedId,
   isValidThemeName,
+  isValidThemeId,
+  themeScheme,
+  rollRotation,
+  rotateIdForScheme,
+  DEFAULT_PREFS,
+  DEFAULT_LIGHT_THEME,
+  DEFAULT_DARK_THEME,
   type CustomPrimaries,
   type PrimaryKey,
   type SavedTheme,
   type Scheme,
+  type ThemeMode,
+  type ThemePrefs,
 } from "./theme-tokens";
 
 const KEY = "peachpi:theme";
@@ -58,6 +77,12 @@ const CUSTOM_KEY = "peachpi:custom-theme";
 /** User-named saved themes: `SavedTheme[]`. */
 const SAVED_KEY = "peachpi:saved-themes";
 const CUSTOM_STYLE_ID = "peachpi-custom-theme";
+
+/** Theme mode preferences (single / system / rotate). One JSON record. */
+const PREFS_KEY = "peachpi:theme-prefs";
+
+/** Match-media query for the OS color scheme (null when unavailable). */
+let darkQuery: MediaQueryList | null = null;
 
 interface StoredCustom {
   scheme: Scheme;
@@ -74,6 +99,106 @@ function readStored(): string {
     /* ignore */
   }
   return DEFAULT_THEME;
+}
+
+/** Index saved themes by id for O(1) scheme lookups in pure helpers. */
+function savedById(list: SavedTheme[]): Map<string, SavedTheme> {
+  return new Map(list.map((t) => [t.id, t]));
+}
+
+/** True when `prefers-color-scheme: dark` (or unknown → dark default). */
+function systemPrefersDark(): boolean {
+  if (darkQuery) return darkQuery.matches;
+  try {
+    darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    return darkQuery.matches;
+  } catch {
+    return true;
+  }
+}
+
+/** Sanitize a single slot id (system light/dark): keep only if it's a known
+ *  theme of the requested scheme. Falls back to the scheme default. */
+function sanitizeSlot(
+  id: unknown,
+  scheme: Scheme,
+  saved: SavedTheme[],
+): string {
+  if (typeof id !== "string" || !id) return scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
+  const savedIds = new Set(saved.map((t) => t.id));
+  if (!isValidThemeId(id, savedIds)) return scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
+  const byId = savedById(saved);
+  if (themeScheme(id, byId) !== scheme) return scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
+  return id;
+}
+
+/** Sanitize a rotate pool: keep only ids that are known + match the scheme. */
+function sanitizePool(
+  raw: unknown,
+  scheme: Scheme,
+  saved: SavedTheme[],
+): string[] {
+  if (!Array.isArray(raw)) return [];
+  const byId = savedById(saved);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of raw) {
+    if (
+      typeof id === "string" &&
+      !seen.has(id) &&
+      isValidThemeId(id, new Set(saved.map((t) => t.id))) &&
+      themeScheme(id, byId) === scheme
+    ) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+/** Read + sanitize theme prefs. Migrates the legacy single-theme key when no
+ *  prefs record exists yet (first load after the mode feature shipped). */
+function readPrefs(saved: SavedTheme[]): ThemePrefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) {
+      // Migrate: promote the legacy `peachpi:theme` id to single mode.
+      const legacy = readStored();
+      return { ...DEFAULT_PREFS, mode: "single", single: legacy };
+    }
+    const p = JSON.parse(raw) as Partial<ThemePrefs>;
+    const mode: ThemeMode =
+      p.mode === "system" || p.mode === "rotate" ? p.mode : "single";
+    const single =
+      typeof p.single === "string" && isValidThemeId(p.single, new Set(saved.map((t) => t.id)))
+        ? p.single
+        : DEFAULT_DARK_THEME;
+    return {
+      mode,
+      single,
+      systemLight: sanitizeSlot(p.systemLight, "light", saved),
+      systemDark: sanitizeSlot(p.systemDark, "dark", saved),
+      rotateLight: sanitizePool(p.rotateLight, "light", saved),
+      rotateDark: sanitizePool(p.rotateDark, "dark", saved),
+      rotateDate: typeof p.rotateDate === "string" ? p.rotateDate : "",
+      rotateActiveLight: sanitizeSlot(p.rotateActiveLight, "light", saved),
+      rotateActiveDark: sanitizeSlot(p.rotateActiveDark, "dark", saved),
+    };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+/** Resolve the active theme id for a prefs record under the current OS scheme. */
+function resolveActiveId(prefs: ThemePrefs, scheme: Scheme): string {
+  switch (prefs.mode) {
+    case "single":
+      return prefs.single;
+    case "system":
+      return scheme === "light" ? prefs.systemLight : prefs.systemDark;
+    case "rotate":
+      return rotateIdForScheme(prefs, scheme);
+  }
 }
 
 /** Read + sanitize the user's saved themes from localStorage. */
@@ -225,10 +350,17 @@ function readComposerStyle(): ComposerStyle {
 let customScheme: Scheme = "dark";
 let customPrimaries: CustomPrimaries = {};
 let savedThemes: SavedTheme[] = [];
+/** Mirror of `prefs` for use in the plain resolver functions above. */
+let prefs: ThemePrefs = { ...DEFAULT_PREFS };
 
 class ThemeStore {
+  /** Resolved active theme id (presets, saved, or custom). Reactive so the
+   *  selector can highlight it; also driven by system/rotate resolution. */
   current = $state(DEFAULT_THEME);
   composer = $state<ComposerStyle>("auto");
+
+  /** Theme mode + slots/pools. Drives `current` via resolveActiveId. */
+  prefs = $state<ThemePrefs>({ ...DEFAULT_PREFS });
 
   /** The 3 primary colors defining the custom working draft (each optional). */
   customPrimaries = $state<CustomPrimaries>({});
@@ -239,24 +371,71 @@ class ThemeStore {
 
   composerOptions = COMPOSER_OPTIONS;
 
+  /** Resolve + apply the active theme for the current prefs/OS scheme. The
+   *  single source of truth for `current` + the DOM under any mode. */
+  private reapply(): void {
+    const scheme = systemPrefersDark() ? "dark" : "light";
+    const id = resolveActiveId(prefs, scheme);
+    this.current = id;
+    applyToDocument(id);
+  }
+
+  /** Persist prefs to localStorage (and keep the module mirror in sync). */
+  private persistPrefs(): void {
+    prefs = this.prefs;
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs));
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Apply the persisted theme to <html>. Call before mount to avoid a flash. */
   init(): void {
-    this.current = readStored();
     this.composer = readComposerStyle();
     composerStyle = this.composer;
     const custom = readStoredCustom();
     this.customScheme = custom.scheme;
     customScheme = custom.scheme;
     this.customPrimaries = custom.primaries;
-    customPrimaries = custom.primaries;
+    customPrimaries = this.customPrimaries;
     this.savedThemes = readStoredSaved();
     savedThemes = this.savedThemes;
-    applyToDocument(this.current);
+    // Prefs depend on saved themes (slot sanitization), so read after them.
+    const loaded = readPrefs(this.savedThemes);
+    // Rotate: roll for a new day (or if a pool changed under the active pick).
+    const rolled = loaded.mode === "rotate" ? rollRotation(loaded) : loaded;
+    this.prefs = rolled;
+    prefs = rolled;
+    if (rolled !== loaded) {
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(rolled));
+      } catch {
+        /* ignore */
+      }
+    }
+    this.reapply();
+    // OS scheme changes drive system + rotate modes.
+    try {
+      if (!darkQuery) darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      darkQuery.addEventListener("change", () => this.reapply());
+    } catch {
+      /* matchMedia unsupported — system/rotate stay on the dark default */
+    }
     // Cross-window sync: `storage` fires only in *other* documents of the
     // same origin, so a change in one window updates the rest.
     window.addEventListener("storage", (e) => {
+      if (e.key === PREFS_KEY && e.newValue) {
+        const next = readPrefs(this.savedThemes);
+        this.prefs = next;
+        prefs = next;
+        this.reapply();
+      }
       if (e.key === KEY && e.newValue) {
-        this.current = e.newValue;
+        // Legacy single-theme key: migrate into single mode.
+        this.prefs = { ...this.prefs, mode: "single", single: e.newValue };
+        prefs = this.prefs;
+        this.reapply();
       }
       if (e.key === COMPOSER_KEY && e.newValue) {
         this.composer = (e.newValue as ComposerStyle) || "auto";
@@ -273,19 +452,64 @@ class ThemeStore {
         this.savedThemes = readStoredSaved();
         savedThemes = this.savedThemes;
       }
-      applyToDocument(this.current);
+      this.reapply();
     });
   }
 
-  /** Select a preset, a saved theme, or the custom draft. */
+  /** Set the theme mode (single / system / rotate). Rolls rotation on enter. */
+  setMode(mode: ThemeMode): void {
+    if (mode === this.prefs.mode) return;
+    let next = { ...this.prefs, mode };
+    if (mode === "rotate") next = rollRotation(next);
+    this.prefs = next;
+    this.persistPrefs();
+    this.reapply();
+  }
+
+  /** `single` mode: pick the active theme. */
+  setSingle(id: string): void {
+    this.prefs = { ...this.prefs, mode: "single", single: id };
+    this.persistPrefs();
+    this.reapply();
+  }
+
+  /** `system` mode: set the light or dark slot. */
+  setSystemSlot(scheme: Scheme, id: string): void {
+    this.prefs =
+      scheme === "light"
+        ? { ...this.prefs, mode: "system", systemLight: id }
+        : { ...this.prefs, mode: "system", systemDark: id };
+    this.persistPrefs();
+    this.reapply();
+  }
+
+  /** `rotate` mode: toggle a theme id in/out of a scheme's pool. */
+  toggleRotatePool(scheme: Scheme, id: string): void {
+    const pool = scheme === "light" ? this.prefs.rotateLight : this.prefs.rotateDark;
+    const nextPool = pool.includes(id) ? pool.filter((x) => x !== id) : [...pool, id];
+    const base: ThemePrefs =
+      scheme === "light"
+        ? { ...this.prefs, rotateLight: nextPool }
+        : { ...this.prefs, rotateDark: nextPool };
+    // Pool change may invalidate the active pick → reroll this scheme only.
+    const next = rollRotation({ ...base, mode: "rotate" });
+    this.prefs = next;
+    this.persistPrefs();
+    this.reapply();
+  }
+
+  /** Force a reroll now (rotates both pools, ignoring the day gate). */
+  rerotate(): void {
+    const next = rollRotation({ ...this.prefs, rotateDate: "" });
+    this.prefs = next;
+    this.persistPrefs();
+    this.reapply();
+  }
+
+  /** Select a preset, a saved theme, or the custom draft (single mode).
+   *  Kept for the existing custom-editor flow + external callers. */
   set(id: string): void {
-    this.current = id;
-    applyToDocument(id);
-    try {
-      localStorage.setItem(KEY, id);
-    } catch {
-      /* ignore */
-    }
+    this.setSingle(id);
   }
 
   /** Override one primary (bg / fg / accent) on the ACTIVE custom-or-saved
@@ -307,13 +531,11 @@ class ThemeStore {
     this.persistCustom();
     syncCustomStyle(this.current);
     if (this.current !== CUSTOM_THEME_ID) {
+      // Editing the draft flips to custom draft as the single-mode theme.
+      this.prefs = { ...this.prefs, mode: "single", single: CUSTOM_THEME_ID };
+      this.persistPrefs();
       this.current = CUSTOM_THEME_ID;
       applyToDocument(CUSTOM_THEME_ID);
-      try {
-        localStorage.setItem(KEY, CUSTOM_THEME_ID);
-      } catch {
-        /* ignore */
-      }
     }
   }
 
@@ -394,13 +616,10 @@ class ThemeStore {
     this.savedThemes = next;
     savedThemes = next;
     this.persistSaved();
+    this.prefs = { ...this.prefs, mode: "single", single: id };
+    this.persistPrefs();
     this.current = id;
     applyToDocument(id);
-    try {
-      localStorage.setItem(KEY, id);
-    } catch {
-      /* ignore */
-    }
     return id;
   }
 

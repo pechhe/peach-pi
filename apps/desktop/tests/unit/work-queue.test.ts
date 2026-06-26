@@ -213,7 +213,8 @@ test("buildSeedPrompt: includes body + acceptance criteria + test/PR gate", () =
   assert.match(seed, /Do the thing\./);
   assert.match(seed, /## Definition of done/);
   assert.match(seed, /- \[ \] It works/);
-  assert.match(seed, /open a pull request and then stop at the human gate/);
+  assert.match(seed, /Closes #19/);
+  assert.match(seed, /stop at the human gate/);
 });
 
 const PRD_BODY = `## Problem Statement

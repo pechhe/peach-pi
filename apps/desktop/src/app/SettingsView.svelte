@@ -14,6 +14,8 @@
     getDoneSoundVariant,
     setArchiveSoundVariant,
     getArchiveSoundVariant,
+    setTestSoundVariant,
+    getTestSoundVariant,
   } from "../lib/sound/sound-prefs";
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import {
@@ -22,6 +24,11 @@
     playArchiveSound,
     type DoneSoundVariant,
   } from "../lib/sound/done-sound";
+  import {
+    TEST_SOUND_OPTIONS,
+    playTestSound,
+    type TestSoundVariant,
+  } from "../lib/sound/test-sound";
   import {
     theme,
     type ComposerStyle,
@@ -39,6 +46,7 @@
   import { Switch } from "../components/ui/switch";
   import ModelScopeSelect from "../components/ui/model-scope-select/model-scope-select.svelte";
   import DoneBurstPlayground from "./DoneBurstPlayground.svelte";
+  import TestBurstPlayground from "./TestBurstPlayground.svelte";
   import DotMatrixPlayground from "./DotMatrixPlayground.svelte";
   import ThemeControls from "./ThemeControls.svelte";
   import SubagentsSection from "./SubagentsSection.svelte";
@@ -69,6 +77,8 @@
     sounds: "sounds button clicks done chime mute",
     doneChime: "done chime celebration cue thread finishes preview",
     threadDoneSound: "thread done sound mark done archive click precision archive latch metallic preview",
+    testBenchSound: "test bench sound mark to test relay tick diagnostic chirp stamp flask inspection preview",
+    testAnimation: "test animation mark to test card animation preview play bench stamp scan relay",
     autoCompact: "auto-compaction compact context usage threshold tokens percentage",
     retry: "retry on error network drop transient exponential backoff wait doubles",
     messageDelivery: "message delivery steering mode follow-up mode",
@@ -221,6 +231,7 @@
   let muted = $state(soundsMuted());
   let doneVariant = $state(getDoneSoundVariant() as DoneSoundVariant);
   let archiveVariant = $state(getArchiveSoundVariant() as DoneSoundVariant);
+  let testVariant = $state(getTestSoundVariant() as TestSoundVariant);
   let version = $state("");
   let models = $state<ModelInfo[]>([]);
   let utilityModel = $state<ModelInfo | null>(null);
@@ -306,6 +317,17 @@
 
   function previewArchive() {
     playArchiveSound(archiveVariant);
+  }
+
+  function pickTestVariant(value: string) {
+    const v = value as TestSoundVariant;
+    testVariant = v;
+    setTestSoundVariant(v);
+    playTestSound(v); // live preview
+  }
+
+  function previewTest() {
+    playTestSound(testVariant);
   }
 
   async function pickUtilityModel(key: string) {
@@ -710,6 +732,46 @@
         <p class="mt-2 text-xs text-fainter">
           {DONE_SOUND_OPTIONS.find((o) => o.id === archiveVariant)?.description}
         </p>
+      </section>
+      {/if}
+
+      {#if hit("testBenchSound")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-sm text-fg">Test bench sound</h2>
+            <p class="text-xs text-faint">The cue played when you mark a thread for testing (the Eye action).</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <Select
+              class="rounded-md bg-surface-2"
+              value={testVariant}
+              onValueChange={pickTestVariant}
+              items={TEST_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
+              data-testid="test-sound-select"
+              aria-label="Test bench sound"
+            />
+            <button
+              class="rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
+              onclick={previewTest}
+              disabled={muted}
+              data-testid="test-sound-preview"
+            >Play</button>
+          </div>
+        </div>
+        <p class="mt-2 text-xs text-fainter">
+          {TEST_SOUND_OPTIONS.find((o) => o.id === testVariant)?.description}
+        </p>
+      </section>
+      {/if}
+
+      {#if hit("testAnimation")}
+      <section class="rounded-lg border border-border bg-surface/50 p-4">
+        <div class="mb-3">
+          <h2 class="text-sm text-fg">Test bench animation</h2>
+          <p class="text-xs text-faint">The "mark to test" card animation. Press Play to preview. (Sound plays too.)</p>
+        </div>
+        <TestBurstPlayground />
       </section>
       {/if}
 

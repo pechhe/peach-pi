@@ -22,6 +22,7 @@
   import X from "@lucide/svelte/icons/x";
   import Tooltip from "./Tooltip.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
+  import { transcripts } from "../stores/transcripts.svelte";
   import { lightbox } from "../stores/lightbox.svelte";
   import { textViewer } from "../stores/text-viewer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
@@ -54,6 +55,15 @@
   const draft = $derived(drafts.for(thread.id));
   const queue = $derived(queues.for(thread.id));
   const running = $derived(thread.status === "running");
+  // An in-flight compaction (manual or auto) blocks both abort and any new
+  // message/steer: cancelling it mid-summarise corrupts context accounting,
+  // and sending on top races the transcript reload it triggers. Derived from
+  // the live transcript's running compaction card rather than thread.status
+  // because a standalone compaction (threshold after a finished turn) can run
+  // with status "completed".
+  const compacting = $derived(
+    transcripts.itemsFor(thread.id).some((i) => i.kind === "compaction" && i.running),
+  );
   const meta = $derived(sessionMetas.for(thread.id));
 
   /**
@@ -697,6 +707,10 @@
   async function submit(asSteer = false, fromPointer = false) {
     const raw = draft.text.trim();
     if (!raw && draft.attachments.length === 0 && !draft.command) return;
+    // A compaction run owns the session: block sending/queuing on top of it.
+    // (App-level system commands like /rewind, /btw, /model, /compact below
+    // are intentionally still allowed.)
+    if (compacting) return;
     // `/rewind [n]` is an app command (conversation rewind), not sent to pi.
     const rewindMatch = /^\/rewind(?:\s+(\d+))?\s*$/.exec(raw);
     if (rewindMatch && !draft.command) {
@@ -958,7 +972,7 @@
       });
       return;
     }
-    if (e.key === "Escape" && running) {
+    if (e.key === "Escape" && running && !compacting) {
       if (abortArmed) {
         abortArmed = false;
         markAborted(thread.id);
@@ -1398,7 +1412,7 @@
         </div>
 
         <div class="composer__actions">
-          {#if running && !draft.text.trim()}
+          {#if running && !draft.text.trim() && !compacting}
             <button
               class="send-dial send-dial--stop"
               onclick={() => api.invoke("threads:abort", thread.id)}
@@ -1412,6 +1426,7 @@
             <button
               class="send-dial {sendPressed ? 'is-pressed' : ''}"
               data-press="self"
+              disabled={compacting}
               onclick={() => submit(false, true)}
               onpointerdown={pressSend}
               onpointerup={() => releaseSend(true)}
@@ -1419,8 +1434,9 @@
               onpointercancel={() => releaseSend(false)}
               data-has-input={draft.text.trim() || draft.attachments.length > 0 ? "" : undefined}
               data-testid="send"
-              title={running ? "Queue message" : "Send message"}
-              aria-label={running ? "Queue message" : "Send message"}
+              title={compacting ? "Compacting…" : running ? "Queue message" : "Send message"}
+              aria-label={compacting ? "Compacting" : running ? "Queue message" : "Send message"}
+              aria-busy={compacting ? "true" : undefined}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
             </button>

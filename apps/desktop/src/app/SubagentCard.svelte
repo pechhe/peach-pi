@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Component } from "svelte";
-  import { slide, fly, fade } from "svelte/transition";
+  import { slide, fly } from "svelte/transition";
   import Compass from "@lucide/svelte/icons/compass";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Wrench from "@lucide/svelte/icons/wrench";
@@ -64,7 +64,6 @@
             : "Idle",
   );
   const stats = $derived(live_ ? (live?.stats ?? []) : []);
-  const isLastNode = (i: number) => i === nodes.length - 1;
   const latest = $derived(entity.events[entity.events.length - 1]!);
   const task = $derived(latest.task ?? entity.events[0]!.task);
 </script>
@@ -95,7 +94,7 @@
   </header>
 
   <ol class="agent-entity__journey">
-    {#each nodes as node, i (node.id)}
+    {#each nodes as node (node.id)}
       {#key node.id}
       <li
         class="agent-entity__node agent-entity__node--{node.tone}"
@@ -109,9 +108,6 @@
           <span class="agent-entity__node-title" title={node.fullTitle ?? node.title}>{node.title}</span>
           {#if node.subtitle}<p class="agent-entity__node-sub" title={node.subtitle}>{node.subtitle}</p>{/if}
         </div>
-        {#if !isLastNode(i)}
-          <span class="agent-entity__connector" in:fade={{ duration: 260, delay: 60 }} aria-hidden="true"></span>
-        {/if}
       </li>
       {/key}
     {/each}
@@ -205,18 +201,23 @@
     align-items: start;
     padding: 6px 0;
   }
-  /* connector to the next node — a real element so it can fade in with the
-     row's transition instead of re-growing on every re-render. Centered on
-     the marker column (11px = half marker). Leaves a small gap around each marker. */
-  .agent-entity__connector {
+  /* connector to the next node — centered on the marker column (11px = half
+     marker). Hidden on the last node; fades in via opacity when a node stops
+     being last, so a freshly-appended step links up gracefully. Leaves a small
+     gap around each marker. */
+  .agent-entity__node::before {
+    content: "";
     position: absolute;
     left: 11px;
     top: 32px;    /* marker bottom (28) + 4px gap */
     bottom: -8px; /* next marker top (12 from this node's bottom) - 4px gap */
     width: 2px;
     transform: translateX(-50%);
-    background: color-mix(in srgb, var(--ae-accent) 20%, var(--color-border));
+    background: color-mix(in srgb, var(--ae-accent) 45%, var(--color-border));
+    opacity: 0;
+    transition: opacity 0.3s ease;
   }
+  .agent-entity__node:not(:last-child)::before { opacity: 1; }
 
   /* plain nodes — no colored boxes */
   .agent-entity__marker {

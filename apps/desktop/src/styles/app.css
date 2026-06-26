@@ -35,7 +35,7 @@
 }
 
 /* Light — white surfaces, light-gray base, indigo accent */
-:root[data-theme="light"] {
+:root[data-theme="light"], .theme-scope[data-theme="light"] {
   color-scheme: light;
   --color-bg: #f4f4f6;
   --color-sidebar: #ececef;
@@ -64,7 +64,7 @@
 }
 
 /* Dracula (dark) */
-:root[data-theme="dracula"] {
+:root[data-theme="dracula"], .theme-scope[data-theme="dracula"] {
   color-scheme: dark;
   --color-bg: #1e1f29;
   --color-sidebar: #232531;
@@ -93,7 +93,7 @@
 }
 
 /* Dracula Light (Alucard) */
-:root[data-theme="dracula-light"] {
+:root[data-theme="dracula-light"], .theme-scope[data-theme="dracula-light"] {
   color-scheme: light;
   --color-bg: #fffbeb;
   --color-sidebar: #f4eed8;
@@ -124,7 +124,7 @@
 }
 
 /* One Dark (Atom) — dark */
-:root[data-theme="one-dark"] {
+:root[data-theme="one-dark"], .theme-scope[data-theme="one-dark"] {
   color-scheme: dark;
   --color-bg: #282c34;
   --color-sidebar: #21252b;
@@ -153,7 +153,7 @@
 }
 
 /* Monokai Pro — dark */
-:root[data-theme="monokai"] {
+:root[data-theme="monokai"], .theme-scope[data-theme="monokai"] {
   color-scheme: dark;
   --color-bg: #2d2a2e;
   --color-sidebar: #221f22;
@@ -182,7 +182,7 @@
 }
 
 /* Gruvbox Dark (medium) — dark */
-:root[data-theme="gruvbox"] {
+:root[data-theme="gruvbox"], .theme-scope[data-theme="gruvbox"] {
   color-scheme: dark;
   --color-bg: #282828;
   --color-sidebar: #1d2021;
@@ -211,7 +211,7 @@
 }
 
 /* Nord — dark */
-:root[data-theme="nord"] {
+:root[data-theme="nord"], .theme-scope[data-theme="nord"] {
   color-scheme: dark;
   --color-bg: #2e3440;
   --color-sidebar: #292e39;
@@ -240,7 +240,7 @@
 }
 
 /* Tokyo Night — dark */
-:root[data-theme="tokyo-night"] {
+:root[data-theme="tokyo-night"], .theme-scope[data-theme="tokyo-night"] {
   color-scheme: dark;
   --color-bg: #1a1b26;
   --color-sidebar: #16161e;
@@ -269,7 +269,7 @@
 }
 
 /* Solarized Light */
-:root[data-theme="solarized-light"] {
+:root[data-theme="solarized-light"], .theme-scope[data-theme="solarized-light"] {
   color-scheme: light;
   --color-bg: #fdf6e3;
   --color-sidebar: #eee8d5;
@@ -300,7 +300,7 @@
 }
 
 /* GitHub Light */
-:root[data-theme="github-light"] {
+:root[data-theme="github-light"], .theme-scope[data-theme="github-light"] {
   color-scheme: light;
   --color-bg: #ffffff;
   --color-sidebar: #f6f8fa;
@@ -329,7 +329,7 @@
 }
 
 /* Catppuccin Latte */
-:root[data-theme="catppuccin-latte"] {
+:root[data-theme="catppuccin-latte"], .theme-scope[data-theme="catppuccin-latte"] {
   color-scheme: light;
   --color-bg: #eff1f5;
   --color-sidebar: #e6e9ef;
@@ -360,7 +360,7 @@
 }
 
 /* One Light (Atom) */
-:root[data-theme="one-light"] {
+:root[data-theme="one-light"], .theme-scope[data-theme="one-light"] {
   color-scheme: light;
   --color-bg: #fafafa;
   --color-sidebar: #f3f3f3;
@@ -389,7 +389,7 @@
 }
 
 /* Gruvbox Light (medium) */
-:root[data-theme="gruvbox-light"] {
+:root[data-theme="gruvbox-light"], .theme-scope[data-theme="gruvbox-light"] {
   color-scheme: light;
   --color-bg: #fbf1c7;
   --color-sidebar: #f9f5d7;
@@ -420,7 +420,7 @@
 }
 
 /* Rosé Pine Dawn */
-:root[data-theme="rose-pine-dawn"] {
+:root[data-theme="rose-pine-dawn"], .theme-scope[data-theme="rose-pine-dawn"] {
   color-scheme: light;
   --color-bg: #faf4ed;
   --color-sidebar: #fffaf3;
@@ -451,7 +451,7 @@
 }
 
 /* Everforest Light (medium) */
-:root[data-theme="everforest-light"] {
+:root[data-theme="everforest-light"], .theme-scope[data-theme="everforest-light"] {
   color-scheme: light;
   --color-bg: #fdf6e3;
   --color-sidebar: #f4f0d9;
@@ -482,7 +482,7 @@
 }
 
 /* Kanagawa Lotus */
-:root[data-theme="kanagawa-lotus"] {
+:root[data-theme="kanagawa-lotus"], .theme-scope[data-theme="kanagawa-lotus"] {
   color-scheme: light;
   --color-bg: #f2ecbc;
   --color-sidebar: #e5ddb0;
@@ -513,7 +513,7 @@
 }
 
 /* Tomorrow (light) */
-:root[data-theme="tomorrow"] {
+:root[data-theme="tomorrow"], .theme-scope[data-theme="tomorrow"] {
   color-scheme: light;
   --color-bg: #ffffff;
   --color-sidebar: #efefef;
@@ -542,7 +542,7 @@
 }
 
 /* Alabaster */
-:root[data-theme="alabaster"] {
+:root[data-theme="alabaster"], .theme-scope[data-theme="alabaster"] {
   color-scheme: light;
   --color-bg: #f7f7f7;
   --color-sidebar: #eeeeee;

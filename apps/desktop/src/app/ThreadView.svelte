@@ -32,6 +32,7 @@
   import { skillViewer } from "../stores/skill-viewer.svelte";
   import Markdown from "./Markdown.svelte";
   import StreamingText from "./StreamingText.svelte";
+  import ThinkingBlock from "./ThinkingBlock.svelte";
   import CopyButton from "./CopyButton.svelte";
   import RewindDialog from "./RewindDialog.svelte";
   import { codeCopy, clickCopy } from "../lib/code-copy";
@@ -528,7 +529,7 @@
   function toolBreakdown(group: ToolItem[]): string {
     const counts = new Map<string, number>();
     for (const it of group) {
-      const name = it.toolName || "tool";
+      const name = it.toolName || it.argsSummary || "tool";
       counts.set(name, (counts.get(name) ?? 0) + 1);
     }
     return [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(" · ");
@@ -587,27 +588,64 @@
   // target, the revealing tail floats a little above the bottom edge while text
   // pours in (the "buffer below"), then settles once growth stops. Bails the
   // instant the user scrolls up to read history.
-  const GLIDE_EASE = 0.18; // fraction of the remaining distance closed per frame
+  //
+  // Two things keep the glide from reading as jumpy despite chunked growth:
+  //  - Time-based decay (not a per-frame fraction): `1 - exp(-dt / tau)` closes
+  //    the same fraction of the remaining gap per unit time regardless of
+  //    refresh rate, and decelerates continuously rather than in fixed steps.
+  //  - The loop stays armed for the whole streaming run instead of ending at
+  //    each `diff <= 0.5` and re-arming from rest on the next token burst.
+  //    The old settle→restart-from-rest cycle was the main visible jank even
+  //    though each individual lerp eased; keeping one continuous loop through
+  //    bursts makes growth flow instead of lurch. The target is recomputed
+  //    every frame, so mid-glide height jumps (new tokens, tool blocks) are
+  //    followed live rather than chased from a stale bottom.
+  const GLIDE_TAU = 0.14; // seconds; higher = gentler. ~140ms time constant.
   let glideRaf = 0;
   let gliding = false;
+  let lastGlideTs = 0;
   function glideToBottom() {
     const el = scrollEl;
     if (!el || gliding) return;
     gliding = true;
-    const step = () => {
+    lastGlideTs = 0;
+    const step = (ts: number) => {
       const e = scrollEl;
       if (!e || scrolledUp) {
         gliding = false;
         return;
       }
+      if (!lastGlideTs) lastGlideTs = ts;
+      // Clamp dt so a tab-throttled gap doesn't dump the whole backlog in one
+      // frame (the rAF timestamp jumps after backgrounding).
+      const dt = Math.min(0.05, (ts - lastGlideTs) / 1000);
+      lastGlideTs = ts;
       const target = e.scrollHeight - e.clientHeight;
       const diff = target - e.scrollTop;
-      if (diff <= 0.5) {
+      // While the thread is still running, keep the loop armed even at a
+      // momentary zero gap so the next burst continues the same motion
+      // instead of restarting from rest. Idle (not running) settles out.
+      const running = thread.status === "running";
+      if (diff <= 0.5 && !running) {
         e.scrollTop = target;
         gliding = false;
         return;
       }
-      e.scrollTop = e.scrollTop + diff * GLIDE_EASE;
+      const factor = 1 - Math.exp(-dt / GLIDE_TAU);
+      // Tag this as a programmatic scroll so the global auto-hide-scrollbar
+      // listener (main.ts) skips it — the thumb stays hidden while we follow a
+      // streaming turn, and only real user scrolls reveal it.
+      e.dataset.glideScroll = "1";
+      e.scrollTop = e.scrollTop + diff * factor;
+      // Clear deferred: the scroll event from the assignment above is queued
+      // asynchronously and fires after this step returns, so a sync delete
+      // would race it (flag already gone when the listener fires).
+      // setTimeout(0) lands after the queued event, covering it; the next
+      // step re-sets the flag before this fires, so it stays set throughout
+      // the continuous glide.
+      setTimeout(() => {
+        delete e.dataset.glideScroll;
+      }, 0);
       glideRaf = requestAnimationFrame(step);
     };
     glideRaf = requestAnimationFrame(step);
@@ -794,9 +832,11 @@
           <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
             <span class="w-3.5 shrink-0 text-center {item.status === 'error' ? 'text-danger' : 'text-fainter'}">{item.status === "error" ? "✕" : item.status !== "running" ? "✓" : ""}</span>
             <span
-              class="shrink-0 font-mono font-medium {item.status === 'running' ? 'tool-name--running' : 'text-muted'}"
-              >{item.toolName}</span>
-            <span class="truncate font-mono text-fainter">{item.argsSummary}</span>
+              class="font-mono font-medium {item.status === 'running' ? 'tool-name--running' : 'text-muted'} {item.toolName ? 'shrink-0' : 'min-w-0 shrink truncate'}"
+              >{item.toolName || item.argsSummary || "tool"}</span>
+            {#if item.toolName}
+              <span class="truncate font-mono text-fainter">{item.argsSummary}</span>
+            {/if}
             <span class="ml-auto shrink-0 text-fainter transition-transform duration-200 ease-out group-open:rotate-90">›</span>
           </summary>
           {#if item.output}
@@ -912,9 +952,7 @@
                 <summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">
                   <span class="mr-1 inline-block transition-transform group-open:rotate-90">›</span>Thinking
                 </summary>
-                <div class="mt-1.5 border-l-2 border-border pl-3 leading-relaxed text-faint">
-                  <StreamingText text={item.thinking} streaming={isStreaming} plain cursor={inThinking} revealKey={`${item.id}:thinking`} />
-                </div>
+                <ThinkingBlock text={item.thinking} streaming={isStreaming} cursor={inThinking} revealKey={`${item.id}:thinking`} />
               </details>
             {/if}
             <StreamingText text={item.text} streaming={isStreaming} cursor={isStreaming && !inThinking} revealKey={`${item.id}:text`} />
