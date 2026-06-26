@@ -61,11 +61,16 @@ import {
   HUD_COLLAPSED_HEIGHT,
   HUD_EXPANDED_HEIGHT,
 } from "./windows/hud-window.ts";
-import { RemoteHostService } from "./services/remote-host.ts";
-import { RemoteClientService } from "./services/remote-client.ts";
-import { createHandoffService } from "./services/handoff-service.ts";
-import { getConnectInfo, enableServe, listTailnetPeers } from "./services/remote-serve.ts";
-import { recordCheckpoint, originUrl as originUrlOf } from "./services/remote-checkpoint.ts";
+import {
+  RemoteHostService,
+  RemoteClientService,
+  recordCheckpoint,
+  originUrl as originUrlOf,
+  getConnectInfo,
+  enableServe,
+  listTailnetPeersDefault,
+} from "./services/served-session/index.ts";
+import { createHandoffService } from "./services/movable-execution/index.ts";
 
 // TEMP DEBUG: enable CDP for renderer layout inspection.
 app.commandLine.appendSwitch("remote-debugging-port", "9222");
@@ -757,7 +762,7 @@ async function boot(): Promise<void> {
       // remote session hosting (ADR-0009)
       "remote:hostStatus": remoteHost.status.bind(remoteHost),
       "remote:setHostEnabled": remoteHost.setHostEnabled.bind(remoteHost),
-      "remote:listTailnetPeers": listTailnetPeers,
+      "remote:listTailnetPeers": listTailnetPeersDefault,
       "remote:listHosts": remoteClient.listHosts.bind(remoteClient),
       "remote:addHost": remoteClient.addHost.bind(remoteClient),
       "remote:removeHost": remoteClient.removeHost.bind(remoteClient),

@@ -12,7 +12,7 @@ import {
   checkpointBranch,
   recordCheckpoint,
   originUrl,
-} from "../../electron/services/remote-checkpoint.ts";
+} from "../../electron/services/served-session/checkpoint.ts";
 
 const THREAD = "rt-test-thread";
 

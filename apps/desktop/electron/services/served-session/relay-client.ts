@@ -14,12 +14,25 @@ import type {
   Thread,
   ThreadId,
 } from "@peach-pi/shared-types";
-import type { Emit } from "../ipc/registry.ts";
-import type { RemoteHostService } from "./remote-host.ts";
-import { checkpointBranch } from "./remote-checkpoint.ts";
+import type { Emit } from "../../ipc/registry.ts";
+import type { RemoteHostService } from "./relay-host.ts";
+import { checkpointBranch } from "./checkpoint.ts";
+import {
+  messagePath,
+  steerPath,
+  abortPath,
+  controlPath,
+  archivePath,
+} from "./routes.ts";
 import { git } from "@peach-pi/remote-handoff";
 
 const CONNECTIONS_PATH = join(homedir(), ".pi", "agent", "peach-remote-hosts.json");
+
+/** Mandatory timeout for the client's fetch calls (ADR-0012). The former raw
+ *  `http.request` path had no timeout — a latent hang; fetch + a mandatory
+ *  `timeoutMs` closes that. The long-lived SSE `attach` tap is NOT subject to
+ *  this (it's a stream, not a request/response). */
+const CLIENT_TIMEOUT_MS = 15_000;
 
 /** Base origin for a saved connection. A full URL (Tailscale Serve HTTPS, no
  *  port) is used as-is; a bare host falls back to plain HTTP on its port. */
@@ -203,25 +216,25 @@ export class RemoteClientService {
 
   /** Write path (ADR-0010): forward a composer action to the master. */
   async message(hostId: string, threadId: ThreadId, text: string): Promise<void> {
-    await this.postJson(this.conn(hostId), `/sessions/${encodeURIComponent(threadId)}/message`, { text });
+    await this.postJson(this.conn(hostId), messagePath(threadId), { text });
   }
   async steer(hostId: string, threadId: ThreadId, text: string): Promise<void> {
-    await this.postJson(this.conn(hostId), `/sessions/${encodeURIComponent(threadId)}/steer`, { text });
+    await this.postJson(this.conn(hostId), steerPath(threadId), { text });
   }
   async abort(hostId: string, threadId: ThreadId): Promise<void> {
-    await this.postJson(this.conn(hostId), `/sessions/${encodeURIComponent(threadId)}/abort`, {});
+    await this.postJson(this.conn(hostId), abortPath(threadId), {});
   }
   /** Take (force) the steering lease for a thread (ADR-0011). */
   async takeControl(hostId: string, threadId: ThreadId): Promise<void> {
-    await this.postJson(this.conn(hostId), `/sessions/${encodeURIComponent(threadId)}/control`, { force: true });
+    await this.postJson(this.conn(hostId), controlPath(threadId), { force: true });
   }
   /** Release the steering lease (Hand back). */
   async releaseControl(hostId: string, threadId: ThreadId): Promise<void> {
-    await this.postJson(this.conn(hostId), `/sessions/${encodeURIComponent(threadId)}/control`, { release: true });
+    await this.postJson(this.conn(hostId), controlPath(threadId), { release: true });
   }
   /** Archive a thread the controller finished (propagates to all clients). */
   async archive(hostId: string, threadId: ThreadId): Promise<void> {
-    await this.postJson(this.conn(hostId), `/sessions/${encodeURIComponent(threadId)}/archive`, {});
+    await this.postJson(this.conn(hostId), archivePath(threadId), {});
   }
 
   private conn(hostId: string): RemoteHostConnection {
@@ -243,54 +256,39 @@ export class RemoteClientService {
     return { "X-Pi-Client-Id": c.id, "X-Pi-Client-Name": c.name };
   }
 
-  /** POST a JSON body to a master (write path: message/steer/abort). */
-  private postJson(c: RemoteHostConnection, pathName: string, body: unknown): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const url = new URL(pathName, baseUrl(c));
-      const { request } = transportFor(url);
-      const payload = Buffer.from(JSON.stringify(body), "utf8");
-      const req = request(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${c.token}`,
-          "Content-Type": "application/json",
-          "Content-Length": String(payload.length),
-          ...this.clientHeaders(),
-        },
-      }, (res) => {
-        res.resume();
-        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) resolve();
-        else reject(new Error(`master returned ${res.statusCode}`));
-      });
-      req.on("error", reject);
-      req.end(payload);
+  /** POST a JSON body to a master (write path: message/steer/abort).
+   *  Uses `fetch` with a mandatory timeout (ADR-0012) — the former raw
+   *  `http.request` path had no timeout, a latent hang. */
+  private async postJson(c: RemoteHostConnection, pathName: string, body: unknown): Promise<void> {
+    const url = new URL(pathName, baseUrl(c));
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${c.token}`,
+        "Content-Type": "application/json",
+        ...this.clientHeaders(),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(CLIENT_TIMEOUT_MS),
     });
+    if (!res.ok) throw new Error(`master returned ${res.status}`);
   }
 
-  /** GET a JSON body from a master (used by listSessions + pullToTest). */
-  private getJson<T>(c: RemoteHostConnection, pathName: string): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const url = new URL(pathName, baseUrl(c));
-      const { request } = transportFor(url);
-      const req = request(url, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${c.token}`, Accept: "application/json", ...this.clientHeaders() },
-      }, (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (d: Buffer) => chunks.push(d));
-        res.on("end", () => {
-          if (res.statusCode !== 200)
-            return reject(new Error(`master returned ${res.statusCode}`));
-          try {
-            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as T);
-          } catch (err) {
-            reject(err);
-          }
-        });
-      });
-      req.on("error", reject);
-      req.end();
+  /** GET a JSON body from a master (used by listSessions + pullToTest).
+   *  Uses `fetch` with a mandatory timeout (ADR-0012). */
+  private async getJson<T>(c: RemoteHostConnection, pathName: string): Promise<T> {
+    const url = new URL(pathName, baseUrl(c));
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${c.token}`,
+        Accept: "application/json",
+        ...this.clientHeaders(),
+      },
+      signal: AbortSignal.timeout(CLIENT_TIMEOUT_MS),
     });
+    if (!res.ok) throw new Error(`master returned ${res.status}`);
+    return (await res.json()) as T;
   }
 
   /** Open the SSE tap and stream frames to the renderer. */

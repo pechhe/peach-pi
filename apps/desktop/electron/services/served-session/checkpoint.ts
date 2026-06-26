@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RemoteCheckpoint } from "@peach-pi/shared-types";
-import { git, gitEnv, gitOk, toHttpsRepoUrl } from "@peach-pi/remote-handoff";
+import { git, gitEnv, gitOk } from "@peach-pi/remote-handoff";
 
 /** Branch namespace for disposable checkpoint branches (ADR-0009). A commit
  *  here is transport, not endorsement — squash/cherry-pick the good parts
@@ -68,15 +68,12 @@ export async function pushCheckpoint(cwd: string, threadId: string): Promise<boo
   }
 }
 
-/** Read the origin URL of a repo (normalized to https, sans .git), or null. */
-export async function originUrl(cwd: string): Promise<string | null> {
-  try {
-    const remote = (await git(["remote", "get-url", "origin"], cwd)).trim();
-    return toHttpsRepoUrl(remote);
-  } catch {
-    return null;
-  }
-}
+/** Read the origin URL of a repo (normalized to https, sans .git), or null.
+ *  `originUrl` now lives in `@peach-pi/remote-handoff` — it's a git-CLI
+ *  concern (the `git remote get-url origin` step + the normalizer). Re-exported
+ *  here so the served-session barrel (`index.ts`) still exposes it for callers
+ *  that reach the relay's checkpoint surface. */
+export { originUrl } from "@peach-pi/remote-handoff";
 
 /** Current tip of `wip/<id>`, or null if the branch does not exist. */
 export async function checkpointTip(cwd: string, threadId: string): Promise<string | null> {

@@ -4,7 +4,7 @@ import {
   RemoteHostService,
   authorizeRequest,
   type RelayDeps,
-} from "../../electron/services/remote-host.ts";
+} from "../../electron/services/served-session/relay-host.ts";
 import type { ProjectId, ThreadId } from "@peach-pi/shared-types";
 
 /** Minimal fake deps: an in-memory thread table + cwd map. The relay's

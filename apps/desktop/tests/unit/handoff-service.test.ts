@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb } from "../../electron/persistence/db.ts";
-import { createHandoffService } from "../../electron/services/handoff-service.ts";
+import { createHandoffService } from "../../electron/services/movable-execution/handoff-service.ts";
 
 /** Make an isolated HandoffAppService backed by an in-memory DB + a temp
  *  PEACH_ROOT so tests never touch real ~/.peach state. */

@@ -7,7 +7,7 @@ import {
   isRfc1918,
   isValidToken,
   type IfaceAddress,
-} from "../../electron/services/remote-tailnet.ts";
+} from "../../electron/services/served-session/tailnet-bind.ts";
 
 /** Build a fake interface map for the resolver (no live network needed). */
 function ifaces(map: Record<string, [string, boolean][]>): () => Record<string, IfaceAddress[]> {

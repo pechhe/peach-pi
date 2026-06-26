@@ -37,3 +37,8 @@ export {
   wipCommitMessage,
   worktreeDirName,
 } from "./ids.ts";
+
+// `originUrl` (read a repo's origin remote, normalized to https) joins the
+// shared git CLI boundary — like `toHttpsRepoUrl`, the served-session
+// checkpoint helpers call this rather than reimplementing `git remote`.
+export { originUrl } from "./git-cli.ts";
