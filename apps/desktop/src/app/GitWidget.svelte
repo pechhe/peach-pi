@@ -222,17 +222,7 @@
         <span class="num-badge">{info.changedCount}</span>
       {/if}
       {#if info.ahead}<span class="text-faint">↑{info.ahead}</span>{/if}
-      {#if info.behind}
-        <button
-          class="rounded px-1 text-faint transition-colors hover:bg-surface hover:text-fg-soft disabled:opacity-40"
-          onclick={pull}
-          disabled={pulling}
-          data-testid="git-pull"
-          title={pulling ? "Pulling…" : `Pull ${info.behind} commit${info.behind === 1 ? "" : "s"} from origin`}
-        >
-          {pulling ? "↻" : `↓${info.behind}`}
-        </button>
-      {/if}
+      {#if info.behind}<span class="text-faint">↓{info.behind}</span>{/if}
     </button>
 
     {#if open}
@@ -255,6 +245,17 @@
           >
             {committing ? "Committing…" : "Commit & Push"}
           </button>
+          {#if info.behind}
+            <button
+              class="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-fg-soft transition-opacity hover:bg-surface disabled:opacity-40"
+              onclick={pull}
+              disabled={pulling}
+              data-testid="git-pull"
+              title={`Pull ${info.behind} commit${info.behind === 1 ? "" : "s"} from origin (--ff-only)`}
+            >
+              {pulling ? "Pulling…" : `Pull ↓${info.behind}`}
+            </button>
+          {/if}
           {#if canPr}
             <button
               class="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-fg-soft transition-opacity hover:bg-surface disabled:opacity-40"
