@@ -6,205 +6,36 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
  * Installs the `peach-connectors` pi extension into the global auto-discovered
  * location (`~/.pi/agent/extensions/`). pi loads it on session start; the
  * extension talks back to peach-pi's ConnectorResolver over localhost, which
- * proxies to Composio. The Composio API key never leaves the main process.
+ * proxies to Composio / custom HTTP connections / Bitwarden Secrets Manager.
+ * The Composio API key never leaves the main process.
  *
- * The extension source is embedded here (not a packaged asset) so packaging
- * stays simple and the version we ship is the version that runs. We only rewrite
- * the file when our VERSION marker changes, so we don't clobber a freshly loaded
- * copy on every launch.
+ * The extension source is a real, type-checked TypeScript file staged by
+ * `scripts/build-extensions.mjs` into `electron/build/extensions/` (run by
+ * `pnpm predev` and the Forge `packageAfterCopy` hook). This installer copies
+ * that staged asset to the auto-discovered extensions dir on launch.
+ *
+ * `VERSION` is a runtime reload guard (not a drift detector — the typed tools
+ * contract in `@peach-pi/shared-types` enforces drift at compile time). It only
+ * says "is the on-disk file the one this build shipped?" so we don't clobber a
+ * freshly loaded copy or a user's local edit on every launch. Resolved via
+ * `__dirname` per the ADR-0001 CJS rule (never `import.meta.dirname`).
  */
 const EXTENSIONS_DIR = join(homedir(), ".pi", "agent", "extensions");
 const EXTENSION_PATH = join(EXTENSIONS_DIR, "peach-connectors.ts");
-const VERSION = "006";
+const VERSION = "007";
 
-// NOTE: no backticks / no ${} inside this string — keeps embedding clean.
-// The extension is plain TS, run by pi's strip-types loader.
-const EXTENSION_SOURCE = [
-  "// AUTO-INSTALLED by peach-pi. Source: apps/desktop/electron/services/connector-extension.ts",
-  "// peach-connectors v" + VERSION,
-  'import { readFile } from "node:fs/promises";',
-  'import { homedir } from "node:os";',
-  'import { join } from "node:path";',
-  'import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";',
-  'import { Type } from "typebox";',
-  "",
-  'const BOOTSTRAP = join(homedir(), ".pi", "agent", "peach-connectors.json");',
-  "",
-  'type ToolOut = { content: { type: "text"; text: string }[]; details: Record<string, unknown> };',
-  "interface Bootstrap { baseUrl: string; token: string; }",
-  "",
-  "async function readBootstrap(): Promise<Bootstrap | null> {",
-  "  try {",
-  "    const raw = JSON.parse(await readFile(BOOTSTRAP, \"utf8\"));",
-  "    if (raw && raw.baseUrl && raw.token) return raw;",
-  "    return null;",
-  "  } catch {",
-  "    return null;",
-  "  }",
-  "}",
-  "",
-  "function txt(text: string) {",
-  "  return { type: \"text\" as const, text };",
-  "}",
-  "",
-  "export default function (pi: ExtensionAPI) {",
-  "  // Discovery: which Composio tools can the agent use right now?",
-  "  pi.registerTool({",
-  "    name: \"connectors_search_tools\",",
-  "    label: \"Search connected tools\",",
-  "    description:",
-  "      \"Search the tools available through the user's connected services (Composio).\" +",
-  "      \" Returns tool slugs and their input schemas. Call this to discover the exact\" +",
-  "      \" toolSlug and arguments before connector_execute. Filter by toolkit (e.g.\" +",
-  "      \" gmail, github) when you know the service.\",",
-  "    parameters: Type.Object({",
-  "      query: Type.Optional(Type.String({ description: \"Free-text search, e.g. \\\"send email\\\".\" })),",
-  "      toolkits: Type.Optional(Type.Array(Type.String(), {",
-  "        description: \"Restrict to these toolkit slugs, e.g. [\\\"gmail\\\"].\",",
-  "      })),",
-  "    }),",
-  "    async execute(_toolCallId, params, signal): Promise<ToolOut> {",
-  "      const b = await readBootstrap();",
-  "      if (!b) return { content: [txt(\"peach-pi is not running. Start the peach-pi app, then retry.\")], details: {} };",
-  "      const url = new URL(b.baseUrl + \"/tools\");",
-  "      if (params.query) url.searchParams.set(\"search\", params.query);",
-  "      if (params.toolkits && params.toolkits.length) url.searchParams.set(\"toolkits\", params.toolkits.join(\",\"));",
-  "      const res = await fetch(url, { headers: { authorization: \"Bearer \" + b.token }, signal });",
-  "      const body = await res.text();",
-  "      return { content: [txt(body)], details: { status: res.status } };",
-  "    },",
-  "  });",
-  "",
-  "  // Execute a Composio tool by slug. peach-pi injects auth + runs it in the cloud.",
-  "  pi.registerTool({",
-  "    name: \"connector_execute\",",
-  "    label: \"Run a connected tool\",",
-  "    description:",
-  "      \"Execute a tool from a connected service (Composio) by its slug. peach-pi\" +",
-  "      \" injects the user's stored auth and runs it. Use connectors_search_tools first\" +",
-  "      \" to find the toolSlug and its required arguments. If the service is not\" +",
-  "      \" connected, ask the user to add it in peach-pi -> Connections.\",",
-  "    parameters: Type.Object({",
-  "      toolSlug: Type.String({ description: \"Composio tool slug, e.g. GMAIL_SEND_EMAIL.\" }),",
-  "      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {",
-  "        description: \"Tool arguments object, matching the tool's input schema.\",",
-  "      })),",
-  "    }),",
-  "    async execute(_toolCallId, params, signal): Promise<ToolOut> {",
-  "      const b = await readBootstrap();",
-  "      if (!b) return { content: [txt(\"peach-pi is not running. Start the peach-pi app, then retry.\")], details: {} };",
-  "      const res = await fetch(b.baseUrl + \"/execute\", {",
-  "        method: \"POST\",",
-  "        headers: { authorization: \"Bearer \" + b.token, \"content-type\": \"application/json\" },",
-  "        body: JSON.stringify({ toolSlug: params.toolSlug, arguments: params.arguments || {} }),",
-  "        signal,",
-  "      });",
-  "      const text = await res.text();",
-  "      return { content: [txt(text)], details: { status: res.status, toolSlug: params.toolSlug } };",
-  "    },",
-  "  });",
-  "",
-  "  // List the user's saved custom HTTP connections (name + base URL, no keys).",
-  "  pi.registerTool({",
-  "    name: \"custom_connections\",",
-  "    label: \"List custom connections\",",
-  "    description:",
-  "      \"List the user's saved custom HTTP connections (name + base URL). Use this\" +",
-  "      \" to discover connection names before calling custom_request.\",",
-  "    parameters: Type.Object({}),",
-  "    async execute(_toolCallId, _params, signal): Promise<ToolOut> {",
-  "      const b = await readBootstrap();",
-  "      if (!b) return { content: [txt(\"peach-pi is not running. Start the peach-pi app, then retry.\")], details: {} };",
-  "      const res = await fetch(b.baseUrl + \"/custom-connections\", { headers: { authorization: \"Bearer \" + b.token }, signal });",
-  "      const body = await res.text();",
-  "      return { content: [txt(body)], details: { status: res.status } };",
-  "    },",
-  "  });",
-  "",
-  "  // Make an authenticated HTTP call against a saved custom connection.",
-  "  pi.registerTool({",
-  "    name: \"custom_request\",",
-  "    label: \"Call a custom connection\",",
-  "    description:",
-  "      \"Make an authenticated HTTP request to one of the user's saved custom\" +",
-  "      \" connections. peach-pi injects the stored API key as the configured header.\" +",
-  "      \" Call custom_connections first to find the connection name. path is appended\" +",
-  "      \" to the connection's base URL.\",",
-  "    parameters: Type.Object({",
-  "      connection: Type.String({ description: \"Saved connection name, e.g. \\\"Metabase\\\".\" }),",
-  "      method: Type.Optional(Type.String({ description: \"HTTP method (GET, POST, ...). Default GET.\" })),",
-  "      path: Type.String({ description: \"Path appended to the base URL, e.g. \\\"/api/card\\\".\" }),",
-  "      body: Type.Optional(Type.Unknown({ description: \"Request body (JSON-serialized for non-GET).\" })),",
-  "      headers: Type.Optional(Type.Record(Type.String(), Type.String(), { description: \"Extra request headers.\" })),",
-  "    }),",
-  "    async execute(_toolCallId, params, signal): Promise<ToolOut> {",
-  "      const b = await readBootstrap();",
-  "      if (!b) return { content: [txt(\"peach-pi is not running. Start the peach-pi app, then retry.\")], details: {} };",
-  "      const res = await fetch(b.baseUrl + \"/custom-request\", {",
-  "        method: \"POST\",",
-  "        headers: { authorization: \"Bearer \" + b.token, \"content-type\": \"application/json\" },",
-  "        body: JSON.stringify({ connection: params.connection, method: params.method, path: params.path, body: params.body, headers: params.headers }),",
-  "        signal,",
-  "      });",
-  "      const text = await res.text();",
-  "      return { content: [txt(text)], details: { status: res.status, connection: params.connection } };",
-  "    },",
-  "  });",
-  "",
-  "  // List the user's Bitwarden Secrets Manager secrets (names + ids only;",
-  "  // values are never returned). Used to discover what's available before",
-  "  // calling bws_get_secret with a specific id.",
-  "  pi.registerTool({",
-  "    name: \"bws_list_secrets\",",
-  "    label: \"List BWS secrets\",",
-  "    description:",
-  "      \"List the user's Bitwarden Secrets Manager secrets (names + ids only;\" +",
-  "      \" values are never returned). Use this to discover available secrets\" +",
-  "      \" before calling bws_get_secret with a specific id. Optionally filter by\" +",
-  "      \" projectId; defaults to the project selected in peach-pi -> Secrets.\",",
-  "    parameters: Type.Object({",
-  "      projectId: Type.Optional(Type.String({ description: \"Restrict to a BWS project id; omits the selected project by default.\" })),",
-  "    }),",
-  "    async execute(_toolCallId, params, signal): Promise<ToolOut> {",
-  "      const b = await readBootstrap();",
-  "      if (!b) return { content: [txt(\"peach-pi is not running. Start the peach-pi app, then retry.\")], details: {} };",
-  "      const url = new URL(b.baseUrl + \"/secrets\");",
-  "      if (params.projectId) url.searchParams.set(\"projectId\", params.projectId);",
-  "      const res = await fetch(url, { headers: { authorization: \"Bearer \" + b.token }, signal });",
-  "      const text = await res.text();",
-  "      return { content: [txt(text)], details: { status: res.status } };",
-  "    },",
-  "  });",
-  "",
-  "  // Fetch one BWS secret's cleartext value by id. The value is returned as a",
-  "  // tool result and does not appear in the user's prompt text. Use",
-  "  // bws_list_secrets to find the id when the user @-pins a secret of unknown id.",
-  "  pi.registerTool({",
-  "    name: \"bws_get_secret\",",
-  "    label: \"Get a BWS secret value\",",
-  "    description:",
- "      \"Fetch the cleartext value of one Bitwarden Secrets Manager secret by id.\" +",
-  "      \" Use bws_list_secrets first to find the id. The value is returned as a\" +",
-  "      \" tool result and does not appear in the user's prompt text. Do not echo\" +",
-  "      \" the returned value back to the user unless they explicitly ask.\",",
-  "    parameters: Type.Object({",
-  "      secretId: Type.String({ description: \"BWS secret id (from bws_list_secrets or an @-pinned secret).\" }),",
-  "    }),",
-  "    async execute(_toolCallId, params, signal): Promise<ToolOut> {",
-  "      const b = await readBootstrap();",
-  "      if (!b) return { content: [txt(\"peach-pi is not running. Start the peach-pi app, then retry.\")], details: {} };",
-  "      const res = await fetch(b.baseUrl + \"/secret-get\", {",
-  "        method: \"POST\",",
-  "        headers: { authorization: \"Bearer \" + b.token, \"content-type\": \"application/json\" },",
-  "        body: JSON.stringify({ secretId: params.secretId }),",
-  "        signal,",
-  "      });",
-  "      const text = await res.text();",
-  "      return { content: [txt(text)], details: { status: res.status, secretId: params.secretId } };",
-  "    },",
-  "  });",
-  "}",
-].join("\n");
+// Staged asset path. In dev the main bundle is at `.vite/build/main.js`; in a
+// packaged app the same relative layout ships under the app source tree. The
+// build step writes the asset to `electron/build/extensions/`.
+const STAGED_ASSET = join(
+  __dirname,
+  "..",
+  "..",
+  "electron",
+  "build",
+  "extensions",
+  "peach-connectors.ts",
+);
 
 /** Write the extension if missing or out of date. Safe to call on every launch. */
 export async function ensureConnectorExtension(): Promise<void> {
@@ -216,5 +47,7 @@ export async function ensureConnectorExtension(): Promise<void> {
     existing = "";
   }
   if (existing.includes("peach-connectors v" + VERSION)) return;
-  await writeFile(EXTENSION_PATH, EXTENSION_SOURCE, "utf8");
+
+  const staged = await readFile(STAGED_ASSET, "utf8");
+  await writeFile(EXTENSION_PATH, staged, "utf8");
 }

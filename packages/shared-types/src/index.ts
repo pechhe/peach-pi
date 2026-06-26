@@ -4,3 +4,4 @@ export * from "./ipc.ts";
 export * from "./transcript.ts";
 export * from "./hud.ts";
 export * from "./chrome.ts";
+export * from "./connector-tools.ts";
