@@ -402,9 +402,9 @@ export class GitService {
     }
   }
 
-  /** Fast-forward the current branch from origin when behind. Only fast-
-   *  forwards (no merge commit) so a diverged tree surfaces an error to the
-   *  human instead of silently creating merge work. */
+  /** Pull the current branch from origin. Fast-forwards when only behind;
+   *  rebases local commits on top when branches have diverged (ahead and
+   *  behind) so no merge commit is created and origin stays linear. */
   async pull(threadId: string): Promise<GitPullResult> {
     const cwd = this.cwdFor(threadId);
     if (!cwd) return { ok: false, error: "No working directory" };
@@ -414,11 +414,22 @@ export class GitService {
     if (branch === "HEAD") return { ok: false, error: "Detached HEAD" };
     if (!(await gitOk(["rev-parse", "--abbrev-ref", "@{u}"], cwd)))
       return { ok: false, error: "No upstream branch to pull from" };
+    // Fetch first so ahead/behind counts reflect origin.
+    await git(["fetch"], cwd).catch(() => undefined);
+    const ahead = Number((await git(["rev-list", "--count", "@{u}..HEAD"], cwd)).trim());
+    const behind = Number((await git(["rev-list", "--count", "HEAD..@{u}"], cwd)).trim());
+    if (behind === 0) return { ok: true, branch };
+    const rebase = ahead > 0;
     try {
-      await git(["pull", "--ff-only"], cwd);
+      await git(rebase ? ["pull", "--rebase"] : ["pull", "--ff-only"], cwd);
       return { ok: true, branch };
     } catch (err) {
-      return { ok: false, error: `Pull failed: ${String(err)}` };
+      return {
+        ok: false,
+        error: rebase
+          ? `Rebase failed: ${String(err)}. Resolve conflicts then \`git rebase --continue\`, or \`git rebase --abort\` to roll back.`
+          : `Pull failed: ${String(err)}`,
+      };
     }
   }
 

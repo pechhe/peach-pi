@@ -251,7 +251,7 @@
               onclick={pull}
               disabled={pulling}
               data-testid="git-pull"
-              title={`Pull ${info.behind} commit${info.behind === 1 ? "" : "s"} from origin (--ff-only)`}
+              title={`Pull ${info.behind} commit${info.behind === 1 ? "" : "s"} from origin${info.ahead ? " (rebase local commits)" : " (--ff-only)"}`}
             >
               {pulling ? "Pulling…" : `Pull ↓${info.behind}`}
             </button>
