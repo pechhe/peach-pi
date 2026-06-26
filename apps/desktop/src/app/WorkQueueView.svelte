@@ -249,7 +249,7 @@
                 <span class="font-mono text-xs text-faint">#{group.prd.number}</span>
                 <h2 class="text-[13px] font-medium text-fg-soft">{group.prd.title}</h2>
                 <span class="num-badge">prd</span>
-                {#if group.childless}
+                {#if group.issues.length === 0}
                   <button
                     class="ml-auto flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"
                     onclick={() => breakdownPrd(group.prd!.number)}

@@ -331,3 +331,23 @@ test("groupWorkQueue: done issues stay grouped under their PRD", () => {
   // #17 still exists as a child, so the PRD is not flagged childless.
   assert.equal(prd16.childless, false);
 });
+
+test("prdBranchName: deterministic slugged PRD branch", () => {
+  assert.equal(prdBranchName(16, "Make Loops First-Class"), "agent/prd-16-make-loops-first-class");
+});
+
+test("buildPrdBreakdownPrompt: invokes the to-issues skill with PRD context", () => {
+  const [prd] = enrichIssues([raw({ number: 16, title: "Work Queue", labels: ["prd"], body: PRD_BODY })]);
+  const seed = buildPrdBreakdownPrompt(prd!);
+  assert.match(seed, /^\/skill:to-issues/);
+  assert.match(seed, /PRD #16: Work Queue/);
+  assert.match(seed, /Problem Statement/);
+});
+
+test("buildPrdAgentPrompt: seeds with PRD body and closes the PRD issue", () => {
+  const [prd] = enrichIssues([raw({ number: 16, title: "Work Queue", labels: ["prd"], body: PRD_BODY })]);
+  const seed = buildPrdAgentPrompt(prd!);
+  assert.match(seed, /implementing PRD #16: Work Queue/);
+  assert.match(seed, /Closes #16/);
+  assert.match(seed, /Problem Statement/);
+});
