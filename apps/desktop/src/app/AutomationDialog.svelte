@@ -7,7 +7,7 @@
   } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
-  import { buildConnectionsHint } from "../lib/composer/mode";
+  import { buildConnectionsHint } from "../lib/composer/hints";
   import { scopedModels } from "../stores/scoped-models.svelte";
   import {
     DEFAULT_SCHEDULE,

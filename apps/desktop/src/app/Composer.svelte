@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { CommandInfo, Connection, CustomConnection, ReferencedConnection, ReferencedSecret, Thread } from "@peach-pi/shared-types";
-  import { buildConnectionsHint, buildSecretsHint, composeOutgoingPrompt } from "../lib/composer/mode";
+  import { buildConnectionsHint, buildSecretsHint } from "../lib/composer/hints";
+  import { composeOutgoingPrompt } from "../lib/composer/mode";
   import {
     extractFilesFromDataTransfer,
     extractImageFilePathsFromClipboardData,

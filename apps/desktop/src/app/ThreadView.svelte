@@ -25,10 +25,8 @@
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Circle from "@lucide/svelte/icons/circle";
   import X from "@lucide/svelte/icons/x";
-  import KeyRound from "@lucide/svelte/icons/key-round";
   import { parseSkillInvocation } from "../lib/composer/skill-message";
-  import { parseConnectionsHint, parseSecretsHint } from "../lib/composer/connections-message";
-  import ConnectorIcon from "./ConnectorIcon.svelte";
+  import MessageBadges from "./MessageBadges.svelte";
   import { skillViewer } from "../stores/skill-viewer.svelte";
   import Markdown from "./Markdown.svelte";
   import StreamingText from "./StreamingText.svelte";
@@ -882,57 +880,32 @@
               </div>
             {/if}
             {#if item.text}
-              {@const conn = parseConnectionsHint(item.text)}
-              {@const sec = parseSecretsHint(conn ? conn.body : item.text)}
-              {@const displayText = sec ? sec.body : conn ? conn.body : item.text}
-              {#if conn}
-                <div class="flex flex-wrap justify-end gap-1.5" data-testid="connection-badges">
-                  {#each conn.connections as c (c.kind + ":" + c.name)}
-                    <span
-                      class="inline-flex items-center gap-1.5 rounded-full border border-border-strong/50 bg-surface-2/80 py-0.5 pl-1 pr-2.5 text-[11.5px] font-medium text-fg-soft"
-                      title={`${c.kind === "custom" ? "Custom connection" : "Composio toolkit"}: ${c.name}`}
+              <MessageBadges text={item.text} connLogos={connLogos}>
+                {#snippet children({ body })}
+                  {@const skill = parseSkillInvocation(body)}
+                  {#if skill}
+                    <button
+                      type="button"
+                      class="skill-chip self-end"
+                      onclick={() => skillViewer.open(skill)}
+                      title="View skill"
+                      data-testid="skill-chip"
                     >
-                      <ConnectorIcon logoUrl={connLogos.get(c.name) ?? null} label={c.name} size={16} />
-                      <span>@{c.name}</span>
-                    </span>
-                  {/each}
-                </div>
-              {/if}
-              {#if sec}
-                <div class="flex flex-wrap justify-end gap-1.5" data-testid="secret-badges">
-                  {#each sec.secrets as s (s.id)}
-                    <span
-                      class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 py-0.5 pl-1 pr-2.5 text-[11.5px] font-medium text-amber-700"
-                      title={`BWS secret: ${s.name}`}
-                    >
-                      <KeyRound size={14} class="shrink-0" />
-                      <span class="font-mono">@{s.name}</span>
-                    </span>
-                  {/each}
-                </div>
-              {/if}
-              {@const skill = parseSkillInvocation(displayText)}
-              {#if skill}
-                <button
-                  type="button"
-                  class="skill-chip self-end"
-                  onclick={() => skillViewer.open(skill)}
-                  title="View skill"
-                  data-testid="skill-chip"
-                >
-                  <BookOpen size={12} />
-                  <span>{skill.name}</span>
-                </button>
-                {#if skill.args}
-                  <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">
-                    {skill.args}
-                  </div>
-                {/if}
-              {:else if displayText}
-                <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">
-                  {displayText}
-                </div>
-              {/if}
+                      <BookOpen size={12} />
+                      <span>{skill.name}</span>
+                    </button>
+                    {#if skill.args}
+                      <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">
+                        {skill.args}
+                      </div>
+                    {/if}
+                  {:else if body}
+                    <div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">
+                      {body}
+                    </div>
+                  {/if}
+                {/snippet}
+              </MessageBadges>
             {/if}
           </div>
         {:else if item.kind === "assistant" && !isSteerMessage(item)}
