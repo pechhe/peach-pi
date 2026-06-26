@@ -252,9 +252,11 @@ export class IssuesService {
     try {
       const useGh = await ghAvailable();
       if (useGh) {
+        // gh CLI uses "not planned" (space); REST API uses "not_planned" (underscore).
+        const ghReason = reason === "not_planned" ? "not planned" : reason;
         await run(
           "gh",
-          ["issue", "close", String(issueNumber), "--repo", `${gh.owner}/${gh.repo}`, "--reason", reason],
+          ["issue", "close", String(issueNumber), "--repo", `${gh.owner}/${gh.repo}`, "--reason", ghReason],
           { cwd: gh.cwd },
         );
       } else {

@@ -41,7 +41,9 @@ const slug = (text: string): string =>
  *  null unless it's a sibling or child of the project root (not under
  *  peach-pi's own managed worktrees dir). The agent-invoked `git worktree add`
  *  runs with the project checkout as cwd, so relative paths resolve against
- *  the project path. Tildes are expanded; anything unresolved is rejected. */
+ *  the project path. Tildes are expanded; anything unresolved is rejected.
+ *  Retained for the future user-driven adoption flow; the agent-driven caller
+ *  was removed to pin thread environments to their creation cwd. */
 function resolveWorktreeDir(
   rawPath: string,
   projectPath: string,
@@ -313,29 +315,6 @@ export class GitService {
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
-  }
-
-  /** Adopt a sibling worktree an agent created out-of-band (raw `git worktree
-   *  add -b <branch> <path>`), so the thread's git status reflects where work
-   *  actually lands instead of the project's main checkout. No-ops when the
-   *  thread already runs in a worktree, when the path isn't resolvable to a
-   *  sibling/child of the project root (peach-pi's own worktrees live under
-   *  userData/worktrees and are managed via the IPC `createWorktree` flow),
-   *  or when the path doesn't resolve to a real git worktree on a feature
-   *  branch. */
-  async adoptSiblingWorktree(threadId: string, worktreePath: string): Promise<void> {
-    const thread = this.threads.get(threadId);
-    if (!thread?.projectId || thread.worktreeDir) return;
-    const project = this.projects.all().find((p) => p.id === thread.projectId);
-    if (!project) return;
-    const dir = resolveWorktreeDir(worktreePath, project.path, this.worktreesDir);
-    if (!dir) return;
-    if (!(await gitOk(["rev-parse", "--git-dir"], dir))) return;
-    const head = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir)).trim();
-    if (!head || head === "HEAD") return;
-    const base = await this.defaultBranch(dir);
-    if (head === base) return;
-    this.threads.setWorktree(threadId, null, dir);
   }
 
   /**
