@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildConnectionsHint } from "../../src/lib/composer/mode.ts";
-import { parseConnectionsHint } from "../../src/lib/composer/connections-message.ts";
+import { buildConnectionsHint, parseConnectionsHint } from "../../src/lib/composer/hints.ts";
 
 // The producer (buildConnectionsHint) and the transcript parser
 // (parseConnectionsHint) share a plain-text format. This test couples them so

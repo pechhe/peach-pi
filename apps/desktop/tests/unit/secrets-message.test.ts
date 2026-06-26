@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSecretsHint } from "../../src/lib/composer/mode.ts";
-import { parseSecretsHint } from "../../src/lib/composer/connections-message.ts";
+import { buildSecretsHint, parseSecretsHint } from "../../src/lib/composer/hints.ts";
 
 // Producer (buildSecretsHint) and transcript parser (parseSecretsHint) share a
 // plain-text format. Keep them coupled so the transcript renders secret badges

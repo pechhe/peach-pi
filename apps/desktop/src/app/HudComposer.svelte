@@ -14,7 +14,7 @@
   import { playDoneSound } from "../lib/sound/done-sound";
   import Composer from "./Composer.svelte";
   import Markdown from "./Markdown.svelte";
-  import { parseConnectionsHint, parseSecretsHint } from "../lib/composer/connections-message";
+  import MessageBadges from "./MessageBadges.svelte";
 
   let snapshot = $state<AppSnapshot | null>(null);
 
@@ -285,22 +285,13 @@
       {:else}
         {#each items as item (item.id)}
           {#if item.kind === "user"}
-            {@const conn = parseConnectionsHint(item.text)}
-            {@const sec = parseSecretsHint(conn ? conn.body : item.text)}
-            {@const bodyAfterAll = sec ? sec.body : conn ? conn.body : item.text}
-            {#if conn}
-              <div class="hud-conn-row">
-                {#each conn.connections as c (c.kind + ":" + c.name)}<span class="hud-conn-badge">@{c.name}</span>{/each}
-              </div>
-            {/if}
-            {#if sec}
-              <div class="hud-conn-row">
-                {#each sec.secrets as s (s.id)}<span class="hud-conn-badge hud-conn-badge--secret">@{s.name}</span>{/each}
-              </div>
-            {/if}
-            {#if !conn || bodyAfterAll}
-              <div class="hud-msg-user">{bodyAfterAll}</div>
-            {/if}
+            <MessageBadges text={item.text} variant="hud">
+              {#snippet children({ body })}
+                {#if body}
+                  <div class="hud-msg-user">{body}</div>
+                {/if}
+              {/snippet}
+            </MessageBadges>
           {:else if item.kind === "assistant"}
             <div class="hud-msg"><Markdown text={item.text} /></div>
           {:else if item.kind === "tool"}
@@ -426,28 +417,6 @@
     background: color-mix(in srgb, var(--color-surface-2) 80%, transparent);
     white-space: pre-wrap;
     color: var(--color-fg);
-  }
-  .hud-conn-row {
-    align-self: flex-end;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 4px;
-  }
-  .hud-conn-badge {
-    padding: 1px 7px;
-    border-radius: 9999px;
-    font-size: 10px;
-    font-weight: 500;
-    border: 1px solid color-mix(in srgb, var(--color-border-strong) 50%, transparent);
-    background: color-mix(in srgb, var(--color-surface-2) 80%, transparent);
-    color: var(--color-fg-soft);
-  }
-  .hud-conn-badge--secret {
-    border-color: color-mix(in srgb, #f59e0b 45%, transparent);
-    background: color-mix(in srgb, #f59e0b 12%, transparent);
-    color: #b45309;
-    font-family: var(--font-mono, monospace);
   }
   .hud-msg-meta {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

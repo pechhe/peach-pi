@@ -1,31 +1,3 @@
-import type { ReferencedConnection, ReferencedSecret } from "@peach-pi/shared-types";
-
-/** Build a prompt hint to prepend when the user has @-pinned connections. */
-export function buildConnectionsHint(connections: ReferencedConnection[]): string {
-  if (connections.length === 0) return "";
-  const items = connections.map((c) => {
-    if (c.kind === "custom") {
-      return `- custom connection "${c.name}"${c.baseUrl ? ` (base URL: ${c.baseUrl})` : ""}`;
-    }
-    return `- composio toolkit "${c.name}"${c.toolkitSlug ? ` (slug: ${c.toolkitSlug})` : ""}`;
-  });
-  return ["The user has pinned these connections for this task. Use them preferentially:", ...items].join("\n");
-}
-
-/** Build a prompt hint for @-pinned BWS secrets. Inputs only names + ids — never
- *  values — so the model knows what's available without the value ever entering
- *  the prompt text. The model fetches the value at runtime via bws_get_secret. */
-export function buildSecretsHint(secrets: ReferencedSecret[]): string {
-  if (secrets.length === 0) return "";
-  const items = secrets.map((s) => `- secret "${s.name}" (id: ${s.id})`);
-  return [
-    "The user has pinned these Bitwarden Secrets Manager secrets for this task.",
-    "To use one, call the bws_get_secret tool with its id; the value is returned as a tool result and is NOT in this prompt.",
-    "Do not echo the secret value back to the user unless they explicitly ask.",
-    ...items,
-  ].join("\n");
-}
-
 export type ComposerMode = "build" | "plan";
 export type PlanModeIdeology = "default" | "grill";
 
