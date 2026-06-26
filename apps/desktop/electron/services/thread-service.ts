@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { randomUUID as uuid } from "node:crypto";
 import type {
+  AppThreadCollaborator,
   AutoCompactSettings,
   CommandInfo,
   ImagePayload,
@@ -214,28 +215,24 @@ export class ThreadService {
     this.gitService = gitService;
   }
 
-  /** Wire the app-state boundary after construction (resolves the App↔Thread
-   *  cycle). Owns worktree record add/archive; required for the sunk
-   *  `threads:create` + `threads:setEnvironment` orchestrators (issue #15). */
-  private appService: {
-    worktree: (id: string) => { id: string; dir: string; projectId: string } | null;
-    addWorktree: (projectId: string, dir: string) => { id: string; dir: string };
-    snapshot: () => {
-      threads: Thread[];
-      projects: { id: string; path: string }[];
-    };
-    archiveWorktree: (id: string) => string[];
-  } | null = null;
-  setAppService(appService: {
-    worktree: (id: string) => { id: string; dir: string; projectId: string } | null;
-    addWorktree: (projectId: string, dir: string) => { id: string; dir: string };
-    snapshot: () => {
-      threads: Thread[];
-      projects: { id: string; path: string }[];
-    };
-    archiveWorktree: (id: string) => string[];
-  }): void {
+  /** App↔Thread collaborator (ADR-0015): the worktree/snapshot/archive subset
+   *  of `AppService`, wired post-construction because the App↔Thread cycle
+   *  forbids constructor injection. Typed by the named `AppThreadCollaborator`
+   *  interface so drift between `AppService` and its mirror fails at compile
+   *  time instead of silently breaking the orchestrators (issue #26). Null
+   *  until `initAppCollaborator` runs; methods null-guard on purpose. */
+  private appService: AppThreadCollaborator | null = null;
+  private appCollaboratorInited = false;
+  /** One-shot init of the App↔Thread collaborator. The cycle requires deferred
+   *  wiring (both services built before either can hold the other), but the
+   *  collaborator is set exactly once — re-wiring after the first init is a
+   *  bug (drift mid-run), so it throws instead of silently overwriting. */
+  initAppCollaborator(appService: AppThreadCollaborator): void {
+    if (this.appCollaboratorInited) {
+      throw new Error("AppThreadCollaborator already initialized");
+    }
     this.appService = appService;
+    this.appCollaboratorInited = true;
   }
 
   /** Wire the remote-handoff boundary after construction (service ordering):

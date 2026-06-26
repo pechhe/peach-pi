@@ -763,6 +763,19 @@ export interface AppSnapshot {
   ui: UiState;
 }
 
+/** App↔Thread collaborator surface (ADR-0015). `ThreadService` consumes the
+ *  worktree/snapshot/archive subset of `AppService` via this named interface so
+ *  a method added to `AppService` that drifts from the collaborator contract
+ *  fails at compile time instead of silently breaking the App↔Thread cycle.
+ *  `AppService` satisfies it directly; the field stays nullable because the
+ *  cycle requires deferred one-shot wiring after both services are built. */
+export interface AppThreadCollaborator {
+  worktree: (id: string) => Worktree | null;
+  addWorktree: (projectId: ProjectId, dir: string) => Worktree;
+  snapshot: () => AppSnapshot;
+  archiveWorktree: (id: string) => string[];
+}
+
 /** A locally-saved API credential for an arbitrary HTTP service, independent
  *  of Composio. Stored on-device; the agent calls it via the `custom_request`
  *  tool. The raw key never crosses IPC to the renderer (only `keyPreview`). */
