@@ -954,6 +954,16 @@ export type NoArgInvokeChannel = {
 export type EventPayload<K extends EventChannel> =
   IpcContracts[K] extends EventContract<infer P> ? P : never;
 
+/**
+ * Typed broadcast emitter: channel → payload, keyed by the IPC contract so a
+ * wrong channel or payload shape is a compile error. Pure type (erases at
+ * runtime) — importing it pulls no `electron` dependency, so service modules
+ * loaded in plain Node for unit tests can adopt the typed shape without
+ * dragging in `BrowserWindow`. The concrete emitter *factory* lives in the
+ * Electron main process (it needs `webContents.send` at runtime).
+ */
+export type TypedEmit = <K extends EventChannel>(channel: K, payload: EventPayload<K>) => void;
+
 /** Shape of the API exposed on `window.peachPi` by preload. */
 export type PeachPiApi = {
   invoke<K extends InvokeChannel>(channel: K, ...args: InvokeArgs<K>): Promise<InvokeResult<K>>;

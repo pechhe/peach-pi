@@ -6,6 +6,7 @@ import {
   type InvokeArgs,
   type InvokeChannel,
   type InvokeResult,
+  type TypedEmit,
 } from "@peach-pi/shared-types";
 import { captureError, emitDevTapEvent, isDevTapEnabled } from "../services/devtap.ts";
 
@@ -72,7 +73,7 @@ export function registerIpcHandlers<F extends IpcForwards>(
   }
 }
 
-export function createEmitter(getWindows: () => BrowserWindow[]) {
+export function createEmitter(getWindows: () => BrowserWindow[]): TypedEmit {
   return function emit<K extends EventChannel>(channel: K, payload: EventPayload<K>): void {
     for (const win of getWindows()) {
       if (!win.isDestroyed()) win.webContents.send(channel, payload);
@@ -80,4 +81,5 @@ export function createEmitter(getWindows: () => BrowserWindow[]) {
   };
 }
 
-export type Emit = ReturnType<typeof createEmitter>;
+/** Typed emitter signature (re-exported from shared-types for convenience). */
+export type Emit = TypedEmit;
