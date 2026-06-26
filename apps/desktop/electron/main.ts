@@ -245,7 +245,7 @@ async function boot(): Promise<void> {
   threadService.setGitService(gitService);
   // Sink the `threads:create` + `threads:setEnvironment` orchestrators into
   // ThreadService (issue #15). App↔Thread cycle → injected post-construction.
-  threadService.setAppService(appService);
+  threadService.initAppCollaborator(appService);
   // Sink the `worktrees:archive` orchestrator into AppService (issue #15).
   appService.setTeardownCollaborators({
     threadService,
