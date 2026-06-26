@@ -102,6 +102,14 @@ const config: ForgeConfig = {
     },
     packageAfterCopy: async (_config, buildPath) => {
       vendorPiSdk(buildPath);
+      // Stage peach-owned pi extensions (e.g. peach-connectors) into the
+      // packaged app source tree so ensureConnectorExtension() can copy them
+      // to ~/.pi/agent/extensions/ on first launch. See ADR-0011.
+      execFileSync(
+        process.execPath,
+        [path.join(__dirname, "../../scripts/build-extensions.mjs"), "--out", path.join(buildPath, "electron/build/extensions")],
+        { stdio: "inherit" },
+      );
     },
   },
   makers: [new MakerZIP({}, ["darwin"]), new MakerDMG({}, ["darwin"])],

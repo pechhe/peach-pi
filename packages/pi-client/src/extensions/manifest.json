@@ -1,0 +1,5 @@
+{
+  "extensions": {
+    "peach-connectors": "extensions/peach-connectors.ts"
+  }
+}

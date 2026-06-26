@@ -14,3 +14,4 @@ apps/desktop/build/cua-driver/
 .pi/devtap/
 .vercel
 apps/desktop/.vite-build-check/
+apps/desktop/electron/build/extensions/
