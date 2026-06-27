@@ -125,18 +125,39 @@ export class PiSession {
     });
   }
 
-  /** New persistent session, or resume when sessionFile given. */
+  /** New persistent session, resume when `sessionFile` given, or fork a
+   *  source session up to `forkFrom.leafId` into a new JSONL file. `forkFrom`
+   *  is mutually exclusive with `sessionFile`. A `null`/`undefined` leafId
+   *  forks the whole source tree (clone semantics — pi `/clone`); a specific
+   *  entry id linearises root→that entry's parent (fork semantics — pi `/fork`). */
   static async create(
     cwd: string,
     callbacks: PiSessionCallbacks,
-    sessionFile?: string,
+    options?: {
+      sessionFile?: string;
+      forkFrom?: { sourceFile: string; leafId?: string | null };
+    },
   ): Promise<PiSession> {
     const sdk = await import("@earendil-works/pi-coding-agent");
     const authStorage = sdk.AuthStorage.create();
     const modelRegistry = sdk.ModelRegistry.create(authStorage);
-    const sessionManager = sessionFile
-      ? sdk.SessionManager.open(sessionFile)
-      : sdk.SessionManager.create(cwd);
+    let sessionManager;
+    if (options?.forkFrom) {
+      // Mirror pi's runtime `fork()` for persisted sessions: re-open the source
+      // file into a fresh SessionManager (never mutate the live source), then
+      // linearise root→leafId into a new `.jsonl` with a `parentSession` link.
+      const fresh = sdk.SessionManager.open(options.forkFrom.sourceFile);
+      const leafId = options.forkFrom.leafId ?? fresh.getLeafId();
+      if (!leafId) {
+        throw new Error("Cannot fork: source session has no entries");
+      }
+      fresh.createBranchedSession(leafId);
+      sessionManager = fresh;
+    } else if (options?.sessionFile) {
+      sessionManager = sdk.SessionManager.open(options.sessionFile);
+    } else {
+      sessionManager = sdk.SessionManager.create(cwd);
+    }
     const loader = new sdk.DefaultResourceLoader({ cwd, agentDir: sdk.getAgentDir() });
     await loader.reload();
     const { session, extensionsResult } = await sdk.createAgentSession({
@@ -183,6 +204,13 @@ export class PiSession {
 
   get sessionFile(): string | undefined {
     return this.session.sessionFile;
+  }
+
+  /** Parent entry id of a session-tree entry, or null at root. Used by the
+   *  fork-before path: pi forks to the parent of the selected user message. */
+  getEntryParentId(entryId: string): string | null {
+    const entry = this.session.sessionManager.getEntry(entryId);
+    return entry?.parentId ?? null;
   }
 
   get isStreaming(): boolean {

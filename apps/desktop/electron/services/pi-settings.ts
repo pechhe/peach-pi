@@ -22,6 +22,7 @@ const DEFAULTS: PiSettings = {
   followUpMode: "one-at-a-time",
   autoUpdateExtensions: true,
   insomnia: false,
+  telemetryConsent: null,
 };
 
 interface RawSettingsFile {
@@ -39,6 +40,7 @@ interface RawSettingsFile {
   followUpMode?: string;
   autoUpdateExtensions?: boolean;
   insomnia?: boolean;
+  telemetryConsent?: boolean | null;
   [key: string]: unknown;
 }
 
@@ -70,6 +72,7 @@ export async function getPiSettings(): Promise<PiSettings> {
     followUpMode: (raw.followUpMode as PiSettings["followUpMode"]) ?? DEFAULTS.followUpMode,
     autoUpdateExtensions: raw.autoUpdateExtensions ?? DEFAULTS.autoUpdateExtensions,
     insomnia: raw.insomnia ?? DEFAULTS.insomnia,
+    telemetryConsent: raw.telemetryConsent ?? DEFAULTS.telemetryConsent,
   };
 }
 
@@ -92,6 +95,7 @@ export async function setPiSettings(patch: Partial<PiSettings>): Promise<PiSetti
   if (patch.autoUpdateExtensions !== undefined)
     raw.autoUpdateExtensions = patch.autoUpdateExtensions;
   if (patch.insomnia !== undefined) raw.insomnia = patch.insomnia;
+  if (patch.telemetryConsent !== undefined) raw.telemetryConsent = patch.telemetryConsent;
 
   await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
   await writeFile(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, "utf8");

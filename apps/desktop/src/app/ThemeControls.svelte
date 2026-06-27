@@ -18,14 +18,17 @@
   } from "../lib/theme.svelte";
   import { Select } from "../components/ui/select";
   import ThemeGrid from "./ThemeGrid.svelte";
+  import ImportThemeDialog from "./ImportThemeDialog.svelte";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Shuffle from "@lucide/svelte/icons/shuffle";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
 
   // Inline name field for save / rename. `showNameField` gates the row;
   // `nameDraft` is just the text the user is typing.
   let nameDraft = $state("");
   let showNameField = $state(false);
   let nameInput = $state<HTMLInputElement | null>(null);
+  let importOpen = $state(false);
 
   const MODE_OPTIONS: { id: ThemeMode; label: string; hint: string }[] = [
     { id: "single", label: "Single", hint: "One theme, always." },
@@ -52,13 +55,26 @@
 </script>
 
 <div class="space-y-4">
-  <!-- Mode switch -->
-  <div>
-    <h2 class="text-sm text-fg">Theme</h2>
-    <p class="text-xs text-faint">
-      {#each MODE_OPTIONS as opt, i}{#if i} · {/if}{#if theme.prefs.mode === opt.id}{opt.hint}{/if}{/each}
-    </p>
-    <div class="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Theme mode">
+  <!-- Import + mode switch -->
+  <div class="flex items-start justify-between gap-3">
+    <div>
+      <h2 class="text-sm text-fg">Theme</h2>
+      <p class="text-xs text-faint">
+        {#each MODE_OPTIONS as opt, i}{#if i} · {/if}{#if theme.prefs.mode === opt.id}{opt.hint}{/if}{/each}
+      </p>
+    </div>
+    <button
+      type="button"
+      class="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted transition-colors hover:border-border-focus hover:text-fg"
+      onclick={() => { importOpen = true; }}
+      data-testid="theme-import-button"
+      title="Import a theme from a name, URL, or screenshot"
+    >
+      <Sparkles class="size-3.5" />
+      Import
+    </button>
+  </div>
+  <div class="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Theme mode">
       {#each MODE_OPTIONS as opt}
         <button
           type="button"
@@ -75,7 +91,6 @@
         >{opt.label}</button>
       {/each}
     </div>
-  </div>
 
   <!-- Visual grid (selection semantics depend on the mode) -->
   <div>
@@ -102,8 +117,10 @@
         <span><span class="font-medium text-fg-soft">Dark:</span> {THEMES.find((t) => t.id === theme.prefs.systemDark)?.label ?? theme.prefs.systemDark}</span>
       </div>
     {/if}
-    <ThemeGrid />
+      <ThemeGrid />
   </div>
+
+  <ImportThemeDialog bind:open={importOpen} />
 
   <!-- Custom editor: only when the active theme is the draft or a saved one -->
   {#if editing}

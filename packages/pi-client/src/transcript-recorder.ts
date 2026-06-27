@@ -546,7 +546,19 @@ export class TranscriptRecorder {
         this.retryId = id;
         const attempt = event.attempt ?? 1;
         const maxAttempts = event.maxAttempts ?? attempt;
-        return [
+        // The SDK emits message_end (error) BEFORE auto_retry_start, so the
+        // failed assistant item already landed with its own error card.
+        // The SDK also drops the failed message from agent state on retry,
+        // and the retry card replaces it — mirror that here: drop the failed
+        // assistant item so only the grouped retry card shows. Without this,
+        // every attempt stacks a redundant "Connection error." card under the
+        // retry summary.
+        const ops: TranscriptOp[] = [];
+        const last = this.items[this.items.length - 1];
+        if (last?.kind === "assistant" && last.error && !last.text && !last.thinking) {
+          ops.push(this.deleteOp(last.id));
+        }
+        ops.push(
           this.upsertOp({
             id,
             kind: "retry",
@@ -555,7 +567,8 @@ export class TranscriptRecorder {
             maxAttempts,
             error: event.errorMessage ?? "Connection failed",
           }),
-        ];
+        );
+        return ops;
       }
       case "auto_retry_end": {
         // Success → drop the card (the run continues normally and the next

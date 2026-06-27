@@ -6,7 +6,7 @@
   import { api } from "../lib/ipc";
   import { snapshot } from "../stores/snapshot.svelte";
   import { transcripts } from "../stores/transcripts.svelte";
-  import { queues } from "../stores/composer.svelte";
+  import { drafts, queues } from "../stores/composer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { scopedModels } from "../stores/scoped-models.svelte";
@@ -15,6 +15,8 @@
   import { sideChat } from "../stores/side-chat.svelte";
   import { usage } from "../stores/usage.svelte";
   import { usagePrefs } from "../stores/usage-prefs.svelte";
+  import { telemetry, subscribeTelemetry } from "../stores/telemetry.svelte";
+  import { captureEvent } from "../lib/telemetry";
   import { preloadSounds, installGlobalButtonPress } from "../lib/sound/button-click-sound";
   import { preloadDoneSamples } from "../lib/sound/done-sound";
   import { playDoneSound } from "../lib/sound/done-sound";
@@ -43,6 +45,7 @@
   import Toasts from "./Toasts.svelte";
   import SidePanel from "./SidePanel.svelte";
   import PiHealthBanner from "./PiHealthBanner.svelte";
+  import TelemetryConsentDialog from "./TelemetryConsentDialog.svelte";
   import { Agentation } from "sv-agentation";
   // After copying annotations, automatically exit inspect mode and collapse the toolbar.
   // The controller is internal, so we dispatch synthetic events to trigger its handlers.
@@ -100,6 +103,7 @@
         : projectId
           ? await api.invoke("threads:create", projectId)
           : await api.invoke("threads:createChat");
+    captureEvent("thread_created", { worktree, is_chat: !projectId });
     selectThread(thread.id);
   }
 
@@ -332,6 +336,30 @@
     startNewThread(selectedThread?.projectId ?? null);
   }
 
+  // Clone the current thread's whole active branch into a new thread (pi
+  // `/clone`). New thread inherits the source's environment.
+  async function cloneCurrentThread() {
+    if (!selectedThread) return;
+    const thread = await api.invoke("threads:clone", selectedThread.id);
+    captureEvent("thread_cloned");
+    selectThread(thread.id);
+  }
+
+  // Fork the current thread up to (excluding) a user-message entry (pi
+  // `/fork`). Pre-fills the new thread's composer with the selected prompt.
+  async function forkCurrentThread(
+    entryId: string,
+  ): Promise<void> {
+    if (!selectedThread) return;
+    const { thread, editorText } = await api.invoke(
+      "threads:forkFrom",
+      selectedThread.id,
+      entryId,
+    );
+    drafts.update(thread.id, { text: editorText });
+    selectThread(thread.id);
+  }
+
   // Sidebar new-thread button: create a thread in the project's main
   // checkout or inside an existing worktree (worktreeId set).
   async function newThreadInProject(projectId: string, worktreeId?: string) {
@@ -340,6 +368,7 @@
       projectId,
       worktreeId ? { worktreeId } : undefined,
     );
+    captureEvent("thread_created", { worktree: false, is_chat: false });
     selectThread(thread.id);
   }
 
@@ -407,10 +436,16 @@
     usagePrefs.init();
     scopedModels.init();
     remoteFirst.init();
+    void telemetry.load();
+    const offTelemetry = subscribeTelemetry();
     void snapshot.init();
     preloadSounds();
     preloadDoneSamples();
-    return installGlobalButtonPress();
+    const cleanupButtonPress = installGlobalButtonPress();
+    return () => {
+      offTelemetry();
+      cleanupButtonPress();
+    };
   });
 
   // Load sidebar open-issue counts once projects are first available.
@@ -423,9 +458,25 @@
       projects.filter((p) => p.kind === "repo").map((p) => p.id),
     );
   });
+
+  // Re-fetch sidebar open-issue counts whenever the window regains focus or
+  // becomes visible. Closes/merges done since mount (in another client, on
+  // GitHub, or via the merge queue) otherwise leave the badge stale: mount
+  // loads it once and only WorkQueueView's own reload refreshes its project.
+  function reloadRepoCounts() {
+    const projects = snapshot.current?.projects;
+    if (!projects) return;
+    void workQueue.loadCounts(
+      projects.filter((p) => p.kind === "repo").map((p) => p.id),
+    );
+  }
 </script>
 
-<svelte:window onkeydown={onGlobalKeydown} />
+<svelte:window
+  onkeydown={onGlobalKeydown}
+  onfocus={reloadRepoCounts}
+  onvisibilitychange={reloadRepoCounts}
+/>
 
 {#snippet sidebarBody()}
   <Sidebar
@@ -541,6 +592,8 @@
         onSetEnvironment={setThreadEnvironment}
         onSelectThread={selectThread}
         onNewThread={newThreadForCurrentProject}
+        onCloneThread={cloneCurrentThread}
+        onForkThread={forkCurrentThread}
         pendingFind={pendingFindQuery}
         onFindConsumed={() => (pendingFindQuery = null)}
       />
@@ -587,6 +640,7 @@
   <SkillDialog />
   <Toasts />
   <PiHealthBanner />
+  <TelemetryConsentDialog />
 </div>
 
 {#if agentationProps}

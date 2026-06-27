@@ -14,7 +14,7 @@ test("migrations are idempotent", () => {
   const db = memoryDb();
   migrate(db); // second run = no-op
   const v = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  assert.equal(v.user_version, 10);
+  assert.equal(v.user_version, 11);
 });
 
 test("automation lifecycle: insert, due, fire, runs, disable", () => {
@@ -67,6 +67,9 @@ test("project add/list/remove round-trip", () => {
   const p = repo.add("/tmp/demo", "demo", "folder");
   assert.equal(repo.all().length, 1);
   assert.equal(repo.all()[0]!.name, "demo");
+  assert.equal(repo.all()[0]!.mergeWorkflow, "pr");
+  repo.setMergeWorkflow(p.id, "local");
+  assert.equal(repo.all()[0]!.mergeWorkflow, "local");
   repo.remove(p.id);
   assert.equal(repo.all().length, 0);
 });

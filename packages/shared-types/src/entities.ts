@@ -13,6 +13,10 @@ export interface Project {
   order: number;
   createdAt: string;
   archivedAt?: string;
+  /** Work Queue merge workflow: 'pr' opens a GitHub PR + `gh pr merge --squash`;
+   *   'local' merges the worktree branch into the repo's default branch in the
+   *   project's main checkout then pushes (no PR). Per-project. Defaults 'pr'. */
+  mergeWorkflow: "pr" | "local";
 }
 
 /** A first-class isolated git worktree owned by a project (ADR-0003 evolve).
@@ -114,6 +118,9 @@ export interface UiState {
   hudPosition: { x: number; y: number } | null;
   /** Opt-in: expand the HUD chat when the HUD's own thread finishes. */
   hudAutoRevealOnFinish: boolean;
+  /** When true, archiving the sole thread in a worktree silently archives
+   *  the worktree too (with its git checkout); no confirm dialog shown. */
+  archiveThreadWorktreeWarningDismissed: boolean;
 }
 
 export type AppView =
@@ -211,7 +218,16 @@ export type MergeBatchItemResult =
   | {
       ok: true;
       issueNumber: number;
+      /** GitHub PR URL (pr workflow) or the default branch the branch was
+       *   merged into (local workflow). */
       prUrl: string;
+      tests: "passed" | "skipped";
+    }
+  | {
+      ok: true;
+      issueNumber: number;
+      /** Default branch the worktree branch was merged into (local workflow). */
+      mergedTo: string;
       tests: "passed" | "skipped";
     }
   | {
@@ -464,6 +480,54 @@ export interface ScopedModel {
   scoped: boolean;
 }
 
+/** Raw output of an LLM-driven theme import. The renderer validates every hex
+ *  against `HEX_RE` before promoting this to a `SavedTheme`. Any field may be
+ *  absent — missing primaries fall back to the base preset's value. */
+export interface ImportedTheme {
+  /** Suggested display name for the theme. May be empty; the renderer derives one. */
+  name?: string;
+  /** Light or dark base. Defaults to "dark" when missing or unrecognized. */
+  scheme?: "dark" | "light";
+  /** Up to nine hex color overrides. Each value must match `^#?[0-9a-fA-F]{3,8}$`. */
+  primaries?: {
+    bg?: string;
+    fg?: string;
+    accent?: string;
+    warning?: string;
+    danger?: string;
+    metalDye?: string;
+    screen?: string;
+    screenText?: string;
+    engraveActive?: string;
+  };
+}
+
+/** Input payload for theme import: one of a free-text description (e.g. an
+ *  iTerm2 scheme name), a URL to fetch, or a screenshot's base64 pixels. The
+ *  main process fetches URLs and resolves the configured vision-proxy model,
+ *  then runs a vision/text completion and returns the parsed colors. */
+export interface ThemeImportInput {
+  /** Descriptive text: an iTerm2 scheme name, a pasted color description, or
+   *  an interpretive hint accompanying `imageUrl`/`imageData`. */
+  prompt?: string;
+  /** Remote URL to fetch (main-process fetch — renderer is `file://` origin).
+   *  If the response is an image, it's attached as vision content. Otherwise
+   *  the response text is fed to the model as a description. */
+  url?: string;
+  /** Base64-encoded screenshot/image bytes (no `data:` prefix). */
+  imageData?: string;
+  /** MIME type for `imageData` (default `image/png`). */
+  imageMimeType?: string;
+}
+
+/** Result of a theme import attempt. On success `theme` holds the parsed
+ *  colors; on failure `error` holds a user-facing message. */
+export interface ThemeImportResult {
+  ok: boolean;
+  theme?: ImportedTheme;
+  error?: string;
+}
+
 /** Plan mode runs read-only tools; build mode runs everything. */
 export type ToolMode = "all" | "readOnly";
 
@@ -520,6 +584,9 @@ export interface RetrySettings {
   };
 }
 
+/** Telemetry consent state. `null` = not yet asked (first launch). */
+export type TelemetryConsent = boolean | null;
+
 /** Subset of pi settings exposed in the GUI. */
 export interface PiSettings {
   retry: RetrySettings;
@@ -529,6 +596,22 @@ export interface PiSettings {
   autoUpdateExtensions: boolean;
   /** Prevent macOS idle sleep while an agent run is active (caffeinate). Default off. */
   insomnia: boolean;
+  /** Opt-in to product analytics + crash reporting. `null` until first prompt. */
+  telemetryConsent: TelemetryConsent;
+}
+
+/** Status of a pending app-binary auto-update. */
+export interface UpdateStatus {
+  /** Auto-update is enabled in this build (env configured). */
+  enabled: boolean;
+  /** An update has been downloaded and is ready to install on relaunch. */
+  ready: boolean;
+  /** Currently checking for / downloading an update. */
+  checking: boolean;
+  /** Last error message, if any. */
+  error: string | null;
+  /** Version of the available update, if known. */
+  version: string | null;
 }
 
 /** Live per-session metadata published main → renderer. */

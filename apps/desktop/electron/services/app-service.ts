@@ -156,6 +156,16 @@ export class AppService {
     this.publish();
   }
 
+  /** Set a project's Work Queue merge workflow ('pr' | 'local'). Returns the
+   *  updated project; throws if the project id is unknown. */
+  setMergeWorkflow(projectId: string, workflow: "pr" | "local"): Project {
+    const exists = this.projects.all().some((p) => p.id === projectId);
+    if (!exists) throw new Error(`Unknown project: ${projectId}`);
+    this.projects.setMergeWorkflow(projectId, workflow);
+    this.publish();
+    return this.projects.all().find((p) => p.id === projectId)!;
+  }
+
   /** Persist the sidebar width (clamped to a sane range). */
   setSidebarWidth(width: number): void {
     this.saveUiState({ sidebarWidth: Math.round(Math.min(560, Math.max(200, width))) });
@@ -257,6 +267,18 @@ export class AppService {
   setHudAutoReveal(on: boolean): void {
     this.saveUiState({ hudAutoRevealOnFinish: on });
     this.publish();
+  }
+
+  /** Read the persisted "don't warn me" flag for archiving a sole-thread
+   *  worktree alongside its thread. */
+  getArchiveThreadWorktreeWarningDismissed(): boolean {
+    return this.loadUiState().archiveThreadWorktreeWarningDismissed;
+  }
+
+  /** Persist the "don't warn me again" flag for the sole-thread worktree
+   *  archive dialog. No publish: this is a UI preference, not renderer state. */
+  setArchiveThreadWorktreeWarningDismissed(dismissed: boolean): void {
+    this.saveUiState({ archiveThreadWorktreeWarningDismissed: dismissed });
   }
 
   snoozeThread(threadId: string, until: string): void {

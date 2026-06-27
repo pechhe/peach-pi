@@ -20,6 +20,7 @@ import { DevTapInstallService } from "./services/devtap-install-status.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { InsomniaService } from "./services/insomnia.ts";
 import { PiUpdateService } from "./services/pi-update-service.ts";
+import { AutoUpdateService, initMainSentry } from "./services/telemetry-service.ts";
 import { setDevTapStateProvider } from "./services/devtap-control.ts";
 import { RecordingService } from "./services/recording-service.ts";
 import { ConnectorService } from "./services/connector-service.ts";
@@ -88,6 +89,7 @@ export interface ServiceComposition {
   remoteClient: RemoteClientService;
   issuesService: IssuesService;
   piUpdateService: PiUpdateService;
+  autoUpdateService: AutoUpdateService;
   insomniaService: InsomniaService;
   subagentService: SubagentService;
   sideChatService: SideChatService;
@@ -368,10 +370,15 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     () => appService.snapshot().projects.map((p) => p.path),
     () => void threadService.reloadIdleSessions(),
   );
+  const autoUpdateService = new AutoUpdateService(emit);
   setupSubagentEnvironment(userData);
 
   const insomniaService = new InsomniaService();
   void getPiSettings().then((s) => insomniaService.setEnabled(s.insomnia));
+  // Init Sentry main if consent already granted. Revocation is rare; main
+  // process Sentry can't be cleanly torn down per-launch, so a revoked user
+  // is honored on next launch (no new crashes are sent once disabled).
+  void getPiSettings().then((s) => initMainSentry(s.telemetryConsent));
 
   const connectorService = new ConnectorService(emit);
   const bwsService = new BwsService(emit);
@@ -411,6 +418,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     remoteClient,
     issuesService,
     piUpdateService,
+    autoUpdateService,
     insomniaService,
     subagentService,
     sideChatService,

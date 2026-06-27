@@ -63,43 +63,76 @@
 
   const hudAutoReveal = $derived(snapshot.current?.ui.hudAutoRevealOnFinish ?? false);
 
-  /** Searchable keywords per section (title + description), lowercased. */
-  const SECTION_KEYWORDS = {
-    playroom: "appearance playroom live stage tune look feel messages done animation alerts chassis",
-    theme: "theme appearance applies to every window colors",
-    composer: "composer light silver dark anodized chassis auto follows your theme",
-    caveman: "caveman intensity level composer toggle",
-    hud: "hud auto-reveal expand chat thread finishes",
-    doneAnimation: "done animation mark done card animation preview play",
-    loaders:
-      "loaders dot matrix spinner square hex triangle sidebar chat agents hourglass neon drift glow bloom animate",
-    streaming: "streaming text assistant replies reveal stream",
-    sounds: "sounds button clicks done chime mute",
-    doneChime: "done chime celebration cue thread finishes preview",
-    threadDoneSound: "thread done sound mark done archive click precision archive latch metallic preview",
-    testBenchSound: "test bench sound mark to test relay tick diagnostic chirp stamp flask inspection preview",
-    testAnimation: "test animation mark to test card animation preview play bench stamp scan relay",
-    autoCompact: "auto-compaction compact context usage threshold tokens percentage",
-    retry: "retry on error network drop transient exponential backoff wait doubles",
-    messageDelivery: "message delivery steering mode follow-up mode",
-    extensions: "extensions auto update packages pi update periodic refresh",
-    insomnia: "insomnia sleep idle caffeinate prevent mac awake while running",
-    about: "about peach-pi version",
-    utilityModel: "utility model background tasks thread titles commit messages fast inexpensive",
-    subagents:
-      "subagents agents scouting research verification cheap model roster subagent roster",
-    scopedModels:
-      "scoped models scopedmodels enable disable model scope composer selector enabled models available list",
-    computerUse:
-      "computer use agent browser cua driver native desktop automation accessibility permissions install setup",
-    visionProxy:
-      "vision proxy images description describe blind text-only model fallback always off consent claude gemini qwen",
-  } as const;
+  /**
+   * Settings navigation model.
+   * One entry per rendered <section>, grouped into a handful of areas that
+   * drive the Cloudflare-style in-page sidebar (jump, don't switch views).
+   * `keywords` powers the search filter; an empty query shows everything.
+   */
+  type NavItem = { id: string; label: string; keywords: string };
+  type NavGroup = { id: string; label: string; items: NavItem[] };
+  const NAV: NavGroup[] = [
+    {
+      id: "appearance",
+      label: "Appearance",
+      items: [
+        { id: "playroom", label: "Playroom", keywords: "appearance playroom live stage tune look feel messages done animation alerts chassis" },
+        { id: "theme", label: "Theme", keywords: "theme appearance applies to every window colors" },
+        { id: "composer", label: "Composer", keywords: "composer light silver dark anodized chassis auto follows your theme" },
+        { id: "sidebar", label: "Sidebar engraving", keywords: "sidebar engraving metal surface letterpress text tune sidebar-device" },
+        { id: "caveman", label: "Caveman intensity", keywords: "caveman intensity level composer toggle" },
+        { id: "hud", label: "HUD auto-reveal", keywords: "hud auto-reveal expand chat thread finishes" },
+        { id: "doneAnimation", label: "Done animation", keywords: "done animation mark done card animation preview play" },
+        { id: "loaders", label: "Loaders", keywords: "loaders dot matrix spinner square hex triangle sidebar chat agents hourglass neon drift glow bloom animate" },
+        { id: "streaming", label: "Streaming", keywords: "streaming text assistant replies reveal stream" },
+      ],
+    },
+    {
+      id: "sounds",
+      label: "Sounds",
+      items: [
+        { id: "sounds", label: "Sounds", keywords: "sounds button clicks done chime mute" },
+        { id: "doneChime", label: "Done chime", keywords: "done chime celebration cue thread finishes preview" },
+        { id: "threadDoneSound", label: "Thread done sound", keywords: "thread done sound mark done archive click precision archive latch metallic preview" },
+        { id: "testBenchSound", label: "Test bench sound", keywords: "test bench sound mark to test relay tick diagnostic chirp stamp flask inspection preview" },
+        { id: "testAnimation", label: "Test bench animation", keywords: "test animation mark to test card animation preview play bench stamp scan relay" },
+      ],
+    },
+    {
+      id: "behavior",
+      label: "Behavior",
+      items: [
+        { id: "autoCompact", label: "Auto-compaction", keywords: "auto-compaction compact context usage threshold tokens percentage" },
+        { id: "retry", label: "Retry on error", keywords: "retry on error network drop transient exponential backoff wait doubles" },
+        { id: "messageDelivery", label: "Message delivery", keywords: "message delivery steering mode follow-up mode" },
+        { id: "extensions", label: "Extensions", keywords: "extensions auto update packages pi update periodic refresh" },
+        { id: "insomnia", label: "Keep awake", keywords: "insomnia sleep idle caffeinate prevent mac awake while running" },
+        { id: "subagents", label: "Subagents", keywords: "subagents agents scouting research verification cheap model roster subagent roster" },
+      ],
+    },
+    {
+      id: "models",
+      label: "Models",
+      items: [
+        { id: "utilityModel", label: "Utility model", keywords: "utility model background tasks thread titles commit messages fast inexpensive" },
+        { id: "scopedModels", label: "Scoped models", keywords: "scoped models scopedmodels enable disable model scope composer selector enabled models available list" },
+        { id: "visionProxy", label: "Vision proxy", keywords: "vision proxy images description describe blind text-only model fallback always off consent claude gemini qwen" },
+      ],
+    },
+    {
+      id: "system",
+      label: "System",
+      items: [
+        { id: "computerUse", label: "Computer use", keywords: "computer use agent browser cua driver native desktop automation accessibility permissions install setup" },
+        { id: "about", label: "About", keywords: "about peach-pi version" },
+      ],
+    },
+  ];
+  const NAV_ITEMS = NAV.flatMap((g) => g.items);
+  const itemById = new Map(NAV_ITEMS.map((it) => [it.id, it]));
 
   let query = $state(initialQuery);
   let searchInput = $state<HTMLInputElement | null>(null);
-  // Deep-link anchor for the theme section.
-  let themeSection = $state<HTMLElement | null>(null);
 
   /* ------------------------------------------------------------------ */
   /* Sidebar engraving overrides (live-tuned via sliders in Settings).   */
@@ -201,7 +234,7 @@
   // Once the section mounts (it renders only after the search bar clears), scroll to it.
   $effect(() => {
     if (awaitingScopedScroll && scopedModelsSection) {
-      scopedModelsSection.scrollIntoView({ block: "center" });
+      scopedModelsSection.scrollIntoView({ block: "center", behavior: "smooth" });
       awaitingScopedScroll = false;
     }
   });
@@ -223,10 +256,72 @@
     searchInput?.focus();
     e.preventDefault();
   }
-  function hit(key: keyof typeof SECTION_KEYWORDS): boolean {
-    return q === "" || SECTION_KEYWORDS[key].includes(q);
+
+  /* --- Search filtering --- */
+  function hit(id: string): boolean {
+    const it = itemById.get(id);
+    if (!it) return false;
+    return q === "" || it.keywords.includes(q);
   }
-  const anyMatch = $derived(q === "" || Object.values(SECTION_KEYWORDS).some((k) => k.includes(q)));
+  function groupHasMatch(g: NavGroup): boolean {
+    return g.items.some((it) => hit(it.id));
+  }
+  const anyMatch = $derived(q === "" || NAV_ITEMS.some((it) => it.keywords.includes(q)));
+
+  /* --- In-page sidebar scrollspy --- */
+  let activeId = $state<string>("");
+  let sectionEls = new Map<string, HTMLElement>();
+  let scrollEl = $state<HTMLElement | null>(null);
+  let io: IntersectionObserver | null = null;
+
+  /** Svelte action: remember a section element so the scrollspy can observe it. */
+  function sectionAction(id: string) {
+    return (node: HTMLElement) => {
+      sectionEls.set(id, node);
+      return () => {
+        if (sectionEls.get(id) === node) sectionEls.delete(id);
+      };
+    };
+  }
+
+  // Re-observe rendered sections whenever the search filter changes which are present.
+  $effect(() => {
+    // depends on which sections are rendered (driven by the query) + the scroll root.
+    q;
+    anyMatch;
+    io?.disconnect();
+    if (!scrollEl) return;
+    io = new IntersectionObserver(
+      () => {
+        // pick the topmost visible section in NAV order
+        let best: { id: string; top: number } | null = null;
+        for (const it of NAV_ITEMS) {
+          const el = sectionEls.get(it.id);
+          if (!el || !hit(it.id)) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.bottom < 0) continue; // scrolled past
+          if (rect.top > scrollEl.clientHeight + 4) continue; // below viewport
+          if (best === null || rect.top < best.top) best = { id: it.id, top: rect.top };
+        }
+        if (best) activeId = best.id;
+        else if (!activeId && NAV_ITEMS[0]) activeId = NAV_ITEMS[0].id;
+      },
+      { root: scrollEl, rootMargin: "0px 0px -60% 0px", threshold: [0, 0.2, 0.6, 1] },
+    );
+    for (const it of NAV_ITEMS) {
+      const el = sectionEls.get(it.id);
+      if (el && hit(it.id)) io.observe(el);
+    }
+    if (!activeId && NAV_ITEMS[0]) activeId = NAV_ITEMS[0].id;
+    return () => io?.disconnect();
+  });
+
+  function scrollToSection(id: string) {
+    const el = sectionEls.get(id);
+    if (!el) return;
+    activeId = id;
+    el.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
 
   let muted = $state(soundsMuted());
   let doneVariant = $state(getDoneSoundVariant() as DoneSoundVariant);
@@ -476,752 +571,796 @@
       bind:this={searchInput}
     />
   </header>
-  <div class="flex-1 overflow-y-auto px-6 pb-6">
-    <div class="mx-auto flex max-w-xl flex-col gap-4">
-      {#if !anyMatch}
-        <p class="text-center text-xs text-fainter" data-testid="settings-search-empty">
-          No settings match “{query.trim()}”.
-        </p>
-      {/if}
-      {#if hit("playroom")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Appearance Playroom</h2>
-            <p class="text-xs text-faint">A live, isolated stage for tuning how the app looks and feels — send messages, mark done, fire alerts.</p>
-          </div>
-          <button
-            class="rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg transition-colors hover:bg-surface-3"
-            onclick={onOpenPlayroom}
-            data-testid="settings-open-playroom"
-          >Open</button>
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("theme")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4" bind:this={themeSection}>
-        <ThemeControls />
-      </section>
-      {/if}
-
-      {#if hit("composer")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Composer</h2>
-            <p class="text-xs text-faint">Light (silver) or dark (anodized) chassis. Auto follows your theme.</p>
-          </div>
-          <Select
-            class="rounded-md bg-surface-2"
-            value={theme.composer}
-            onValueChange={(v) => theme.setComposer(v as ComposerStyle)}
-            items={theme.composerOptions.map((opt) => ({ value: opt.id, label: opt.label }))}
-            data-testid="composer-style-select"
-            aria-label="Composer appearance"
-          />
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("sidebar")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="mb-3">
-          <h2 class="text-sm text-fg">Sidebar engraving</h2>
-          <p class="text-xs text-faint">Tune the sidebar metal surface and letterpress text. Values override sidebar-device.css in real time.</p>
-        </div>
-        <div class="grid grid-cols-2 gap-x-6 gap-y-3">
-          <label class="flex flex-col gap-0.5">
-            <span class="text-[11px] text-fainter">Gradient angle: {engrave.angle}°</span>
-            <input type="range" class="accent-primary" min="0" max="90" step="1" bind:value={engrave.angle} />
-          </label>
-          <label class="flex flex-col gap-0.5">
-            <span class="text-[11px] text-fainter">Metal left L: {engrave.metalL.toFixed(3)}</span>
-            <input type="range" class="accent-primary" min="0.5" max="0.95" step="0.005" bind:value={engrave.metalL} />
-          </label>
-          <label class="flex flex-col gap-0.5">
-            <span class="text-[11px] text-fainter">Metal right L: {engrave.metalR.toFixed(3)}</span>
-            <input type="range" class="accent-primary" min="0.6" max="0.98" step="0.005" bind:value={engrave.metalR} />
-          </label>
-          <label class="flex flex-col gap-0.5">
-            <span class="text-[11px] text-fainter">Lip size: {engrave.lipPx}px</span>
-            <input type="range" class="accent-primary" min="0" max="6" step="0.5" bind:value={engrave.lipPx} />
-          </label>
-          <label class="flex flex-col gap-0.5">
-            <span class="text-[11px] text-fainter">Lip opacity: {engrave.lipOp.toFixed(2)}</span>
-            <input type="range" class="accent-primary" min="0" max="1" step="0.05" bind:value={engrave.lipOp} />
-          </label>
-          <label class="flex flex-col gap-0.5">
-            <span class="text-[11px] text-fainter">Ink lightness: {engrave.inkL.toFixed(3)}</span>
-            <input type="range" class="accent-primary" min="0.08" max="0.55" step="0.005" bind:value={engrave.inkL} />
-          </label>
-          <label class="flex flex-col gap-0.5">
-            <span class="text-[11px] text-fainter">Ink chroma: {engrave.inkC.toFixed(3)}</span>
-            <input type="range" class="accent-primary" min="0" max="0.08" step="0.001" bind:value={engrave.inkC} />
-          </label>
-          <label class="flex flex-col gap-0.5">
-            <span class="text-[11px] text-fainter">Ink hue: {engrave.inkH.toFixed(0)}°</span>
-            <input type="range" class="accent-primary" min="0" max="360" step="1" bind:value={engrave.inkH} />
-          </label>
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("caveman")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Caveman intensity</h2>
-            <p class="text-xs text-faint">Level the composer caveman toggle maps to when on.</p>
-          </div>
-          <Select
-            class="rounded-md bg-surface-2"
-            value={caveman.level}
-            onValueChange={pickCavemanLevel}
-            items={[
-              { value: "full", label: "Full" },
-              { value: "ultra", label: "Ultra" },
-            ]}
-            data-testid="caveman-level-select"
-            aria-label="Caveman intensity"
-          />
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("hud")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">HUD auto-reveal</h2>
-            <p class="text-xs text-faint">Expand the HUD chat when its own thread finishes.</p>
-          </div>
-          <input
-            type="checkbox"
-            checked={hudAutoReveal}
-            onchange={(e) => api.invoke("hud:setAutoReveal", e.currentTarget.checked)}
-            data-testid="settings-hud-auto-reveal"
-          />
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("doneAnimation")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="mb-3">
-          <h2 class="text-sm text-fg">Done animation</h2>
-          <p class="text-xs text-faint">Pick the "mark Done" card animation. Press Play to preview each.</p>
-        </div>
-        <DoneBurstPlayground />
-      </section>
-      {/if}
-
-      {#if hit("loaders")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="mb-3">
-          <h2 class="text-sm text-fg">Dot matrix loaders</h2>
-          <p class="text-xs text-faint">
-            Curate which spinners appear where. Square → chat, Hex → sidebar, Triangle → agents.
-            A random loader from the selected set is picked each time one appears.
-          </p>
-        </div>
-        <DotMatrixPlayground />
-      </section>
-      {/if}
-
-      {#if hit("streaming")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Streaming text</h2>
-            <p class="text-xs text-faint">How assistant replies reveal as they stream in.</p>
-          </div>
-          <div class="flex flex-col items-end gap-2">
-            <Select
-              class="rounded-md bg-surface-2"
-              value={streamReveal.look}
-              onValueChange={(v) => streamReveal.setLook(v as StreamLook)}
-              items={STREAM_LOOKS.map((l) => ({ value: l.id, label: l.label }))}
-              data-testid="stream-look-select"
-              aria-label="Reveal look"
-            />
-            <Select
-              class="rounded-md bg-surface-2"
-              value={streamReveal.speed}
-              onValueChange={(v) => streamReveal.setSpeed(v as StreamSpeed)}
-              items={STREAM_SPEEDS.map((s) => ({ value: s.id, label: s.label }))}
-              data-testid="stream-speed-select"
-              aria-label="Reveal speed"
-            />
-          </div>
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("sounds")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <h2 class="text-sm text-fg">Sounds</h2>
-            <p class="text-xs text-faint">Button clicks and the done chime.</p>
-          </div>
-          <Switch
-            checked={!muted}
-            onCheckedChange={toggleSounds}
-            data-testid="sounds-toggle"
-            aria-label="Toggle sounds"
-          />
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("doneChime")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Done chime</h2>
-            <p class="text-xs text-faint">Pick a celebration cue for when a thread finishes, then preview it.</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <Select
-              class="rounded-md bg-surface-2"
-              value={doneVariant}
-              onValueChange={pickDoneVariant}
-              items={DONE_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
-              data-testid="done-sound-select"
-              aria-label="Done chime"
-            />
-            <button
-              class="rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
-              onclick={previewDone}
-              disabled={muted}
-              data-testid="done-sound-preview"
-            >Play</button>
-          </div>
-        </div>
-        <p class="mt-2 text-xs text-fainter">
-          {DONE_SOUND_OPTIONS.find((o) => o.id === doneVariant)?.description}
-        </p>
-      </section>
-      {/if}
-
-      {#if hit("threadDoneSound")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Thread done sound</h2>
-            <p class="text-xs text-faint">The cue played when you mark a thread done (the archive action).</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <Select
-              class="rounded-md bg-surface-2"
-              value={archiveVariant}
-              onValueChange={pickArchiveVariant}
-              items={DONE_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
-              data-testid="archive-sound-select"
-              aria-label="Thread done sound"
-            />
-            <button
-              class="rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
-              onclick={previewArchive}
-              disabled={muted}
-              data-testid="archive-sound-preview"
-            >Play</button>
-          </div>
-        </div>
-        <p class="mt-2 text-xs text-fainter">
-          {DONE_SOUND_OPTIONS.find((o) => o.id === archiveVariant)?.description}
-        </p>
-      </section>
-      {/if}
-
-      {#if hit("testBenchSound")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Test bench sound</h2>
-            <p class="text-xs text-faint">The cue played when you mark a thread for testing (the Eye action).</p>
-          </div>
-          <div class="flex items-center gap-2">
-            <Select
-              class="rounded-md bg-surface-2"
-              value={testVariant}
-              onValueChange={pickTestVariant}
-              items={TEST_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
-              data-testid="test-sound-select"
-              aria-label="Test bench sound"
-            />
-            <button
-              class="rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
-              onclick={previewTest}
-              disabled={muted}
-              data-testid="test-sound-preview"
-            >Play</button>
-          </div>
-        </div>
-        <p class="mt-2 text-xs text-fainter">
-          {TEST_SOUND_OPTIONS.find((o) => o.id === testVariant)?.description}
-        </p>
-      </section>
-      {/if}
-
-      {#if hit("testAnimation")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="mb-3">
-          <h2 class="text-sm text-fg">Test bench animation</h2>
-          <p class="text-xs text-faint">The "mark to test" card animation. Press Play to preview. (Sound plays too.)</p>
-        </div>
-        <TestBurstPlayground />
-      </section>
-      {/if}
-
-      {#if hit("autoCompact")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div>
-          <h2 class="text-sm text-fg">Auto-compaction</h2>
-          <p class="text-xs text-faint">
-            Conversations compact automatically once context usage crosses either
-            threshold — whichever is reached first. Leave the token cap blank to
-            trigger on percentage alone.
-          </p>
-        </div>
-        <div class="mt-3 flex flex-col gap-3">
-          <label class="flex items-center justify-between gap-4">
-            <span class="text-xs text-fg">Context used (%)</span>
-            <input
-              type="number"
-              min="1"
-              max="100"
-              value={autoCompact.percent}
-              onchange={saveAutoCompactPercent}
-              class="w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
-              data-testid="auto-compact-percent"
-              aria-label="Auto-compact percentage"
-            />
-          </label>
-          <label class="flex items-center justify-between gap-4">
-            <span class="text-xs text-fg">Token count</span>
-            <input
-              type="number"
-              min="0"
-              step="1000"
-              placeholder="none"
-              value={autoCompact.tokens ?? ""}
-              onchange={saveAutoCompactTokens}
-              class="w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
-              data-testid="auto-compact-tokens"
-              aria-label="Auto-compact token count"
-            />
-          </label>
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("retry")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div>
-          <h2 class="text-sm text-fg">Retry on error</h2>
-          <p class="text-xs text-faint">
-            When a request fails (network drop, transient error), pi retries with
-            exponential backoff — each wait doubles.
-          </p>
-        </div>
-        <div class="mt-3 flex flex-col gap-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs text-fg">Enabled</span>
-            <Switch
-              checked={piSettings.retryEnabled}
-              onCheckedChange={toggleRetryEnabled}
-              data-testid="retry-enabled-toggle"
-              aria-label="Toggle retry"
-            />
-          </div>
-          <label class="flex items-center justify-between gap-4">
-            <span class="text-xs text-fg">Retries</span>
-            <input
-              type="number"
-              min="0"
-              max="10"
-              value={piSettings.retryMaxRetries}
-              onchange={saveRetryCount}
-              class="w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
-              data-testid="retry-count"
-              aria-label="Number of retries"
-            />
-          </label>
-          <label class="flex items-center justify-between gap-4">
-            <span class="text-xs text-fg">Initial wait (seconds)</span>
-            <input
-              type="number"
-              min="0.5"
-              step="0.5"
-              value={piSettings.retryBaseDelayMs / 1000}
-              onchange={saveRetryDelay}
-              class="w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
-              data-testid="retry-initial-delay"
-              aria-label="Initial wait seconds"
-            />
-          </label>
-          {#if piSettings.retryMaxRetries > 0}
-            <div class="rounded-md bg-surface-2 px-3 py-2 text-xs text-faint">
-              <span class="text-fg-soft">Total retry window:</span>
-              {formatDuration(retryTotalSeconds)}
-              <span class="text-faint">
-                ({piSettings.retryMaxRetries} retries,
-                {piSettings.retryBaseDelayMs / 1000}s → {piSettings.retryBaseDelayMs / 1000 * Math.pow(2, piSettings.retryMaxRetries - 1)}s)
-              </span>
-            </div>
-          {/if}
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("messageDelivery")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div>
-          <h2 class="text-sm text-fg">Message delivery</h2>
-          <p class="text-xs text-faint">How steering and follow-up messages are sent.</p>
-        </div>
-        <div class="mt-3 flex flex-col gap-3">
-          <label class="flex items-center justify-between gap-4">
-            <span class="text-xs text-fg">Steering mode</span>
-            <Select
-              class="rounded-md bg-surface-2"
-              value={piSettings.steeringMode}
-              onValueChange={pickSteeringMode}
-              items={[
-                { value: "one-at-a-time", label: "One at a time" },
-                { value: "all", label: "All" },
-              ]}
-              data-testid="steering-mode-select"
-              aria-label="Steering mode"
-            />
-          </label>
-          <label class="flex items-center justify-between gap-4">
-            <span class="text-xs text-fg">Follow-up mode</span>
-            <Select
-              class="rounded-md bg-surface-2"
-              value={piSettings.followUpMode}
-              onValueChange={pickFollowUpMode}
-              items={[
-                { value: "one-at-a-time", label: "One at a time" },
-                { value: "all", label: "All" },
-              ]}
-              data-testid="followup-mode-select"
-              aria-label="Follow-up mode"
-            />
-          </label>
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("extensions")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div>
-          <h2 class="text-sm text-fg">Extensions</h2>
-          <p class="text-xs text-faint">
-            Keep installed pi packages up to date by running
-            <code>pi update --extensions</code> on launch and periodically. Runs
-            only while no thread is active; restart to load new versions.
-          </p>
-        </div>
-        <div class="mt-3 flex flex-col gap-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs text-fg">Auto-update</span>
-            <Switch
-              checked={piSettings.autoUpdateExtensions}
-              onCheckedChange={toggleAutoUpdateExtensions}
-              data-testid="auto-update-extensions-toggle"
-              aria-label="Toggle extension auto-update"
-            />
-          </div>
-          <button
-            class="self-start rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
-            onclick={updateExtensionsNow}
-            disabled={updatingExtensions}
-            data-testid="update-extensions-now"
-          >
-            {updatingExtensions ? "Updating…" : "Update now"}
-          </button>
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("insomnia")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h2 class="text-sm text-fg">Keep awake while running</h2>
-            <p class="text-xs text-faint">
-              Prevent macOS idle sleep while an agent run is active. Releases the
-              moment the run goes idle. Mac only.
-            </p>
-          </div>
-          <Switch
-            checked={piSettings.insomnia}
-            onCheckedChange={toggleInsomnia}
-            data-testid="insomnia-toggle"
-            aria-label="Toggle keep awake"
-          />
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("subagents")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4" data-testid="subagents-section">
-        <SubagentsSection projects={snapshot.current?.projects ?? []} />
-      </section>
-      {/if}
-
-      {#if hit("about")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <h2 class="text-sm text-fg">About</h2>
-        <p class="mt-1 text-xs text-faint">peach-pi {version}</p>
-      </section>
-      {/if}
-
-      {#if hit("computerUse")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4" data-testid="computer-use-section">
-        <div class="mb-3">
-          <h2 class="text-sm text-fg">Computer use</h2>
-          <p class="text-xs text-faint">
-            Lets the agent drive real apps when no CLI/API path exists. Web pages
-            use the native <code>agent_browser</code> tool; native macOS apps use
-            the <code>cua-driver</code> (background, no focus steal). Run the
-            checks below to install + grant access.
-          </p>
-        </div>
-
-        <div class="flex flex-col gap-3">
-          <!-- 1. agent-browser engine binary -->
-          <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">
-            <div class="min-w-0">
-              <p class="text-xs text-fg">agent-browser engine</p>
-              <p class="text-[11px] text-fainter">
-                {#if agentBrowser?.binaryVersion}
-                  <code>agent-browser {agentBrowser.binaryVersion}</code> found on PATH
-                {:else}
-                  Binary not on PATH — install with <code>npm i -g agent-browser</code>
+  <div class="flex min-h-0 flex-1">
+    <!-- In-page nav: jumps within the scroll pane (Cloudflare-style, not separate views). -->
+    <nav class="settings-nav w-48 shrink-0 overflow-y-auto px-2 py-4" aria-label="Settings sections">
+      {#each NAV as g (g.id)}
+        {#if groupHasMatch(g)}
+          <div class="mb-4">
+            <p class="settings-nav-group mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-fainter">{g.label}</p>
+            <ul class="flex flex-col gap-0.5">
+              {#each g.items as it (it.id)}
+                {#if hit(it.id)}
+                  <li>
+                    <button
+                      type="button"
+                      class="settings-nav-item w-full rounded-md px-2 py-1 text-left text-xs text-fg-soft transition-colors hover:bg-surface-2 hover:text-fg {activeId === it.id ? 'is-active bg-surface-2 text-fg' : ''}"
+                      onclick={() => scrollToSection(it.id)}
+                      aria-current={activeId === it.id ? "true" : undefined}
+                    >{it.label}</button>
+                  </li>
                 {/if}
-              </p>
-            </div>
-            {#if agentBrowser?.binaryVersion}
-              <Check size={16} class="text-emerald-500" />
-            {:else}
-              <CircleSlash size={16} class="text-fainter" />
-            {/if}
-          </div>
-
-          <!-- 2. pi-agent-browser-native package -->
-          <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">
-            <div class="min-w-0 flex-1">
-              <p class="text-xs text-fg">Native <code>agent_browser</code> tool</p>
-              <p class="text-[11px] text-fainter">
-                {#if agentBrowser?.installed}
-                  <code>npm:pi-agent-browser-native</code> installed — restart pi to load
-                {:else}
-                  Not installed — exposes the typed browser tool
-                {/if}
-              </p>
-            </div>
-            {#if agentBrowser?.installed}
-              <Check size={16} class="text-emerald-500" />
-            {:else}
-              <button
-                class="rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
-                onclick={installAgentBrowser}
-                disabled={installingBrowser}
-                data-testid="install-agent-browser"
-              >
-                {installingBrowser ? "Installing…" : "Install"}
-              </button>
-            {/if}
-          </div>
-
-          <!-- 3. CuaDriver.app -->
-          <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">
-            <div class="min-w-0">
-              <p class="text-xs text-fg">Cua Driver</p>
-              <p class="text-[11px] text-fainter">
-                {#if cuaDriver?.installed}
-                  <code>CuaDriver.app{cuaDriver.version ? " v" + cuaDriver.version : ""}</code> installed
-                {:else}
-                  Not installed — native macOS desktop automation
-                {/if}
-              </p>
-            </div>
-            {#if cuaDriver?.installed}
-              <Check size={16} class="text-emerald-500" />
-            {:else}
-              <CircleSlash size={16} class="text-fainter" />
-            {/if}
-          </div>
-
-          <!-- 4. Cua Driver permissions -->
-          <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">
-            <div class="min-w-0 flex-1">
-              <p class="text-xs text-fg">macOS Accessibility + Screen Recording</p>
-              <p class="text-[11px] text-fainter">
-                {#if cuaDriver?.installed}
-                  {#if cuaDriver.accessibility === "granted" && cuaDriver.screenRecording === "granted"}
-                    Both permissions granted
-                  {:else if cuaDriver.accessibility === "unknown" || cuaDriver.screenRecording === "unknown"}
-                    Start the Cua Driver daemon, then grant access
-                  {:else}
-                    Denied — re-enable in System Settings → Privacy & Security
-                  {/if}
-                {:else}
-                  Install Cua Driver first
-                {/if}
-              </p>
-            </div>
-            {#if cuaDriver?.accessibility === "granted" && cuaDriver.screenRecording === "granted"}
-              <Check size={16} class="text-emerald-500" />
-            {:else}
-              <button
-                class="rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
-                onclick={grantCuaPermissions}
-                disabled={grantingCua || !cuaDriver?.installed}
-                data-testid="grant-cua-permissions"
-              >
-                {grantingCua ? "Opening…" : "Grant access"}
-              </button>
-            {/if}
-          </div>
-
-          {#if computerUseReady}
-            <p class="text-xs text-emerald-500" data-testid="computer-use-ready">
-              ✓ Computer use is set up. The agent will prefer programmatic paths,
-              then <code>agent_browser</code> for web, then <code>cua-driver</code> for native desktop.
-            </p>
-          {:else}
-            <p class="text-xs text-faint">
-              Computer use is optional. The agent prefers CLI/API/connector paths; it only
-              drives UI when no programmatic route exists.
-            </p>
-          {/if}
-        </div>
-      </section>
-      {/if}
-
-      {#if hit("visionProxy")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div class="mb-2">
-          <h2 class="text-sm text-fg">Vision proxy</h2>
-          <p class="text-xs text-faint">
-            Routes images to a vision-capable model, collects descriptions, and
-            injects them into the agent's context — so text-only models can
-            "see" your images across turns. Requires restart after install.
-          </p>
-        </div>
-
-        {#if !visionProxy.installed}
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-xs text-faint">
-              Not installed. Installs <code>npm:pi-vision-proxy</code> via pi.
-            </span>
-            <button
-              class="rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
-              onclick={installVisionProxy}
-              disabled={installingVision}
-              data-testid="install-vision-proxy"
-            >
-              {installingVision ? "Installing…" : "Install"}
-            </button>
-          </div>
-          {#if visionError}
-            <p class="mt-2 text-xs text-danger" data-testid="vision-proxy-error" use:clickCopy={visionError}>{visionError}</p>
-          {/if}
-        {:else}
-          <div class="flex flex-col gap-3">
-            <div>
-              <label class="mb-1 block text-xs text-fg">Vision model</label>
-              <Select
-                class="w-full rounded-md bg-surface-2"
-                value={visionKey}
-                onValueChange={pickVisionModel}
-                disabled={visionProxy.modelLocked}
-                items={grouped.flatMap((group) =>
-                  group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider })),
-                )}
-                data-testid="vision-model-select"
-                aria-label="Vision model"
-              />
-              {#if visionProxy.modelLocked}
-                <p class="mt-1 text-[11px] text-fainter">
-                  Locked by <code>PI_VISION_PROXY_MODEL</code> env var.
-                </p>
-              {/if}
-            </div>
-            <div>
-              <label class="mb-1 block text-xs text-fg">Mode</label>
-              <Select
-                class="w-full rounded-md bg-surface-2"
-                value={visionProxy.mode}
-                onValueChange={(v) => visionProxy.setMode(v as VisionProxyConfig["mode"])}
-                disabled={visionProxy.modeLocked}
-                items={[
-                  { value: "fallback", label: "Fallback — only when active model can't see images" },
-                  { value: "always", label: "Always — always route through the proxy" },
-                  { value: "off", label: "Off — disabled" },
-                ]}
-                data-testid="vision-mode-select"
-                aria-label="Vision proxy mode"
-              />
-              {#if visionProxy.modeLocked}
-                <p class="mt-1 text-[11px] text-fainter">
-                  Locked by <code>PI_VISION_PROXY_MODE</code> env var.
-                </p>
-              {/if}
-            </div>
-            {#if visionError}
-              <p class="text-xs text-danger" data-testid="vision-proxy-error" use:clickCopy={visionError}>{visionError}</p>
-            {/if}
+              {/each}
+            </ul>
           </div>
         {/if}
-      </section>
-      {/if}
+      {/each}
+    </nav>
 
-      {#if hit("scopedModels")}
-      <section bind:this={scopedModelsSection} class="rounded-lg border border-border bg-surface/50 p-4" data-testid="scoped-models-section">
-        <div class="flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <h2 class="text-sm text-fg">Scoped models</h2>
+    <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-6">
+      <div class="mx-auto flex max-w-xl flex-col gap-4">
+        {#if !anyMatch}
+          <p class="text-center text-xs text-fainter" data-testid="settings-search-empty">
+            No settings match “{query.trim()}”.
+          </p>
+        {/if}
+
+        {#if hit("playroom")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="playroom" use:sectionAction={"playroom"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">Appearance Playroom</h2>
+              <p class="text-xs text-faint">A live, isolated stage for tuning how the app looks and feels — send messages, mark done, fire alerts.</p>
+            </div>
+            <button
+              class="settings-btn rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg transition-colors hover:bg-surface-3"
+              onclick={onOpenPlayroom}
+              data-testid="settings-open-playroom"
+            >Open</button>
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("theme")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="theme" use:sectionAction={"theme"}>
+          <ThemeControls />
+        </section>
+        {/if}
+
+        {#if hit("composer")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="composer" use:sectionAction={"composer"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">Composer</h2>
+              <p class="text-xs text-faint">Light (silver) or dark (anodized) chassis. Auto follows your theme.</p>
+            </div>
+            <Select
+              class="rounded-md bg-surface-2"
+              value={theme.composer}
+              onValueChange={(v) => theme.setComposer(v as ComposerStyle)}
+              items={theme.composerOptions.map((opt) => ({ value: opt.id, label: opt.label }))}
+              data-testid="composer-style-select"
+              aria-label="Composer appearance"
+            />
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("sidebar")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="sidebar" use:sectionAction={"sidebar"}>
+          <div class="mb-3">
+            <h2 class="text-sm text-fg">Sidebar engraving</h2>
+            <p class="text-xs text-faint">Tune the sidebar metal surface and letterpress text. Values override sidebar-device.css in real time.</p>
+          </div>
+          <div class="grid grid-cols-2 gap-x-6 gap-y-3">
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-fainter">Gradient angle: {engrave.angle}°</span>
+              <input type="range" class="accent-primary" min="0" max="90" step="1" bind:value={engrave.angle} />
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-fainter">Metal left L: {engrave.metalL.toFixed(3)}</span>
+              <input type="range" class="accent-primary" min="0.5" max="0.95" step="0.005" bind:value={engrave.metalL} />
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-fainter">Metal right L: {engrave.metalR.toFixed(3)}</span>
+              <input type="range" class="accent-primary" min="0.6" max="0.98" step="0.005" bind:value={engrave.metalR} />
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-fainter">Lip size: {engrave.lipPx}px</span>
+              <input type="range" class="accent-primary" min="0" max="6" step="0.5" bind:value={engrave.lipPx} />
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-fainter">Lip opacity: {engrave.lipOp.toFixed(2)}</span>
+              <input type="range" class="accent-primary" min="0" max="1" step="0.05" bind:value={engrave.lipOp} />
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-fainter">Ink lightness: {engrave.inkL.toFixed(3)}</span>
+              <input type="range" class="accent-primary" min="0.08" max="0.55" step="0.005" bind:value={engrave.inkL} />
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-fainter">Ink chroma: {engrave.inkC.toFixed(3)}</span>
+              <input type="range" class="accent-primary" min="0" max="0.08" step="0.001" bind:value={engrave.inkC} />
+            </label>
+            <label class="flex flex-col gap-0.5">
+              <span class="text-[11px] text-fainter">Ink hue: {engrave.inkH.toFixed(0)}°</span>
+              <input type="range" class="accent-primary" min="0" max="360" step="1" bind:value={engrave.inkH} />
+            </label>
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("caveman")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="caveman" use:sectionAction={"caveman"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">Caveman intensity</h2>
+              <p class="text-xs text-faint">Level the composer caveman toggle maps to when on.</p>
+            </div>
+            <Select
+              class="rounded-md bg-surface-2"
+              value={caveman.level}
+              onValueChange={pickCavemanLevel}
+              items={[
+                { value: "full", label: "Full" },
+                { value: "ultra", label: "Ultra" },
+              ]}
+              data-testid="caveman-level-select"
+              aria-label="Caveman intensity"
+            />
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("hud")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="hud" use:sectionAction={"hud"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">HUD auto-reveal</h2>
+              <p class="text-xs text-faint">Expand the HUD chat when its own thread finishes.</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={hudAutoReveal}
+              onchange={(e) => api.invoke("hud:setAutoReveal", e.currentTarget.checked)}
+              data-testid="settings-hud-auto-reveal"
+            />
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("doneAnimation")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="doneAnimation" use:sectionAction={"doneAnimation"}>
+          <div class="mb-3">
+            <h2 class="text-sm text-fg">Done animation</h2>
+            <p class="text-xs text-faint">Pick the "mark Done" card animation. Press Play to preview each.</p>
+          </div>
+          <DoneBurstPlayground />
+        </section>
+        {/if}
+
+        {#if hit("loaders")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="loaders" use:sectionAction={"loaders"}>
+          <div class="mb-3">
+            <h2 class="text-sm text-fg">Dot matrix loaders</h2>
             <p class="text-xs text-faint">
-              Which models appear in the composer selector. Shared with
-              <code>pi /model</code> in <code>settings.json</code>.
+              Curate which spinners appear where. Square → chat, Hex → sidebar, Triangle → agents.
+              A random loader from the selected set is picked each time one appears.
             </p>
           </div>
-          <ModelScopeSelect bind:open={scopedModelsOpen} class="min-w-44" />
-        </div>
-      </section>
-      {/if}
+          <DotMatrixPlayground />
+        </section>
+        {/if}
 
-      {#if hit("utilityModel")}
-      <section class="rounded-lg border border-border bg-surface/50 p-4">
-        <div>
-          <h2 class="text-sm text-fg">Utility model</h2>
-          <p class="text-xs text-faint">
-            Background tasks like thread titles and commit messages use this fast,
-            inexpensive model. Choose from your scoped models (same as the
-            composer). Leave on “Default” to auto-pick.
+        {#if hit("streaming")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="streaming" use:sectionAction={"streaming"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">Streaming text</h2>
+              <p class="text-xs text-faint">How assistant replies reveal as they stream in.</p>
+            </div>
+            <div class="flex flex-col items-end gap-2">
+              <Select
+                class="rounded-md bg-surface-2"
+                value={streamReveal.look}
+                onValueChange={(v) => streamReveal.setLook(v as StreamLook)}
+                items={STREAM_LOOKS.map((l) => ({ value: l.id, label: l.label }))}
+                data-testid="stream-look-select"
+                aria-label="Reveal look"
+              />
+              <Select
+                class="rounded-md bg-surface-2"
+                value={streamReveal.speed}
+                onValueChange={(v) => streamReveal.setSpeed(v as StreamSpeed)}
+                items={STREAM_SPEEDS.map((s) => ({ value: s.id, label: s.label }))}
+                data-testid="stream-speed-select"
+                aria-label="Reveal speed"
+              />
+            </div>
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("sounds")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="sounds" use:sectionAction={"sounds"}>
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-sm text-fg">Sounds</h2>
+              <p class="text-xs text-faint">Button clicks and the done chime.</p>
+            </div>
+            <Switch
+              checked={!muted}
+              onCheckedChange={toggleSounds}
+              data-testid="sounds-toggle"
+              aria-label="Toggle sounds"
+            />
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("doneChime")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="doneChime" use:sectionAction={"doneChime"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">Done chime</h2>
+              <p class="text-xs text-faint">Pick a celebration cue for when a thread finishes, then preview it.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <Select
+                class="rounded-md bg-surface-2"
+                value={doneVariant}
+                onValueChange={pickDoneVariant}
+                items={DONE_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
+                data-testid="done-sound-select"
+                aria-label="Done chime"
+              />
+              <button
+                class="settings-btn rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
+                onclick={previewDone}
+                disabled={muted}
+                data-testid="done-sound-preview"
+              >Play</button>
+            </div>
+          </div>
+          <p class="mt-2 text-xs text-fainter">
+            {DONE_SOUND_OPTIONS.find((o) => o.id === doneVariant)?.description}
           </p>
-        </div>
-        <Select
-          class="mt-3 w-full rounded-md bg-surface-2"
-          value={selectedKey}
-          onValueChange={pickUtilityModel}
-          items={[
-            { value: "", label: "Default (auto-pick)" },
-            ...grouped.flatMap((group) =>
-              group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider })),
-            ),
-          ]}
-          data-testid="utility-model-select"
-          aria-label="Utility model"
-        />
-      </section>
-      {/if}
+        </section>
+        {/if}
+
+        {#if hit("threadDoneSound")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="threadDoneSound" use:sectionAction={"threadDoneSound"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">Thread done sound</h2>
+              <p class="text-xs text-faint">The cue played when you mark a thread done (the archive action).</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <Select
+                class="rounded-md bg-surface-2"
+                value={archiveVariant}
+                onValueChange={pickArchiveVariant}
+                items={DONE_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
+                data-testid="archive-sound-select"
+                aria-label="Thread done sound"
+              />
+              <button
+                class="settings-btn rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
+                onclick={previewArchive}
+                disabled={muted}
+                data-testid="archive-sound-preview"
+              >Play</button>
+            </div>
+          </div>
+          <p class="mt-2 text-xs text-fainter">
+            {DONE_SOUND_OPTIONS.find((o) => o.id === archiveVariant)?.description}
+          </p>
+        </section>
+        {/if}
+
+        {#if hit("testBenchSound")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="testBenchSound" use:sectionAction={"testBenchSound"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">Test bench sound</h2>
+              <p class="text-xs text-faint">The cue played when you mark a thread for testing (the Eye action).</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <Select
+                class="rounded-md bg-surface-2"
+                value={testVariant}
+                onValueChange={pickTestVariant}
+                items={TEST_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
+                data-testid="test-sound-select"
+                aria-label="Test bench sound"
+              />
+              <button
+                class="settings-btn rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"
+                onclick={previewTest}
+                disabled={muted}
+                data-testid="test-sound-preview"
+              >Play</button>
+            </div>
+          </div>
+          <p class="mt-2 text-xs text-fainter">
+            {TEST_SOUND_OPTIONS.find((o) => o.id === testVariant)?.description}
+          </p>
+        </section>
+        {/if}
+
+        {#if hit("testAnimation")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="testAnimation" use:sectionAction={"testAnimation"}>
+          <div class="mb-3">
+            <h2 class="text-sm text-fg">Test bench animation</h2>
+            <p class="text-xs text-faint">The "mark to test" card animation. Press Play to preview. (Sound plays too.)</p>
+          </div>
+          <TestBurstPlayground />
+        </section>
+        {/if}
+
+        {#if hit("autoCompact")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="autoCompact" use:sectionAction={"autoCompact"}>
+          <div>
+            <h2 class="text-sm text-fg">Auto-compaction</h2>
+            <p class="text-xs text-faint">
+              Conversations compact automatically once context usage crosses either
+              threshold — whichever is reached first. Leave the token cap blank to
+              trigger on percentage alone.
+            </p>
+          </div>
+          <div class="mt-3 flex flex-col gap-3">
+            <label class="flex items-center justify-between gap-4">
+              <span class="text-xs text-fg">Context used (%)</span>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={autoCompact.percent}
+                onchange={saveAutoCompactPercent}
+                class="settings-input w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+                data-testid="auto-compact-percent"
+                aria-label="Auto-compact percentage"
+              />
+            </label>
+            <label class="flex items-center justify-between gap-4">
+              <span class="text-xs text-fg">Token count</span>
+              <input
+                type="number"
+                min="0"
+                step="1000"
+                placeholder="none"
+                value={autoCompact.tokens ?? ""}
+                onchange={saveAutoCompactTokens}
+                class="settings-input w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+                data-testid="auto-compact-tokens"
+                aria-label="Auto-compact token count"
+              />
+            </label>
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("retry")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="retry" use:sectionAction={"retry"}>
+          <div>
+            <h2 class="text-sm text-fg">Retry on error</h2>
+            <p class="text-xs text-faint">
+              When a request fails (network drop, transient error), pi retries with
+              exponential backoff — each wait doubles.
+            </p>
+          </div>
+          <div class="mt-3 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-fg">Enabled</span>
+              <Switch
+                checked={piSettings.retryEnabled}
+                onCheckedChange={toggleRetryEnabled}
+                data-testid="retry-enabled-toggle"
+                aria-label="Toggle retry"
+              />
+            </div>
+            <label class="flex items-center justify-between gap-4">
+              <span class="text-xs text-fg">Retries</span>
+              <input
+                type="number"
+                min="0"
+                max="10"
+                value={piSettings.retryMaxRetries}
+                onchange={saveRetryCount}
+                class="settings-input w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+                data-testid="retry-count"
+                aria-label="Number of retries"
+              />
+            </label>
+            <label class="flex items-center justify-between gap-4">
+              <span class="text-xs text-fg">Initial wait (seconds)</span>
+              <input
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={piSettings.retryBaseDelayMs / 1000}
+                onchange={saveRetryDelay}
+                class="settings-input w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus"
+                data-testid="retry-initial-delay"
+                aria-label="Initial wait seconds"
+              />
+            </label>
+            {#if piSettings.retryMaxRetries > 0}
+              <div class="rounded-md bg-surface-2 px-3 py-2 text-xs text-faint">
+                <span class="text-fg-soft">Total retry window:</span>
+                {formatDuration(retryTotalSeconds)}
+                <span class="text-faint">
+                  ({piSettings.retryMaxRetries} retries,
+                  {piSettings.retryBaseDelayMs / 1000}s → {piSettings.retryBaseDelayMs / 1000 * Math.pow(2, piSettings.retryMaxRetries - 1)}s)
+                </span>
+              </div>
+            {/if}
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("messageDelivery")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="messageDelivery" use:sectionAction={"messageDelivery"}>
+          <div>
+            <h2 class="text-sm text-fg">Message delivery</h2>
+            <p class="text-xs text-faint">How steering and follow-up messages are sent.</p>
+          </div>
+          <div class="mt-3 flex flex-col gap-3">
+            <label class="flex items-center justify-between gap-4">
+              <span class="text-xs text-fg">Steering mode</span>
+              <Select
+                class="rounded-md bg-surface-2"
+                value={piSettings.steeringMode}
+                onValueChange={pickSteeringMode}
+                items={[
+                  { value: "one-at-a-time", label: "One at a time" },
+                  { value: "all", label: "All" },
+                ]}
+                data-testid="steering-mode-select"
+                aria-label="Steering mode"
+              />
+            </label>
+            <label class="flex items-center justify-between gap-4">
+              <span class="text-xs text-fg">Follow-up mode</span>
+              <Select
+                class="rounded-md bg-surface-2"
+                value={piSettings.followUpMode}
+                onValueChange={pickFollowUpMode}
+                items={[
+                  { value: "one-at-a-time", label: "One at a time" },
+                  { value: "all", label: "All" },
+                ]}
+                data-testid="followup-mode-select"
+                aria-label="Follow-up mode"
+              />
+            </label>
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("extensions")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="extensions" use:sectionAction={"extensions"}>
+          <div>
+            <h2 class="text-sm text-fg">Extensions</h2>
+            <p class="text-xs text-faint">
+              Keep installed pi packages up to date by running
+              <code>pi update --extensions</code> on launch and periodically. Runs
+              only while no thread is active; restart to load new versions.
+            </p>
+          </div>
+          <div class="mt-3 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-fg">Auto-update</span>
+              <Switch
+                checked={piSettings.autoUpdateExtensions}
+                onCheckedChange={toggleAutoUpdateExtensions}
+                data-testid="auto-update-extensions-toggle"
+                aria-label="Toggle extension auto-update"
+              />
+            </div>
+            <button
+              class="settings-btn self-start rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
+              onclick={updateExtensionsNow}
+              disabled={updatingExtensions}
+              data-testid="update-extensions-now"
+            >
+              {updatingExtensions ? "Updating…" : "Update now"}
+            </button>
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("insomnia")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="insomnia" use:sectionAction={"insomnia"}>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-sm text-fg">Keep awake while running</h2>
+              <p class="text-xs text-faint">
+                Prevent macOS idle sleep while an agent run is active. Releases the
+                moment the run goes idle. Mac only.
+              </p>
+            </div>
+            <Switch
+              checked={piSettings.insomnia}
+              onCheckedChange={toggleInsomnia}
+              data-testid="insomnia-toggle"
+              aria-label="Toggle keep awake"
+            />
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("subagents")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="subagents" data-testid="subagents-section" use:sectionAction={"subagents"}>
+          <SubagentsSection projects={snapshot.current?.projects ?? []} />
+        </section>
+        {/if}
+
+        {#if hit("utilityModel")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="utilityModel" use:sectionAction={"utilityModel"}>
+          <div>
+            <h2 class="text-sm text-fg">Utility model</h2>
+            <p class="text-xs text-faint">
+              Background tasks like thread titles and commit messages use this fast,
+              inexpensive model. Choose from your scoped models (same as the
+              composer). Leave on “Default” to auto-pick.
+            </p>
+          </div>
+          <Select
+            class="mt-3 w-full rounded-md bg-surface-2"
+            value={selectedKey}
+            onValueChange={pickUtilityModel}
+            items={[
+              { value: "", label: "Default (auto-pick)" },
+              ...grouped.flatMap((group) =>
+                group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider })),
+              ),
+            ]}
+            data-testid="utility-model-select"
+            aria-label="Utility model"
+          />
+        </section>
+        {/if}
+
+        {#if hit("scopedModels")}
+        <section bind:this={scopedModelsSection} class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="scopedModels" data-testid="scoped-models-section" use:sectionAction={"scopedModels"}>
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <h2 class="text-sm text-fg">Scoped models</h2>
+              <p class="text-xs text-faint">
+                Which models appear in the composer selector. Shared with
+                <code>pi /model</code> in <code>settings.json</code>.
+              </p>
+            </div>
+            <ModelScopeSelect bind:open={scopedModelsOpen} class="min-w-44" />
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("visionProxy")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="visionProxy" use:sectionAction={"visionProxy"}>
+          <div class="mb-2">
+            <h2 class="text-sm text-fg">Vision proxy</h2>
+            <p class="text-xs text-faint">
+              Routes images to a vision-capable model, collects descriptions, and
+              injects them into the agent's context — so text-only models can
+              "see" your images across turns. Requires restart after install.
+            </p>
+          </div>
+
+          {#if !visionProxy.installed}
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-xs text-faint">
+                Not installed. Installs <code>npm:pi-vision-proxy</code> via pi.
+              </span>
+              <button
+                class="settings-btn rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
+                onclick={installVisionProxy}
+                disabled={installingVision}
+                data-testid="install-vision-proxy"
+              >
+                {installingVision ? "Installing…" : "Install"}
+              </button>
+            </div>
+            {#if visionError}
+              <p class="mt-2 text-xs text-danger" data-testid="vision-proxy-error" use:clickCopy={visionError}>{visionError}</p>
+            {/if}
+          {:else}
+            <div class="flex flex-col gap-3">
+              <div>
+                <label class="mb-1 block text-xs text-fg">Vision model</label>
+                <Select
+                  class="w-full rounded-md bg-surface-2"
+                  value={visionKey}
+                  onValueChange={pickVisionModel}
+                  disabled={visionProxy.modelLocked}
+                  items={grouped.flatMap((group) =>
+                    group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider })),
+                  )}
+                  data-testid="vision-model-select"
+                  aria-label="Vision model"
+                />
+                {#if visionProxy.modelLocked}
+                  <p class="mt-1 text-[11px] text-fainter">
+                    Locked by <code>PI_VISION_PROXY_MODEL</code> env var.
+                  </p>
+                {/if}
+              </div>
+              <div>
+                <label class="mb-1 block text-xs text-fg">Mode</label>
+                <Select
+                  class="w-full rounded-md bg-surface-2"
+                  value={visionProxy.mode}
+                  onValueChange={(v) => visionProxy.setMode(v as VisionProxyConfig["mode"])}
+                  disabled={visionProxy.modeLocked}
+                  items={[
+                    { value: "fallback", label: "Fallback — only when active model can't see images" },
+                    { value: "always", label: "Always — always route through the proxy" },
+                    { value: "off", label: "Off — disabled" },
+                  ]}
+                  data-testid="vision-mode-select"
+                  aria-label="Vision proxy mode"
+                />
+                {#if visionProxy.modeLocked}
+                  <p class="mt-1 text-[11px] text-fainter">
+                    Locked by <code>PI_VISION_PROXY_MODE</code> env var.
+                  </p>
+                {/if}
+              </div>
+              {#if visionError}
+                <p class="text-xs text-danger" data-testid="vision-proxy-error" use:clickCopy={visionError}>{visionError}</p>
+              {/if}
+            </div>
+          {/if}
+        </section>
+        {/if}
+
+        {#if hit("computerUse")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="computerUse" data-testid="computer-use-section" use:sectionAction={"computerUse"}>
+          <div class="mb-3">
+            <h2 class="text-sm text-fg">Computer use</h2>
+            <p class="text-xs text-faint">
+              Lets the agent drive real apps when no CLI/API path exists. Web pages
+              use the native <code>agent_browser</code> tool; native macOS apps use
+              the <code>cua-driver</code> (background, no focus steal). Run the
+              checks below to install + grant access.
+            </p>
+          </div>
+
+          <div class="flex flex-col gap-3">
+            <!-- 1. agent-browser engine binary -->
+            <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">
+              <div class="min-w-0">
+                <p class="text-xs text-fg">agent-browser engine</p>
+                <p class="text-[11px] text-fainter">
+                  {#if agentBrowser?.binaryVersion}
+                    <code>agent-browser {agentBrowser.binaryVersion}</code> found on PATH
+                  {:else}
+                    Binary not on PATH — install with <code>npm i -g agent-browser</code>
+                  {/if}
+                </p>
+              </div>
+              {#if agentBrowser?.binaryVersion}
+                <Check size={16} class="text-emerald-500" />
+              {:else}
+                <CircleSlash size={16} class="text-fainter" />
+              {/if}
+            </div>
+
+            <!-- 2. pi-agent-browser-native package -->
+            <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">
+              <div class="min-w-0 flex-1">
+                <p class="text-xs text-fg">Native <code>agent_browser</code> tool</p>
+                <p class="text-[11px] text-fainter">
+                  {#if agentBrowser?.installed}
+                    <code>npm:pi-agent-browser-native</code> installed — restart pi to load
+                  {:else}
+                    Not installed — exposes the typed browser tool
+                  {/if}
+                </p>
+              </div>
+              {#if agentBrowser?.installed}
+                <Check size={16} class="text-emerald-500" />
+              {:else}
+                <button
+                  class="settings-btn rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
+                  onclick={installAgentBrowser}
+                  disabled={installingBrowser}
+                  data-testid="install-agent-browser"
+                >
+                  {installingBrowser ? "Installing…" : "Install"}
+                </button>
+              {/if}
+            </div>
+
+            <!-- 3. CuaDriver.app -->
+            <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">
+              <div class="min-w-0">
+                <p class="text-xs text-fg">Cua Driver</p>
+                <p class="text-[11px] text-fainter">
+                  {#if cuaDriver?.installed}
+                    <code>CuaDriver.app{cuaDriver.version ? " v" + cuaDriver.version : ""}</code> installed
+                  {:else}
+                    Not installed — native macOS desktop automation
+                  {/if}
+                </p>
+              </div>
+              {#if cuaDriver?.installed}
+                <Check size={16} class="text-emerald-500" />
+              {:else}
+                <CircleSlash size={16} class="text-fainter" />
+              {/if}
+            </div>
+
+            <!-- 4. Cua Driver permissions -->
+            <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">
+              <div class="min-w-0 flex-1">
+                <p class="text-xs text-fg">macOS Accessibility + Screen Recording</p>
+                <p class="text-[11px] text-fainter">
+                  {#if cuaDriver?.installed}
+                    {#if cuaDriver.accessibility === "granted" && cuaDriver.screenRecording === "granted"}
+                      Both permissions granted
+                    {:else if cuaDriver.accessibility === "unknown" || cuaDriver.screenRecording === "unknown"}
+                      Start the Cua Driver daemon, then grant access
+                    {:else}
+                      Denied — re-enable in System Settings → Privacy & Security
+                    {/if}
+                  {:else}
+                    Install Cua Driver first
+                  {/if}
+                </p>
+              </div>
+              {#if cuaDriver?.accessibility === "granted" && cuaDriver.screenRecording === "granted"}
+                <Check size={16} class="text-emerald-500" />
+              {:else}
+                <button
+                  class="settings-btn rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"
+                  onclick={grantCuaPermissions}
+                  disabled={grantingCua || !cuaDriver?.installed}
+                  data-testid="grant-cua-permissions"
+                >
+                  {grantingCua ? "Opening…" : "Grant access"}
+                </button>
+              {/if}
+            </div>
+
+            {#if computerUseReady}
+              <p class="text-xs text-emerald-500" data-testid="computer-use-ready">
+                ✓ Computer use is set up. The agent will prefer programmatic paths,
+                then <code>agent_browser</code> for web, then <code>cua-driver</code> for native desktop.
+              </p>
+            {:else}
+              <p class="text-xs text-faint">
+                Computer use is optional. The agent prefers CLI/API/connector paths; it only
+                drives UI when no programmatic route exists.
+              </p>
+            {/if}
+          </div>
+        </section>
+        {/if}
+
+        {#if hit("about")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="about" use:sectionAction={"about"}>
+          <h2 class="text-sm text-fg">About</h2>
+          <p class="mt-1 text-xs text-faint">peach-pi {version}</p>
+        </section>
+        {/if}
+      </div>
     </div>
   </div>
 </main>
+
+<style>
+  /* In-page settings sidebar — local to this view. */
+  .settings-nav {
+    border-right: 1px solid var(--color-border);
+  }
+  .settings-nav-item.is-active {
+    background: var(--color-surface-2);
+    color: var(--color-fg);
+    font-weight: 500;
+    box-shadow: inset 2px 0 0 0 var(--color-accent);
+  }
+  .settings-section {
+    scroll-margin-top: 1rem;
+  }
+</style>

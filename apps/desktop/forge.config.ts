@@ -5,6 +5,7 @@ import type { ForgeConfig } from "@electron-forge/shared-types";
 import { VitePlugin } from "@electron-forge/plugin-vite";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { MakerDMG } from "@electron-forge/maker-dmg";
+import { PublisherS3 } from "@electron-forge/publisher-s3";
 
 /**
  * Vendor the pi SDK dependency tree into the packaged app.
@@ -112,7 +113,54 @@ const config: ForgeConfig = {
       );
     },
   },
-  makers: [new MakerZIP({}, ["darwin"]), new MakerDMG({}, ["darwin"])],
+  makers: [
+    new MakerZIP(
+      // When PEACH_PI_UPDATE_URL is set (release lane), the ZIP maker also
+      // emits the Squirrel.Mac RELEASES.json manifest. DMG-only builds cannot
+      // auto-update. Inert for dev/unsigned builds.
+      process.env.PEACH_PI_UPDATE_URL
+        ? { macUpdateManifestBaseUrl: process.env.PEACH_PI_UPDATE_URL }
+        : {},
+      ["darwin"],
+    ),
+    new MakerDMG({}, ["darwin"]),
+  ],
+  ...(process.env.PEACH_PI_UPDATE_URL &&
+    process.env.PEACH_PI_R2_BUCKET &&
+    process.env.PEACH_PI_R2_ACCESS_KEY_ID &&
+    process.env.PEACH_PI_R2_SECRET_ACCESS_KEY
+    ? {
+        publishers: [
+          new PublisherS3({
+            // S3-compatible object storage. Works with AWS S3, Cloudflare R2
+            // (set PEACH_PI_R2_S3_ENDPOINT + PEACH_PI_R2_FORCE_PATH_STYLE), GCS, etc.
+            bucket: process.env.PEACH_PI_R2_BUCKET,
+            // Path suffix after bucket → folder key prefix. If
+            // PEACH_PI_UPDATE_URL is https://host/peach-pi, manifest files
+            // live under the `peach-pi` key.
+            folder:
+              (() => {
+                try {
+                  return decodeURIComponent(
+                    new URL(process.env.PEACH_PI_UPDATE_URL!).pathname,
+                  ).replace(/^\//, "");
+                } catch {
+                  return "";
+                }
+              })(),
+            accessKeyId: process.env.PEACH_PI_R2_ACCESS_KEY_ID,
+            secretAccessKey: process.env.PEACH_PI_R2_SECRET_ACCESS_KEY,
+            ...(process.env.PEACH_PI_R2_S3_ENDPOINT ? { endpoint: process.env.PEACH_PI_R2_S3_ENDPOINT } : {}),
+            ...(process.env.PEACH_PI_R2_REGION ? { region: process.env.PEACH_PI_R2_REGION } : {}),
+            s3ForcePathStyle: process.env.PEACH_PI_R2_FORCE_PATH_STYLE === "1",
+            // R2 rejects ACLs; public access comes from the bucket's r2.dev
+            // subdomain or a custom domain, so omit the ACL header.
+            omitAcl: process.env.PEACH_PI_R2_OMIT_ACL === "1",
+            public: true,
+          }),
+        ],
+      }
+    : {}),
   plugins: [
     new VitePlugin({
       build: [

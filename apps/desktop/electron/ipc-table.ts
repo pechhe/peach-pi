@@ -28,6 +28,8 @@ import {
 } from "./services/pi-vision-proxy.ts";
 import { computePiHealth } from "./services/pi-health.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
+import { importTheme } from "./services/theme-import-service.ts";
+import { initMainSentry } from "./services/telemetry-service.ts";
 import type { ServiceComposition } from "./compose-services.ts";
 import type { HudLifecycle } from "./hud-lifecycle.ts";
 
@@ -93,6 +95,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     remoteClient,
     issuesService,
     piUpdateService,
+    autoUpdateService,
     subagentService,
     sideChatService,
     devTapInstallService,
@@ -132,7 +135,9 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       issue.parent != null
         ? (allIssues.find((i) => i.number === issue.parent && i.isPrd) ?? null)
         : null;
-    await threadService.prompt(thread.id, buildSeedPrompt(issue, parentPrd));
+    const workflow =
+      appService.snapshot().projects.find((p) => p.id === projectId)?.mergeWorkflow ?? "pr";
+    await threadService.prompt(thread.id, buildSeedPrompt(issue, parentPrd, workflow));
     return thread.id;
   }
 
@@ -154,7 +159,17 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "app:getVisionProxyConfig": getVisionProxyConfig,
       "app:setVisionProxyModel": setVisionProxyModel,
       "app:setVisionProxyMode": setVisionProxyMode,
+      "theme:import": importTheme,
       "app:updateExtensions": piUpdateService.updateNow.bind(piUpdateService),
+      "app:getTelemetryConsent": async () => (await getPiSettings()).telemetryConsent,
+      "app:setTelemetryConsent": async (consent) => {
+        const updated = await setPiSettings({ telemetryConsent: consent });
+        emit("event:telemetryConsentChanged", undefined);
+        if (consent === true) await initMainSentry(true);
+        return updated.telemetryConsent;
+      },
+      "app:getUpdateStatus": () => autoUpdateService.status,
+      "app:installUpdate": () => autoUpdateService.installUpdate(),
       "extensions:remove": piUpdateService.removeExtension.bind(piUpdateService),
       "extensions:deleteLocal": piUpdateService.deleteLocalExtension.bind(piUpdateService),
       "skills:delete": piUpdateService.deleteSkill.bind(piUpdateService),
@@ -189,15 +204,19 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "agentBrowser:state": agentBrowserService.state.bind(agentBrowserService),
       "ui:setSidebarWidth": appService.setSidebarWidth.bind(appService),
       "ui:setSidebarCollapsed": appService.setSidebarCollapsed.bind(appService),
+      "ui:setArchiveThreadWorktreeWarningDismissed": appService.setArchiveThreadWorktreeWarningDismissed.bind(appService),
       "projects:add": appService.addProject.bind(appService),
       "projects:remove": appService.removeProject.bind(appService),
       "projects:pick": pickProject,
       "projects:reorder": appService.reorderProjects.bind(appService),
       "projects:setCollapsed": appService.setProjectCollapsed.bind(appService),
+      "projects:setMergeWorkflow": appService.setMergeWorkflow.bind(appService),
       "worktrees:rename": appService.renameWorktree.bind(appService),
       "worktrees:archive": appService.archive.bind(appService),
       "threads:create": threadService.createThread.bind(threadService),
       "threads:createChat": threadService.createChat.bind(threadService),
+      "threads:clone": threadService.cloneThread.bind(threadService),
+      "threads:forkFrom": threadService.forkFrom.bind(threadService),
       "threads:prompt": threadService.prompt.bind(threadService),
       "threads:runCommand": threadService.runCommand.bind(threadService),
       "threads:reload": threadService.reloadSession.bind(threadService),
@@ -339,7 +358,9 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
         await gitService.branchWorktree(dir, prdBranchName(prd.number, prd.title));
         const wt = appService.addWorktree(projectId, dir, `prd-${prd.number}`);
         const thread = await threadService.createThread(projectId, { worktreeId: wt.id });
-        await threadService.prompt(thread.id, buildPrdAgentPrompt(prd));
+        const workflow =
+          appService.snapshot().projects.find((p) => p.id === projectId)?.mergeWorkflow ?? "pr";
+        await threadService.prompt(thread.id, buildPrdAgentPrompt(prd, workflow));
         return { ok: true, threadId: thread.id };
       },
       "workQueue:closeIssue": (projectId, issueNumber, reason) =>
@@ -356,6 +377,12 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
         const projectWorktrees = snap.worktrees.filter(
           (w) => w.projectId === projectId && w.archivedAt == null,
         );
+        // Issue titles for (re)created PR bodies. Best-effort: a failed fetch
+        // falls back to a generic title so the batch still proceeds.
+        const issueTitles = new Map<number, string>();
+        const listRes = await issuesService.list(projectId);
+        if (listRes.ok) for (const i of listRes.issues) issueTitles.set(i.number, i.title);
+        const titleFor = (n: number) => issueTitles.get(n) ?? `Issue #${n}`;
         const items: MergeBatchItemResult[] = [];
         for (const issueNumber of issueNumbers) {
           const wt = projectWorktrees.find((w) => w.name === `issue-${issueNumber}`);
@@ -376,9 +403,84 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
             const item = { ok: false as const, issueNumber, phase: rebaseRes.error.includes("Tests") ? ("tests" as const) : ("rebase" as const), error: rebaseRes.error };
             items.push(item);
             emit("event:mergeProgress", { projectId, issueNumber, phase: item.phase, done: true, item });
+            // On any rebase-phase failure, nudge the issue's thread to resolve
+            // it: the thread is the actor that can fix whatever blocked the
+            // rebase — uncommitted changes left in the worktree, a real
+            // rebase conflict, a detached HEAD, etc. rebaseAndTest already
+            // aborted (on conflict) or refused (on dirty tree), leaving the
+            // worktree on the agent's branch, so the agent can commit/stash,
+            // re-run the rebase, fix conflicts, push, and stop for the human
+            // to re-attempt the merge. Test-phase failures are left alone
+            // (a different concern).
+            if (item.phase === "rebase") {
+              await threadService
+                .prompt(
+                  thread.id,
+                  `The merge queue couldn't merge issue #${issueNumber} — the rebase onto ` +
+                    `main failed with:\n\n${rebaseRes.error}\n\n` +
+                    `Fix whatever blocked the rebase, then make the branch mergeable again. ` +
+                    `If there are uncommitted changes, commit or stash them. If the rebase ` +
+                    `aborted on a conflict, run \`git rebase origin/main\` and resolve the ` +
+                    `conflicts in the affected files, then \`git rebase --continue\` (repeat ` +
+                    `until it completes). Run the full test suite. Once green, force-push ` +
+                    `your branch with \`git push --force-with-lease\` so the merge queue can ` +
+                    `re-attempt. Then stop at the human gate — do not merge yourself.`,
+                )
+                .catch((e) =>
+                  console.error(`[mergeBatch] failed to prompt thread ${thread.id} for rebase failure:`, e),
+                );
+            }
             continue;
           }
-          const mergeRes = await gitService.mergePr(thread.id);
+          // 'local' workflow: merge the worktree branch into the repo's default
+          // branch in the project's main checkout, then push. No PR. On
+          // failure, nudge the issue's agent to fix it (mirrors the rebase-
+          // failure nudge) — fail loudly, no silent PR fallback.
+          const workflow =
+            snap.projects.find((p) => p.id === projectId)?.mergeWorkflow ?? "pr";
+          if (workflow === "local") {
+            const mergeRes = await gitService.mergeBranchToDefault(thread.id);
+            const item: MergeBatchItemResult = mergeRes.ok
+              ? { ok: true, issueNumber, mergedTo: mergeRes.target, tests: rebaseRes.tests }
+              : { ok: false, issueNumber, phase: "merge", error: mergeRes.error };
+            items.push(item);
+            emit("event:mergeProgress", { projectId, issueNumber, phase: "merge", done: true, item });
+            if (mergeRes.ok) {
+              await appService.archive(wt!.id).catch((e) =>
+                console.error(`[mergeBatch] failed to archive worktree ${wt!.id}:`, e),
+              );
+            } else {
+              await threadService
+                .prompt(
+                  thread.id,
+                  `The merge queue couldn't merge issue #${issueNumber} into the default ` +
+                    `branch — the local merge failed with:\n\n${mergeRes.error}\n\n` +
+                    `Sort it out so the branch can be merged into the default branch. ` +
+                    `If the local repo is dirty, commit or stash on the default branch. ` +
+                    `If the merge hit a conflict, resolve it in the default branch's working ` +
+                    `tree and commit the merge. Run the full test suite. Once green, push ` +
+                    `the default branch. Then stop at the human gate — do not start new work.`,
+                )
+                .catch((e) =>
+                  console.error(`[mergeBatch] failed to prompt thread ${thread.id} for local merge failure:`, e),
+                );
+            }
+            continue;
+          }
+          // 'pr' workflow: ensure an OPEN PR exists for this branch. A force-
+          // push after a rebase-conflict fix can leave the original PR closed
+          // (e.g. GitHub auto-closes a PR whose head briefly matched the
+          // base). ensureOpenPr recreates a fresh `Closes #N` PR in that case
+          // so the queue can finish the merge instead of dead-ending on "PR
+          // is closed".
+          const ensured = await gitService.ensureOpenPr(
+            thread.id,
+            issueNumber,
+            titleFor(issueNumber),
+          );
+          const mergeRes = ensured.ok
+            ? await gitService.mergePr(thread.id)
+            : ensured;
           const item: MergeBatchItemResult = mergeRes.ok
             ? { ok: true, issueNumber, prUrl: mergeRes.prUrl, tests: rebaseRes.tests }
             : { ok: false, issueNumber, phase: "merge", error: mergeRes.error };
@@ -389,6 +491,15 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
             // project repo. Best-effort — a pull failure does not fail the
             // merge that already landed on GitHub.
             await gitService.pull(thread.id).catch(() => undefined);
+            // The issue shipped + its PR merged, so the isolated worktree
+            // (git checkout + DB record) and its thread are no longer needed.
+            // `appService.archive` is the full teardown: archives the worktree
+            // record (drops it from the sidebar), archives every live thread
+            // in it (drops them from the sidebar), and `git worktree remove`s
+            // the checkout dir so the git process is cleaned up too.
+            await appService.archive(wt!.id).catch((e) =>
+              console.error(`[mergeBatch] failed to archive worktree ${wt!.id}:`, e),
+            );
           }
         }
         return { ok: true, items };

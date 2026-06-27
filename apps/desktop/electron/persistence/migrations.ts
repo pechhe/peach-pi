@@ -207,4 +207,16 @@ export const migrations: Migration[] = [
       db.exec("ALTER TABLE automations ADD COLUMN model TEXT");
     },
   },
+  {
+    version: 11,
+    up: (db) => {
+      // Per-project Work Queue merge workflow: 'pr' (open a PR + gh pr merge) or
+      // 'local' (merge the worktree branch into the repo's default branch in
+      // the project's main checkout, then push). Defaults to 'pr' so existing
+      // projects keep their GitHub-PR behaviour.
+      db.exec(
+        "ALTER TABLE projects ADD COLUMN merge_workflow TEXT NOT NULL DEFAULT 'pr'",
+      );
+    },
+  },
 ];

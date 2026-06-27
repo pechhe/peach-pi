@@ -22,6 +22,7 @@ interface ProjectRow {
   ord: number;
   created_at: string;
   archived_at: string | null;
+  merge_workflow: string;
 }
 
 interface ThreadRow {
@@ -51,6 +52,7 @@ const toProject = (r: ProjectRow): Project => ({
   order: r.ord,
   createdAt: r.created_at,
   archivedAt: r.archived_at ?? undefined,
+  mergeWorkflow: r.merge_workflow === "local" ? "local" : "pr",
 });
 
 const toThread = (r: ThreadRow): Thread => ({
@@ -92,9 +94,11 @@ export class ProjectRepo {
       this.db.prepare("SELECT COALESCE(MAX(ord), -1) AS m FROM projects").get() as { m: number }
     ).m;
     this.db
-      .prepare("INSERT INTO projects (id, path, name, kind, ord, created_at) VALUES (?,?,?,?,?,?)")
-      .run(id, path, name, kind, maxOrd + 1, now);
-    return { id, path, name, kind, order: maxOrd + 1, createdAt: now };
+      .prepare(
+        "INSERT INTO projects (id, path, name, kind, ord, created_at, merge_workflow) VALUES (?,?,?,?,?,?,?)",
+      )
+      .run(id, path, name, kind, maxOrd + 1, now, "pr");
+    return { id, path, name, kind, order: maxOrd + 1, createdAt: now, mergeWorkflow: "pr" };
   }
 
   remove(id: string): void {
@@ -113,6 +117,11 @@ export class ProjectRepo {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  /** Set a project's Work Queue merge workflow ('pr' | 'local'). */
+  setMergeWorkflow(id: string, workflow: Project["mergeWorkflow"]): void {
+    this.db.prepare("UPDATE projects SET merge_workflow = ? WHERE id = ?").run(workflow, id);
   }
 }
 
@@ -724,6 +733,7 @@ export const defaultUiState: UiState = {
   hudThreadId: null,
   hudPosition: null,
   hudAutoRevealOnFinish: false,
+  archiveThreadWorktreeWarningDismissed: false,
 };
 
 /** KV key for the configured "utility" model (background LLM tasks: titles/commits). */

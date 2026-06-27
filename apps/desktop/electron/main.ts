@@ -61,6 +61,7 @@ async function boot(): Promise<void> {
   svc.appService.start();
   svc.automationService.start();
   svc.piUpdateService.start();
+  svc.autoUpdateService.start();
   hud.initMainWindow();
   startDevTapControlChannel();
   globalShortcut.register("CommandOrControl+Shift+Space", () => hud.toggleHud());

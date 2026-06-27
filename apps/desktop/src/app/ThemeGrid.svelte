@@ -17,18 +17,28 @@
   import { theme } from "../lib/theme.svelte";
   import Check from "@lucide/svelte/icons/check";
 
+  /** A unified card shape for presets + saved themes. `saved`/`imported` are
+   *  only present on saved-theme cards; presets leave them absent. */
+  interface ThemeCard {
+    id: string;
+    label: string;
+    scheme: Scheme;
+    saved?: true;
+    imported?: boolean;
+  }
+
   /** Cards derived from presets + saved themes, split by scheme. */
-  let lightCards = $derived([
+  let lightCards = $derived<ThemeCard[]>([
     ...THEMES.filter((t) => t.scheme === "light"),
     ...theme.savedThemes.filter((t) => t.scheme === "light").map(savedCard),
   ]);
-  let darkCards = $derived([
+  let darkCards = $derived<ThemeCard[]>([
     ...THEMES.filter((t) => t.scheme === "dark"),
     ...theme.savedThemes.filter((t) => t.scheme === "dark").map(savedCard),
   ]);
 
-  function savedCard(t: SavedTheme): { id: string; label: string; scheme: Scheme; saved: true } {
-    return { id: t.id, label: t.name, scheme: t.scheme, saved: true as const };
+  function savedCard(t: SavedTheme): ThemeCard {
+    return { id: t.id, label: t.name, scheme: t.scheme, saved: true as const, imported: t.source === "imported" };
   }
 
   /** The active theme ids per scheme, for ring display under each mode. */
@@ -96,9 +106,14 @@
       </div>
       <div class="flex items-center justify-between gap-1">
         <span class="truncate text-xs font-medium" style="color: var(--color-fg);">{card.label}</span>
-        {#if checked}
-          <Check class="size-3.5 shrink-0 text-accent" aria-hidden="true" />
-        {/if}
+        <div class="flex items-center gap-1">
+          {#if card.saved && card.imported}
+            <span class="shrink-0 rounded px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide" style="background: var(--color-surface-3); color: var(--color-fg-soft);" title="Imported">Imported</span>
+          {/if}
+          {#if checked}
+            <Check class="size-3.5 shrink-0 text-accent" aria-hidden="true" />
+          {/if}
+        </div>
       </div>
       {#if showRing}
         <span class="sr-only">(active)</span>

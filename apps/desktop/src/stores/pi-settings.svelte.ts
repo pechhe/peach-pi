@@ -19,6 +19,7 @@ const store = createIpcStore<"app:getPiSettings", "app:setPiSettings">({
     followUpMode: "one-at-a-time",
     autoUpdateExtensions: true,
     insomnia: false,
+    telemetryConsent: null,
   },
 });
 

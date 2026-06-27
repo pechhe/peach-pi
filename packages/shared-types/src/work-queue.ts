@@ -181,7 +181,11 @@ export function extractPrdContext(prdBody: string): string {
  *  Decisions) when launched on a child issue, the acceptance criteria as the
  *  definition of done, and the standing test+PR gate. An issue with no parent
  *  PRD gets only its own context. Pure — unit-tested. */
-export function buildSeedPrompt(issue: TrackedIssue, parentPrd?: TrackedIssue | null): string {
+export function buildSeedPrompt(
+  issue: TrackedIssue,
+  parentPrd?: TrackedIssue | null,
+  workflow: "pr" | "local" = "pr",
+): string {
   const prdContext = parentPrd ? extractPrdContext(parentPrd.body) : "";
   const prdBlock = prdContext
     ? `\n\n## Parent PRD #${parentPrd!.number}: ${parentPrd!.title}\n\n${prdContext}`
@@ -190,13 +194,15 @@ export function buildSeedPrompt(issue: TrackedIssue, parentPrd?: TrackedIssue | 
     issue.acceptanceCriteria.length > 0
       ? `\n\n## Definition of done\n${issue.acceptanceCriteria.map((c) => `- [ ] ${c}`).join("\n")}`
       : "";
-  return (
-    `You are implementing issue #${issue.number}: ${issue.title}.\n\n` +
-    `${issue.body.trim()}${prdBlock}${dod}\n\n` +
-    `When the work is complete, run the full test suite. Once it is green, ` +
-    `open a pull request whose body includes \`Closes #${issue.number}\` so the ` +
-    `issue closes on merge, then stop at the human gate for review — do not merge.`
-  );
+  const gate =
+    workflow === "local"
+      ? `When the work is complete, run the full test suite. Once it is green, ` +
+        `push your branch and stop — do not merge. A human will trigger a local ` +
+        `merge of your branch into the repo's default branch.`
+      : `When the work is complete, run the full test suite. Once it is green, ` +
+        `open a pull request whose body includes \`Closes #${issue.number}\` so the ` +
+        `issue closes on merge, then stop at the human gate for review — do not merge.`;
+  return `You are implementing issue #${issue.number}: ${issue.title}.\n\n${issue.body.trim()}${prdBlock}${dod}\n\n${gate}`;
 }
 
 /** Build the seed prompt for running the to-issues skill on a childless PRD.
@@ -212,14 +218,16 @@ export function buildPrdBreakdownPrompt(prd: TrackedIssue): string {
 /** Build the seed prompt for running an agent directly on a PRD (no child
  *  issues). The PRD body is the task; the PR closes the PRD issue itself.
  *  Pure. */
-export function buildPrdAgentPrompt(prd: TrackedIssue): string {
-  return (
-    `You are implementing PRD #${prd.number}: ${prd.title}.\n\n` +
-    `${prd.body.trim()}\n\n` +
-    `When the work is complete, run the full test suite. Once it is green, ` +
-    `open a pull request whose body includes \`Closes #${prd.number}\` so the ` +
-    `PRD issue closes on merge, then stop at the human gate for review — do not merge.`
-  );
+export function buildPrdAgentPrompt(prd: TrackedIssue, workflow: "pr" | "local" = "pr"): string {
+  const gate =
+    workflow === "local"
+      ? `When the work is complete, run the full test suite. Once it is green, ` +
+        `push your branch and stop — do not merge. A human will trigger a local ` +
+        `merge of your branch into the repo's default branch.`
+      : `When the work is complete, run the full test suite. Once it is green, ` +
+        `open a pull request whose body includes \`Closes #${prd.number}\` so the ` +
+        `PRD issue closes on merge, then stop at the human gate for review — do not merge.`;
+  return `You are implementing PRD #${prd.number}: ${prd.title}.\n\n${prd.body.trim()}\n\n${gate}`;
 }
 
 /** A display group in the Work Queue: a PRD with its direct child issues, or

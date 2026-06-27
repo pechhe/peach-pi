@@ -317,6 +317,42 @@ export class GitService {
     }
   }
 
+  /** Ensure the thread's branch has an OPEN PR, (re)creating one via `gh pr
+   *  create` if it's missing or closed-unmerged. Used by the merge queue when a
+   *  force-push revived a diff after GitHub auto-closed the original PR (a
+   *  branch identical to base → GitHub closes; once divergent again, reopen).
+   *  Resolves the existing PR via `gh pr view`; when open, returns it; when
+   *  closed/absent, creates a fresh squash-target with a `Closes #N` body. */
+  async ensureOpenPr(
+    threadId: string,
+    issueNumber: number,
+    issueTitle: string,
+  ): Promise<GitMergePrResult> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd) return { ok: false, error: "No working directory" };
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    if (!branch || branch === "HEAD")
+      return { ok: false, error: "No branch (detached HEAD)" };
+    const base = await this.defaultBranch(cwd);
+    if (!base) return { ok: false, error: "No default branch (origin/HEAD)" };
+    try {
+      const view = await runGh(["pr", "view", "--json", "number,url,state"], cwd);
+      const pr = JSON.parse(view) as { number: number; url: string; state: string };
+      if (pr.state.toUpperCase() === "OPEN") return { ok: true, prNumber: pr.number, prUrl: pr.url };
+      // Closed/unmerged: recreate so the merge queue has something to merge.
+      const title = `Issue #${issueNumber}: ${issueTitle}`;
+      const body = `Closes #${issueNumber}`;
+      const url = await runGh(
+        ["pr", "create", "--base", base, "--head", branch, "--title", title, "--body", body],
+        cwd,
+      );
+      const num = Number(/\/pull\/(\d+)$/.exec(url)?.[1] ?? 0);
+      return { ok: true, prNumber: num, prUrl: url };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   /**
    * Merge this worktree's branch into the local project repo's current branch
    * with --no-ff (keeps a thread-boundary merge commit). Local only — no push.
@@ -379,6 +415,69 @@ export class GitService {
       }
     }
     return { ok: true, target, branch, hasRemote };
+  }
+
+  /** Merge a worktree thread's branch into the repo's default branch (e.g.
+   *  `main`/`master`) in the project's main checkout, then push the default
+   *  branch to origin. Unlike {@link mergeToLocal}, this deliberately targets
+   *  the default branch — it's the Work Queue 'local' workflow's merge step,
+   *  gated behind a fresh `rebaseAndTest` so the branch is green and current.
+   *  Leaves the main checkout on the default branch after the merge. */
+  async mergeBranchToDefault(threadId: string): Promise<GitMergeResult> {
+    const cwd = this.cwdFor(threadId);
+    if (!cwd) return { ok: false, error: "No working directory" };
+    const thread = this.threads.get(threadId);
+    if (!thread?.worktreeDir) return { ok: false, error: "Not a worktree thread" };
+    if (!(await gitOk(["rev-parse", "--git-dir"], cwd)))
+      return { ok: false, error: "Not a git repository" };
+    const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+    if (branch === "HEAD") return { ok: false, error: "Nothing committed yet" };
+
+    const projectPath = this.projectPathFor(threadId);
+    if (!projectPath) return { ok: false, error: "No local project repo" };
+    const base = await this.defaultBranch(projectPath);
+    if (!base) return { ok: false, error: "No default branch (origin/HEAD)" };
+
+    // Refuse if the main checkout is dirty: the merge would rewrite its
+    // working tree mid-flight. Fail loudly — the caller (mergeBatch) will
+    // nudge the issue's agent to sort it out.
+    if ((await git(["status", "--porcelain"], projectPath)).trim())
+      return { ok: false, error: `Local repo is dirty — commit or stash on ${base} first` };
+
+    // Ensure the main checkout is on the default branch before merging.
+    const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
+    if (current !== base) {
+      try {
+        await git(["checkout", base], projectPath);
+      } catch (e) {
+        return { ok: false, error: `Could not check out ${base}: ${String(e)}` };
+      }
+    }
+
+    try {
+      await git(["merge", "--no-ff", branch], projectPath);
+    } catch {
+      await git(["merge", "--abort"], projectPath).catch(() => undefined);
+      return { ok: false, error: `Merge conflict on ${base} — aborted` };
+    }
+
+    const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);
+    if (hasRemote) {
+      try {
+        await git(["push", "origin", base], projectPath);
+      } catch (e) {
+        // Merge landed locally but the push failed (e.g. rejected non-fast-
+        // forward). Surface as a warning rather than rolling back the merge.
+        return {
+          ok: true,
+          target: base,
+          branch,
+          hasRemote,
+          warning: `Merged into ${base} but push failed: ${String(e)}`,
+        };
+      }
+    }
+    return { ok: true, target: base, branch, hasRemote };
   }
 
   /** Push the local project repo's current branch (post merge-to-local). */

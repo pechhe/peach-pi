@@ -11,6 +11,7 @@
     destructive = false,
     error = "",
     busy = false,
+    dontShowAgainLabel = "",
     onConfirm,
   }: {
     open?: boolean;
@@ -22,8 +23,19 @@
     /** Set to show an error inside the dialog (keeps it open). */
     error?: string;
     busy?: boolean;
-    onConfirm: () => void;
+    /** When set, renders a "don't warn me again" checkbox with this label. */
+    dontShowAgainLabel?: string;
+    /** When `dontShowAgainLabel` is set: called with the checkbox's value on
+     *  confirm (true = suppress future warnings). Never called on cancel. */
+    onConfirm: (dontShowAgain?: boolean) => void;
   } = $props();
+
+  let dontShowAgain = $state(false);
+  $effect(() => {
+    // Reset the checkbox whenever the dialog opens so a past dismissal state
+    // never leaks into a future independent confirmation.
+    if (open) dontShowAgain = false;
+  });
 </script>
 
 <AlertDialog.Root bind:open>
@@ -45,6 +57,12 @@
           {error}
         </p>
       {/if}
+      {#if dontShowAgainLabel}
+        <label class="mt-3 flex items-center gap-2 text-[12px] text-fg-soft">
+          <input type="checkbox" bind:checked={dontShowAgain} data-testid="confirm-dialog-dont-show-again" />
+          {dontShowAgainLabel}
+        </label>
+      {/if}
       <div class="mt-4 flex justify-end gap-2">
         <AlertDialog.Cancel
           class="rounded-lg border border-border px-3 py-1.5 text-[13px] text-fg-soft hover:bg-surface-2"
@@ -53,7 +71,7 @@
           {cancelLabel}
         </AlertDialog.Cancel>
         <AlertDialog.Action
-          onclick={onConfirm}
+          onclick={() => onConfirm(dontShowAgainLabel ? dontShowAgain : undefined)}
           disabled={busy}
           data-testid="confirm-dialog-action"
           class="rounded-lg border px-3 py-1.5 text-[13px] font-medium disabled:opacity-50

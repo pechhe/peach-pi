@@ -30,6 +30,8 @@ export {
   isSavedId,
   makeSavedId,
   isValidThemeName,
+  normalizeHex,
+  normalizeImportedTheme,
   DEFAULT_PREFS,
   DEFAULT_LIGHT_THEME,
   DEFAULT_DARK_THEME,
@@ -45,6 +47,7 @@ export {
   type Scheme,
   type ThemeMode,
   type ThemePrefs,
+  type ImportedTheme,
 } from "./theme-tokens";
 import {
   CUSTOM_THEME_ID,
@@ -54,6 +57,7 @@ import {
   makeSavedId,
   isValidThemeName,
   isValidThemeId,
+  normalizeImportedTheme,
   themeScheme,
   rollRotation,
   rotateIdForScheme,
@@ -66,6 +70,7 @@ import {
   type Scheme,
   type ThemeMode,
   type ThemePrefs,
+  type ImportedTheme,
 } from "./theme-tokens";
 
 const KEY = "peachpi:theme";
@@ -221,6 +226,7 @@ function readStoredSaved(): SavedTheme[] {
         name: t.name,
         scheme: t.scheme,
         primaries: sanitizePrimaries(t.primaries),
+        ...(t.source === "imported" ? { source: "imported" as const } : {}),
       }));
   } catch {
     return [];
@@ -611,6 +617,43 @@ class ThemeStore {
       name: trimmed,
       scheme: this.customScheme,
       primaries: { ...this.customPrimaries },
+    };
+    const next = [...this.savedThemes, t];
+    this.savedThemes = next;
+    savedThemes = next;
+    this.persistSaved();
+    this.prefs = { ...this.prefs, mode: "single", single: id };
+    this.persistPrefs();
+    this.current = id;
+    applyToDocument(id);
+    return id;
+  }
+
+  /** Promote an LLM-produced imported theme into a saved theme and activate
+   *  it. `input` is the loose model output; this normalizes every hex (dropping
+   *  invalid ones) and derives a name when the model omitted one. Returns the
+   *  new saved id, or empty string when the import had nothing usable. */
+  addImportedTheme(input: ImportedTheme): string {
+    const norm = normalizeImportedTheme(input);
+    if (!norm) return "";
+    const baseName = norm.name || "Imported theme";
+    // Disambiguate against an existing saved theme with the same name by
+    // appending a counter — makeSavedId already adds a random suffix, but
+    // matching display names read better with a trailing number.
+    let name = baseName;
+    const existingNames = new Set(this.savedThemes.map((t) => t.name));
+    if (existingNames.has(name)) {
+      let i = 2;
+      while (existingNames.has(`${baseName} ${i}`)) i++;
+      name = `${baseName} ${i}`;
+    }
+    const id = makeSavedId(name);
+    const t: SavedTheme = {
+      id,
+      name,
+      scheme: norm.scheme,
+      primaries: norm.primaries,
+      source: "imported",
     };
     const next = [...this.savedThemes, t];
     this.savedThemes = next;

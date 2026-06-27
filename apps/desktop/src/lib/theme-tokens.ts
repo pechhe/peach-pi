@@ -54,6 +54,10 @@ export interface SavedTheme {
   name: string;
   scheme: Scheme;
   primaries: CustomPrimaries;
+  /** Origin marker for display. "imported" flags themes created via the
+   *  Import dialog (LLM-read palette); absent means hand-saved. Purely
+   *  cosmetic — no behavioral difference. */
+  source?: "imported";
 }
 
 /** Prefix for saved-theme ids, so they're distinguishable from presets and
@@ -193,6 +197,70 @@ export function rotateIdForScheme(prefs: ThemePrefs, scheme: Scheme): string {
 /** A name is valid when it has non-whitespace content. */
 export function isValidThemeName(name: string): boolean {
   return name.trim().length > 0;
+}
+
+/** All primary keys, including device/screen ones. Mirrors `CustomPrimaries`. */
+const ALL_PRIMARY_KEYS = [
+  "bg",
+  "fg",
+  "accent",
+  "warning",
+  "danger",
+  "metalDye",
+  "screen",
+  "screenText",
+  "engraveActive",
+] as const;
+
+/** Normalize a loose hex the LLM might return (`1e1e2e`, `#1e1e2e`, `#EEE`,
+ *  uppercased, with/without `#`) to a leading-`#` 6-digit hex string. Returns
+ *  null when the input doesn't look like a hex color. Used by the import flow
+ *  so the model's output is coerced to the same shape the color pickers emit. */
+export function normalizeHex(raw: string): string | null {
+  const s = raw.trim();
+  if (!s || !HEX_RE.test(s)) return null;
+  const bare = s.replace(/^#/, "");
+  // Expand 3-digit shorthand (#RGB → #RRGGBB).
+  const full = bare.length === 3
+    ? bare.split("").map((c) => c + c).join("")
+    : bare.length === 4
+      ? bare // 4/8-digit forms (with alpha) — keep as-is, prefixed.
+      : bare;
+  return `#${full.toUpperCase()}`;
+}
+
+/** Input shape from the theme-import service (loose, model-produced). */
+export interface ImportedTheme {
+  name?: string;
+  scheme?: "dark" | "light";
+  primaries?: Partial<Record<(typeof ALL_PRIMARY_KEYS)[number], string>>;
+}
+
+/** Coerce and validate an `ImportedTheme` into a `SavedTheme`-compatible
+ *  record. Every hex is normalized to leading-`#` 6-digit form; invalid colors
+ *  are dropped (the base preset fills them in). Returns null if the result
+ *  would be empty (no name AND no primaries). Pure, unit-testable. */
+export function normalizeImportedTheme(input: ImportedTheme): {
+  name: string;
+  scheme: Scheme;
+  primaries: CustomPrimaries;
+} | null {
+  const primaries: CustomPrimaries = {};
+  if (input.primaries && typeof input.primaries === "object") {
+    for (const key of ALL_PRIMARY_KEYS) {
+      const v = input.primaries[key];
+      if (typeof v === "string") {
+        const hex = normalizeHex(v);
+        if (hex) primaries[key] = hex;
+      }
+    }
+  }
+  const scheme: Scheme = input.scheme === "light" ? "light" : "dark";
+  const name = typeof input.name === "string" && input.name.trim()
+    ? input.name.trim()
+    : "";
+  if (!name && Object.keys(primaries).length === 0) return null;
+  return { name, scheme, primaries };
 }
 
 /** The colors a custom theme is defined by. Each is optional; an unset

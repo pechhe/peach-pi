@@ -42,13 +42,18 @@
   import ConnectorIcon from "./ConnectorIcon.svelte";
   import SlashMenu from "./composer/SlashMenu.svelte";
   import ConnectionsMenu, { type ConnMenuItem, type SecMenuItem } from "./composer/ConnectionsMenu.svelte";
+  import { captureEvent } from "../lib/telemetry";
 
-  let { thread, onRewind, onNewThread, centered = false }: {
+  let { thread, onRewind, onNewThread, onCloneThread, onForkPicker, centered = false }: {
     thread: Thread;
     /** `/rewind [n]` from the composer — rewind the n-th turn from the end. */
     onRewind?: (n: number) => void;
     /** `/new` system command — start a new thread in the current project. */
     onNewThread?: () => void;
+    /** `/clone` or `/branch` — clone the current thread into a new thread. */
+    onCloneThread?: () => void | Promise<void>;
+    /** `/fork` — open the fork-from-message picker. */
+    onForkPicker?: () => void;
     /** Centered "new thread" state (composer in the middle, no messages yet). */
     centered?: boolean;
   } = $props();
@@ -143,6 +148,7 @@
   async function pickModel(provider: string, id: string) {
     playRotary();
     sessionMetas.set(await api.invoke("threads:setModel", thread.id, provider, id));
+    captureEvent("model_changed", { provider });
   }
 
   const fmtTokens = (n: number | null | undefined): string => {
@@ -160,6 +166,7 @@
     const next = levels[(idx + direction + levels.length) % levels.length]!;
     playRotary();
     sessionMetas.set(await api.invoke("threads:setThinking", thread.id, next));
+    captureEvent("thinking_level_changed", { level: next });
   }
 
   let textareaEl = $state<HTMLTextAreaElement | null>(null);
@@ -234,6 +241,9 @@
     { name: "plan", description: "Switch to Plan mode", kind: "system" },
     { name: "build", description: "Switch to Build mode", kind: "system" },
     { name: "new", description: "Start a new thread in this project", kind: "system" },
+    { name: "branch", description: "Branch this thread into a new thread", kind: "system" },
+    { name: "clone", description: "Clone this thread into a new thread", kind: "system" },
+    { name: "fork", description: "Pick a turn to fork a new thread from", kind: "system" },
     { name: "reload", description: "Reload extensions/skills/prompts from disk", kind: "system" },
     { name: "scoped-models", description: "Pick which models appear in the composer", kind: "system" },
   ];
@@ -289,6 +299,7 @@
         modelSelector?.openMenu();
         break;
       case "compact":
+        captureEvent("context_compacted");
         void api.invoke("threads:compact", thread.id);
         break;
       case "rewind":
@@ -305,6 +316,13 @@
         break;
       case "new":
         onNewThread?.();
+        break;
+      case "clone":
+      case "branch":
+        onCloneThread?.();
+        break;
+      case "fork":
+        onForkPicker?.();
         break;
       case "reload":
         void api.invoke("threads:reload", thread.id).then((res) => {
@@ -323,6 +341,7 @@
     const outgoing = [`/${cmd.name}`, body].filter(Boolean).join(" ");
     playButtonClick("click");
     drafts.clearText(thread.id);
+    captureEvent("slash_command_run", { command: cmd.name, kind: cmd.kind });
     void api.invoke("threads:prompt", thread.id, outgoing, [], "all").catch((err) => {
       console.error("run command failed", err);
     });
@@ -395,6 +414,7 @@
     // Dedupe by kind+name: pinning a connection twice is meaningless.
     if (!draft.connections.some((r) => r.kind === ref.kind && r.name === ref.name)) {
       drafts.update(thread.id, { text: stripped, connections: [...draft.connections, ref] });
+      captureEvent("connection_pinned", { kind: c.kind });
     } else {
       drafts.update(thread.id, { text: stripped });
     }
@@ -431,15 +451,10 @@
   }
 
   // ── Textarea auto-grow ────────────────────────────────────────────────
-  function autoGrow() {
-    if (!textareaEl) return;
-    textareaEl.style.height = "auto";
-    textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, 400)}px`;
-  }
-  $effect(() => {
-    void draft.text;
-    autoGrow();
-  });
+  // The textarea self-sizes via CSS `field-sizing: content` (see
+  // composer-device.css). No JS height mutation: the previous autoGrow
+  // set height:auto→scrollHeight every keystroke, which under the frame's
+  // zoom:0.78 caused per-character visual jitter.
 
   // Reveal the scrollbar thumb only while actively scrolling. Below
   // max-height there is no overflow so no scrollbar ever shows; once the
@@ -460,6 +475,7 @@
     const added = await readComposerAttachmentsFromFiles(files);
     if (added.length > 0) {
       drafts.update(thread.id, { attachments: [...draft.attachments, ...added] });
+      captureEvent("file_attached", { count: added.length });
     }
   }
 
@@ -532,6 +548,7 @@
       if (!question) return;
       if (!fromPointer) playButtonClick("click");
       drafts.clearText(thread.id);
+      captureEvent("side_chat_opened");
       void sideChat.openPanel(thread.id, question);
       return;
     }
@@ -573,22 +590,26 @@
           sendAnim.mark(thread.id);
           const [id, text, images, toolMode] = built.args;
           await api.invoke("threads:prompt", id, text, images, toolMode);
+          captureEvent("message_sent", { has_attachments: images.length > 0, mode: draft.mode });
           break;
         }
         case "threads:steer": {
           const [id, text] = built.args;
           await api.invoke("threads:steer", id, text);
+          captureEvent("message_steered");
           break;
         }
         case "remote:message": {
           sendAnim.mark(thread.id);
           const [hostId, remoteId, text] = built.args;
           await api.invoke("remote:message", hostId, remoteId, text);
+          captureEvent("message_sent", { has_attachments: false, mode: draft.mode, remote: true });
           break;
         }
         case "remote:steer": {
           const [hostId, remoteId, text] = built.args;
           await api.invoke("remote:steer", hostId, remoteId, text);
+          captureEvent("message_steered", { remote: true });
           break;
         }
       }
@@ -608,7 +629,9 @@
   // Build/Plan flip uses the subtle rotary click (like the dial and model slider).
   function toggleMode() {
     playRotary();
-    drafts.update(thread.id, { mode: draft.mode === "build" ? "plan" : "build" });
+    const next = draft.mode === "build" ? "plan" : "build";
+    drafts.update(thread.id, { mode: next });
+    captureEvent("composer_mode_switched", { mode: next });
   }
 
   // Thread-wide shortcuts (work regardless of focus). All meta-keyed so they
@@ -993,7 +1016,7 @@
                 {#if meta.contextPercent > 30 && !running}
                   <button
                     class="composer__context-compact"
-                    onclick={() => api.invoke("threads:compact", thread.id)}
+                    onclick={() => { captureEvent("context_compacted"); void api.invoke("threads:compact", thread.id); }}
                     data-testid="compact-button"
                     title="Compact context (auto-compacts at {Math.round(autoCompactPercent)}%)"
                   >Compact</button>
@@ -1122,7 +1145,7 @@
       // Open the panel, or — when it's already open for this thread — act as its
       // send button. (Close via the panel's ×.)
       const panelOpen = sideChat.open && sideChat.threadId === thread.id;
-      panelOpen ? void sideChat.submitDraft() : void sideChat.openPanel(thread.id);
+      if (panelOpen) { void sideChat.submitDraft(); } else { captureEvent("side_chat_opened"); void sideChat.openPanel(thread.id); }
     }}
     onpointercancel={() => { btwRelease = null; }}
     data-testid="open-side-chat"

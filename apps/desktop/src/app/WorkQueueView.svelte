@@ -146,8 +146,16 @@
   // bar runs `workQueue:mergeBatch` on the selected issues in selection order.
   let mergeMode = $state(false);
   let selected = $state<number[]>([]);
+  // Merge-eligible = has an open PR and isn't done. NOT gated on
+  // `inProgress` (worktree exists): the worktree is exactly what
+  // `workQueue:mergeBatch` needs to rebase/test/merge, so an issue whose
+  // agent finished but left its worktree around is still mergeable.
+  // Local workflow has no PR signal — a ready/not-done issue with a worktree
+  // is mergeable; the handler fails loudly per-item if none exists.
   const mergeEligible = (i: { hasOpenPr: boolean; status: string; inProgress: boolean }) =>
-    i.hasOpenPr && i.status !== "done" && !i.inProgress;
+    workflow === "local"
+      ? i.status !== "done" && i.status !== "blocked"
+      : i.hasOpenPr && i.status !== "done";
 
   function toggleSelect(issueNumber: number) {
     selected = selected.includes(issueNumber)
@@ -172,7 +180,16 @@
     if (!projectId || selected.length === 0 || batchRunning) return;
     const order = [...selected];
     await mergeQueue.run(projectId, order);
-    await workQueue.load(projectId);
+    // GitHub reports a just-merged issue as open for a beat; defer the reload
+    // so the sidebar badge + Work Queue list reflect the new closed state.
+    setTimeout(() => { void workQueue.load(projectId); }, 1500);
+  }
+
+  const workflow = $derived(project?.mergeWorkflow ?? "pr");
+  async function setWorkflow(next: "pr" | "local") {
+    if (!projectId || next === workflow) return;
+    await api.invoke("projects:setMergeWorkflow", projectId, next);
+    // The snapshot event will refresh `project` (and hence `workflow`).
   }
 
   // Reload whenever the viewed project changes.
@@ -182,6 +199,38 @@
 
   const result = $derived(workQueue.result);
   const groups = $derived(result?.ok ? groupWorkQueue(result.issues) : []);
+
+  // View filter: which issues to show. Persisted per-app (not per-project) — a
+  // user's preferred lens (actionable vs full history) rarely changes by repo.
+  // - all:    every issue (open + done) — full picture incl. shipped work.
+  // - open:   non-done only — hides the closed/done backlog clutter.
+  // - ready:  status === "ready" only — the actionable "what can I start now" view.
+  type WqFilter = "all" | "open" | "ready";
+  const WQ_FILTER_KEY = "peach-pi.wq.filter";
+  function readFilter(): WqFilter {
+    const v = localStorage.getItem(WQ_FILTER_KEY);
+    return v === "all" || v === "ready" ? v : "open";
+  }
+  let filter = $state<WqFilter>(readFilter());
+  function setFilter(next: WqFilter) {
+    if (next === filter) return;
+    filter = next;
+    try { localStorage.setItem(WQ_FILTER_KEY, next); } catch { /* quota */ }
+  }
+  // Groups after applying the view filter. Empty groups (no surviving child)
+  // are dropped so headers with nothing under them don't add noise.
+  const filteredGroups = $derived(
+    filter === "all"
+      ? groups
+      : groups
+          .map((g) => ({
+            ...g,
+            issues: g.issues.filter((i) =>
+              filter === "open" ? i.status !== "done" : i.status === "ready",
+            ),
+          }))
+          .filter((g) => g.issues.length > 0),
+  );
 </script>
 
 <main class="flex h-full flex-1 flex-col" data-testid="work-queue-view">
@@ -210,6 +259,47 @@
         <GitMerge size={12} />
         {mergeMode ? "Cancel" : "Merge queue"}
       </button>
+      <div
+        class="flex items-center rounded-md border border-border p-0.5 titlebar-no-drag"
+        data-testid="wq-filter-toggle"
+        role="group"
+        aria-label="View filter"
+      >
+        <button
+          class="rounded px-1.5 py-0.5 text-xs {filter === 'all' ? 'bg-surface-2 text-fg' : 'text-faint hover:text-fg'}"
+          onclick={() => setFilter("all")}
+          title="All issues (open + done)"
+        >All</button>
+        <button
+          class="rounded px-1.5 py-0.5 text-xs {filter === 'open' ? 'bg-surface-2 text-fg' : 'text-faint hover:text-fg'}"
+          onclick={() => setFilter("open")}
+          title="Open issues only (hide done)"
+        >Open</button>
+        <button
+          class="rounded px-1.5 py-0.5 text-xs {filter === 'ready' ? 'bg-surface-2 text-fg' : 'text-faint hover:text-fg'}"
+          onclick={() => setFilter("ready")}
+          title="Ready issues only (actionable start list)"
+        >Ready</button>
+      </div>
+      <div
+        class="flex items-center rounded-md border border-border p-0.5 titlebar-no-drag"
+        data-testid="workflow-toggle"
+        role="group"
+        aria-label="Merge workflow"
+      >
+        <button
+          class="rounded px-1.5 py-0.5 text-xs {workflow === 'pr' ? 'bg-surface-2 text-fg' : 'text-faint hover:text-fg'}"
+          onclick={() => setWorkflow("pr")}
+          disabled={batchRunning}
+          title="Open a GitHub PR and squash-merge via gh"
+        >PR</button>
+        <button
+          class="rounded px-1.5 py-0.5 text-xs {workflow === 'local' ? 'bg-surface-2 text-fg' : 'text-faint hover:text-fg'}"
+          onclick={() => setWorkflow("local")}
+          disabled={batchRunning}
+          title="Merge the worktree branch into the default branch locally and push"
+        >Local</button>
+      </div>
       <button
         class="text-faint hover:text-fg"
         onclick={() => workQueue.load(projectId)}
@@ -240,9 +330,13 @@
       </p>
     {:else if groups.length === 0}
       <p class="text-sm text-faint" data-testid="work-queue-empty">No issues.</p>
+    {:else if filteredGroups.length === 0}
+      <p class="text-sm text-faint" data-testid="work-queue-filter-empty">
+        No {filter === "ready" ? "ready" : "open"} issues.
+      </p>
     {:else}
       <div class="flex flex-col gap-5" data-testid="work-queue-list">
-        {#each groups as group (group.prd ? `prd-${group.prd.number}` : "unparented")}
+        {#each filteredGroups as group (group.prd ? `prd-${group.prd.number}` : "unparented")}
           <section data-testid="work-queue-group">
             <header class="mb-1.5 flex items-center gap-2">
               {#if group.prd}
@@ -277,6 +371,49 @@
                     {launchingPrd === group.prd!.number ? "Starting…" : "Start all ready"}</button
                   >
                 {/if}
+                <details class="group relative ml-auto shrink-0">
+                  <summary
+                    class="flex size-6 cursor-pointer list-none items-center justify-center rounded-md text-faint hover:bg-surface-2 hover:text-fg"
+                    aria-label="PRD actions"
+                    data-testid="prd-actions-menu"
+                    >⋯</summary
+                  >
+                  <div
+                    class="absolute right-0 top-full z-10 mt-1 w-48 rounded-md border border-border bg-surface-2 py-1 text-xs shadow-lg"
+                    data-testid="prd-actions-dropdown"
+                  >
+                    <button
+                      class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"
+                      onclick={async () => {
+                        await closeIssue(group.prd!.number, "completed");
+                        (document.activeElement as HTMLElement)?.blur?.();
+                      }}
+                      disabled={busyWithIssue(group.prd!.number)}
+                      data-testid="close-prd-completed"
+                      >Mark done (completed)</button
+                    >
+                    <button
+                      class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"
+                      onclick={async () => {
+                        await closeIssue(group.prd!.number, "not_planned");
+                        (document.activeElement as HTMLElement)?.blur?.();
+                      }}
+                      disabled={busyWithIssue(group.prd!.number)}
+                      data-testid="close-prd-not-planned"
+                      >Close (not planned)</button
+                    >
+                    <button
+                      class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"
+                      onclick={async () => {
+                        await reopenIssue(group.prd!.number);
+                        (document.activeElement as HTMLElement)?.blur?.();
+                      }}
+                      disabled={busyWithIssue(group.prd!.number)}
+                      data-testid="reopen-prd"
+                      >Reopen</button
+                    >
+                  </div>
+                </details>
               {:else}
                 <h2 class="text-[13px] font-medium text-fg-soft">Unparented</h2>
               {/if}
@@ -336,11 +473,12 @@
                       <span
                         class="shrink-0 text-xs {p.item.ok ? 'text-emerald-500' : 'text-amber-600'}"
                         data-testid="merge-status"
+                        title={!p.item.ok ? p.item.error : undefined}
                       >
                         {#if p.item.ok}
                           merged ✓
                         {:else if p.phase === 'rebase'}
-                          rebase conflict ⚠
+                          {!p.item.ok && p.item.error.includes('Rebase conflict') ? 'rebase conflict ⚠' : 'rebase stopped ⚠'}
                         {:else if p.phase === 'tests'}
                           tests failed ⚠
                         {:else}
@@ -406,7 +544,8 @@
         data-testid="merge-action-bar"
       >
         <span class="text-xs text-fg-soft">
-          {selected.length} selected · rebase → test → merge on main
+          {selected.length} selected · rebase → test → merge
+          {workflow === "local" ? " locally via agent" : " on main"}
         </span>
         <button
           class="flex items-center gap-1 rounded-md bg-fg px-3 py-1.5 text-xs text-surface hover:bg-fg/90 disabled:opacity-50"
@@ -415,7 +554,7 @@
           data-testid="merge-batch-run"
         >
           <GitMerge size={12} />
-          {batchRunning ? "Merging…" : `Merge ${selected.length} → main`}
+          {batchRunning ? "Merging…" : `Merge ${selected.length} → ${workflow === "local" ? "default (local)" : "main"}`}
         </button>
       </div>
     {/if}

@@ -57,6 +57,7 @@
   import { mapTurns } from "../lib/transcript/turns";
   import { playClick } from "../lib/sound/button-click-sound";
   import Undo2 from "@lucide/svelte/icons/undo-2";
+  import GitBranch from "@lucide/svelte/icons/git-branch";
   import type { CompactionItem } from "./CompactionDialog.svelte";
   import CompactionDialog from "./CompactionDialog.svelte";
   import Composer from "./Composer.svelte";
@@ -78,6 +79,7 @@
   import ThinkingBlock from "./ThinkingBlock.svelte";
   import CopyButton from "./CopyButton.svelte";
   import RewindDialog from "./RewindDialog.svelte";
+  import ForkPickerDialog from "./ForkPickerDialog.svelte";
   import { codeCopy, clickCopy } from "../lib/code-copy";
   import WorkingLabel from "./WorkingLabel.svelte";
   import BrailleSpinner from "./BrailleSpinner.svelte";
@@ -115,7 +117,7 @@
     return off;
   });
 
-  let { thread, onSetEnvironment, onSelectThread, onNewThread, pendingFind, onFindConsumed }: {
+  let { thread, onSetEnvironment, onSelectThread, onNewThread, onCloneThread, onForkThread, pendingFind, onFindConsumed }: {
     thread: Thread;
     /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
     onSetEnvironment?: (threadId: string, worktree: boolean) => void | Promise<void>;
@@ -123,6 +125,12 @@
     onSelectThread?: (threadId: string) => void;
     /** Start a new thread in the current project (`/new` system command). */
     onNewThread?: () => void;
+    /** Clone the current thread's whole active branch into a new thread
+     *  (pi `/clone`). */
+    onCloneThread?: () => void | Promise<void>;
+    /** Fork the current thread up to (excluding) a user-message entry (pi
+     *  `/fork`). Pre-fills the new thread's composer with the prompt. */
+    onForkThread?: (entryId: string) => void | Promise<void>;
     /** Set when the search overlay passes a body-match query through. ThreadView
      *  opens its FindBar pre-filled and calls `onFindConsumed` once applied. */
     pendingFind?: string | null;
@@ -530,6 +538,25 @@
     turnCount: number;
   } | null>(null);
 
+  // Fork picker (pi `/fork`). A message selector listing every user turn;
+  // picking one calls `onForkThread` with that entry id, which branches the
+  // source up to (but excluding) that user message and pre-fills the new
+  // thread's composer with the selected prompt.
+  let forkPickerOpen = $state(false);
+
+  function openForkPicker(): void {
+    if (turns.length === 0) return;
+    forkPickerOpen = true;
+  }
+
+  function pickFork(entryId: string): void {
+    void onForkThread?.(entryId);
+  }
+
+  async function doClone(): Promise<void> {
+    await onCloneThread?.();
+  }
+
   // Refetch the turn list (entry ids) whenever the conversation settles.
   $effect(() => {
     void items.length;
@@ -867,6 +894,15 @@
           ><FolderOpen size={14} /></button
           >
         </Tooltip>
+        <Tooltip text="Fork thread (new thread from a past turn)">
+          <button
+            class="rounded px-2 py-0.5 text-faint hover:bg-surface hover:text-fg-soft disabled:opacity-50"
+            onclick={openForkPicker}
+            disabled={!thread.piSessionFile || thread.status === 'running' || turns.length === 0}
+            data-testid="fork-thread"
+          ><GitBranch size={14} /></button
+          >
+        </Tooltip>
         <Tooltip text="Terminal (⌃`)">
           <button
             class="rounded px-2 py-0.5 font-mono text-[11px] {terminal.visible
@@ -951,7 +987,7 @@
       {#snippet renderRow(row: Row)}
         {#if row.type === "group"}
           {@const live = row.items.some((it) => (it.kind === "assistant" && it.streaming) || (it.kind === "tool" && it.status === "running"))}
-          <details class="collapse-anim tool-enter group/tools -my-1.5 text-xs" data-item-id={row.id} open={live && thread.status === "running"}>
+          <details class="collapse-anim tool-enter group/tools -mb-1.5 mt-2 text-xs" data-item-id={row.id} open={live && thread.status === "running"}>
             <summary class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-0.5 transition-colors select-none hover:bg-surface">
               <span class="shrink-0 text-fainter">✓</span>
               <span class="shrink-0 font-mono font-medium text-muted">{row.hasThinking ? "Reasoning" : `${row.items.length} tool calls`}</span>
@@ -1066,6 +1102,15 @@
                   >
                     <Undo2 size={13} /> <span>Rewind</span>
                   </button>
+                  <button
+                    type="button"
+                    class="copy-btn"
+                    onclick={() => pickFork(t.entryId)}
+                    title="Fork into a new thread at this point"
+                    data-testid="fork-turn"
+                  >
+                    <GitBranch size={13} /> <span>Fork</span>
+                  </button>
                 {/if}
               </div>
             {/if}
@@ -1083,7 +1128,7 @@
           {/each}
         {:else if item.kind === "compaction"}
           {#if item.running}
-            <div class="item-enter w-full rounded-2xl border border-border-strong/40 bg-surface-2/40 px-4 py-3" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
+            <div class="item-enter w-full rounded-lg border border-border-strong/40 bg-surface-2/40 px-4 py-3" data-item-id={item.id} class:thread-find-hit={item.id === currentMatchId}>
               <div class="flex items-center gap-2 text-[11px] font-semibold tracking-wider text-muted uppercase">
                 <BrailleSpinner class="working-label__spinner shrink-0" />
                 {item.reason === "manual" ? "Compacting…" : "Auto-compacting…"}
@@ -1238,7 +1283,14 @@
         </button>
       </div>
     {/if}
-    <Composer {thread} onRewind={rewindFromEnd} {onNewThread} centered={isEmpty} />
+    <Composer
+      {thread}
+      onRewind={rewindFromEnd}
+      {onNewThread}
+      onCloneThread={doClone}
+      onForkPicker={openForkPicker}
+      centered={isEmpty}
+    />
   </div>
   <RewindDialog
     bind:open={rewindDialogOpen}
@@ -1247,6 +1299,11 @@
     turnCount={pendingRewind?.turnCount ?? 1}
     promptPreview={pendingRewind?.promptPreview ?? ""}
     onConfirm={confirmRewind}
+  />
+  <ForkPickerDialog
+    bind:open={forkPickerOpen}
+    {turns}
+    onPick={pickFork}
   />
   <CompactionDialog
     bind:item={compactionDialogItem}

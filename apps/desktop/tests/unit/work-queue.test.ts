@@ -240,6 +240,21 @@ test("buildSeedPrompt: includes body + acceptance criteria + test/PR gate", () =
   assert.match(seed, /stop at the human gate/);
 });
 
+test("buildSeedPrompt: local workflow tells the agent to push and stop, no PR", () => {
+  const [issue] = enrichIssues([
+    raw({
+      number: 21,
+      title: "Local merge",
+      body: "## What to build\n\nDo the thing.\n",
+    }),
+  ]);
+  const seed = buildSeedPrompt(issue!, null, "local");
+  assert.doesNotMatch(seed, /open a pull request/);
+  assert.match(seed, /push your branch and stop/);
+  assert.match(seed, /do not merge/);
+  assert.match(seed, /local/);
+});
+
 const PRD_BODY = `## Problem Statement
 
 Some problem.

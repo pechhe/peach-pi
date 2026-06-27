@@ -48,6 +48,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { TAG_META } from "../lib/tag-meta";
   import ConfirmDialog from "../components/ui/dialog/ConfirmDialog.svelte";
+  import { snapshot } from "../stores/snapshot.svelte";
   import { usage } from "../stores/usage.svelte";
   import { usagePrefs } from "../stores/usage-prefs.svelte";
   import { featuredMetrics, shortTag, urgencyClass, fmtResetsIn } from "../lib/usage-featured";
@@ -450,6 +451,26 @@
   // once the animation reports back so the row survives the effect.
   // An empty (never-prompted) thread is destroyed instead — the done area
   // must never hold empty rows, and there's nothing to archive anyway.
+  //
+  // Special case: archiving the only remaining thread in a worktree also
+  // tears down the worktree (its branch + checkout) because the thread IS
+  // the worktree's purpose for existing. Forbidden silently when the user
+  // ticked "don't warn me again"; otherwise opens a confirm dialog (the
+  // teardown is non-reversible, so the done-burst/Undo flow doesn't fit).
+  let pendingArchiveSoleWorktreeThread = $state<Thread | null>(null);
+  let archiveSoleWorktreeDialogOpen = $state(false);
+  const archiveSoleWorktreeWarningDismissed = $derived(
+    snapshot.current?.ui.archiveThreadWorktreeWarningDismissed ?? false,
+  );
+  /** Non-archived siblings of the thread's worktree (excluding the thread
+   *  itself). When empty, archiving this thread would orphan the worktree. */
+  function soleThreadInWorktree(thread: Thread): boolean {
+    if (!thread.worktreeId) return false;
+    const siblings = threads.filter(
+      (t) => t.worktreeId === thread.worktreeId && !t.archivedAt && t.id !== thread.id,
+    );
+    return siblings.length === 0;
+  }
   function archiveThread(thread: Thread) {
     if (isNewThread(thread.title)) {
       const idx = previewOrder.indexOf(thread.id);
@@ -458,8 +479,37 @@
       if (nextId && thread.id === selectedThreadId) onSelect(nextId);
       return;
     }
+    // Sole-thread worktree: archive both thread + worktree. Non-reversible,
+    // so gate on an explicit confirm unless the user opted out.
+    if (soleThreadInWorktree(thread)) {
+      pendingArchiveSoleWorktreeThread = thread;
+      if (archiveSoleWorktreeWarningDismissed) {
+        confirmArchiveSoleWorktreeThread(false);
+      } else {
+        archiveSoleWorktreeDialogOpen = true;
+      }
+      return;
+    }
     playArchiveSound();
     doneAnimFor = thread.id;
+  }
+  function confirmArchiveSoleWorktreeThread(dontShowAgain: boolean | undefined) {
+    const thread = pendingArchiveSoleWorktreeThread;
+    if (!thread) return;
+    if (dontShowAgain) {
+      void api.invoke("ui:setArchiveThreadWorktreeWarningDismissed", true);
+    }
+    // Pick the next thread below before this one leaves the list, so the
+    // view advances instead of landing on nothing.
+    const idx = previewOrder.indexOf(thread.id);
+    const nextId = idx !== -1 ? (previewOrder[idx + 1] ?? previewOrder[idx - 1] ?? null) : null;
+    archivingIds.add(thread.id);
+    // worktrees:archive tears down the worktree AND archives every thread in
+    // it (AppService.archive), so this single call covers both rows.
+    if (thread.worktreeId) void api.invoke("worktrees:archive", thread.worktreeId);
+    if (nextId && thread.id === selectedThreadId) onSelect(nextId);
+    pendingArchiveSoleWorktreeThread = null;
+    archiveSoleWorktreeDialogOpen = false;
   }
   function finishArchive(thread: Thread) {
     // Pick the next thread below before this one leaves the list, so the
@@ -1144,6 +1194,16 @@
   confirmLabel="Archive"
   destructive
   onConfirm={confirmArchiveWorktree}
+/>
+
+<ConfirmDialog
+  bind:open={archiveSoleWorktreeDialogOpen}
+  title="Archive thread and worktree?"
+  description="This is the only thread in its worktree, so archiving it removes the worktree's git checkout too. This can't be undone."
+  confirmLabel="Archive thread + worktree"
+  destructive
+  dontShowAgainLabel="Don't warn me about this"
+  onConfirm={(dontShowAgain) => confirmArchiveSoleWorktreeThread(dontShowAgain)}
 />
 
 <style>

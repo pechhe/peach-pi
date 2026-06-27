@@ -16,13 +16,16 @@
   --crt-seg: 9px;
   --crt-seg-gap: 3px;
 
-  /* Cream screen */
-  --cream-bg: oklch(0.955 0.018 92);
-  --cream-bg-hi: oklch(0.985 0.014 92);
-  --cream-bg-lo: oklch(0.925 0.02 90);
-  --cream-ink: oklch(0.34 0.012 250);
-  --cream-ink-muted: oklch(0.54 0.012 250);
-  --cream-caret: oklch(0.7 0.17 52);
+  /* Cream screen. Derived from the active theme's bg/fg so every preset
+     recolours the screen + ink; the caret follows the theme accent. A custom
+     theme's `screen` / `screenText` primaries still override these via the
+     higher-specificity :root[data-custom="true"] .composer-device rule. */
+  --cream-bg: var(--color-bg);
+  --cream-bg-hi: color-mix(in oklch, var(--color-bg), white 6%);
+  --cream-bg-lo: color-mix(in oklch, var(--color-bg), black 5%);
+  --cream-ink: var(--color-fg);
+  --cream-ink-muted: color-mix(in oklch, var(--color-fg), var(--color-bg) 42%);
+  --cream-caret: var(--color-accent);
 
   /* Light machined keycap (used by .composer-mode thumb / .devbtn / slider) */
   --crt-key-bg:
@@ -162,6 +165,14 @@
   border: 0;
   outline: none;
   resize: none;
+  /* Browser sizes the textarea to its content in one layout pass. Replaces
+     the JS autoGrow (height:auto → measure scrollHeight → set px) which
+     mutated inline height every keystroke; under the frame's zoom:0.78
+     that mid-tick style change caused a visible per-character jitter as
+     the compositor re-rasterised the fractional-scaled frame. field-sizing
+     respects min/max-height, so the 400px cap + overflow-y:auto still
+     engage once content overflows. */
+  field-sizing: content;
   overflow-y: auto;
   background: transparent;
   color: var(--cream-ink);

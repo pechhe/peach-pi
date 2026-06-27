@@ -94,6 +94,23 @@ export interface UtilityCompletionOptions {
   maxTokens?: number;
 }
 
+/** A vision content part to attach to the user message. */
+export interface UtilityImage {
+  /** Raw base64 (no data: prefix). */
+  data: string;
+  mimeType: string;
+}
+
+export interface VisionCompletionOptions {
+  systemPrompt: string;
+  userText: string;
+  /** Optional images appended to the user message (vision-capable model required). */
+  images?: UtilityImage[];
+  inputLimit?: number;
+  temperature?: number;
+  maxTokens?: number;
+}
+
 /** One-shot utility completion; returns trimmed text or null on any failure. */
 export async function completeUtility(
   config: UtilityModelConfig | null | undefined,
@@ -121,6 +138,69 @@ export async function completeUtility(
         headers: resolved.headers,
         temperature: opts.temperature ?? 0.3,
         maxTokens: opts.maxTokens ?? 200,
+      },
+    );
+    const text = result.content
+      .filter((c): c is { type: "text"; text: string } => c.type === "text")
+      .map((c) => c.text)
+      .join("")
+      .trim();
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve a specific model (provider + id) bypassing the PREFERRED fallback.
+ *  Used when the caller wants a particular model (e.g. the configured vision
+ *  proxy model) rather than whatever the utility preference list picks. */
+export async function resolveSpecificModel(
+  config: UtilityModelConfig,
+): Promise<ResolvedUtilityModel | null> {
+  try {
+    const sdk = await import("@earendil-works/pi-coding-agent");
+    const registry = sdk.ModelRegistry.create(sdk.AuthStorage.create());
+    const model = registry.find(config.provider, config.id);
+    if (!model || !registry.hasConfiguredAuth(model)) return null;
+    const auth = await registry.getApiKeyAndHeaders(model);
+    if (!auth.ok) return null;
+    return { model, apiKey: auth.apiKey, headers: auth.headers };
+  } catch {
+    return null;
+  }
+}
+
+/** One-shot vision completion using a specific model. Images are attached as
+ *  content parts; the model must declare vision capability. Returns trimmed
+ *  text or null on any failure. */
+export async function completeVision(
+  config: UtilityModelConfig,
+  opts: VisionCompletionOptions,
+): Promise<string | null> {
+  const resolved = await resolveSpecificModel(config);
+  if (!resolved) return null;
+  try {
+    const ai = await import("@earendil-works/pi-ai");
+    const limit = opts.inputLimit ?? 15_000;
+    const content: Array<
+      | { type: "text"; text: string }
+      | { type: "image"; data: string; mimeType: string }
+    > = [opts.userText ? { type: "text", text: opts.userText.slice(0, limit) } : null]
+      .filter((c): c is { type: "text"; text: string } => c !== null);
+    for (const img of opts.images ?? []) {
+      content.push({ type: "image", data: img.data, mimeType: img.mimeType });
+    }
+    const result = await ai.completeSimple(
+      resolved.model as Parameters<typeof ai.completeSimple>[0],
+      {
+        systemPrompt: opts.systemPrompt,
+        messages: [{ role: "user", content, timestamp: Date.now() }],
+      },
+      {
+        apiKey: resolved.apiKey,
+        headers: resolved.headers,
+        temperature: opts.temperature ?? 0.3,
+        maxTokens: opts.maxTokens ?? 500,
       },
     );
     const text = result.content

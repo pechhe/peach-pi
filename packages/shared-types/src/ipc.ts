@@ -18,6 +18,9 @@ import type {
   AutomationRun,
   ExtensionWidgetPayload,
   GitChangedFile,
+  ImportedTheme,
+  ThemeImportInput,
+  ThemeImportResult,
   GitCommitPushResult,
   GitInfo,
   GitMergeResult,
@@ -85,7 +88,9 @@ import type {
   RemotePullResult,
   ProviderUsageSummary,
   RemoteFirstMode,
+  TelemetryConsent,
   ThreadHandoffStatus,
+  UpdateStatus,
 } from "./entities.ts";
 import type { RemoteTapFrame, TranscriptDelta, TranscriptSnapshot } from "./transcript.ts";
 
@@ -173,6 +178,11 @@ export const ipcContracts = {
   "app:setVisionProxyModel": invoke<[model: ModelInfo], VisionProxyConfig>(),
   /** Persist the proxy mode (fallback | always | off). */
   "app:setVisionProxyMode": invoke<[mode: VisionProxyConfig["mode"]], VisionProxyConfig>(),
+  /** Import a theme via the configured vision-proxy model. The renderer feeds
+   *  an iTerm2 name, a URL, or a screenshot; the main process fetches (if a URL),
+   *  runs the vision/text completion, and returns the parsed colors. The
+   *  renderer then validates and saves it as a saved theme. */
+  "theme:import": invoke<[input: ThemeImportInput], ThemeImportResult>(),
   /** Open the working directory for a thread in Finder. */
   "app:openFolder": invoke<[threadId: ThreadId], void>((id) =>
     requireNonEmptyString(id, "threadId"),
@@ -205,6 +215,13 @@ export const ipcContracts = {
     if (typeof c !== "boolean") throw new Error("collapsed must be a boolean");
   }),
 
+  /** Persist the "don't warn me again" flag for the dialog shown when
+   *  archiving the only remaining thread in a worktree (the worktree is
+   *  torn down alongside the thread). */
+  "ui:setArchiveThreadWorktreeWarningDismissed": invoke<[dismissed: boolean], void>((d) => {
+    if (typeof d !== "boolean") throw new Error("dismissed must be a boolean");
+  }),
+
   // projects
   "projects:add": invoke<[path: string], Project>((path) =>
     requireNonEmptyString(path, "path"),
@@ -227,6 +244,17 @@ export const ipcContracts = {
       if (typeof collapsed !== "boolean") throw new Error("collapsed must be a boolean");
     },
   ),
+  /** Set a project's Work Queue merge workflow: 'pr' (GitHub PR + squash merge)
+   *  or 'local' (merge the worktree branch into the repo's default branch in
+   *  the project's main checkout, then push). Returns the updated project. */
+  "projects:setMergeWorkflow": invoke<
+    [projectId: string, workflow: "pr" | "local"],
+    Project
+  >((id, workflow) => {
+    requireNonEmptyString(id, "projectId");
+    if (workflow !== "pr" && workflow !== "local")
+      throw new Error("workflow must be 'pr' or 'local'");
+  }),
 
   // worktrees
   /** Create a registered worktree record for a project. Resolves the isolated
@@ -253,6 +281,21 @@ export const ipcContracts = {
     Thread
   >((id) => requireNonEmptyString(id, "projectId")),
   "threads:createChat": invoke<[], Thread>(),
+  /** Clone a thread's whole active branch into a new thread (pi `/clone`).
+   *  New thread inherits the source's environment (project / chat / worktree). */
+  "threads:clone": invoke<[threadId: ThreadId], Thread>((id) =>
+    requireNonEmptyString(id, "threadId"),
+  ),
+  /** Fork a thread up to (excluding) a user-message entry into a new thread
+   *  (pi `/fork`). Returns the new thread + the selected prompt text for
+   *  composer pre-fill. `entryId` comes from `threads:listTurns`. */
+  "threads:forkFrom": invoke<
+    [threadId: ThreadId, entryId: string],
+    { thread: Thread; editorText: string }
+  >((id, eid) => {
+    requireNonEmptyString(id, "threadId");
+    requireNonEmptyString(eid, "entryId");
+  }),
   "threads:prompt": invoke<
     [threadId: ThreadId, text: string, images?: ImagePayload[], toolMode?: ToolMode],
     void
@@ -877,6 +920,20 @@ export const ipcContracts = {
   /** Force a fresh fetch now (bypasses cache); returns the new summaries. */
   "usage:refresh": invoke<[], ProviderUsageSummary[]>(),
 
+  // ── Release telemetry + auto-update (ADR-0013) ───────────────────────────
+  // Consent is stored in pi settings.json (`telemetryConsent`). `null` =
+  // first launch, surfaces a prompt. Drives PostHog analytics + Sentry crash
+  // reporting. Both off by default; opt-in only. Auto-update is build-gated
+  // (env PEACH_PI_UPDATE_URL); these IPCs are inert in dev/unsigned builds.
+  /** Read telemetry consent state (null = not yet asked). */
+  "app:getTelemetryConsent": invoke<[], TelemetryConsent>(),
+  /** Set telemetry consent (also persists to settings.json). */
+  "app:setTelemetryConsent": invoke<[consent: TelemetryConsent], TelemetryConsent>(),
+  /** Read app-binary auto-update status (enabled/ready/checking/error). */
+  "app:getUpdateStatus": invoke<[], UpdateStatus>(),
+  /** Quit and relaunch to apply a downloaded update (no-op if none ready). */
+  "app:installUpdate": invoke<[], void>(),
+
   // events (main → renderer)
   "event:snapshot": event<AppSnapshot>(),
   "event:threadChanged": event<Thread>(),
@@ -930,6 +987,10 @@ export const ipcContracts = {
   /** Per-item progress from a `workQueue:mergeBatch` run. Fires for each issue
    *  as it moves through rebase → tests → merge, and with the final outcome. */
   "event:mergeProgress": event<MergeProgressPayload>(),
+  /** Telemetry consent changed — renderer re-reads + re-inits PostHog/Sentry. */
+  "event:telemetryConsentChanged": event<void>(),
+  /** App-binary auto-update status changed (downloaded / error / checking). */
+  "event:updateStatus": event<UpdateStatus>(),
 } as const;
 
 export type IpcContracts = typeof ipcContracts;

@@ -255,6 +255,74 @@ export class ThreadService {
     return this.threads.get(thread.id)!;
   }
 
+  /** Clone = fork the source thread's whole active branch (root→current leaf)
+   *  into a new JSONL file. New thread inherits the source's environment
+   *  (project / chat workspace / worktree). Source session is untouched. */
+  async cloneThread(threadId: string): Promise<Thread> {
+    return this.forkThread(threadId, null);
+  }
+
+  /** Fork = branch the source thread up to (but excluding) the given user
+   *  message entry, into a new JSONL file. `entryId` is a user-message entry
+   *  id (from `threads:listTurns`). The selected prompt is returned so the
+   *  renderer can pre-fill the new thread's composer (pi `/fork` parity). */
+  async forkFrom(threadId: string, entryId: string): Promise<{
+    thread: Thread;
+    editorText: string;
+  }> {
+    const session = await this.sessionFor(threadId);
+    const turns = session.listTurns();
+    const turn = turns.find((t) => t.entryId === entryId);
+    if (!turn) throw new Error(`Unknown fork entry: ${entryId}`);
+    // pi forks to the parent of the selected user message (position "before"):
+    // the new thread contains history up to that point and the message text is
+    // returned for composer pre-fill.
+    const thread = await this.forkThread(threadId, entryId);
+    return { thread, editorText: turn.text };
+  }
+
+  /** Shared fork backbone. `leafId = null` clones the whole active branch
+   *  (pi `/clone`); a user-message entry id forks before it (pi `/fork`).
+   *  Resolves the source's entry into `parentId` because pi's
+   *  `createBranchedSession` walks root→leafId; forking "before" a user
+   *  message means leafId = that message's parent. */
+  private async forkThread(
+    threadId: string,
+    leafEntryId: string | null,
+  ): Promise<Thread> {
+    const source = this.threads.get(threadId)!;
+    if (!source) throw new Error(`Unknown thread: ${threadId}`);
+    if (!source.piSessionFile) {
+      throw new Error("Cannot fork a thread with no session file yet");
+    }
+    const project = source.projectId
+      ? this.projects.all().find((p) => p.id === source.projectId)
+      : null;
+    const cwd = project?.path ?? source.chatWorkspaceDir ?? process.cwd();
+    // Resolve the leaf id: null/undefined → current leaf (clone). A user
+    // message entry → its parent (fork-before). Two entry ids can collide
+    // across the source and the fresh fork copy, so resolve against the
+    // live source session before re-opening the file.
+    let leafId: string | null = null;
+    if (leafEntryId) {
+      const session = await this.sessionFor(threadId);
+      leafId = session.getEntryParentId(leafEntryId);
+    }
+    const thread = this.threads.insert({
+      projectId: source.projectId,
+      title: source.title ? `${source.title} (fork)` : "New thread",
+      worktreeId: source.worktreeId,
+      worktreeDir: source.worktreeDir,
+      chatWorkspaceDir: source.chatWorkspaceDir,
+    });
+    await this.ensureSession(thread.id, cwd, null, {
+      sourceFile: source.piSessionFile,
+      leafId,
+    });
+    this.onThreadsChanged();
+    return this.threads.get(thread.id)!;
+  }
+
   async prompt(
     threadId: string,
     text: string,
@@ -736,6 +804,7 @@ export class ThreadService {
     threadId: string,
     cwd: string,
     sessionFile: string | null,
+    forkFrom?: { sourceFile: string; leafId: string | null },
   ): Promise<PiSession> {
     // Lazy import: keeps pi SDK out of the boot path (and out of the
     // packaged-app critical path until packaging of externals lands).
@@ -818,9 +887,16 @@ export class ThreadService {
           //  Adoption is now user-driven only (the worktree flip / detach UI).
         },
       },
-      sessionFile ?? undefined,
+      forkFrom
+        ? { forkFrom: { sourceFile: forkFrom.sourceFile, leafId: forkFrom.leafId } }
+        : sessionFile
+          ? { sessionFile }
+          : undefined,
     );
-    if (session.sessionFile && session.sessionFile !== sessionFile) {
+    if (forkFrom && session.sessionFile) {
+      // Forked sessions always get a fresh file path; persist it.
+      this.threads.setSessionFile(threadId, session.sessionFile);
+    } else if (session.sessionFile && session.sessionFile !== sessionFile) {
       this.threads.setSessionFile(threadId, session.sessionFile);
     }
     this.sessions.set(threadId, session);
