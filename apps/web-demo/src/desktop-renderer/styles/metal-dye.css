@@ -1,0 +1,283 @@
+/* ================================================================ */
+/* Metal dye — optional tint for the skeuomorphic chassis.             */
+/*                                                                    */
+/* Loaded LAST (after composer-device.css / -dark.css and             */
+/* sidebar-device.css) so it wins by source order at equal specificity. */
+/*                                                                    */
+/* Applied whenever a theme emits `--metal-dye` — either a preset      */
+/* (`:root[data-theme]` in app.css) or a custom/saved theme            */
+/* (theme-tokens.ts buildCustomCss). Each neutral chassis body          */
+/* stop is re-mixed toward the dye:                                   */
+/*                                                                    */
+/*   color-mix(in oklch, <neutral>, var(--metal-dye, <neutral>)       */
+/*              var(--metal-tint-amount, 0%))                         */
+/*                                                                    */
+/* When no dye is set the fallback IS the neutral and the amount is    */
+/* 0%, so color-mix(<n>, <n>, 0%) = <n> exactly — a pure no-op for     */
+/* presets. Only the *body ramp* of each surface is retinted: chassis   */
+/* panels, round dials/knobs (conic-gradient spin + base radial), and   */
+/* square slot keycaps (devbtn caps). The screen, LEDs, engraved        */
+/* labels, the slider track/panel and the specular sheen layers stay    */
+/* neutral so the dye reads as pigment and the device still reads as    */
+/* physical.                                                          */
+/*                                                                    */
+/* NOTE: the body ramps below must mirror the originals in            */
+/* composer-device.css (L84–90 chassis, L431–461 reasoning knob,      */
+/* L462–546 send dial, L516–547 mode thumb, L579–680 btw-btn),        */
+/* composer-device-parts.css (L1020–1046 model slider thumb,           */
+/* L2495–2510 devbtn cap) and sidebar-device.css (L46–49, L77–80).    */
+/* Keep them in sync if the originals change.                         */
+/* ================================================================ */
+
+/* --------------------------------------------------------------- */
+/* Composer chassis — brushed silver (light)                        */
+/* Only the final body-ramp layer is retinted; the sheen/corner    */
+/* highlights above it stay neutral so the dye reads as pigment.     */
+/* --------------------------------------------------------------- */
+:root .composer-device .composer__surface {
+  background:
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.42), oklch(0.9 0.003 250 / 0.1) 46%, oklch(0.64 0.003 250 / 0.09) 100%),
+    radial-gradient(ellipse 95% 76% at 24% 20%, oklch(1 0.002 250 / 0.13), transparent 64%),
+    radial-gradient(ellipse 90% 78% at 88% 82%, oklch(0.42 0.003 250 / 0.055), transparent 70%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, oklch(0.985 0.002 250), var(--metal-dye, oklch(0.985 0.002 250)) var(--metal-tint-amount, 0%)) 0%,
+      color-mix(in srgb, oklch(0.9 0.003 250),   var(--metal-dye, oklch(0.9 0.003 250))   var(--metal-tint-amount, 0%)) 54%,
+      color-mix(in srgb, oklch(0.79 0.003 250),  var(--metal-dye, oklch(0.79 0.003 250))  var(--metal-tint-amount, 0%)) 100%
+    );
+}
+
+/* --------------------------------------------------------------- */
+/* Composer chassis — anodized black (dark)                        */
+/* --------------------------------------------------------------- */
+:root[data-composer="dark"] .composer-device .composer__surface {
+  background:
+    linear-gradient(180deg, oklch(0.6 0.004 265 / 0.16), oklch(0.3 0.004 265 / 0.05) 46%, oklch(0.05 0.004 265 / 0.14) 100%),
+    radial-gradient(ellipse 95% 76% at 24% 20%, oklch(0.62 0.004 265 / 0.1), transparent 64%),
+    radial-gradient(ellipse 90% 78% at 88% 82%, oklch(0 0 0 / 0.26), transparent 70%),
+    repeating-linear-gradient(90deg, oklch(0.6 0.004 265 / 0.022) 0 1px, transparent 1px 3px),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, oklch(0.235 0.004 265), var(--metal-dye, oklch(0.235 0.004 265)) var(--metal-tint-amount, 0%)) 0%,
+      color-mix(in srgb, oklch(0.17 0.004 265),  var(--metal-dye, oklch(0.17 0.004 265))  var(--metal-tint-amount, 0%)) 54%,
+      color-mix(in srgb, oklch(0.115 0.004 265), var(--metal-dye, oklch(0.115 0.004 265)) var(--metal-tint-amount, 0%)) 100%
+    );
+  background-blend-mode: normal, soft-light, multiply, overlay, normal;
+}
+
+/* --------------------------------------------------------------- */
+/* Sidebar rail — brushed silver (light)                           */
+/* The 45deg body ramp is retinted; a full-height top-down sheen +   */
+/* lit top edge give the dyed surface anodized depth (it otherwise   */
+/* holds flat across a tall rail and reads as a slab).               */
+/* --------------------------------------------------------------- */
+:root .sidebar-device {
+  background:
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.34) 0%, transparent 40%, transparent 70%, oklch(0.42 0.004 250 / 0.14) 100%),
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(1 0.002 250 / 0.26), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0.35 0.004 250 / 0.05), transparent 64%),
+    repeating-linear-gradient(90deg, oklch(0.35 0.004 250 / 0.06) 0 1px, transparent 1px 3px),
+    linear-gradient(
+      45deg,
+      color-mix(in srgb, oklch(0.82 0.003 250),  var(--metal-dye, oklch(0.82 0.003 250))  var(--metal-tint-amount, 0%)) 0px,
+      color-mix(in srgb, oklch(0.885 0.003 250), var(--metal-dye, oklch(0.885 0.003 250)) var(--metal-tint-amount, 0%)) 150px,
+      color-mix(in srgb, oklch(0.935 0.002 250), var(--metal-dye, oklch(0.935 0.002 250)) var(--metal-tint-amount, 0%)) 240px
+    );
+  background-blend-mode: soft-light, normal, normal, soft-light, normal;
+  box-shadow:
+    inset 0 1px 0 oklch(1 0.002 250 / 0.6),
+    inset 0 0 0 0.5px oklch(0.92 0.002 250 / 0.18);
+}
+
+/* --------------------------------------------------------------- */
+/* Round dials + knobs — brushed metal spin                          */
+/* Same treatment as the chassis body ramp: the specular sheen layer  */
+/* (top radial) stays neutral so the dye reads as pigment, while the  */
+/* conic-gradient spin and base radial are re-mixed toward the dye.  */
+/* No-op when --metal-dye/amount are unset (fallbacks equal the       */
+/* native stops and amount is 0%).                                    */
+/* --------------------------------------------------------------- */
+
+/* SEND dial (light) */
+:root .composer-device .send-dial {
+  background:
+    radial-gradient(circle at 50% 46%, oklch(1 0.002 250 / 0.5), transparent 46%),
+    conic-gradient(
+      from 0deg,
+      color-mix(in srgb, oklch(0.78 0.004 250), var(--metal-dye, oklch(0.78 0.004 250)) var(--metal-tint-amount, 0%)) 0deg,
+      color-mix(in srgb, oklch(0.6 0.004 250),  var(--metal-dye, oklch(0.6 0.004 250))  var(--metal-tint-amount, 0%)) 45deg,
+      color-mix(in srgb, oklch(0.8 0.004 250),  var(--metal-dye, oklch(0.8 0.004 250))  var(--metal-tint-amount, 0%)) 90deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 135deg,
+      color-mix(in srgb, oklch(0.8 0.004 250),  var(--metal-dye, oklch(0.8 0.004 250))  var(--metal-tint-amount, 0%)) 180deg,
+      color-mix(in srgb, oklch(0.6 0.004 250),  var(--metal-dye, oklch(0.6 0.004 250))  var(--metal-tint-amount, 0%)) 225deg,
+      color-mix(in srgb, oklch(0.8 0.004 250),  var(--metal-dye, oklch(0.8 0.004 250))  var(--metal-tint-amount, 0%)) 270deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 315deg,
+      color-mix(in srgb, oklch(0.78 0.004 250), var(--metal-dye, oklch(0.78 0.004 250)) var(--metal-tint-amount, 0%)) 360deg
+    ),
+    radial-gradient(circle at 50% 50%,
+      color-mix(in srgb, oklch(0.82 0.004 250), var(--metal-dye, oklch(0.82 0.004 250)) var(--metal-tint-amount, 0%)) 0 100%
+    );
+}
+
+/* BTW button (light) — smaller sibling of the send dial */
+:root .composer-device .btw-btn {
+  background:
+    radial-gradient(circle at 50% 46%, oklch(1 0.002 250 / 0.5), transparent 46%),
+    conic-gradient(
+      from 0deg,
+      color-mix(in srgb, oklch(0.78 0.004 250), var(--metal-dye, oklch(0.78 0.004 250)) var(--metal-tint-amount, 0%)) 0deg,
+      color-mix(in srgb, oklch(0.6 0.004 250),  var(--metal-dye, oklch(0.6 0.004 250))  var(--metal-tint-amount, 0%)) 45deg,
+      color-mix(in srgb, oklch(0.8 0.004 250),  var(--metal-dye, oklch(0.8 0.004 250))  var(--metal-tint-amount, 0%)) 90deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 135deg,
+      color-mix(in srgb, oklch(0.8 0.004 250),  var(--metal-dye, oklch(0.8 0.004 250))  var(--metal-tint-amount, 0%)) 180deg,
+      color-mix(in srgb, oklch(0.6 0.004 250),  var(--metal-dye, oklch(0.6 0.004 250))  var(--metal-tint-amount, 0%)) 225deg,
+      color-mix(in srgb, oklch(0.8 0.004 250),  var(--metal-dye, oklch(0.8 0.004 250))  var(--metal-tint-amount, 0%)) 270deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 315deg,
+      color-mix(in srgb, oklch(0.78 0.004 250), var(--metal-dye, oklch(0.78 0.004 250)) var(--metal-tint-amount, 0%)) 360deg
+    ),
+    radial-gradient(circle at 50% 50%,
+      color-mix(in srgb, oklch(0.82 0.004 250), var(--metal-dye, oklch(0.82 0.004 250)) var(--metal-tint-amount, 0%)) 0 100%
+    );
+}
+
+/* REASONING dial knob (light) */
+:root .composer-device .reasoning-dial__knob {
+  background:
+    radial-gradient(circle at 50% 44%, oklch(1 0.002 250 / 0.56), transparent 46%),
+    conic-gradient(
+      from -14deg,
+      color-mix(in srgb, oklch(0.7 0.004 250),  var(--metal-dye, oklch(0.7 0.004 250))  var(--metal-tint-amount, 0%)) 0deg,
+      color-mix(in srgb, oklch(0.94 0.003 250), var(--metal-dye, oklch(0.94 0.003 250)) var(--metal-tint-amount, 0%)) 36deg,
+      color-mix(in srgb, oklch(0.64 0.004 250), var(--metal-dye, oklch(0.64 0.004 250)) var(--metal-tint-amount, 0%)) 76deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 118deg,
+      color-mix(in srgb, oklch(0.66 0.004 250), var(--metal-dye, oklch(0.66 0.004 250)) var(--metal-tint-amount, 0%)) 168deg,
+      color-mix(in srgb, oklch(0.45 0.004 250), var(--metal-dye, oklch(0.45 0.004 250)) var(--metal-tint-amount, 0%)) 215deg,
+      color-mix(in srgb, oklch(0.82 0.004 250), var(--metal-dye, oklch(0.82 0.004 250)) var(--metal-tint-amount, 0%)) 262deg,
+      color-mix(in srgb, oklch(0.98 0.002 250), var(--metal-dye, oklch(0.98 0.002 250)) var(--metal-tint-amount, 0%)) 312deg,
+      color-mix(in srgb, oklch(0.7 0.004 250),  var(--metal-dye, oklch(0.7 0.004 250))  var(--metal-tint-amount, 0%)) 360deg
+    );
+}
+
+/* Build/Plan mode thumb (light) */
+:root .composer-device .composer-mode__thumb {
+  background:
+    radial-gradient(circle at 50% 46%, oklch(1 0.002 250 / 0.5), transparent 46%),
+    conic-gradient(
+      from 0deg,
+      color-mix(in srgb, oklch(0.78 0.004 250), var(--metal-dye, oklch(0.78 0.004 250)) var(--metal-tint-amount, 0%)) 0deg,
+      color-mix(in srgb, oklch(0.60 0.004 250), var(--metal-dye, oklch(0.60 0.004 250)) var(--metal-tint-amount, 0%)) 45deg,
+      color-mix(in srgb, oklch(0.80 0.004 250), var(--metal-dye, oklch(0.80 0.004 250)) var(--metal-tint-amount, 0%)) 90deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 135deg,
+      color-mix(in srgb, oklch(0.80 0.004 250), var(--metal-dye, oklch(0.80 0.004 250)) var(--metal-tint-amount, 0%)) 180deg,
+      color-mix(in srgb, oklch(0.60 0.004 250), var(--metal-dye, oklch(0.60 0.004 250)) var(--metal-tint-amount, 0%)) 225deg,
+      color-mix(in srgb, oklch(0.80 0.004 250), var(--metal-dye, oklch(0.80 0.004 250)) var(--metal-tint-amount, 0%)) 270deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 315deg,
+      color-mix(in srgb, oklch(0.78 0.004 250), var(--metal-dye, oklch(0.78 0.004 250)) var(--metal-tint-amount, 0%)) 360deg
+    );
+}
+
+/* Model selector slider thumb (light) */
+:root .model-selector__slider-thumb {
+  background:
+    radial-gradient(circle at 50% 44%, oklch(1 0.002 250 / 0.58), transparent 46%),
+    conic-gradient(from 0deg,
+      color-mix(in srgb, oklch(0.78 0.004 250), var(--metal-dye, oklch(0.78 0.004 250)) var(--metal-tint-amount, 0%)) 0deg,
+      color-mix(in srgb, oklch(0.60 0.004 250), var(--metal-dye, oklch(0.60 0.004 250)) var(--metal-tint-amount, 0%)) 45deg,
+      color-mix(in srgb, oklch(0.80 0.004 250), var(--metal-dye, oklch(0.80 0.004 250)) var(--metal-tint-amount, 0%)) 90deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 135deg,
+      color-mix(in srgb, oklch(0.80 0.004 250), var(--metal-dye, oklch(0.80 0.004 250)) var(--metal-tint-amount, 0%)) 180deg,
+      color-mix(in srgb, oklch(0.60 0.004 250), var(--metal-dye, oklch(0.60 0.004 250)) var(--metal-tint-amount, 0%)) 225deg,
+      color-mix(in srgb, oklch(0.80 0.004 250), var(--metal-dye, oklch(0.80 0.004 250)) var(--metal-tint-amount, 0%)) 270deg,
+      color-mix(in srgb, oklch(0.97 0.002 250), var(--metal-dye, oklch(0.97 0.002 250)) var(--metal-tint-amount, 0%)) 315deg,
+      color-mix(in srgb, oklch(0.78 0.004 250), var(--metal-dye, oklch(0.78 0.004 250)) var(--metal-tint-amount, 0%)) 360deg);
+}
+
+/* --------------------------------------------------------------- */
+/* Square slot keycaps (light) — CAVEMAN / GRILL / ADD (devbtn caps)  */
+/* Sharp machined caps: only the flat face body ramp is re-mixed;     */
+/* the crisp machined-edge box-shadow stays neutral. No-op when no    */
+/* dye is set.                                                        */
+/* --------------------------------------------------------------- */
+:root .composer-device .devbtn__cap {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, oklch(0.945 0.003 250), var(--metal-dye, oklch(0.945 0.003 250)) var(--metal-tint-amount, 0%)) 0%,
+    color-mix(in srgb, oklch(0.875 0.003 250), var(--metal-dye, oklch(0.875 0.003 250)) var(--metal-tint-amount, 0%)) 52%,
+    color-mix(in srgb, oklch(0.83 0.004 250),  var(--metal-dye, oklch(0.83 0.004 250))  var(--metal-tint-amount, 0%)) 100%
+  );
+}
+
+/* --------------------------------------------------------------- */
+/* Square slot keycaps (dark)                                       */
+/* --------------------------------------------------------------- */
+:root[data-composer="dark"] .composer-device .devbtn__cap {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, oklch(0.275 0.004 265), var(--metal-dye, oklch(0.275 0.004 265)) var(--metal-tint-amount, 0%)) 0%,
+    color-mix(in srgb, oklch(0.2 0.004 265),   var(--metal-dye, oklch(0.2 0.004 265))   var(--metal-tint-amount, 0%)) 52%,
+    color-mix(in srgb, oklch(0.155 0.004 265), var(--metal-dye, oklch(0.155 0.004 265)) var(--metal-tint-amount, 0%)) 100%
+  );
+}
+
+/* --------------------------------------------------------------- */
+/* Round dials + knobs (dark) — anodized black-metal spin           */
+/* Mirrors composer-device-dark.css shared block + reasoning knob.   */
+/* Specular radial sheen stays neutral; conic body + base re-mixed.   */
+/* --------------------------------------------------------------- */
+:root[data-composer="dark"] .composer-device .send-dial,
+:root[data-composer="dark"] .composer-device .btw-btn,
+:root[data-composer="dark"] .composer-device .composer-mode__thumb,
+:root[data-composer="dark"] .composer-device .model-selector__slider-thumb {
+  background:
+    radial-gradient(circle at 50% 44%, oklch(0.6 0.004 265 / 0.4), transparent 46%),
+    conic-gradient(
+      from 0deg,
+      color-mix(in srgb, oklch(0.3 0.004 265),  var(--metal-dye, oklch(0.3 0.004 265))  var(--metal-tint-amount, 0%)) 0deg,
+      color-mix(in srgb, oklch(0.15 0.004 265), var(--metal-dye, oklch(0.15 0.004 265)) var(--metal-tint-amount, 0%)) 45deg,
+      color-mix(in srgb, oklch(0.32 0.004 265), var(--metal-dye, oklch(0.32 0.004 265)) var(--metal-tint-amount, 0%)) 90deg,
+      color-mix(in srgb, oklch(0.42 0.004 265), var(--metal-dye, oklch(0.42 0.004 265)) var(--metal-tint-amount, 0%)) 135deg,
+      color-mix(in srgb, oklch(0.32 0.004 265), var(--metal-dye, oklch(0.32 0.004 265)) var(--metal-tint-amount, 0%)) 180deg,
+      color-mix(in srgb, oklch(0.15 0.004 265), var(--metal-dye, oklch(0.15 0.004 265)) var(--metal-tint-amount, 0%)) 225deg,
+      color-mix(in srgb, oklch(0.32 0.004 265), var(--metal-dye, oklch(0.32 0.004 265)) var(--metal-tint-amount, 0%)) 270deg,
+      color-mix(in srgb, oklch(0.42 0.004 265), var(--metal-dye, oklch(0.42 0.004 265)) var(--metal-tint-amount, 0%)) 315deg,
+      color-mix(in srgb, oklch(0.3 0.004 265),  var(--metal-dye, oklch(0.3 0.004 265))  var(--metal-tint-amount, 0%)) 360deg
+    );
+}
+
+:root[data-composer="dark"] .composer-device .reasoning-dial__knob {
+  background:
+    radial-gradient(circle at 50% 44%, oklch(0.62 0.004 265 / 0.42), transparent 46%),
+    conic-gradient(
+      from -14deg,
+      color-mix(in srgb, oklch(0.16 0.004 265), var(--metal-dye, oklch(0.16 0.004 265)) var(--metal-tint-amount, 0%)) 0deg,
+      color-mix(in srgb, oklch(0.36 0.004 265), var(--metal-dye, oklch(0.36 0.004 265)) var(--metal-tint-amount, 0%)) 36deg,
+      color-mix(in srgb, oklch(0.14 0.004 265), var(--metal-dye, oklch(0.14 0.004 265)) var(--metal-tint-amount, 0%)) 76deg,
+      color-mix(in srgb, oklch(0.42 0.004 265), var(--metal-dye, oklch(0.42 0.004 265)) var(--metal-tint-amount, 0%)) 118deg,
+      color-mix(in srgb, oklch(0.16 0.004 265), var(--metal-dye, oklch(0.16 0.004 265)) var(--metal-tint-amount, 0%)) 168deg,
+      color-mix(in srgb, oklch(0.1 0.004 265),  var(--metal-dye, oklch(0.1 0.004 265))  var(--metal-tint-amount, 0%)) 215deg,
+      color-mix(in srgb, oklch(0.3 0.004 265),  var(--metal-dye, oklch(0.3 0.004 265))  var(--metal-tint-amount, 0%)) 262deg,
+      color-mix(in srgb, oklch(0.44 0.004 265), var(--metal-dye, oklch(0.44 0.004 265)) var(--metal-tint-amount, 0%)) 312deg,
+      color-mix(in srgb, oklch(0.16 0.004 265), var(--metal-dye, oklch(0.16 0.004 265)) var(--metal-tint-amount, 0%)) 360deg
+    );
+}
+
+/* --------------------------------------------------------------- */
+/* Sidebar rail — anodized black (dark)                            */
+/* --------------------------------------------------------------- */
+:root[data-composer="dark"] .sidebar-device {
+  background:
+    linear-gradient(180deg, oklch(0.62 0.004 265 / 0.22) 0%, transparent 36%, transparent 66%, oklch(0 0 0 / 0.3) 100%),
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(0.62 0.004 265 / 0.22), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0 0 0 / 0.1), transparent 64%),
+    repeating-linear-gradient(90deg, oklch(0.7 0.004 265 / 0.04) 0 1px, transparent 1px 3px),
+    linear-gradient(
+      45deg,
+      color-mix(in srgb, oklch(0.13 0.004 265),  var(--metal-dye, oklch(0.13 0.004 265))  var(--metal-tint-amount, 0%)) 0px,
+      color-mix(in srgb, oklch(0.19 0.004 265),  var(--metal-dye, oklch(0.19 0.004 265))  var(--metal-tint-amount, 0%)) 150px,
+      color-mix(in srgb, oklch(0.225 0.004 265), var(--metal-dye, oklch(0.225 0.004 265)) var(--metal-tint-amount, 0%)) 240px
+    );
+  background-blend-mode: soft-light, normal, normal, soft-light, normal;
+  box-shadow:
+    inset 0 1px 0 oklch(0.62 0.004 265 / 0.32),
+    inset 0 0 0 0.5px oklch(0 0 0 / 0.2);
+}

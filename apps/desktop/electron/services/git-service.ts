@@ -530,7 +530,8 @@ export class GitService {
       if (inProgress) {
         return {
           ok: false,
-          error: "Pull stopped at a merge conflict. Resolve it, then run `git rebase --continue` (or `git rebase --abort` to roll back).",
+          conflict: true,
+          error: "Pull stopped at a rebase conflict — dispatching a thread to resolve it.",
         };
       }
       return {
@@ -546,24 +547,48 @@ export class GitService {
     if (!project) throw new Error(`Unknown project: ${projectId}`);
     mkdirSync(this.worktreesDir, { recursive: true });
 
-    // Create the worktree at HEAD. The project repo is never touched, so
-    // a failure here leaves nothing lost — unlike a stash-and-move, which
-    // empties the project checkout before the worktree is seeded.
-    //
-    // Refuse to spawn an isolated worktree from a dirty project checkout: the
-    // previous "seed = copy of uncommitted master" behaviour carried whatever
-    // was lying around (often contamination an earlier agent left on the
-    // shared checkout) into every new worktree, so the smear propagated across
-    // siblings. Isolated work must start from a clean, committed base — commit
-    // or stash the main checkout first.
-    const dirty = Boolean((await git(["status", "--porcelain"], project.path)).trim());
-    if (dirty) {
-      throw new Error(
-        "Project working tree is dirty. Commit or stash on the main checkout before spinning an isolated worktree — new worktrees start from a clean base to avoid propagating uncommitted changes.",
-      );
-    }
     const dir = path.join(this.worktreesDir, randomUUID());
-    await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
+    const dirty = Boolean((await git(["status", "--porcelain"], project.path)).trim());
+    if (!dirty) {
+      await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
+      return dir;
+    }
+
+    // Seed the worktree with a COPY of the main checkout's uncommitted work
+    // (modified tracked + deletions + untracked, .gitignore-respecting) so
+    // isolated iteration carries the in-flight edits. Flow: stash-push on
+    // main (main goes clean) → create worktree at HEAD → apply the stash INTO
+    // the worktree (copy, not move) → pop on main to restore its original
+    // dirty state. Main ends up exactly as it was; the work is duplicated into
+    // the worktree, not moved.
+    //
+    // Note on the old smear concern: an earlier version refused dirty trees
+    // because the previous flow copied uncommitted state into EVERY sibling,
+    // drifting across worktrees. That trade-off is now explicit: each new
+    // worktree seeds from main's current uncommitted state at creation time.
+    // If the process dies between push and pop, the work is preserved in
+    // `git stash list` — recoverable by `git stash pop` on the main checkout.
+    await git(["stash", "push", "-u", "-m", "peach-pi worktree seed"], project.path);
+    try {
+      await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
+      try {
+        // Apply (not pop): leaves the stash in place so we can restore main
+        // next. Same HEAD as when the stash was made → applies clean.
+        await git(["stash", "apply"], dir);
+      } catch (err) {
+        // Shouldn't happen against a fresh worktree at the same HEAD, but if
+        // it does, tear down the half-seeded worktree and surface the error
+        // before the finally restores main — no work is silently lost.
+        await git(["worktree", "remove", "--force", dir], project.path).catch(() => {});
+        throw new Error(`Could not seed worktree from local changes: ${(err as Error).message}`);
+      }
+    } finally {
+      // Restore main's uncommitted state. pop = apply + drop; safe because
+      // main is clean (reset by the push) and the stash was made against this
+      // same HEAD. If pop somehow fails, the stash remains in `git stash list`
+      // for manual recovery.
+      await git(["stash", "pop"], project.path).catch(() => {});
+    }
     return dir;
   }
 

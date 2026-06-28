@@ -420,7 +420,15 @@ export class ThreadService {
     const session = this.sessions.get(threadId);
     const firstPrompt = firstUserMessage(session?.transcript() ?? []) ?? fallbackPrompt;
     const { generateTitleAndTag } = await import("@peach-pi/pi-client");
-    const result = await generateTitleAndTag(firstPrompt, config);
+    const result = await generateTitleAndTag(firstPrompt, {
+      config,
+      onError: (reason) => this.emit("event:notice", {
+        threadId,
+        message: `Thread title generation failed — ${reason} Click to choose a utility model.`,
+        level: "warning",
+        action: { label: "Go to settings", target: "utility-model" },
+      }),
+    });
     if (!result) return;
     this.threads.setTag(threadId, result.tag);
     // Only overwrite the title if the user hasn't manually renamed meanwhile.
@@ -643,7 +651,13 @@ export class ThreadService {
     const cwd = project?.path ?? this.chatsDir;
     const config = this.getUtilityModel();
     const { inspectCommandToggle } = await import("@peach-pi/pi-client");
-    return inspectCommandToggle(cwd, kind, name, config);
+    return inspectCommandToggle(cwd, kind, name, config, (reason) =>
+      this.emit("event:notice", {
+        message: `Couldn't inspect "${name}" — ${reason}`,
+        level: "warning",
+        action: { label: "Go to settings", target: "utility-model" },
+      }),
+    );
   }
 
   setTitle(threadId: string, title: string): void {

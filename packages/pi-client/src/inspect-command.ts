@@ -100,6 +100,7 @@ export async function inspectCommandToggle(
   kind: CommandKind,
   name: string,
   utilityConfig?: UtilityModelConfig | null,
+  onError?: (message: string) => void,
 ): Promise<SlotToggleSpec | null> {
   const evidence = await probe(cwd, kind, name);
   if (!evidence) return null;
@@ -109,6 +110,7 @@ export async function inspectCommandToggle(
     inputLimit: SOURCE_LIMIT + 500,
     temperature: 0.1,
     maxTokens: 250,
+    onError,
   });
   if (!text) return null;
   return parseSpec(text, name);

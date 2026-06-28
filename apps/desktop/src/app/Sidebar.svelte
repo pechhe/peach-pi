@@ -980,7 +980,7 @@
                 aria-label="Add thread"><Plus size={14} /></button
               >
             </Tooltip>
-            <Tooltip text="New worktree (isolated checkout)">
+            <Tooltip text="New worktree — seeded from a copy of your current changes, main checkout is left untouched">
               <button
                 class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
                 onclick={() => newWorktree(group.project.id)}
@@ -1221,16 +1221,25 @@
      inside; ≥2 threads collapse under a .worktree-header. ───────── */
   .worktrees-section {
     margin-top: 4px;
-    padding: 2px 0;
+    /* Horizontal inset keeps rows (and the MovingHighlight active box,
+       which measures them) clear of the section's left accent stripe and
+       its 6px rounded corners; otherwise the selected-row grey box covers
+       the stripe and its 8px corners clash with the section radius. */
+    padding: 2px 6px 2px 8px;
     border-radius: 6px;
     background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface) 96%);
     box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  /* Inside the tinted section, match the indicator radius to the section's
+     6px (global default is 8px) so corners nest instead of poking out. */
+  .worktrees-section :global(.sidebar-moving-highlight__indicator) {
+    border-radius: 6px;
   }
   .worktrees-section__label {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 2px 8px;
+    padding: 2px 8px 2px 10px;
     font-size: 10px;
     font-weight: 500;
     color: var(--color-muted);

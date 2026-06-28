@@ -1265,8 +1265,8 @@
           onclick={toggleEnvironment}
           data-testid="environment-toggle"
           title={isWorktree
-            ? "Working in an isolated git worktree"
-            : "Working in the project directory"}
+            ? "Working in an isolated git worktree (seeded from a copy of your main checkout's changes)"
+            : "Working in the project directory — switching to Worktree seeds it from a copy of your current changes, main is left untouched"}
         >
           {isWorktree ? "⎇ Worktree" : "◈ Local"}
         </button>

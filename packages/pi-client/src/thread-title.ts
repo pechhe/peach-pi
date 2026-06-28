@@ -31,6 +31,13 @@ const isTag = (v: unknown): v is ThreadTag =>
 
 const capTitle = (t: string): string => (t.length > 35 ? `${t.slice(0, 34)}…` : t);
 
+export interface ThreadTitleOptions {
+  /** Utility-model override; falls back to the app's configured selection. */
+  config?: UtilityModelConfig | null;
+  /** Invoked when the underlying utility call fails, with a short reason. */
+  onError?: (message: string) => void;
+}
+
 /**
  * Generate a short title and category tag from the user's first message in a
  * single utility-model call. Returns null on failure; a missing/invalid tag
@@ -38,14 +45,15 @@ const capTitle = (t: string): string => (t.length > 35 ? `${t.slice(0, 34)}…` 
  */
 export async function generateTitleAndTag(
   firstPrompt: string,
-  config?: UtilityModelConfig | null,
+  opts: ThreadTitleOptions = {},
 ): Promise<ThreadTitleAndTag | null> {
-  const text = await completeUtility(config, {
+  const text = await completeUtility(opts.config, {
     systemPrompt: SYSTEM_PROMPT,
     userText: firstPrompt,
     inputLimit: PROMPT_LIMIT,
     temperature: 0.4,
     maxTokens: 48,
+    onError: opts.onError,
   });
   if (!text) return null;
 

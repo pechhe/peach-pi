@@ -17,6 +17,7 @@ const DIFF_LIMIT = 15_000;
 export async function generateCommitMessage(
   diff: string,
   config?: UtilityModelConfig | null,
+  onError?: (message: string) => void,
 ): Promise<string | null> {
   const text = await completeUtility(config, {
     systemPrompt: SYSTEM_PROMPT,
@@ -24,6 +25,7 @@ export async function generateCommitMessage(
     inputLimit: DIFF_LIMIT,
     temperature: 0.3,
     maxTokens: 200,
+    onError,
   });
   // Commit messages must be a single line; collapse any stray wrapping.
   return text?.split("\n")[0]?.trim() || null;

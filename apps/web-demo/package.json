@@ -1,0 +1,39 @@
+{
+  "name": "@peach-pi/web-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-vercel": "^5.7.2",
+    "@sveltejs/kit": "^2.22.0",
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@tailwindcss/vite": "^4.1.18",
+    "svelte": "^5.36.0",
+    "svelte-check": "^4.2.2",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.2",
+    "vite": "^6.3.0"
+  },
+  "dependencies": {
+    "@lucide/svelte": "^1.18.0",
+    "@sentry/electron": "^5.7.0",
+    "bits-ui": "^2.18.1",
+    "clsx": "^2.1.1",
+    "dompurify": "^3.4.9",
+    "marked": "^18.0.5",
+    "motion-sv": "^0.1.12",
+    "posthog-js": "^1.215.0",
+    "tailwind-merge": "^3.6.0"
+  },
+  "overrides": {
+    "motion-dom": "12.38.0",
+    "motion-utils": "12.39.0",
+    "framer-motion": "12.38.0"
+  }
+}

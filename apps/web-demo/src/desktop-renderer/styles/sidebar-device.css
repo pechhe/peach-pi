@@ -1,0 +1,361 @@
+/* ================================================================ */
+/* Skeuomorphic metal base layer — the app chrome that the page sits   */
+/* on top of (mirrors the composer device chassis so the rail and the     */
+/* composer read as one machined-panel family).                           */
+/*                                                                       */
+/* Keyed off <html data-composer> (resolved by the theme store): brushed */
+/* silver when the composer is light, anodized black when it is dark.    */
+/*                                                                       */
+/* This is a full-window base sheet, so the recipe is tuned to read as    */
+/* metal at *any* size:                                                   */
+/*   • the body sits in the composer chassis' silver range (light ~0.82→   */
+/*     0.9, dark ~0.13→0.225) — NOT near-white, so it reads as brushed     */
+/*     metal and the engraved labels' crisp highlight stays visible;       */
+/*   • the luminance ramp runs diagonally (45deg) — darkest at the         */
+/*     bottom-left corner, lifting toward the top-right, so the metal reads  */
+/*     as angled rather than a flat wash; with px stops the peak lands       */
+/*     around the sidebar's right edge, then holds across the page;          */
+/*   • the fine brushed grain (repeating-linear-gradient, ~1px) is width-  */
+/*     independent — this is the real "brushed metal" tell, applied to     */
+/*     both light and dark;                                                 */
+/*   • soft localized catchlights sit in the visible corner.               */
+/* Shadows/bevels stay minimal — the metal reads via body+grain, not via   */
+/* heavy drop shadows.                                                      */
+/* ================================================================ */
+
+.sidebar-device {
+  position: relative;
+  isolation: isolate;
+  background:
+    /* ambient catchlight, upper-right */
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(1 0.002 250 / 0.26), transparent 60%),
+    /* subtle shade pooled lower-left (kept gentle so the bottom-left corner isn't over-darkened) */
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0.35 0.004 250 / 0.05), transparent 64%),
+    /* fine brushed grain — width-independent metal striations */
+    repeating-linear-gradient(90deg, oklch(0.35 0.004 250 / 0.06) 0 1px, transparent 1px 3px),
+    /* diagonal body ramp in the composer chassis' brushed-silver range
+       (0.985→0.9→0.79 vertical on the composer; here ~0.82→0.9 diagonal):
+       darkest at the bottom-left corner, lifts toward the top-right and
+       holds the silver mid-tone across the page. Staying off near-white is
+       what lets the engraved labels' highlight read. */
+    linear-gradient(78deg, oklch(0.79 0.003 250) 0px, oklch(0.85 0.003 250) 170px, oklch(0.92 0.002 250) 340px);
+  background-blend-mode: normal, normal, soft-light, normal;
+  box-shadow: inset 0 0 0 0.5px oklch(0.92 0.002 250 / 0.18);
+}
+
+/* Faint top sheen so the rail catches a little overhead light without        */
+/* reintroducing a heavy shadow band. Low opacity, gentle stops.                */
+.sidebar-device::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.2;
+  background:
+    linear-gradient(180deg, oklch(1 0.002 250 / 0.22), transparent 18%, transparent 82%, oklch(0.3 0.004 250 / 0.08));
+}
+
+/* ---------------- Dark: anodized black (tracks composer) ---------------- */
+:root[data-composer="dark"] .sidebar-device {
+  background:
+    /* ambient catchlight, upper-right */
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(0.62 0.004 265 / 0.22), transparent 60%),
+    /* shade pooled lower-left (kept gentle so the corner isn't over-darkened) */
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0 0 0 / 0.1), transparent 64%),
+    /* fine anodized brushed grain */
+    repeating-linear-gradient(90deg, oklch(0.7 0.004 265 / 0.04) 0 1px, transparent 1px 3px),
+    /* diagonal body ramp in the composer's anodized-black range
+       (0.235→0.17→0.115 vertical on the composer): darkest at the
+       bottom-left corner, lifting toward the top-right then holding. */
+    linear-gradient(78deg, oklch(0.135 0.004 265) 0px, oklch(0.185 0.004 265) 170px, oklch(0.235 0.004 265) 340px);
+  background-blend-mode: normal, normal, soft-light, normal;
+  box-shadow: inset 0 0 0 0.5px oklch(0 0 0 / 0.2);
+}
+
+:root[data-composer="dark"] .sidebar-device::before {
+  opacity: 0.28;
+  background:
+    linear-gradient(180deg, oklch(0.62 0.004 265 / 0.2), transparent 18%, transparent 82%, oklch(0 0 0 / 0.12));
+}
+
+/* ================================================================ */
+/* Engraved labels — dark machined ink + a single CRISP hairline shadow   */
+/* (zero blur), copied from the composer keycap (.device-key). In light   */
+/* mode a lit lower lip of the cut (white below); in dark mode a dark top  */
+/* edge (black above). A blurred shadow reads as a glow, not an engraving, */
+/* so there is none. The active row gets the MovingHighlight pill.        */
+/* ================================================================ */
+.sidebar-device .main-nav-item > span,
+.sidebar-device .engraved {
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  /* Solid dark machined ink + a crisp lit lower lip (zero blur). On the
+     mid-silver metal this reads as a clean letterpress cut. No gradient text
+     fill — that made the glyphs look hollow / white-centred. */
+  color: oklch(0.2 0.005 250);
+  text-shadow: 0 2px 0 oklch(1 0.002 250 / 0.7);
+}
+/* Icons share the engraved plane: same ink (currentColor) + the same crisp
+   lower-lip drop-shadow (text-shadow doesn't apply to SVG strokes). */
+.sidebar-device .main-nav-item > span svg,
+.sidebar-device .engraved svg {
+  filter: drop-shadow(0 2px 0 oklch(1 0.002 250 / 0.7));
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > span,
+:root[data-composer="dark"] .sidebar-device .engraved {
+  /* light ink on anodized black + crisp dark upper wall */
+  color: oklch(0.84 0.004 265);
+  text-shadow: 0 -2px 0 oklch(0 0 0 / 0.7);
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > span svg,
+:root[data-composer="dark"] .sidebar-device .engraved svg {
+  filter: drop-shadow(0 -2px 0 oklch(0 0 0 / 0.7));
+}
+
+/* ================================================================ */
+/* Active engraved label — the ink lights up (one colour, same in        */
+/* light + dark) so the selected area reads as "lit", mirroring the      */
+/* ready send-dial orange. No selector pill: the text + icon glow.        */
+/* Overrideable via the theme builder's "Active label" swatch            */
+/* (--engrave-active). Applies to the active nav item and the Projects    */
+/* section header when the selected thread lives in a project.            */
+/* ================================================================ */
+.sidebar-device .main-nav-item--active > span,
+.sidebar-device .engraved--active {
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  /* Lip tinted toward the lit ink (not pure white) so it reads as a warm
+     letterpress edge rather than a white sticker outline. */
+  text-shadow: 0 2px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 250 / 0.85)),
+               0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+}
+.sidebar-device .main-nav-item--active > span svg,
+.sidebar-device .engraved--active svg {
+  filter: drop-shadow(0 2px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 250 / 0.85)))
+          drop-shadow(0 0 5px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item--active > span,
+:root[data-composer="dark"] .sidebar-device .engraved--active {
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  text-shadow: 0 -2px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / 0.7)),
+               0 0 6px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item--active > span svg,
+:root[data-composer="dark"] .sidebar-device .engraved--active svg {
+  filter: drop-shadow(0 -2px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / 0.7)))
+          drop-shadow(0 0 5px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent));
+}
+/* No selector pill behind the active nav item — just the glow. */
+.sidebar-device .moving-highlight--nav .sidebar-moving-highlight__indicator--active {
+  background: transparent;
+}
+
+/* ================================================================ */
+/* Remote-first mode — the Remote *icon* pulses green slowly while on.     */
+/* Mirrors the active-orange engraving: lit ink + a lower lip tinted toward */
+/* the lit colour (green here), NOT pure white — a white lip on a green     */
+/* glyph reads as a white sticker edge, the same problem fixed for orange.  */
+/* Scoped to `svg` only so the "Remote" label keeps its dark machined ink.  */
+/* Glow kept at constant drop-shadow count across keyframes so `filter`     */
+/* interpolates (a differing count would snap discretely).                  */
+/* ================================================================ */
+.sidebar-device .main-nav-item > span.remote-first-pulse svg {
+  animation: remote-first-engrave 2.8s ease-in-out infinite;
+}
+@keyframes remote-first-engrave {
+  0%, 100% {
+    color: oklch(0.6 0.13 150);
+    filter: drop-shadow(0 2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 35%, oklch(1 0.002 250 / 0.85)))
+            drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0));
+  }
+  50% {
+    color: oklch(0.68 0.13 150);
+    filter: drop-shadow(0 2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 35%, oklch(1 0.002 250 / 0.85)))
+            drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0.22));
+  }
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > span.remote-first-pulse svg {
+  animation: remote-first-engrave-dark 2.8s ease-in-out infinite;
+}
+@keyframes remote-first-engrave-dark {
+  0%, 100% {
+    color: oklch(0.62 0.13 150);
+    filter: drop-shadow(0 -2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 30%, oklch(0 0 0 / 0.7)))
+            drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0));
+  }
+  50% {
+    color: oklch(0.7 0.13 150);
+    filter: drop-shadow(0 -2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 30%, oklch(0 0 0 / 0.7)))
+            drop-shadow(0 0 5px oklch(0.8 0.18 150 / 0.22));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-device .main-nav-item > span.remote-first-pulse svg {
+    animation: none;
+    color: oklch(0.72 0.17 150);
+    filter: drop-shadow(0 2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 35%, oklch(1 0.002 250 / 0.85)));
+  }
+  :root[data-composer="dark"] .sidebar-device .main-nav-item > span.remote-first-pulse svg {
+    filter: drop-shadow(0 -2px 0 color-mix(in srgb, oklch(0.72 0.17 150) 30%, oklch(0 0 0 / 0.7)));
+  }
+}
+
+/* ================================================================ */
+/* Number badge — just the digit, lit in the same orange (with glow) as the  */
+/* active label, engraved into the metal (no pill / no fill).                */
+/* ================================================================ */
+/* Selectors carry .main-nav-item too, to out-specify the engraved-label rule
+   `.sidebar-device .main-nav-item > span` which otherwise paints the badge
+   span dark machined ink. */
+/* Only the main-nav counts (Automations etc.) get the lit-orange engraved
+   digit + etched circle. Every other .num-badge (git status, extension and
+   connector lists) stays a plain number from the base rule in app.css. */
+.sidebar-device .main-nav-item > .num-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+  font-weight: 600;
+  color: var(--engrave-active, oklch(0.74 0.185 52));
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 35%, oklch(1 0.002 250 / 0.85)),
+               0 0 4px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  /* etched ring: thin recessed cut (dark inner line) + lit lower lip. */
+  box-shadow:
+    inset 0 0 0 1px oklch(0.3 0.004 250 / 0.16),
+    0 1px 0 oklch(1 0.002 250 / 0.65);
+}
+:root[data-composer="dark"] .sidebar-device .main-nav-item > .num-badge {
+  text-shadow: 0 -1px 0 color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 30%, oklch(0 0 0 / 0.7)),
+               0 0 4px color-mix(in srgb, var(--engrave-active, oklch(0.74 0.185 52)) 55%, transparent);
+  box-shadow:
+    inset 0 0 0 1px oklch(0 0 0 / 0.38),
+    0 -1px 0 oklch(0.7 0.004 265 / 0.16);
+}
+
+/* ================================================================ */
+/* Collapsible sidebar — flush rail <-> floating card (⌘S + hover).      */
+/*                                                                       */
+/* The rail is always absolutely positioned inside a host pinned to the   */
+/* window's left edge:                                                    */
+/*   • expanded  — host = full sidebar width; rail sits flush on the       */
+/*     chassis (no card, no gap), content butts against its right edge.    */
+/*   • collapsed — host shrinks to a thin trigger strip; the rail morphs   */
+/*     into a brushed-metal card (rounded, shadowed, inset 8px all round)  */
+/*     slid off-screen. Hovering the strip grows the host to cover the     */
+/*     card so the pointer stays "inside" while the sidebar is in use.     */
+/* Motion is composited: the rail slide and the content slide both run on */
+/* `transform` (GPU) — never `left`/`margin-left`, which reflow the heavy  */
+/* content tree every frame (jitter) and drift the centring. The sidebar's*/
+/* fixed popovers are portaled to <body>, so a transform on the rail is    */
+/* safe (no new containing block clips them).                             */
+/* ================================================================ */
+.sidebar-host {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--float-width);
+  z-index: 40;
+}
+.sidebar-host--collapsed {
+  width: 14px;
+}
+.sidebar-host--collapsed.sidebar-host--revealed {
+  /* cover the card (8px margin + width + a little slack) so leaving the
+     card — not merely the strip — is what dismisses it. */
+  width: calc(var(--float-width) + 24px);
+}
+
+.sidebar-rail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  transform: translateX(0);
+  opacity: 1;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    top 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    left 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    bottom 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    border-radius 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    opacity 180ms ease;
+  will-change: transform;
+}
+
+/* Floating card: same brushed-silver chassis as .sidebar-device (light). */
+.sidebar-rail--floating {
+  top: 8px;
+  left: 8px;
+  bottom: 8px;
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(1 0.002 250 / 0.26), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0.35 0.004 250 / 0.05), transparent 64%),
+    repeating-linear-gradient(90deg, oklch(0.35 0.004 250 / 0.06) 0 1px, transparent 1px 3px),
+    linear-gradient(78deg, oklch(0.79 0.003 250) 0px, oklch(0.85 0.003 250) 170px, oklch(0.92 0.002 250) 340px);
+  background-blend-mode: normal, normal, soft-light, normal;
+  box-shadow:
+    0 18px 40px -10px rgba(0, 0, 0, 0.32),
+    0 4px 12px -4px rgba(0, 0, 0, 0.22),
+    inset 0 0 0 0.5px oklch(0.92 0.002 250 / 0.25);
+  /* hidden: slid fully off-screen, past its own left margin */
+  transform: translateX(calc(-100% - 8px));
+  opacity: 0;
+  pointer-events: none;
+}
+.sidebar-rail--floating.sidebar-rail--shown {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+:root[data-composer="dark"] .sidebar-rail--floating {
+  background:
+    radial-gradient(ellipse 34% 55% at 86% 12%, oklch(0.62 0.004 265 / 0.22), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 8% 92%, oklch(0 0 0 / 0.1), transparent 64%),
+    repeating-linear-gradient(90deg, oklch(0.7 0.004 265 / 0.04) 0 1px, transparent 1px 3px),
+    linear-gradient(78deg, oklch(0.135 0.004 265) 0px, oklch(0.185 0.004 265) 170px, oklch(0.235 0.004 265) 340px);
+  background-blend-mode: normal, normal, soft-light, normal;
+  box-shadow:
+    0 18px 40px -10px rgba(0, 0, 0, 0.6),
+    0 4px 12px -4px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 0.5px oklch(0 0 0 / 0.25);
+}
+
+/* The content card rests on a REAL left margin (= sidebar reserve when
+   expanded, an even 8px when collapsed) so its inner, centred content
+   (`mx-auto max-w-3xl`, composer) is always centred in the space it actually
+   occupies. The ⌘S toggle uses a FLIP: `margin-left` jumps to the new resting
+   value instantly and a composited `transform` glide eases the eye from the
+   previous box; the transform is cleared at rest so the card (and any fixed
+   popovers inside it) rest transform-free. The glide runs only while
+   `.sidebar-device--animating` is set — the invert frame and resting changes
+   never tween. */
+.sidebar-content {
+  will-change: transform;
+}
+.sidebar-device--animating .sidebar-content {
+  transition: transform 220ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.sidebar-device--no-anim .sidebar-rail,
+.sidebar-device--no-anim .sidebar-content {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-rail,
+  .sidebar-content {
+    transition: opacity 120ms ease;
+  }
+}

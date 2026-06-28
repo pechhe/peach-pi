@@ -512,7 +512,6 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "git:mergePr": gitService.mergePr.bind(gitService),
       "git:mergeToLocal": gitService.mergeToLocal.bind(gitService),
       "git:pushLocal": gitService.pushLocal.bind(gitService),
-      "git:pull": gitService.pull.bind(gitService),
       "git:rebaseAndTest": gitService.rebaseAndTest.bind(gitService),
       // remote session hosting (ADR-0009)
       "remote:hostStatus": remoteHost.status.bind(remoteHost),
@@ -636,6 +635,36 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       },
       "handoff:message": (threadId) =>
         handoffService.ensureRemoteForThread(threadId, "manual handoff"),
+      // Auto-dispatch a thread to resolve a pull --rebase conflict (mirrors the
+      // mergeBatch rebase-failure nudge). The pull stopped mid-rebase on the
+      // agent's branch; serving the thread the same instruction mergeBatch does
+      // — commit/stash, re-run the rebase, resolve conflicts, push, test, stop
+      // — resolves it without a manual terminal detour. Fire-and-forget; never
+      // blocks the pull result returned to GitWidget.
+      "git:pull": async (threadId) => {
+        const result = await gitService.pull(threadId);
+        if (!result.ok && result.conflict) {
+          void threadService
+            .prompt(
+              threadId,
+              `A \`git pull --rebase\` stopped at a rebase conflict.\n\n` +
+                `Resolve it so the branch can be pushed. If there are uncommitted ` +
+                `changes, commit or stash them. If you want a clean slate, run ` +
+                `\`git rebase --abort\` to roll back to the pre-pull tip, then ` +
+                `\`git pull --rebase\` to re-attempt from a clean tree. If the ` +
+                `rebase stopped on a conflict, resolve the conflict markers in the ` +
+                `affected files, then \`git rebase --continue\` (repeat until it ` +
+                `completes). Run the full test suite. Once green, push with ` +
+                `\`git push\` (or \`git push --force-with-lease\` if the rebase ` +
+                `moved past the remote tip). Then stop at the human gate — do not ` +
+                `start new work.`,
+            )
+            .catch((e) =>
+              console.error(`[git:pull] failed to prompt thread ${threadId} for rebase conflict:`, e),
+            );
+        }
+        return result;
+      },
     },
   );
 }

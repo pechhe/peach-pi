@@ -28,6 +28,20 @@ export interface ResolvedUtilityModel {
   headers?: Record<string, string>;
 }
 
+/** Distill a thrown error from `completeSimple` into a short reason for a
+ *  warning toast. Recognises credit/quota/billing failures so the user can
+ *  tell their utility model is out of credits. */
+function describeUtilityError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/insufficient_quota|out of budget|quota exceeded|billing|available balance|usage limit/i.test(msg)) {
+    return "Utility model is out of credits or quota exceeded.";
+  }
+  if (/401|unauthorized|invalid api key|no api key/i.test(msg)) {
+    return "Utility model auth failed — check the API key in Settings.";
+  }
+  return `Utility model call failed: ${msg.slice(0, 120)}`;
+}
+
 /** All auth-configured models, scoped by the global enabledModels setting (settings.json). */
 export async function listAvailableModels(): Promise<
   Array<{ provider: string; id: string; name: string }>
@@ -92,6 +106,10 @@ export interface UtilityCompletionOptions {
   inputLimit?: number;
   temperature?: number;
   maxTokens?: number;
+  /** Invoked with a short human-readable reason when the call fails (no
+   *  auth-configured model, request error, non-200). Lets callers surface a
+   *  warning toast instead of failing silently. */
+  onError?: (message: string) => void;
 }
 
 /** A vision content part to attach to the user message. */
@@ -109,6 +127,8 @@ export interface VisionCompletionOptions {
   inputLimit?: number;
   temperature?: number;
   maxTokens?: number;
+  /** Invoked with a short human-readable reason on failure (see UtilityCompletionOptions). */
+  onError?: (message: string) => void;
 }
 
 /** One-shot utility completion; returns trimmed text or null on any failure. */
