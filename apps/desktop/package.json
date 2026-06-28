@@ -5,7 +5,7 @@
   "private": true,
   "main": ".vite/build/main.js",
   "scripts": {
-    "dev": "electron-forge start",
+    "dev": "DEV_TAP=1 electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",

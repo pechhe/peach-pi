@@ -19,12 +19,19 @@ export const SERVED_SESSION_ROUTES: ServedSessionRoutes = {
   steer: { path: "/sessions/:threadId/steer", body: { text: "" } },
   abort: { path: "/sessions/:threadId/abort", body: {} },
   archive: { path: "/sessions/:threadId/archive", body: {} },
+  snooze: { path: "/sessions/:threadId/snooze", body: { until: "" } },
+  unsnooze: { path: "/sessions/:threadId/unsnooze", body: {} },
+  markToTest: { path: "/sessions/:threadId/mark-to-test", body: { note: "" } },
+  unmarkToTest: { path: "/sessions/:threadId/unmark-to-test", body: {} },
   control: { path: "/sessions/:threadId/control", body: {} },
   deleteQueued: { path: "/sessions/:threadId/queue/delete", body: { kind: "steer", index: 0 } },
   gitCommitPush: { path: "/sessions/:threadId/git/commit-push", body: {} },
   gitPr: { path: "/sessions/:threadId/git/pr", body: {} },
   gitMerge: { path: "/sessions/:threadId/git/merge", body: {} },
-  createThread: { path: "/threads", body: { projectId: "" as ProjectId } },
+  createThread: {
+    path: "/threads",
+    body: { projectId: "" as ProjectId, worktreeId: "", worktree: false },
+  },
   createChat: { path: "/chats", body: {} },
 };
 
@@ -41,6 +48,14 @@ export const abortPath = (threadId: ThreadId) =>
   sessionPath(SERVED_SESSION_ROUTES.abort.path, threadId);
 export const archivePath = (threadId: ThreadId) =>
   sessionPath(SERVED_SESSION_ROUTES.archive.path, threadId);
+export const snoozePath = (threadId: ThreadId) =>
+  sessionPath(SERVED_SESSION_ROUTES.snooze.path, threadId);
+export const unsnoozePath = (threadId: ThreadId) =>
+  sessionPath(SERVED_SESSION_ROUTES.unsnooze.path, threadId);
+export const markToTestPath = (threadId: ThreadId) =>
+  sessionPath(SERVED_SESSION_ROUTES.markToTest.path, threadId);
+export const unmarkToTestPath = (threadId: ThreadId) =>
+  sessionPath(SERVED_SESSION_ROUTES.unmarkToTest.path, threadId);
 export const controlPath = (threadId: ThreadId) =>
   sessionPath(SERVED_SESSION_ROUTES.control.path, threadId);
 export const deleteQueuedPath = (threadId: ThreadId) =>

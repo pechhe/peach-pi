@@ -15,10 +15,14 @@ import type { TelemetryConsent } from "@peach-pi/shared-types";
  *   captures native crashes via minidump. The renderer client gets its DSN
  *   from main over IPC, so the DSN is never baked in the renderer bundle.
  *
- * Consent model: the Sentry renderer client is initialized at boot with a
- * `beforeSend` drop filter that rejects all events until `consentGranted`
- * flips true (after the user opts in). This avoids an init race — the SDK is
- * ready immediately, but ships nothing pre-consent. Revocation re-drops.
+ * Consent model: `initTelemetry` is only called once the user has opted in
+ * (consent === true). Inside, `posthog.init` runs in its default opted-in
+ * state (no `opt_out_capturing_by_default` flag) so the /flags ping fires
+ * immediately — that ping is what the PostHog onboarding dashboard detects
+ * as "SDK connected". The Sentry renderer client is initialized eagerly at
+ * boot with a `beforeSend` drop-filter that rejects all events until
+ * `consentGranted` flips true; this avoids an init race (SDK ready
+ * immediately, ships nothing pre-consent) and revocation re-drops.
  *
  * No PII, no conversation/file content. Events queue locally while offline.
  */
@@ -70,16 +74,18 @@ export function initTelemetry(consent: TelemetryConsent): void {
 
   if (POSTHOG_KEY) {
     try {
+      // Consent is gated at the call site (initTelemetry only runs when
+      // consent === true), so the SDK inits in its default opted-in state.
+      // This fires the /flags (decide) ping immediately, which the PostHog
+      // onboarding dashboard detects as "SDK connected".
       posthog.init(POSTHOG_KEY, {
         api_host: POSTHOG_HOST || "https://app.posthog.com",
         autocapture: false, // no DOM autocapture — we send explicit events only
         capture_pageview: false,
         disable_session_recording: true, // privacy: no session replay of app contents
         persistence: "localStorage",
-        opt_out_capturing_by_default: true,
       });
       posthog.identify(distinctId);
-      posthog.opt_in_capturing();
       posthog.register({
         app_version: APP_VERSION,
         os: "darwin",

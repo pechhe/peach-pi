@@ -3,14 +3,14 @@ import {
   type TranscriptItem,
   type TranscriptOp,
 } from "@peach-pi/shared-types";
-import { SvelteMap } from "svelte/reactivity";
+import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import { api } from "../lib/ipc";
 import { snapshot } from "./snapshot.svelte";
 
 /** Per-thread transcript views, fed by main-process ops. */
 class TranscriptStore {
   private byThread = new SvelteMap<string, TranscriptItem[]>();
-  private loaded = new Set<string>();
+  private loaded = new SvelteSet<string>();
   /** Deltas captured while a backfill fetch is in flight, keyed by thread, so
    *  they can be replayed on top of the authoritative snapshot. */
   private buffering = new Map<string, { seq: number; ops: TranscriptOp[] }[]>();
@@ -51,6 +51,14 @@ class TranscriptStore {
 
   itemsFor(threadId: string): TranscriptItem[] {
     return this.byThread.get(threadId) ?? [];
+  }
+
+  /** True once the authoritative snapshot for this thread has arrived. Until
+   *  then `itemsFor` may return [] because backfill hasn't landed — callers
+   *  that treat an empty transcript as "genuinely new thread" must gate on
+   *  this so a resumed thread isn't briefly mistaken for a new one. */
+  hasLoaded(threadId: string): boolean {
+    return this.loaded.has(threadId);
   }
 
   /** Ensure full history is loaded once per thread (resume / mid-run view).

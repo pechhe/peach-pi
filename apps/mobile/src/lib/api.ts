@@ -100,8 +100,12 @@ export function deleteQueued(
   return post(m, `/sessions/${threadId}/queue/delete`, { kind, index });
 }
 
-export function createThread(m: Master, projectId: string): Promise<RemoteSessionInfo> {
-  return post<RemoteSessionInfo>(m, "/threads", { projectId });
+export function createThread(
+  m: Master,
+  projectId: string,
+  opts?: { worktreeId?: string; worktree?: boolean },
+): Promise<RemoteSessionInfo> {
+  return post<RemoteSessionInfo>(m, "/threads", { projectId, ...opts });
 }
 
 export function createChat(m: Master): Promise<RemoteSessionInfo> {
@@ -122,6 +126,31 @@ export function gitPr(m: Master, threadId: string): Promise<GitPrResult> {
 
 export function gitMerge(m: Master, threadId: string): Promise<GitMergeResult> {
   return post<GitMergeResult>(m, `/sessions/${threadId}/git/merge`);
+}
+
+/** Snooze a thread until an ISO time (mirrors threads:snooze). */
+export function snoozeThread(m: Master, threadId: string, until: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/snooze`, { until });
+}
+
+/** Clear a snooze (mirrors threads:unsnooze). */
+export function unsnoozeThread(m: Master, threadId: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/unsnooze`);
+}
+
+/** Mark a thread for testing, optionally with a note (mirrors threads:markToTest). */
+export function markToTest(m: Master, threadId: string, note?: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/mark-to-test`, note ? { note } : undefined);
+}
+
+/** Clear a to-test mark (mirrors threads:unmarkToTest). */
+export function unmarkToTest(m: Master, threadId: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/unmark-to-test`);
+}
+
+/** Archive a thread (the controller finishing it marks it done everywhere). */
+export function archiveThread(m: Master, threadId: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/archive`);
 }
 
 export type TapStatus =

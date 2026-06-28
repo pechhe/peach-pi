@@ -17,6 +17,7 @@ import { SubagentService, setupSubagentEnvironment } from "./services/subagent-s
 import { IssuesService } from "./services/issues-service.ts";
 import { SideChatService } from "./services/side-chat-service.ts";
 import { DevTapInstallService } from "./services/devtap-install-status.ts";
+import { FallowService } from "./services/fallow-service.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { InsomniaService } from "./services/insomnia.ts";
 import { PiUpdateService } from "./services/pi-update-service.ts";
@@ -94,6 +95,7 @@ export interface ServiceComposition {
   subagentService: SubagentService;
   sideChatService: SideChatService;
   devTapInstallService: DevTapInstallService;
+  fallowService: FallowService;
   connectorService: ConnectorService;
   bwsService: BwsService;
   customConnectionService: CustomConnectionService;
@@ -153,7 +155,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const threadService = new ThreadService(
     db,
     emit,
-    () => emit("event:snapshot", appService.snapshot()),
+    () => appService.notify(),
     path.join(userData, "chats"),
     (thread) => {
       // HUD up → route to the HUD as an ambient cue instead of a system
@@ -190,7 +192,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const automationService = new AutomationService(
     db,
     threadService,
-    () => emit("event:snapshot", appService.snapshot()),
+    () => appService.notify(),
     async (projectId) => {
       const dir = await gitService.createWorktree(projectId);
       const wt = appService.addWorktree(projectId, dir);
@@ -240,13 +242,23 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
         status: t.status,
         projectId: t.projectId,
         archivedAt: t.archivedAt,
+        snoozedUntil: t.snoozedUntil,
+        toTestAt: t.toTestAt,
+        toTestNote: t.toTestNote,
       })),
     threadCwd: (threadId) => gitService.cwdFor(threadId),
-    projects: () =>
-      appService
-        .snapshot()
-        .projects.filter((p) => !p.archivedAt)
-        .map((p) => ({ id: p.id, name: p.name })),
+    projects: () => {
+      const snap = appService.snapshot();
+      return snap.projects
+        .filter((p) => !p.archivedAt)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          worktrees: snap.worktrees
+            .filter((w) => w.projectId === p.id && !w.archivedAt)
+            .map((w) => ({ id: w.id, name: w.name, dir: w.dir })),
+        }));
+    },
     settings: async () => ({
       piSettings: await getPiSettings(),
       autoCompact: appService.getAutoCompact(),
@@ -277,11 +289,25 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
         threadService.archive(threadId);
         return Promise.resolve();
       },
+      snoozeThread: (threadId, until) => {
+        appService.snoozeThread(threadId, until);
+        return Promise.resolve();
+      },
+      unsnoozeThread: (threadId) => {
+        appService.unsnoozeThread(threadId);
+        return Promise.resolve();
+      },
+      markToTest: (threadId) => threadService.markToTest(threadId),
+      unmarkToTest: (threadId) => {
+        appService.unmarkToTest(threadId);
+        return Promise.resolve();
+      },
       deleteQueued: (threadId, kind, index) =>
         kind === "steer"
           ? threadService.deleteSteer(threadId, index)
           : threadService.deleteFollowUp(threadId, index),
-      createThread: async (projectId) => (await threadService.createThread(projectId)).id,
+      createThread: async (projectId, opts) =>
+        (await threadService.createThread(projectId, opts)).id,
       createChat: async () => (await threadService.createChat()).id,
       gitCommitPush: (threadId, message) => gitService.commitPush(threadId, message),
       gitPr: (threadId) => gitService.createPr(threadId),
@@ -325,7 +351,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     path.join(userData, "worktrees"),
   );
   appService.setRemoteThreadsProvider(() => remoteClient.remoteThreadsSnapshot());
-  remoteClient.onChange = () => emit("event:snapshot", appService.snapshot());
+  remoteClient.onChange = () => appService.notify();
   remoteClient.applySettings = async (settings) => {
     await setPiSettings(settings.piSettings);
     appService.setAutoCompact(settings.autoCompact);
@@ -340,7 +366,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
         // Model list unreadable — leave the local utility model untouched.
       }
     }
-    emit("event:snapshot", appService.snapshot());
+    appService.notify();
   };
   remoteClient.applyPiConfig = async (payload) => {
     const dir = path.join(homedir(), ".pi", "agent");
@@ -358,6 +384,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const subagentService = new SubagentService(db);
   const sideChatService = new SideChatService(db, emit, threadService, gitService);
   const devTapInstallService = new DevTapInstallService(db);
+  const fallowService = new FallowService(db);
   const issuesService = new IssuesService(
     (id) => appService.snapshot().projects.find((p) => p.id === id)?.path ?? null,
     (id) =>
@@ -423,6 +450,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     subagentService,
     sideChatService,
     devTapInstallService,
+    fallowService,
     connectorService,
     bwsService,
     customConnectionService,

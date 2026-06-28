@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Component } from "svelte";
   import { fly } from "svelte/transition";
-  import { cubicOut } from "svelte/easing";
+  import { cubicOut, cubicInOut } from "svelte/easing";
 
   // Step entrance: collapse height + fade together so the card grows smoothly
   // as the new step flows in. Pairs with the connector draw-down below.
@@ -127,7 +127,18 @@
           {:else}
             <span class="agent-entity__node-title" title={node.fullTitle ?? node.title}>{node.title}</span>
           {/if}
-          {#if node.subtitle}<p class="agent-entity__node-sub" title={node.subtitle}>{node.subtitle}</p>{/if}
+          {#if node.subtitle}
+            <div class="agent-entity__node-sub-wrap">
+              {#key node.subtitle}
+                <p
+                  class="agent-entity__node-sub"
+                  title={node.subtitle}
+                  in:fly={{ duration: 280, y: -8, opacity: 0, easing: cubicOut }}
+                  out:fly={{ duration: 280, y: 8, opacity: 0, easing: cubicInOut }}
+                >{node.subtitle}</p>
+              {/key}
+            </div>
+          {/if}
         </div>
       </li>
       {/key}
@@ -329,7 +340,14 @@
   }
   .agent-entity__node--blocked .agent-entity__node-title { color: #c2691a; }
   .agent-entity__node--active .agent-entity__node-title { color: var(--ae-accent); }
+  .agent-entity__node-sub-wrap {
+    position: relative;
+    /* reserve 2 lines so swapping subtitles (absolute) don't resize the row */
+    min-height: calc(2 * 1.4 * 10.5px);
+  }
   .agent-entity__node-sub {
+    position: absolute;
+    inset: 0;
     margin: 0;
     font-size: 10.5px;
     line-height: 1.4;

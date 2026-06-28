@@ -99,6 +99,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     subagentService,
     sideChatService,
     devTapInstallService,
+    fallowService,
     connectorService,
     bwsService,
     customConnectionService,
@@ -297,6 +298,9 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "subagents:listAgents": subagentService.listAgents.bind(subagentService),
       "subagents:updateAgent": subagentService.updateAgent.bind(subagentService),
       "devtap:projectStatus": devTapInstallService.status.bind(devTapInstallService),
+      "fallow:projectStatus": fallowService.status.bind(fallowService),
+      "fallow:install": fallowService.install.bind(fallowService),
+      "fallow:run": fallowService.run.bind(fallowService),
       "workQueue:list": (projectId) => issuesService.list(projectId),
       "workQueue:startAgent": async (projectId, issueNumber) => {
         const res = await issuesService.list(projectId);

@@ -348,6 +348,15 @@ export interface RemoteSessionInfo {
   /** Whether a client marked this thread done/archived; propagated to all
    *  clients so the controller finishing it archives it everywhere. */
   archived: boolean;
+  /** ISO time until which the thread is snoozed (mirrors Thread.snoozedUntil).
+   *  Null/absent = active. Drives the phone's "Snoozed" lane, mirroring the
+   *  desktop sidebar's classification. */
+  snoozedUntil: string | null;
+  /** ISO time the thread was marked for testing (mirrors Thread.toTestAt).
+   *  Null/absent = not marked. Drives the phone's "To test" lane. */
+  toTestAt: string | null;
+  /** Optional note attached when marking for testing. */
+  toTestNote: string | null;
   /** Git origin URL of the session's repo, so the laptop can match a local
    *  project to fetch checkpoint branches from. */
   originUrl: string | null;
@@ -356,10 +365,24 @@ export interface RemoteSessionInfo {
   lastCheckpointAt: string | null;
 }
 
-/** A served project the phone can start a new thread in (from GET /projects). */
+/** A served project the phone can start a new thread in (from GET /projects).
+ *  `worktrees` are the project's existing isolated checkouts (ADR-0003), so the
+ *  phone can offer "local" vs "in this worktree" start modes and list each
+ *  worktree as its own start row — mirroring the desktop sidebar. Empty when
+ *  the project has no worktrees (threads run in the main checkout). */
 export interface RemoteProjectInfo {
   id: ProjectId;
   name: string;
+  worktrees: RemoteWorktreeInfo[];
+}
+
+/** A worktree a phone can start a thread in (nested under a served project). */
+export interface RemoteWorktreeInfo {
+  id: string;
+  /** Sidebar label, e.g. "Worktree 2". */
+  name: string;
+  /** Absolute checkout path (for the laptop-side checkpoint pull). */
+  dir: string;
 }
 
 /** Behavioral settings a master exposes over `GET /settings`, so a client can
@@ -598,6 +621,52 @@ export interface PiSettings {
   insomnia: boolean;
   /** Opt-in to product analytics + crash reporting. `null` until first prompt. */
   telemetryConsent: TelemetryConsent;
+  /** Which optional widgets are visible in the thread topbar. */
+  topbar: TopbarSettings;
+}
+
+/** Toggles for optional widgets rendered in the thread topbar.
+ *  Driven by the Topbar settings page; each maps 1:1 to a topbar chip. */
+export interface TopbarSettings {
+  /** Show the DevTap runtime-tap widget. Default on. */
+  devtap: boolean;
+  /** Show the Fallow codebase-intelligence widget. Default on. */
+  fallow: boolean;
+}
+
+/** Fallow install + report state for a project. */
+export interface FallowProjectStatus {
+  /** `fallow` resolves in the project (bin or dependency declared). */
+  installed: boolean;
+  /** Absolute path to the resolved fallow binary, if found. */
+  binPath: string | null;
+  /** Detected fallow version, if installed. */
+  version: string | null;
+  /** Detected package manager for the project (pnpm/npm/yarn/bun). */
+  packageManager: "pnpm" | "npm" | "yarn" | "bun" | null;
+}
+
+/** Aggregated Fallow scan summary surfaced to the UI + thread prompts. */
+export interface FallowReport {
+  /** Whether the run completed successfully. */
+  ok: boolean;
+  /** Error message when `ok` is false. */
+  error: string | null;
+  /** ISO timestamp of the run. */
+  ranAt: string;
+  /** Aggregate counts by category. */
+  counts: {
+    unusedFiles: number;
+    unusedExports: number;
+    unusedTypes: number;
+    unusedClassMembers: number;
+    unusedDependencies: number;
+    unlistedDependencies: number;
+    duplicateExports: number;
+    unusedComponentProps: number;
+  };
+  /** Raw JSON output written by `fallow dead-code --format json` (bounded size). */
+  json: string | null;
 }
 
 /** Status of a pending app-binary auto-update. */
@@ -1419,13 +1488,30 @@ export interface ServedSessionRoutes {
     path: "/sessions/:threadId/queue/delete";
     body: { kind: "steer" | "followUp"; index: number };
   };
+  /** Snooze a thread until an ISO time (mirrors threads:snooze). */
+  snooze: { path: "/sessions/:threadId/snooze"; body: { until: string } };
+  /** Clear a snooze (mirrors threads:unsnooze). */
+  unsnooze: { path: "/sessions/:threadId/unsnooze"; body: Record<string, never> };
+  /** Mark a thread for testing, optionally with a note (mirrors threads:markToTest). */
+  markToTest: {
+    path: "/sessions/:threadId/mark-to-test";
+    body: { note?: string };
+  };
+  /** Clear a to-test mark (mirrors threads:unmarkToTest). */
+  unmarkToTest: {
+    path: "/sessions/:threadId/unmark-to-test";
+    body: Record<string, never>;
+  };
   gitCommitPush: {
     path: "/sessions/:threadId/git/commit-push";
     body: { message?: string };
   };
   gitPr: { path: "/sessions/:threadId/git/pr"; body: Record<string, never> };
   gitMerge: { path: "/sessions/:threadId/git/merge"; body: Record<string, never> };
-  createThread: { path: "/threads"; body: { projectId: ProjectId } };
+  createThread: {
+    path: "/threads";
+    body: { projectId: ProjectId; worktreeId?: string; worktree?: boolean };
+  };
   createChat: { path: "/chats"; body: Record<string, never> };
 }
 

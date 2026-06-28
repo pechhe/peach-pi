@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { isConfigValueConfigured, resolveConfigValueOrThrow } from "../resolve-config-value.ts";
+import { isConfigValueConfigured, resolveConfigValueOrThrowAsync } from "../resolve-config-value.ts";
 import type { Credential, CredentialSource } from "./usage-shared.ts";
 
 const AGENT_DIR = join(homedir(), ".pi", "agent");
@@ -52,7 +52,7 @@ export class ModelsApiKeySource implements CredentialSource {
 
   async resolve(): Promise<Credential> {
     const entry = rawProviderEntry(this.provider);
-    const value = resolveConfigValueOrThrow(entry.apiKey, `API key for provider "${this.provider}"`);
+    const value = await resolveConfigValueOrThrowAsync(entry.apiKey, `API key for provider "${this.provider}"`);
     return { kind: "api-key", value, baseUrl: entry.baseUrl };
   }
 }

@@ -92,6 +92,9 @@ export interface RelayDeps {
     status: string;
     projectId: ProjectId | null;
     archivedAt?: string;
+    snoozedUntil?: string | null;
+    toTestAt?: string | null;
+    toTestNote?: string | null;
   }[];
   /** Working dir for a thread (to read checkpoint + origin). */
   threadCwd: (threadId: ThreadId) => string | null;
@@ -119,10 +122,23 @@ export interface RelayActions {
   abort: (threadId: ThreadId) => Promise<void>;
   /** Archive a thread — the controller finishing it marks it done everywhere. */
   archiveThread: (threadId: ThreadId) => Promise<void>;
+  /** Snooze a thread until an ISO time (mirrors threads:snooze). */
+  snoozeThread: (threadId: ThreadId, until: string) => Promise<void>;
+  /** Clear a snooze (mirrors threads:unsnooze). */
+  unsnoozeThread: (threadId: ThreadId) => Promise<void>;
+  /** Mark a thread for testing, optionally with a note (mirrors threads:markToTest). */
+  markToTest: (threadId: ThreadId, note?: string) => Promise<void>;
+  /** Clear a to-test mark (mirrors threads:unmarkToTest). */
+  unmarkToTest: (threadId: ThreadId) => Promise<void>;
   /** Drop a queued message by lane + index. */
   deleteQueued: (threadId: ThreadId, kind: "steer" | "followUp", index: number) => Promise<void>;
-  /** Start a new thread in a served project; returns its id. */
-  createThread: (projectId: ProjectId) => Promise<ThreadId>;
+  /** Start a new thread in a served project; returns its id. `opts.worktreeId`
+   *  starts the thread in an existing worktree; `opts.worktree: true` mints a
+   *  fresh worktree first; no opts = the project's main checkout (local). */
+  createThread: (
+    projectId: ProjectId,
+    opts?: { worktreeId?: string; worktree?: boolean },
+  ) => Promise<ThreadId>;
   /** Start a new chat (no repo); returns its id. */
   createChat: () => Promise<ThreadId>;
   gitCommitPush: (threadId: ThreadId, message?: string) => Promise<GitCommitPushResult>;
@@ -529,6 +545,9 @@ export class RemoteHostService {
       lastCheckpointAt: null,
       ...this.leaseFields(threadId),
       archived: !!t.archivedAt,
+      snoozedUntil: t.snoozedUntil ?? null,
+      toTestAt: t.toTestAt ?? null,
+      toTestNote: t.toTestNote ?? null,
     };
   }
 
@@ -555,7 +574,11 @@ export class RemoteHostService {
       if (!projectId) return this.send(res, 400, { error: "projectId required" });
       if (!this.isServedProject(projectId as ProjectId))
         return this.send(res, 404, { error: "project is not served" });
-      const id = await a.createThread(projectId as ProjectId);
+      const opts: { worktreeId?: string; worktree?: boolean } = {};
+      if (typeof body.worktreeId === "string" && body.worktreeId)
+        opts.worktreeId = body.worktreeId;
+      else if (body.worktree === true) opts.worktree = true;
+      const id = await a.createThread(projectId as ProjectId, opts);
       return this.send(res, 200, await this.sessionInfo(id));
     }
     if (seg.length === 1 && seg[0] === "chats") {
@@ -599,6 +622,39 @@ export class RemoteHostService {
         const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await this.deps.actions.archiveThread(threadId);
+        return this.send(res, 200, { ok: true });
+      }
+      case "snooze": {
+        // POST /sessions/:id/snooze — snooze the thread until an ISO time.
+        const until = String(body.until ?? "").trim();
+        if (!until) return this.send(res, 400, { error: "until required" });
+        const guard = this.leases.assertControl(threadId, client);
+        if (guard !== true) return this.send(res, guard.status, guard.body);
+        await this.deps.actions.snoozeThread(threadId, until);
+        return this.send(res, 200, { ok: true });
+      }
+      case "unsnooze": {
+        // POST /sessions/:id/unsnooze — clear a snooze.
+        const guard = this.leases.assertControl(threadId, client);
+        if (guard !== true) return this.send(res, guard.status, guard.body);
+        await this.deps.actions.unsnoozeThread(threadId);
+        return this.send(res, 200, { ok: true });
+      }
+      case "mark-to-test": {
+        // POST /sessions/:id/mark-to-test — flag for testing, optional note.
+        const guard = this.leases.assertControl(threadId, client);
+        if (guard !== true) return this.send(res, guard.status, guard.body);
+        await this.deps.actions.markToTest(
+          threadId,
+          typeof body.note === "string" ? body.note : undefined,
+        );
+        return this.send(res, 200, { ok: true });
+      }
+      case "unmark-to-test": {
+        // POST /sessions/:id/unmark-to-test — clear a to-test mark.
+        const guard = this.leases.assertControl(threadId, client);
+        if (guard !== true) return this.send(res, guard.status, guard.body);
+        await this.deps.actions.unmarkToTest(threadId);
         return this.send(res, 200, { ok: true });
       }
       case "message": {

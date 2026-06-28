@@ -23,6 +23,7 @@ const DEFAULTS: PiSettings = {
   autoUpdateExtensions: true,
   insomnia: false,
   telemetryConsent: null,
+  topbar: { devtap: true, fallow: true },
 };
 
 interface RawSettingsFile {
@@ -41,6 +42,7 @@ interface RawSettingsFile {
   autoUpdateExtensions?: boolean;
   insomnia?: boolean;
   telemetryConsent?: boolean | null;
+  topbar?: { devtap?: boolean; fallow?: boolean };
   [key: string]: unknown;
 }
 
@@ -73,6 +75,10 @@ export async function getPiSettings(): Promise<PiSettings> {
     autoUpdateExtensions: raw.autoUpdateExtensions ?? DEFAULTS.autoUpdateExtensions,
     insomnia: raw.insomnia ?? DEFAULTS.insomnia,
     telemetryConsent: raw.telemetryConsent ?? DEFAULTS.telemetryConsent,
+    topbar: {
+      devtap: raw.topbar?.devtap ?? DEFAULTS.topbar.devtap,
+      fallow: raw.topbar?.fallow ?? DEFAULTS.topbar.fallow,
+    },
   };
 }
 
@@ -96,6 +102,12 @@ export async function setPiSettings(patch: Partial<PiSettings>): Promise<PiSetti
     raw.autoUpdateExtensions = patch.autoUpdateExtensions;
   if (patch.insomnia !== undefined) raw.insomnia = patch.insomnia;
   if (patch.telemetryConsent !== undefined) raw.telemetryConsent = patch.telemetryConsent;
+  if (patch.topbar) {
+    raw.topbar = {
+      ...(raw.topbar as { devtap?: boolean; fallow?: boolean } | undefined),
+      ...patch.topbar,
+    };
+  }
 
   await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
   await writeFile(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, "utf8");

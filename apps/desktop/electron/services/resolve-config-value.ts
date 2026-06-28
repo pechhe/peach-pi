@@ -1,4 +1,5 @@
-import { execSync } from "node:child_process";
+import { execSync, execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 /**
  * Resolve config values (API keys, etc.) the same way pi does
@@ -93,6 +94,31 @@ function execute(commandConfig: string): string | undefined {
   return result;
 }
 
+const execFileAsync = promisify(execFile);
+
+/** Async execute: same semantics + cache as `execute()`, but runs the command
+ *  on the libuv threadpool via `execFile` instead of `execSync`. Used from
+ *  async credential resolution so a slow `!cmd` API-key source never blocks
+ *  the Electron main thread (a 10s `execSync` would freeze all IPC). */
+async function executeAsync(commandConfig: string): Promise<string | undefined> {
+  const cached = commandCache.get(commandConfig);
+  if (cached !== undefined || commandCache.has(commandConfig)) return cached;
+  const cmd = commandConfig.slice(1);
+  let result: string | undefined;
+  try {
+    const { stdout } = await execFileAsync(cmd, {
+      encoding: "utf-8",
+      timeout: 10_000,
+      shell: true,
+    });
+    result = stdout.trim() || undefined;
+  } catch {
+    result = undefined;
+  }
+  commandCache.set(commandConfig, result);
+  return result;
+}
+
 /** Resolve a raw config value to an actual string (or undefined on failure). */
 export function resolveConfigValue(config: string | undefined): string | undefined {
   if (!config) return undefined;
@@ -100,9 +126,38 @@ export function resolveConfigValue(config: string | undefined): string | undefin
   return resolveParts(parseTemplate(config));
 }
 
+/** Async variant: uses `execFile` for `!cmd` values so the main thread isn't
+ *  blocked during credential resolution. Env-var / literal paths resolve
+ *  synchronously inside the promise. Prefer this from any async context. */
+export async function resolveConfigValueAsync(
+  config: string | undefined,
+): Promise<string | undefined> {
+  if (!config) return undefined;
+  if (config.startsWith("!")) return executeAsync(config);
+  return resolveParts(parseTemplate(config));
+}
+
 /** Resolve and throw a clear error if it can't be resolved. */
 export function resolveConfigValueOrThrow(config: string | undefined, description: string): string {
   const v = resolveConfigValue(config);
+  if (v !== undefined) return v;
+  if (config?.startsWith("!")) {
+    throw new Error(`Failed to resolve ${description} from shell command: ${config.slice(1)}`);
+  }
+  const missing = envVarNames(parseTemplate(config ?? "")).filter((n) => process.env[n] === undefined);
+  if (missing.length) {
+    throw new Error(`Failed to resolve ${description}: env var ${missing.join(", ")} not set`);
+  }
+  throw new Error(`Failed to resolve ${description}`);
+}
+
+/** Async `resolveConfigValueOrThrow`: throws the same messages, but resolves
+ *  `!cmd` values off the main thread. */
+export async function resolveConfigValueOrThrowAsync(
+  config: string | undefined,
+  description: string,
+): Promise<string> {
+  const v = await resolveConfigValueAsync(config);
   if (v !== undefined) return v;
   if (config?.startsWith("!")) {
     throw new Error(`Failed to resolve ${description} from shell command: ${config.slice(1)}`);

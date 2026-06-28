@@ -12,6 +12,26 @@ import { devTapRequestsDir } from "../../electron/services/devtap.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Poll up to ~2s for `predicate` to return truthy. fs.watch on macOS
+ *  FSEvents has variable latency, so a fixed sleep racy-fails the control
+ *  channel test. */
+async function waitFor<T>(predicate: () => T | undefined): Promise<T> {
+  for (let i = 0; i < 100; i++) {
+    const v = predicate();
+    if (v) return v;
+    await sleep(20);
+  }
+  throw new Error("waitFor: timed out");
+}
+
+function readEvents(log: string): any[] {
+  try {
+    return readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+}
+
 test("control channel processes a state request when enabled", async () => {
   const dir = mkdtempSync(join(tmpdir(), "devtap-ctl-"));
   const log = join(dir, "devtap.jsonl");
@@ -22,13 +42,10 @@ test("control channel processes a state request when enabled", async () => {
   const reqDir = devTapRequestsDir();
   mkdirSync(reqDir, { recursive: true });
   writeFileSync(join(reqDir, "abc.json"), JSON.stringify({ id: "abc", cmd: "state" }));
-  await sleep(800);
+  const state = await waitFor(() =>
+    readEvents(log).find((e) => e.event === "devtap.state"),
+  );
   stopDevTapControlChannel();
-  const events = readFileSync(log, "utf8")
-    .trim()
-    .split("\n")
-    .map((l) => JSON.parse(l));
-  const state = events.find((e) => e.event === "devtap.state");
   assert.ok(state, "devtap.state event emitted");
   assert.equal(state.payload.requestId, "abc");
   assert.deepEqual(state.payload.state, { ok: true, n: 42 });

@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "predev": "node scripts/build-extensions.mjs",
-    "dev": "pnpm --filter @peach-pi/desktop dev",
+    "dev": "DEV_TAP=1 pnpm --filter @peach-pi/desktop dev",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
@@ -24,6 +24,7 @@
     }
   },
   "devDependencies": {
+    "fallow": "^2.103.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {

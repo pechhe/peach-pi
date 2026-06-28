@@ -803,7 +803,7 @@
       onPickSecret={pickSecret}
     />
 
-    <!-- Queued messages shelf (Codex/Cursor-style chip rail) -->
+    <!-- Queued messages shelf — metallic chassis bar, one row per queued msg -->
     {#if queue.followUp.length > 0}
       <section
         class="qq"
@@ -811,44 +811,28 @@
         role="list"
         aria-label={`${queue.followUp.length} queued`}
       >
-        <header class="qq__head">
-          <span class="qq__pulse" aria-hidden="true"></span>
-          <span class="qq__head-label">Up next</span>
-          <span class="qq__count" aria-hidden="true">{queue.followUp.length}</span>
-          <span class="qq__head-hint" aria-hidden="true">
-            <span class="qq__head-tag qq__head-tag--queue">{queue.followUp.length} queued</span>
-          </span>
-        </header>
-
-        <div class="qq__list">
-          {#if queue.followUp.length > 0}
-            <div class="qq__group" role="group" aria-label="Queued messages">
-              <span class="qq__group-label">queue</span>
-              <div class="qq__items">
-                {#each queue.followUp as t, i ("f-" + i)}
-                  <div class="qq-item qq-item--queue" role="listitem">
-                    <span class="qq-item__pos" aria-hidden="true">{i + 1}</span>
-                    <span class="qq-item__text" title={t}>{t}</span>
-                    <button
-                      class="qq-item__action qq-item__action--promote"
-                      onclick={() => api.invoke("threads:promoteFollowUpToSteer", thread.id, i)}
-                      title="Steer now"
-                      aria-label="Steer now"
-                      data-testid="promote-steer"
-                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
-                    <button
-                      class="qq-item__action qq-item__action--delete"
-                      onclick={() => api.invoke("threads:deleteFollowUp", thread.id, i).catch(console.error)}
-                      title="Remove"
-                      aria-label="Remove queued message"
-                      data-testid="delete-followup"
-                    ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg></button>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
-        </div>
+        {#each queue.followUp as t, i ("f-" + i)}
+          <div class="qq-row" role="listitem">
+            <span class="qq-row__dot" aria-hidden="true"></span>
+            <span class="qq-row__label">QUEUE</span>
+            <span class="qq-row__count" aria-hidden="true">{i + 1}</span>
+            <span class="qq-row__text" title={t}>{t}</span>
+            <button
+              class="qq-row__btn qq-row__btn--promote"
+              onclick={() => api.invoke("threads:promoteFollowUpToSteer", thread.id, i)}
+              title="Steer now"
+              aria-label="Steer now"
+              data-testid="promote-steer"
+            ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+            <button
+              class="qq-row__btn qq-row__btn--delete"
+              onclick={() => api.invoke("threads:deleteFollowUp", thread.id, i).catch(console.error)}
+              title="Remove"
+              aria-label="Remove queued message"
+              data-testid="delete-followup"
+            ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg></button>
+          </div>
+        {/each}
       </section>
     {/if}
 
@@ -1160,153 +1144,105 @@
 </footer>
 
 <style>
-  /* Queued-messages shelf — modern AI-harness chip rail.
-     Codex IDE ext: per-row queue w/ steer-promote + delete.
-     Cursor 1.4: compact single-line chips, contextual action verbs.
-     Steer = inject into current turn (accent). Queue = FIFO next turn (neutral). */
+  /* Queued-messages shelf — metallic chassis bar matching composer surface.
+     One raised metal row per queued message: dot + QUEUE wordmark + pos +
+     mono text + steer/remove controls. Reuses --crt-body* so dark mode
+     (composer-device-dark.css overrides) stays in sync. */
   .qq {
     margin-bottom: 8px;
-    border-radius: 12px;
-    border: 1px solid color-mix(in srgb, var(--color-border-strong) 70%, transparent);
-    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
-    overflow: hidden;
-  }
-
-  /* Header strip */
-  .qq__head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
-    border-bottom: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
-    background: color-mix(in srgb, var(--color-surface-2) 35%, transparent);
-    user-select: none;
-  }
-  .qq__pulse {
-    width: 6px;
-    height: 6px;
-    border-radius: 9999px;
-    background: var(--color-accent);
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent);
-    animation: qq-pulse 1.6s ease-out infinite;
-  }
-  .qq__head-label {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-muted);
-  }
-  .qq__count {
-    min-width: 16px;
-    height: 16px;
-    padding: 0 5px;
-    border-radius: 9999px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    background: var(--color-surface-3);
-    color: var(--color-fg-soft);
-  }
-  .qq__head-hint {
-    margin-left: auto;
-    display: inline-flex;
-    gap: 6px;
-  }
-  .qq__head-tag {
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 9999px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-  }
-  .qq__head-tag--queue {
-    color: var(--color-muted);
-    background: color-mix(in srgb, var(--color-surface-3) 55%, transparent);
-  }
-
-  /* List body */
-  .qq__list {
     display: flex;
     flex-direction: column;
-    padding: 6px;
     gap: 4px;
-    max-height: 184px;
-    overflow-y: auto;
-  }
-  .qq__group {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .qq__group-label {
-    font-size: 9.5px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--color-fainter);
-    padding: 0 6px;
-  }
-  .qq__items {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
   }
 
-  /* Single chip */
-  .qq-item {
+  .qq-row {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 5px 6px 5px 8px;
-    border-radius: 8px;
-    border: 1px solid color-mix(in srgb, var(--color-border-strong) 55%, transparent);
-    background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+    gap: 9px;
+    padding: 6px 8px 6px 10px;
+    border-radius: 9px;
+    isolation: isolate;
     min-width: 0;
+    background:
+      linear-gradient(180deg, oklch(1 0.002 250 / 0.5), oklch(0.92 0.003 250 / 0.12) 48%, oklch(0.66 0.003 250 / 0.1) 100%),
+      linear-gradient(180deg, var(--crt-body-top) 0%, var(--crt-body) 52%, var(--crt-body-bottom) 100%);
+    box-shadow:
+      inset 0 1px 0 oklch(1 0.002 250 / 0.9),
+      inset 0 2px 3px oklch(1 0.002 250 / 0.32),
+      inset 1px 0 0 oklch(1 0.002 250 / 0.42),
+      inset -1px 0 0 oklch(0.34 0.004 250 / 0.3),
+      0 0 0 0.5px oklch(0.9 0.002 250 / 0.7),
+      0 1px 0 0.5px oklch(0.58 0.004 250 / 0.5),
+      0 2px 4px -1px oklch(0.22 0.004 250 / 0.45),
+      0 5px 10px -4px oklch(0 0 0 / 0.4);
     animation: qq-slide 160ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  .qq-row::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    border-radius: inherit;
+    opacity: 0.5;
+    background:
+      linear-gradient(90deg, oklch(1 0.002 250 / 0.24), transparent 8%, transparent 92%, oklch(0.3 0.004 250 / 0.1)),
+      linear-gradient(180deg, oklch(1 0.002 250 / 0.3), transparent 12%, transparent 88%, oklch(0.3 0.004 250 / 0.12));
+  }
+  .qq-row > * { position: relative; z-index: 1; }
 
-  /* Queue variant — neutral */
-  .qq-item--queue .qq-item__action--delete:hover {
-    background: color-mix(in srgb, var(--color-danger) 22%, transparent);
-    color: var(--color-danger);
-  }
-  .qq-item--queue .qq-item__action--promote:hover {
-    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-    color: var(--color-accent);
-  }
-  /* Position badge (queue) */
-  .qq-item__pos {
+  .qq-row__dot {
     flex: none;
-    width: 16px;
-    height: 16px;
+    width: 6px;
+    height: 6px;
     border-radius: 9999px;
+    background: oklch(0.72 0.19 52);
+    box-shadow:
+      0 0 6px 0 oklch(0.72 0.19 52 / 0.7),
+      inset 0 0 0 0.5px oklch(0.55 0.2 52 / 0.6);
+    animation: qq-pulse 1.6s ease-out infinite;
+  }
+  .qq-row__label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: oklch(0.42 0.004 250);
+    user-select: none;
+  }
+  .qq-row__count {
+    flex: none;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    border-radius: 4px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     font-size: 9.5px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    background: var(--color-surface-3);
-    color: var(--color-fg-soft);
+    font-variant-numeric: tabular-nums;
+    color: oklch(0.4 0.004 250);
+    background: oklch(0.94 0.003 250 / 0.55);
+    box-shadow:
+      inset 0 1px 0 oklch(1 / 0.6),
+      inset 0 -1px 0 oklch(0.6 0.004 250 / 0.18),
+      0 0 0 0.5px oklch(0.7 0.004 250 / 0.4);
   }
-
-  /* Truncated text */
-  .qq-item__text {
+  .qq-row__text {
     flex: 1 1 auto;
     min-width: 0;
     font-size: 12px;
     line-height: 1.35;
-    color: var(--color-fg-soft);
+    font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
+    color: oklch(0.5 0.004 250 / 0.85);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     user-select: text;
   }
-  /* Action buttons — subtle at rest, full on hover/focus */
-  .qq-item__action {
+  .qq-row__btn {
     flex: none;
     width: 20px;
     height: 20px;
@@ -1314,24 +1250,44 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-faint);
-    opacity: 0.55;
-    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+    color: oklch(0.4 0.004 250 / 0.7);
+    opacity: 0.6;
     cursor: pointer;
+    background: oklch(0.92 0.003 250 / 0.4);
+    box-shadow:
+      inset 0 1px 0 oklch(1 / 0.5),
+      0 0 0 0.5px oklch(0.7 0.004 250 / 0.35);
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
   }
-  .qq-item:hover .qq-item__action,
-  .qq-item:focus-within .qq-item__action {
-    opacity: 1;
+  .qq-row:hover .qq-row__btn,
+  .qq-row:focus-within .qq-row__btn { opacity: 1; }
+  .qq-row__btn--promote:hover {
+    background: oklch(0.72 0.19 52 / 0.22);
+    color: oklch(0.62 0.2 52);
   }
-  .qq-item__action svg {
-    width: 11px;
-    height: 11px;
+  .qq-row__btn--delete:hover {
+    background: oklch(0.6 0.22 25 / 0.2);
+    color: oklch(0.55 0.24 25);
+  }
+  .qq-row__btn svg { width: 11px; height: 11px; }
+
+  /* Dark-mode reassurance: chassis vars are overridden by composer-device-dark,
+     but the muted ink/espresso text helpers below use color-mix on those vars so
+     both themes read correctly without per-theme rules. */
+  :global([data-composer="dark"]) .qq-row__label {
+    color: color-mix(in oklch, var(--crt-body-top) 55%, oklch(0.7 0.004 250));
+  }
+  :global([data-composer="dark"]) .qq-row__text {
+    color: color-mix(in oklch, var(--crt-body-top) 48%, transparent);
+  }
+  :global([data-composer="dark"]) .qq-row__btn {
+    color: color-mix(in oklch, var(--crt-body-top) 55%, transparent);
   }
 
   @keyframes qq-pulse {
-    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 50%, transparent); }
-    70% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 0%, transparent); }
-    100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 0%, transparent); }
+    0% { box-shadow: 0 0 0 0 oklch(0.72 0.19 52 / 0.5), inset 0 0 0 0.5px oklch(0.55 0.2 52 / 0.6); }
+    70% { box-shadow: 0 0 0 4px oklch(0.72 0.19 52 / 0), inset 0 0 0 0.5px oklch(0.55 0.2 52 / 0.6); }
+    100% { box-shadow: 0 0 0 0 oklch(0.72 0.19 52 / 0), inset 0 0 0 0.5px oklch(0.55 0.2 52 / 0.6); }
   }
   @keyframes qq-slide {
     from { opacity: 0; transform: translateY(-3px) scale(0.985); }
@@ -1339,7 +1295,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .qq-item { animation: none; }
-    .qq__pulse { animation: none; }
+    .qq-row { animation: none; }
+    .qq-row__dot { animation: none; }
   }
 </style>

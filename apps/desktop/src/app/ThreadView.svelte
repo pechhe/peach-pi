@@ -64,6 +64,8 @@
   import GitWidget from "./GitWidget.svelte";
   import Tooltip from "./Tooltip.svelte";
   import DevTapWidget from "./DevTapWidget.svelte";
+  import FallowWidget from "./FallowWidget.svelte";
+  import { piSettings } from "../stores/pi-settings.svelte";
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
@@ -224,6 +226,21 @@
   // Fetch this machine's client identity once (for the control indicator).
   $effect(() => { remoteClient.init(); });
 
+  // Route bare paste (e.g. via Edit menu / context menu with no ⌘V
+  // keydown) into the composer when focus isn't already in an editable.
+  $effect(() => {
+    function onWindowPaste(e: ClipboardEvent) {
+      if (isFocusInEditable()) return;
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '[data-testid="composer-input"]',
+      );
+      if (input) input.focus();
+      // Don't preventDefault: native paste delivers to the textarea.
+    }
+    window.addEventListener("paste", onWindowPaste);
+    return () => window.removeEventListener("paste", onWindowPaste);
+  });
+
   // When a search-overlay body-match is clicked, open the FindBar with the
   // original search term so the user lands directly on the relevant text.
   $effect(() => {
@@ -262,6 +279,73 @@
       }
       return;
     }
+
+    // Auto-route typing to the composer. When focus isn't already in an
+    // editable element, a printable keystroke (no modifiers other than
+    // Shift) — or a ⌘V/⌃V paste — focuses the composer so the character
+    // / clipboard lands there. Other shortcuts all use Cmd/Ctrl and pass
+    // through untouched (they check their own modifier+key combos first).
+    focusComposerForEditableKeydown(e);
+  }
+
+  // True when the current focus is already inside something the user can
+  // type into — in which case we must not steal the keystroke.
+  function isFocusInEditable(): boolean {
+    const active = document.activeElement as HTMLElement | null;
+    if (!active) return false;
+    const tag = active.tagName;
+    if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return true;
+    if (active.isContentEditable) return true;
+    return false;
+  }
+
+  function focusComposerForEditableKeydown(e: KeyboardEvent) {
+    if (isFocusInEditable()) return;
+
+    const input = document.querySelector<HTMLTextAreaElement>(
+      '[data-testid="composer-input"]',
+    );
+    if (!input) return;
+
+    // Plain Enter with no modifiers: if the composer already has a draft,
+    // behave as if Enter were pressed in the composer — focus it and
+    // dispatch a matching keydown/keyup so Composer's own send logic
+    // (pressSend on keydown, submit on keyup) runs unchanged. Don't steal
+    // an Enter that would just send whitespace.
+    if (
+      e.key === "Enter" &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      input.value.trim().length > 0
+    ) {
+      e.preventDefault();
+      input.focus();
+      const opts: KeyboardEventInit = {
+        key: "Enter",
+        code: "Enter",
+        bubbles: true,
+        composed: true,
+      };
+      input.dispatchEvent(new KeyboardEvent("keydown", opts));
+      input.dispatchEvent(new KeyboardEvent("keyup", opts));
+      return;
+    }
+
+    // Paste (⌘V / ⌃V): focus so the browser's paste default lands here.
+    const isPaste = (e.metaKey || e.ctrlKey) && (e.key === "v" || e.key === "V");
+    // Plain printable char: no ⌘/⌃/⌥, single-char key (excludes Enter,
+    // Backspace, Tab, arrows, Escape, function keys). Shift is allowed so
+    // capitals / symbols route through too.
+    const isPrintable =
+      !e.metaKey && !e.ctrlKey && !e.altKey && e.key.length === 1;
+
+    if (!isPaste && !isPrintable) return;
+
+    input.focus();
+    // Don't preventDefault: after the synchronous focus, the browser's
+    // default action (text insert / paste) targets the now-focused textarea.
   }
 
   // Text of a transcript item, flattened across its searchable fields.
@@ -410,11 +494,14 @@
 
   const items = $derived(transcripts.itemsFor(thread.id));
   // The composer centres (and the transcript hides) until the first message.
-  // Title-based check distinguishes a genuinely-new thread from an existing
-  // thread whose history is still loading asynchronously (items briefly []):
-  // a resumed thread has a real title from frame 1, so it never centres/flips
-  // and never triggers the dock animation.
-  const isEmpty = $derived(items.length === 0 && isNewThread(thread.title));
+  // Two conditions, both required, so resumed threads never centre:
+  //  - transcript backfill has completed (hasLoaded) → not still [] because
+  //    history is racing the fetch;
+  //  - placeholder title (isNewThread) → a real title means an existing thread
+  //    whose title-gen already landed, even if backfill hasn't.
+  const isEmpty = $derived(
+    transcripts.hasLoaded(thread.id) && items.length === 0 && isNewThread(thread.title),
+  );
 
   // ── Send animation ──────────────────────────────────────────────────
   // A freshly-sent user message pops up into the page from its bottom-right
@@ -883,7 +970,12 @@
         <GitWidget {thread} />
       {/if}
       {#if thread.projectId}
-        <DevTapWidget {thread} {onSelectThread} />
+        {#if piSettings.topbar.devtap}
+          <DevTapWidget {thread} {onSelectThread} />
+        {/if}
+        {#if piSettings.topbar.fallow}
+          <FallowWidget {thread} {onSelectThread} />
+        {/if}
       {/if}
       {#if !thread.remoteHostId}
         <Tooltip text="Open in Finder">

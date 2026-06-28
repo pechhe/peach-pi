@@ -39,6 +39,10 @@ export class AppService {
   private kv: KvRepo;
   private automations: AutomationRepo;
   private snoozeTimer: NodeJS.Timeout | null = null;
+  /** Coalesced publish timer: bursts of mutations (sidebar drag, streaming-
+   *  driven onThreadsChanged callbacks, rapid status flips) collapse into one
+   *  `event:snapshot` emit so the 5-query snapshot isn't re-run ~60x/sec. */
+  private publishTimer: NodeJS.Timeout | null = null;
   private emit: Emit;
   /** Collaborators for worktree teardown (archive a worktree → archive its
    *  threads → remove the git dir). Injected post-construction to avoid the
@@ -74,6 +78,10 @@ export class AppService {
 
   stop(): void {
     if (this.snoozeTimer) clearInterval(this.snoozeTimer);
+    if (this.publishTimer) {
+      clearTimeout(this.publishTimer);
+      this.publishTimer = null;
+    }
   }
 
   /** Register the provider of remote-master threads (RemoteClientService). */
@@ -326,7 +334,20 @@ export class AppService {
     if (woken.length > 0) this.publish();
   }
 
+  /** Schedule a coalesced snapshot emit. External collaborators (ThreadService
+   *  via onThreadsChanged, automations, remote relay) call this instead of
+   *  emitting `event:snapshot` directly so hot paths share one debounce. */
+  notify(): void {
+    if (this.publishTimer) return;
+    // 0-delay: coalesces all calls within the current macrotask into one
+    // emit, and naturally bounds steady-state (~1000/sec max → same tick).
+    this.publishTimer = setTimeout(() => {
+      this.publishTimer = null;
+      this.emit("event:snapshot", this.snapshot());
+    }, 0);
+  }
+
   private publish(): void {
-    this.emit("event:snapshot", this.snapshot());
+    this.notify();
   }
 }

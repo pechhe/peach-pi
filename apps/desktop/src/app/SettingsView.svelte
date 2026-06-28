@@ -50,6 +50,7 @@
   import DotMatrixPlayground from "./DotMatrixPlayground.svelte";
   import ThemeControls from "./ThemeControls.svelte";
   import SubagentsSection from "./SubagentsSection.svelte";
+  import TopbarSettings from "./TopbarSettings.svelte";
   import Check from "@lucide/svelte/icons/check";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
   import { autoCompact } from "../stores/auto-compact.svelte";
@@ -107,6 +108,7 @@
         { id: "messageDelivery", label: "Message delivery", keywords: "message delivery steering mode follow-up mode" },
         { id: "extensions", label: "Extensions", keywords: "extensions auto update packages pi update periodic refresh" },
         { id: "insomnia", label: "Keep awake", keywords: "insomnia sleep idle caffeinate prevent mac awake while running" },
+        { id: "topbar", label: "Topbar", keywords: "topbar top bar widgets devtap fallow customization show hide chip" },
         { id: "subagents", label: "Subagents", keywords: "subagents agents scouting research verification cheap model roster subagent roster" },
       ],
     },
@@ -336,12 +338,24 @@
 
   const keyOf = (m: { provider: string; id: string }) => `${m.provider}:${m.id}`;
   const byKey = $derived(new Map(models.map((m) => [keyOf(m), m])));
+  // Scoped models ∪ the currently-configured utility model. The persisted
+  // selection may fall outside the scoped list (e.g. the user unscoped it, or
+  // the scoped list hasn't loaded yet); a Select built only from `models`
+  // can't represent it, so the trigger renders the placeholder — visually
+  // indistinguishable from "Default", and a re-pick silently nulls it out.
   const grouped = $derived.by(() => {
     const groups = new Map<string, ModelInfo[]>();
     for (const m of models) {
       const arr = groups.get(m.provider);
       if (arr) arr.push(m);
       else groups.set(m.provider, [m]);
+    }
+    // Surface the configured utility model even when it isn't in the scoped
+    // list, so the Select can display and re-select it.
+    if (utilityModel && !byKey.has(keyOf(utilityModel))) {
+      const arr = groups.get(utilityModel.provider);
+      if (arr) arr.push(utilityModel);
+      else groups.set(utilityModel.provider, [utilityModel]);
     }
     return [...groups.entries()].map(([provider, items]) => ({ provider, items }));
   });
@@ -428,7 +442,10 @@
 
   async function pickUtilityModel(key: string) {
     selectedKey = key;
-    const model = key ? byKey.get(key) ?? null : null;
+    // Resolve from the merged scoped ∪ persisted set so a selection that's
+    // currently out of scope (but still configured) isn't silently nulled out.
+    const merged = new Map(grouped.flatMap((g) => g.items).map((m) => [keyOf(m), m]));
+    const model = key ? merged.get(key) ?? byKey.get(key) ?? null : null;
     utilityModel = await api.invoke("app:setUtilityModel", model);
     selectedKey = utilityModel ? keyOf(utilityModel) : "";
   }
@@ -1088,6 +1105,10 @@
             />
           </div>
         </section>
+        {/if}
+
+        {#if hit("topbar")}
+        <TopbarSettings />
         {/if}
 
         {#if hit("subagents")}

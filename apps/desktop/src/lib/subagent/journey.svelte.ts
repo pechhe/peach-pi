@@ -131,12 +131,45 @@ function shortenTitle(raw: string): string {
   return raw.trim().replace(/\s+/g, " ").replace(/[…\.\s]+$/u, "");
 }
 
-/** Detect low-signal grunt-status lines the fleet widget rotates through.
- *  These shouldn't get their own timeline node — fold them into the
- *  previous node as a small subtitle instead. */
-function isGruntActivity(raw: string): boolean {
-  const s = raw.trim();
-  return /^(?:running|reading)\s+\S+(?:\s+\S+)*\s+\d+\s+files?\b/i.test(s);
+const TOOL_ACTION_WORDS = [
+  "reading",
+  "running command",
+  "editing",
+  "writing",
+  "searching",
+  "finding files",
+  "listing",
+];
+
+/** Detect tool-derived "grunt" activity lines the fleet widget rotates
+ *  through (e.g. "reading 3 files…", "running command…", "cymbal_search…").
+ *  These advance the agent's work but rarely say anything useful as a
+ *  standalone timeline step, so the journey folds them in as a subtitle on
+ *  the latest narration node instead.
+ *
+ *  Narration prose (assistant sentences like "Found X. Now let me…") is NOT
+ *  matched here — those are the real milestones we keep as nodes. */
+function isToolActivity(raw: string): boolean {
+  const s = raw.replace(/…+$/u, "").trim();
+  if (!s) return false;
+  const lower = s.toLowerCase();
+  for (const word of TOOL_ACTION_WORDS) {
+    if (lower === word) return true;
+    if (lower.startsWith(`${word} `)) {
+      const rest = s.slice(word.length + 1).trim();
+      if (/^\d+\s+(?:files?|patterns?)\b/i.test(rest)) return true;
+    }
+  }
+  // Raw tool identifiers (snake_case / dotted) optionally with a count,
+  // e.g. "cymbal_search", "cymbal_search 2 files", "web_search 3 patterns".
+  // Requires an underscore so single prose words ("done", "found") never
+  // get misclassified as tool churn.
+  if (
+    /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?:\.[a-z0-9_]+)*\s*(?:\d+\s+(?:files?|patterns?))?$/i.test(s)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** Set or replace the subtitle of the last node. Returns false if there's no
@@ -233,8 +266,12 @@ export function buildNodes(
         };
         lastActivityIdx = pendingShimmerIdx;
         pendingShimmerIdx = -1;
-      } else if (isGruntActivity(raw) && attachAsSubtitle(nodes, raw)) {
-        lastActivityIdx = nodes.length - 1;
+      } else if (isToolActivity(raw)) {
+        // Tool churn (reading, running command, cymbal_search, …) is low
+        // signal as a standalone step: fold it as a subtitle onto the
+        // latest narration node rather than adding another timeline row.
+        attachAsSubtitle(nodes, raw);
+        lastActivityIdx = Math.max(lastActivityIdx, nodes.length - 1);
       } else {
         lastActivityIdx = nodes.length;
         nodes.push({ id: `act-${u.t}`, tone: "done", title: shortenTitle(raw), fullTitle: raw, at: relAt(u.t) });
@@ -254,8 +291,15 @@ export function buildNodes(
     const raw = liveActivity ?? "Working…";
     // Don't surface generic placeholders as a separate step, but always
     // surface an active node so the spinner has somewhere to live.
-    const current = /^(?:thinking|working)/i.test(raw) ? "Working…" : shortenTitle(raw);
-    if (lastActivityIdx >= 0 && nodes[lastActivityIdx]!.title === current) {
+    const isPlaceholder = /^(?:thinking|working)/i.test(raw);
+    const current = isPlaceholder ? "Working…" : shortenTitle(raw);
+    // Tool churn as the live activity: fold it as a subtitle on the latest
+    // narration node and mark that node active, instead of pushing a noisy
+    // standalone row.
+    if (!isPlaceholder && isToolActivity(raw) && lastActivityIdx >= 0) {
+      const n = nodes[lastActivityIdx]!;
+      nodes[lastActivityIdx] = { ...n, tone: "active", at: "Now", subtitle: raw, fullTitle: n.fullTitle ?? n.title };
+    } else if (lastActivityIdx >= 0 && nodes[lastActivityIdx]!.title === current) {
       const n = nodes[lastActivityIdx]!;
       nodes[lastActivityIdx] = { ...n, tone: "active", at: "Now", title: current, fullTitle: n.fullTitle ?? n.title };
     } else {

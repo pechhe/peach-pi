@@ -7,9 +7,18 @@ import type { Emit } from "../ipc/registry.ts";
 /** Scrollback replayed when a terminal pane re-attaches. */
 const BUFFER_CAP = 200_000;
 
+/** Coalesce frequent PTY data bursts (e.g. large `ls` / build output) into
+ *  one IPC message per timer tick, instead of one per `onData` callback.
+ *  Heavy OS output can fire `onData` hundreds of times/sec; batching cuts IPC
+ *  load to the renderer dramatically and avoids re-rendering the terminal on
+ *  every tiny chunk. */
+const TERM_FLUSH_MS = 16;
+
 interface Term {
   pty: IPty;
   buffer: string;
+  /** Pending output chunks awaiting the next flush. */
+  pending: string;
 }
 
 /**
@@ -21,6 +30,7 @@ export class TerminalService {
   private projects: ProjectRepo;
   private emit: Emit;
   private terms = new Map<string, Term>();
+  private flushTimer: NodeJS.Timeout | null = null;
 
   constructor(db: AppDb, emit: Emit) {
     this.threads = new ThreadRepo(db);
@@ -54,11 +64,12 @@ export class TerminalService {
       env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
     });
 
-    const term: Term = { pty: proc, buffer: "" };
+    const term: Term = { pty: proc, buffer: "", pending: "" };
     this.terms.set(threadId, term);
     proc.onData((data) => {
       term.buffer = (term.buffer + data).slice(-BUFFER_CAP);
-      this.emit("event:terminalData", { threadId, data });
+      term.pending += data;
+      this.scheduleFlush();
     });
     proc.onExit(({ exitCode }) => {
       this.terms.delete(threadId);
@@ -93,8 +104,30 @@ export class TerminalService {
   }
 
   dispose(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+      this.flushTerms();
+    }
     for (const { pty } of this.terms.values()) pty.kill();
     this.terms.clear();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flushTerms();
+    }, TERM_FLUSH_MS);
+  }
+
+  private flushTerms(): void {
+    for (const [threadId, term] of this.terms) {
+      if (!term.pending) continue;
+      const data = term.pending;
+      term.pending = "";
+      this.emit("event:terminalData", { threadId, data });
+    }
   }
 }
 

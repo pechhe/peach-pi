@@ -13,6 +13,8 @@ import type {
   Connection,
   ConnectStartResult,
   DevTapProjectStatus,
+  FallowProjectStatus,
+  FallowReport,
   Automation,
   AutomationModel,
   AutomationRun,
@@ -625,6 +627,20 @@ export const ipcContracts = {
 
   /** Is the DevTap runtime tap installed in this project? */
   "devtap:projectStatus": invoke<[projectId: string], DevTapProjectStatus>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+
+  // fallow (renderer → main; codebase intelligence).
+  /** Is `fallow` installed in this project? Cheap detection, no execution. */
+  "fallow:projectStatus": invoke<[projectId: string], FallowProjectStatus>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+  /** Install `fallow` into the project via the detected package manager. */
+  "fallow:install": invoke<[projectId: string], FallowProjectStatus>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
+  /** Run `fallow dead-code --format json` and return the parsed summary. */
+  "fallow:run": invoke<[projectId: string], FallowReport>((id) =>
     requireNonEmptyString(id, "projectId"),
   ),
 

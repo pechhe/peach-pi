@@ -20,6 +20,7 @@ const store = createIpcStore<"app:getPiSettings", "app:setPiSettings">({
     autoUpdateExtensions: true,
     insomnia: false,
     telemetryConsent: null,
+    topbar: { devtap: true, fallow: true },
   },
 });
 
@@ -44,6 +45,9 @@ export const piSettings = {
   },
   get insomnia(): boolean {
     return store.state.insomnia;
+  },
+  get topbar(): PiSettings["topbar"] {
+    return store.state.topbar;
   },
   load: (force?: boolean) => store.load(force),
   patch: (update: Partial<PiSettings>) => store.set(update),

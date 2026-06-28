@@ -37,7 +37,10 @@ export type HandoffHook = {
   beforePrompt: (threadId: string, task: string) => Promise<string | null>;
 };
 
-const FLUSH_MS = 16;
+// Transcript-op flush cadence. 16ms (~60fps) was overkill for streaming text
+// and drove ~60 IPC messages/sec to the renderer during runs; 50ms (~20fps)
+// stays smooth for token streaming while cutting IPC ~3x.
+const FLUSH_MS = 50;
 
 /** Final prompt sent when a thread is parked for testing. The assistant's
  *  one-row markdown table reply is captured as the thread's test note and

@@ -25,7 +25,11 @@
     | "git-pull-request"
     | "git-merge"
     | "folder"
-    | "message";
+    | "box"
+    | "message"
+    | "clock"
+    | "beaker"
+    | "inbox";
 
   let { name, size = 16, sw = 1.8 }: { name: Name; size?: number; sw?: number } = $props();
 </script>
@@ -92,7 +96,19 @@
     <path d="M6 9v9M6 7a2 2 0 1 0 0-2 2 2 0 0 0 0 2zM18 16a2 2 0 1 0 0-1.9M6 12a6 6 0 0 0 6 4h4" />
   {:else if name === "folder"}
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+  {:else if name === "box"}
+    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" />
+    <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" />
   {:else if name === "message"}
     <path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z" />
+  {:else if name === "clock"}
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  {:else if name === "beaker"}
+    <path d="M9 3h6M10 3v6l-4 7a2 2 0 0 0 2 3h8a2 2 0 0 0 2-3l-4-7V3" />
+    <path d="M7 15h10" />
+  {:else if name === "inbox"}
+    <path d="M4 13l3 0a2 2 0 0 1 2 1.5v0a1.5 1.5 0 0 0 3 0v0a2 2 0 0 1 2-1.5l3 0" />
+    <path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
   {/if}
 </svg>
