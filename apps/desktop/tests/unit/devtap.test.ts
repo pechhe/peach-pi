@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { emitDevTapEvent, sanitizePayload } from "../../electron/services/devtap.ts";
+import { emitDevTapEvent, initDevTapMain, sanitizePayload } from "../../electron/services/devtap.ts";
 
 function tempLog(): string {
   return join(mkdtempSync(join(tmpdir(), "devtap-")), "devtap.jsonl");
@@ -63,4 +63,25 @@ test("malformed JSONL does not crash the reader", () => {
   });
   assert.match(out, /Malformed lines: 2/);
   assert.match(out, /Events: 1/);
+});
+
+test("initDevTapMain captures console.error as error-level console event", () => {
+  const log = tempLog();
+  process.env.DEV_TAP = "1";
+  process.env.DEVTAP_LOG = log;
+  // initDevTapMain is idempotent and installs persistent process listeners;
+  // we only assert the console.error wrap emits a console.error event.
+  initDevTapMain();
+  const saved = console.error;
+  try {
+    console.error("boom", { code: 42 });
+  } finally {
+    console.error = saved;
+  }
+  const lines = readFileSync(log, "utf8").trim().split("\n");
+  const ev = JSON.parse(lines.at(-1)!);
+  assert.equal(ev.event, "console.error");
+  assert.equal(ev.level, "error");
+  assert.equal(ev.area, "console");
+  assert.match(ev.message, /boom/);
 });

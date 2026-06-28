@@ -142,8 +142,10 @@ export function emitDevTapEvent(ev: DevTapEvent): void {
     appendFileSync(path, `${JSON.stringify(serialize(ev))}\n`);
   } catch (err) {
     // Best-effort: surface only in dev, never throw into the host app.
+    // Use the saved original ref so emitDevTapEvent's failure path never
+    // recurses into our wrapped console.error in initDevTapMain().
     try {
-      console.error("[devtap] write failed:", err);
+      (originalConsoleError ?? console.error)("[devtap] write failed:", err);
     } catch {
       /* ignore */
     }
@@ -168,14 +170,33 @@ export function captureError(
 }
 
 let mainHandlersInstalled = false;
+let originalConsoleError: typeof console.error | null = null;
+let originalConsoleWarn: typeof console.warn | null = null;
+
 /**
  * Install main-process error capture and emit a startup marker.
+ * Captures `uncaughtException`, `unhandledRejection`, and `console.error/warn`
+ * (most main-process failures surface as console.error inside caught handlers).
  * Call once from boot. No-op (and attaches nothing) unless DEV_TAP=1, so
- * production never gains an uncaughtException listener.
+ * production never gains an uncaughtException listener or console override.
  */
 export function initDevTapMain(): void {
   if (!isDevTapEnabled() || mainHandlersInstalled) return;
   mainHandlersInstalled = true;
+
+  // Capture console.error/warn without infinite recursion on emitDevTapEvent's
+  // own failure path (which calls the original console.error directly).
+  originalConsoleError = console.error;
+  originalConsoleWarn = console.warn;
+  console.error = (...args: unknown[]): void => {
+    captureConsole(args, "error");
+    originalConsoleError?.apply(console, args);
+  };
+  console.warn = (...args: unknown[]): void => {
+    captureConsole(args, "warn");
+    originalConsoleWarn?.apply(console, args);
+  };
+
   process.on("uncaughtException", (err) =>
     captureError(err, { event: "error.uncaughtException", source: "main" }),
   );
@@ -187,5 +208,89 @@ export function initDevTapMain(): void {
     event: "devtap.init",
     message: "DevTap enabled (main process)",
     payload: { pid: process.pid, cwd: process.cwd(), log: devTapLogPath() },
+  });
+}
+
+/** Emit a console-derived event. `originalConsoleError` is the saved ref so
+ *  emitDevTapEvent's failure path never recurses into our wrapped console. */
+function captureConsole(args: unknown[], level: "error" | "warn"): void {
+  // Avoid capturing the tap's own failure logs.
+  if (args.length && typeof args[0] === "string" && args[0] === "[devtap]") return;
+  let message = "";
+  try {
+    message = args.map((a) => (typeof a === "string" ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })())).join(" ");
+  } catch {
+    message = String(args);
+  }
+  emitDevTapEvent({
+    level,
+    source: "main",
+    area: "console",
+    event: `console.${level}`,
+    message: message.slice(0, 2000) || undefined,
+    payload: { args },
+  });
+}
+
+/**
+ * Attach DevTap capture to a BrowserWindow's webContents. Catches the
+ * renderer-process failure signals that `window.error` and Svelte `onError`
+ * miss: render-process-gone, unresponsive, crashed, preload load failures,
+ * and the renderer console (level + message). Idempotent. No-op unless
+ * DEV_TAP=1. Call right after creating each window.
+ *
+ * Electron types are imported lazily so plain-Node unit tests of the core
+ * (which import this module) don't require electron at runtime.
+ */
+export function attachDevTapToWindow(win: {
+  webContents: Electron.WebContents;
+}): void {
+  if (!isDevTapEnabled()) return;
+  const wc = win.webContents as Electron.WebContents & { __devtapAttached?: boolean };
+  if (wc.__devtapAttached) return;
+  wc.__devtapAttached = true;
+
+  wc.on("console-message", (_e, level, message, line, sourceId) => {
+    // Electron console levels: 0=verbose 1=info 2=warning 3=error
+    emitDevTapEvent({
+      level: level >= 3 ? "error" : level === 2 ? "warn" : "info",
+      source: "renderer",
+      area: "console",
+      event: "renderer.console",
+      message: typeof message === "string" ? message.slice(0, 2000) : String(message),
+      payload: { level, line, sourceId },
+    });
+  });
+  wc.on("render-process-gone", (_e, details) => {
+    captureError(new Error(`render-process-gone: ${details?.reason ?? "unknown"}`), {
+      event: "renderer.render-process-gone",
+      source: "renderer",
+      payload: details,
+    });
+  });
+  wc.on("unresponsive", () => {
+    emitDevTapEvent({
+      level: "warn",
+      source: "renderer",
+      area: "diagnostic",
+      event: "renderer.unresponsive",
+    });
+  });
+  wc.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL) => {
+    emitDevTapEvent({
+      level: "error",
+      source: "renderer",
+      area: "lifecycle",
+      event: "renderer.did-fail-load",
+      message: errorDescription ?? `load failed (${errorCode})`,
+      payload: { errorCode, errorDescription, validatedURL },
+    });
+  });
+  wc.on("preload-error", (_e, preloadPath, error) => {
+    captureError(error, {
+      event: "renderer.preload-error",
+      source: "renderer",
+      payload: { preloadPath },
+    });
   });
 }

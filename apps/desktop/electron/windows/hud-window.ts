@@ -1,5 +1,6 @@
 import { BrowserWindow, screen, shell } from "electron";
 import path from "node:path";
+import { attachDevTapToWindow } from "../services/devtap.ts";
 
 import { isExternalUrl } from "./url-guard";
 
@@ -62,6 +63,7 @@ export function createHudWindow(geom: { x: number; y: number; width: number }): 
     event.preventDefault();
   });
   // No hide-on-blur: the HUD persists while you work in another app.
+  attachDevTapToWindow(win);
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     void win.loadURL(`${MAIN_WINDOW_VITE_DEV_SERVER_URL}#hud`);

@@ -1,6 +1,7 @@
 import { BrowserWindow, shell } from "electron";
 import path from "node:path";
 import { TRAFFIC_LIGHTS } from "@peach-pi/shared-types";
+import { attachDevTapToWindow } from "../services/devtap.ts";
 
 import { isExternalUrl } from "./url-guard";
 
@@ -35,6 +36,7 @@ export function createMainWindow(): BrowserWindow {
     if (isExternalUrl(url)) void shell.openExternal(url);
     event.preventDefault();
   });
+  attachDevTapToWindow(win);
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     void win.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);

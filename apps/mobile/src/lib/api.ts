@@ -62,10 +62,22 @@ async function post<T>(m: Master, path: string, body?: unknown): Promise<T> {
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (res.status === 401) throw new Error("Unauthorized — check the token.");
   if (!res.ok) {
-    const detail = await res.json().catch(() => null);
-    throw new Error((detail as { error?: string } | null)?.error ?? `Master returned ${res.status}.`);
+    // Surface the server's actual reason. The relay returns JSON like
+    // `{ error: "client identity required" }` (missing X-Pi-Client-Id) or
+    // `{ error: "controlled by another client", controllerName: "…" }` (409,
+    // steering lease held elsewhere) — both were being flattened to a misleading
+    // "check the token" message that points at the wrong cause.
+    const detail = (await res.json().catch(() => null)) as
+      | { error?: string; controllerName?: string | null }
+      | null;
+    const reason = detail?.error;
+    if (reason) {
+      const holder = detail?.controllerName;
+      throw new Error(holder ? `${reason} (held by ${holder})` : reason);
+    }
+    if (res.status === 401) throw new Error("Unauthorized — check the token.");
+    throw new Error(`Master returned ${res.status}.`);
   }
   return (await res.json()) as T;
 }

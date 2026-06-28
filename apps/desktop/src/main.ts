@@ -17,6 +17,9 @@ import "./styles/sidebar-device.css";
 import "./styles/metal-dye.css";
 
 // DevTap renderer error capture (dev only; main drops events unless DEV_TAP=1).
+// Renderer `window.error` catches thrown render errors; Svelte's dev-mode
+// console diagnostics are captured on the main side via webContents
+// `console-message` (see attachDevTapToWindow).
 if (import.meta.env.DEV) initDevTapRenderer();
 
 // Hide OS/browser `title` popovers; the app renders its own tooltips.
