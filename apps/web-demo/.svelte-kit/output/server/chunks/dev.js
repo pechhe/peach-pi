@@ -1,4 +1,4 @@
-import { s as ssr_context, F as FILENAME, E as set_ssr_context, R as Renderer, G as invalid_snippet_arguments } from "./index.js";
+import { R as Renderer, E as invalid_snippet_arguments, s as ssr_context, F as FILENAME, G as set_ssr_context } from "./index.js";
 const autoclosing_children = {
   // based on http://developers.whatwg.org/syntax.html#syntax-tag-omission
   li: { direct: ["li"] },

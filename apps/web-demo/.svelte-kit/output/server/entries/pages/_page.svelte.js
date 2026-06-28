@@ -37,6 +37,852 @@ const NEW_THREAD_TITLES = ["New thread", "New chat"];
 function isNewThread(title) {
   return NEW_THREAD_TITLES.includes(title);
 }
+function groupWorkQueue(issues) {
+  const prds = issues.filter((i) => i.isPrd);
+  const prdNumbers = new Set(prds.map((p) => p.number));
+  const byNumber = (a, b) => a.number - b.number;
+  const groups = prds.sort(byNumber).map((prd) => {
+    const children = issues.filter((i) => i.parent === prd.number);
+    return {
+      prd,
+      childless: children.length === 0,
+      issues: children.sort(byNumber)
+    };
+  });
+  const unparented = issues.filter((i) => !i.isPrd && (i.parent === null || !prdNumbers.has(i.parent))).sort(byNumber);
+  if (unparented.length > 0) {
+    groups.push({ prd: null, childless: false, issues: unparented });
+  }
+  return groups;
+}
+const THEMES = [
+  { id: "default", label: "Peach Dark", scheme: "dark" },
+  { id: "light", label: "Light", scheme: "light" },
+  { id: "dracula", label: "Dracula", scheme: "dark" },
+  { id: "dracula-light", label: "Dracula Light", scheme: "light" },
+  { id: "one-dark", label: "One Dark", scheme: "dark" },
+  { id: "monokai", label: "Monokai", scheme: "dark" },
+  { id: "gruvbox", label: "Gruvbox", scheme: "dark" },
+  { id: "nord", label: "Nord", scheme: "dark" },
+  { id: "tokyo-night", label: "Tokyo Night", scheme: "dark" },
+  { id: "solarized-light", label: "Solarized Light", scheme: "light" },
+  { id: "github-light", label: "GitHub Light", scheme: "light" },
+  { id: "catppuccin-latte", label: "Catppuccin Latte", scheme: "light" },
+  { id: "one-light", label: "One Light", scheme: "light" },
+  { id: "gruvbox-light", label: "Gruvbox Light", scheme: "light" },
+  { id: "rose-pine-dawn", label: "Rosé Pine Dawn", scheme: "light" },
+  { id: "everforest-light", label: "Everforest Light", scheme: "light" },
+  { id: "kanagawa-lotus", label: "Kanagawa Lotus", scheme: "light" },
+  { id: "tomorrow", label: "Tomorrow", scheme: "light" },
+  { id: "alabaster", label: "Alabaster", scheme: "light" }
+];
+const CUSTOM_THEME_ID = "custom";
+const SAVED_PREFIX = "saved:";
+function isSavedId(id2) {
+  return id2.startsWith(SAVED_PREFIX);
+}
+function makeSavedId(name) {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "theme";
+  const rand = Math.random().toString(36).slice(2, 6);
+  return `${SAVED_PREFIX}${slug}-${rand}`;
+}
+const DEFAULT_LIGHT_THEME = "light";
+const DEFAULT_DARK_THEME = "default";
+const DEFAULT_PREFS = {
+  mode: "single",
+  single: DEFAULT_DARK_THEME,
+  systemLight: DEFAULT_LIGHT_THEME,
+  systemDark: DEFAULT_DARK_THEME,
+  rotateLight: [],
+  rotateDark: [],
+  rotateDate: "",
+  rotateActiveLight: DEFAULT_LIGHT_THEME,
+  rotateActiveDark: DEFAULT_DARK_THEME
+};
+function isValidThemeId(id2, savedIds) {
+  return id2 === CUSTOM_THEME_ID || isSavedId(id2) && savedIds.has(id2) || THEMES.some((t) => t.id === id2);
+}
+function themeScheme(id2, savedById2) {
+  if (id2 === CUSTOM_THEME_ID) {
+    return "dark";
+  }
+  const saved = savedById2.get(id2);
+  if (saved) return saved.scheme;
+  return THEMES.find((t) => t.id === id2)?.scheme ?? "dark";
+}
+function todayString(now2 = /* @__PURE__ */ new Date()) {
+  const y = now2.getFullYear();
+  const m = String(now2.getMonth() + 1).padStart(2, "0");
+  const d = String(now2.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+function rollRotation(prefs2, now2 = /* @__PURE__ */ new Date(), rand = Math.random) {
+  const today = todayString(now2);
+  const dayChanged = prefs2.rotateDate !== today;
+  const lightMissing = prefs2.rotateLight.length > 0 && !prefs2.rotateLight.includes(prefs2.rotateActiveLight);
+  const darkMissing = prefs2.rotateDark.length > 0 && !prefs2.rotateDark.includes(prefs2.rotateActiveDark);
+  const firstLight = prefs2.rotateLight.length > 0 && prefs2.rotateDate === "";
+  const firstDark = prefs2.rotateDark.length > 0 && prefs2.rotateDate === "";
+  if (!dayChanged && !lightMissing && !darkMissing && !firstLight && !firstDark) {
+    return prefs2;
+  }
+  const pick = (pool, current) => {
+    if (pool.length === 0) return current;
+    if (pool.length === 1) return pool[0] ?? current;
+    const others = pool.filter((id2) => id2 !== current);
+    if (others.length > 0) return others[Math.floor(rand() * others.length)] ?? current;
+    return pool[0] ?? current;
+  };
+  const rollLight = dayChanged || lightMissing || firstLight;
+  const rollDark = dayChanged || darkMissing || firstDark;
+  return {
+    ...prefs2,
+    rotateDate: today,
+    rotateActiveLight: rollLight ? pick(prefs2.rotateLight, prefs2.rotateActiveLight) : prefs2.rotateActiveLight,
+    rotateActiveDark: rollDark ? pick(prefs2.rotateDark, prefs2.rotateActiveDark) : prefs2.rotateActiveDark
+  };
+}
+function rotateIdForScheme(prefs2, scheme) {
+  return scheme === "light" ? prefs2.rotateActiveLight : prefs2.rotateActiveDark;
+}
+function isValidThemeName(name) {
+  return name.trim().length > 0;
+}
+const ALL_PRIMARY_KEYS = [
+  "bg",
+  "fg",
+  "accent",
+  "warning",
+  "danger",
+  "metalDye",
+  "screen",
+  "screenText",
+  "engraveActive"
+];
+function normalizeHex(raw) {
+  const s = raw.trim();
+  if (!s || !HEX_RE.test(s)) return null;
+  const bare = s.replace(/^#/, "");
+  const full = bare.length === 3 ? bare.split("").map((c) => c + c).join("") : bare.length === 4 ? bare : bare;
+  return `#${full.toUpperCase()}`;
+}
+function normalizeImportedTheme(input) {
+  const primaries = {};
+  if (input.primaries && typeof input.primaries === "object") {
+    for (const key of ALL_PRIMARY_KEYS) {
+      const v = input.primaries[key];
+      if (typeof v === "string") {
+        const hex = normalizeHex(v);
+        if (hex) primaries[key] = hex;
+      }
+    }
+  }
+  const scheme = input.scheme === "light" ? "light" : "dark";
+  const name = typeof input.name === "string" && input.name.trim() ? input.name.trim() : "";
+  if (!name && Object.keys(primaries).length === 0) return null;
+  return { name, scheme, primaries };
+}
+const PRIMARY_SLOTS = [
+  {
+    id: "bg",
+    label: "Background",
+    family: ["sidebar", "surface", "surface-2", "surface-3", "selected", "border", "border-strong"]
+  },
+  { id: "fg", label: "Text", family: ["fg-soft", "muted", "faint", "fainter", "primary", "primary-fg"] },
+  { id: "accent", label: "Accent", family: ["border-focus"] }
+];
+const STATUS_SLOTS = [
+  { id: "warning", label: "Warning", family: ["warning-border", "warning-surface"] },
+  { id: "danger", label: "Error", family: ["danger-border", "danger-surface"] }
+];
+const DEVICE_SLOTS = [
+  { id: "metalDye", label: "Metal", token: "--metal-dye" },
+  { id: "screen", label: "Screen", token: "--color-screen" },
+  { id: "screenText", label: "Screen text", token: "--color-screen-text" },
+  { id: "engraveActive", label: "Active label", token: "--engrave-active" }
+];
+const HEX_RE = /^#?[0-9a-fA-F]{3,8}$/;
+function normHex(hex) {
+  return hex.startsWith("#") ? hex : `#${hex}`;
+}
+const DERIVED_FORMULAS = {
+  sidebar: "color-mix(in srgb, var(--color-bg), var(--color-fg) 3%)",
+  surface: "color-mix(in srgb, var(--color-bg), var(--color-fg) 4%)",
+  "surface-2": "color-mix(in srgb, var(--color-bg), var(--color-fg) 12%)",
+  "surface-3": "color-mix(in srgb, var(--color-bg), var(--color-fg) 24%)",
+  selected: "color-mix(in srgb, var(--color-bg), var(--color-fg) 14%)",
+  border: "color-mix(in srgb, var(--color-bg), var(--color-fg) 11%)",
+  "border-strong": "color-mix(in srgb, var(--color-bg), var(--color-fg) 22%)",
+  "border-focus": "var(--color-accent)",
+  "fg-soft": "color-mix(in srgb, var(--color-fg), var(--color-bg) 9%)",
+  muted: "color-mix(in srgb, var(--color-fg), var(--color-bg) 33%)",
+  faint: "color-mix(in srgb, var(--color-fg), var(--color-bg) 55%)",
+  fainter: "color-mix(in srgb, var(--color-fg), var(--color-bg) 69%)",
+  primary: "var(--color-fg)",
+  "primary-fg": "var(--color-bg)",
+  "warning-border": "color-mix(in srgb, var(--color-warning), var(--color-bg) 58%)",
+  "warning-surface": "color-mix(in srgb, var(--color-warning), var(--color-bg) 86%)",
+  "danger-border": "color-mix(in srgb, var(--color-danger), var(--color-bg) 58%)",
+  "danger-surface": "color-mix(in srgb, var(--color-danger), var(--color-bg) 86%)"
+};
+const METAL_TINT_AMOUNT = "40%";
+function buildCustomCss(p) {
+  const rootLines = [];
+  const deviceLines = [];
+  for (const slot of [...PRIMARY_SLOTS, ...STATUS_SLOTS]) {
+    const v = p[slot.id];
+    if (v && HEX_RE.test(v)) {
+      rootLines.push(`  --color-${slot.id}: ${normHex(v)};`);
+      for (const id2 of slot.family) {
+        const formula = DERIVED_FORMULAS[id2];
+        if (formula) rootLines.push(`  --color-${id2}: ${formula};`);
+      }
+    }
+  }
+  if (p.metalDye && HEX_RE.test(p.metalDye)) {
+    rootLines.push(`  --metal-dye: ${normHex(p.metalDye)};`);
+    rootLines.push(`  --metal-tint-amount: ${METAL_TINT_AMOUNT};`);
+  }
+  if (p.screen && HEX_RE.test(p.screen)) {
+    rootLines.push(`  --color-screen: ${normHex(p.screen)};`);
+    deviceLines.push("  --cream-bg: var(--color-screen);");
+    deviceLines.push("  --cream-bg-hi: color-mix(in oklch, var(--color-screen), white 8%);");
+    deviceLines.push("  --cream-bg-lo: color-mix(in oklch, var(--color-screen), black 8%);");
+  }
+  if (p.screenText && HEX_RE.test(p.screenText)) {
+    rootLines.push(`  --color-screen-text: ${normHex(p.screenText)};`);
+    deviceLines.push("  --cream-ink: var(--color-screen-text);");
+    deviceLines.push("  --cream-ink-muted: color-mix(in oklch, var(--color-screen-text), white 30%);");
+  }
+  if (p.engraveActive && HEX_RE.test(p.engraveActive)) {
+    rootLines.push(`  --engrave-active: ${normHex(p.engraveActive)};`);
+  }
+  const blocks = [];
+  if (rootLines.length) blocks.push(`:root[data-custom="true"] {
+${rootLines.join("\n")}
+}`);
+  if (deviceLines.length) blocks.push(`:root[data-custom="true"] .composer-device {
+${deviceLines.join("\n")}
+}`);
+  return blocks.join("\n");
+}
+const KEY$2 = "peachpi:theme";
+const DEFAULT_THEME = "default";
+const CUSTOM_KEY = "peachpi:custom-theme";
+const SAVED_KEY = "peachpi:saved-themes";
+const CUSTOM_STYLE_ID = "peachpi-custom-theme";
+const PREFS_KEY = "peachpi:theme-prefs";
+let darkQuery = null;
+function readStored$2() {
+  try {
+    const id2 = localStorage.getItem(KEY$2);
+    if (id2 && (id2 === CUSTOM_THEME_ID || isSavedId(id2) || THEMES.some((t) => t.id === id2))) {
+      return id2;
+    }
+  } catch {
+  }
+  return DEFAULT_THEME;
+}
+function savedById(list) {
+  return new Map(list.map((t) => [t.id, t]));
+}
+function systemPrefersDark() {
+  if (darkQuery) return darkQuery.matches;
+  try {
+    darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    return darkQuery.matches;
+  } catch {
+    return true;
+  }
+}
+function sanitizeSlot(id2, scheme, saved) {
+  if (typeof id2 !== "string" || !id2) return scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
+  const savedIds = new Set(saved.map((t) => t.id));
+  if (!isValidThemeId(id2, savedIds)) return scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
+  const byId2 = savedById(saved);
+  if (themeScheme(id2, byId2) !== scheme) return scheme === "light" ? DEFAULT_LIGHT_THEME : DEFAULT_DARK_THEME;
+  return id2;
+}
+function sanitizePool(raw, scheme, saved) {
+  if (!Array.isArray(raw)) return [];
+  const byId2 = savedById(saved);
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const id2 of raw) {
+    if (typeof id2 === "string" && !seen.has(id2) && isValidThemeId(id2, new Set(saved.map((t) => t.id))) && themeScheme(id2, byId2) === scheme) {
+      seen.add(id2);
+      out.push(id2);
+    }
+  }
+  return out;
+}
+function readPrefs(saved) {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) {
+      const legacy = readStored$2();
+      return { ...DEFAULT_PREFS, mode: "single", single: legacy };
+    }
+    const p = JSON.parse(raw);
+    const mode = p.mode === "system" || p.mode === "rotate" ? p.mode : "single";
+    const single = typeof p.single === "string" && isValidThemeId(p.single, new Set(saved.map((t) => t.id))) ? p.single : DEFAULT_DARK_THEME;
+    return {
+      mode,
+      single,
+      systemLight: sanitizeSlot(p.systemLight, "light", saved),
+      systemDark: sanitizeSlot(p.systemDark, "dark", saved),
+      rotateLight: sanitizePool(p.rotateLight, "light", saved),
+      rotateDark: sanitizePool(p.rotateDark, "dark", saved),
+      rotateDate: typeof p.rotateDate === "string" ? p.rotateDate : "",
+      rotateActiveLight: sanitizeSlot(p.rotateActiveLight, "light", saved),
+      rotateActiveDark: sanitizeSlot(p.rotateActiveDark, "dark", saved)
+    };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+function resolveActiveId(prefs2, scheme) {
+  switch (prefs2.mode) {
+    case "single":
+      return prefs2.single;
+    case "system":
+      return scheme === "light" ? prefs2.systemLight : prefs2.systemDark;
+    case "rotate":
+      return rotateIdForScheme(prefs2, scheme);
+  }
+}
+function readStoredSaved() {
+  try {
+    const raw = localStorage.getItem(SAVED_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((t) => t && typeof t === "object" && typeof t.id === "string" && isSavedId(t.id) && typeof t.name === "string" && (t.scheme === "light" || t.scheme === "dark") && t.primaries && typeof t.primaries === "object").map((t) => ({
+      id: t.id,
+      name: t.name,
+      scheme: t.scheme,
+      primaries: sanitizePrimaries(t.primaries),
+      ...t.source === "imported" ? { source: "imported" } : {}
+    }));
+  } catch {
+    return [];
+  }
+}
+function sanitizePrimaries(inP) {
+  const out = {};
+  if (inP && typeof inP === "object") {
+    for (const k of [
+      "bg",
+      "fg",
+      "accent",
+      "warning",
+      "danger",
+      "metalDye",
+      "screen",
+      "screenText",
+      "engraveActive"
+    ]) {
+      const v = inP[k];
+      if (typeof v === "string" && v) out[k] = v;
+    }
+  }
+  return out;
+}
+function findSaved(id2) {
+  return savedThemes.find((t) => t.id === id2);
+}
+function readStoredCustom() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_KEY);
+    if (!raw) return { scheme: "dark", primaries: {} };
+    const parsed = JSON.parse(raw);
+    const inP = parsed.primaries ?? {};
+    const primaries = {};
+    for (const k of [
+      "bg",
+      "fg",
+      "accent",
+      "warning",
+      "danger",
+      "metalDye",
+      "screen",
+      "screenText",
+      "engraveActive"
+    ]) {
+      const v = inP[k];
+      if (typeof v === "string" && v) primaries[k] = v;
+    }
+    return {
+      scheme: parsed.scheme === "light" ? "light" : "dark",
+      primaries
+    };
+  } catch {
+    return { scheme: "dark", primaries: {} };
+  }
+}
+function schemeFor(id2) {
+  if (id2 === CUSTOM_THEME_ID) return customScheme;
+  const saved = findSaved(id2);
+  if (saved) return saved.scheme;
+  return THEMES.find((t) => t.id === id2)?.scheme ?? "dark";
+}
+function customStyleNode() {
+  let el = document.getElementById(CUSTOM_STYLE_ID);
+  if (!el) {
+    el = document.createElement("style");
+    el.id = CUSTOM_STYLE_ID;
+    document.head.appendChild(el);
+  }
+  return el;
+}
+function activePrimaries(id2) {
+  if (isSavedId(id2)) return findSaved(id2)?.primaries ?? {};
+  return customPrimaries;
+}
+function syncCustomStyle(id2) {
+  customStyleNode().textContent = buildCustomCss(activePrimaries(id2));
+}
+function applyToDocument(id2) {
+  if (id2 === CUSTOM_THEME_ID || isSavedId(id2)) {
+    document.documentElement.dataset.theme = schemeFor(id2) === "light" ? "light" : "default";
+    document.documentElement.dataset.custom = "true";
+    syncCustomStyle(id2);
+  } else {
+    document.documentElement.dataset.theme = id2;
+    delete document.documentElement.dataset.custom;
+  }
+  document.documentElement.dataset.scheme = schemeFor(id2);
+  document.documentElement.style.colorScheme = schemeFor(id2);
+  const resolved = composerStyle === "auto" ? schemeFor(id2) : composerStyle;
+  document.documentElement.dataset.composer = resolved;
+}
+const COMPOSER_KEY = "peachpi:composer-style";
+const COMPOSER_OPTIONS = [
+  { id: "auto", label: "Auto (match theme)" },
+  { id: "light", label: "Light (silver)" },
+  { id: "dark", label: "Dark (anodized)" }
+];
+let composerStyle = "auto";
+function readComposerStyle() {
+  try {
+    const v = localStorage.getItem(COMPOSER_KEY);
+    return v === "light" || v === "dark" || v === "auto" ? v : "auto";
+  } catch {
+    return "auto";
+  }
+}
+let customScheme = "dark";
+let customPrimaries = {};
+let savedThemes = [];
+let prefs$1 = { ...DEFAULT_PREFS };
+class ThemeStore {
+  /** Resolved active theme id (presets, saved, or custom). Reactive so the
+   *  selector can highlight it; also driven by system/rotate resolution. */
+  current = DEFAULT_THEME;
+  composer = "auto";
+  /** Theme mode + slots/pools. Drives `current` via resolveActiveId. */
+  prefs = { ...DEFAULT_PREFS };
+  /** The 3 primary colors defining the custom working draft (each optional). */
+  customPrimaries = {};
+  /** Light/dark scheme for the custom draft (presets carry their own). */
+  customScheme = "dark";
+  /** User-named, persisted themes. */
+  savedThemes = [];
+  composerOptions = COMPOSER_OPTIONS;
+  /** Resolve + apply the active theme for the current prefs/OS scheme. The
+   *  single source of truth for `current` + the DOM under any mode. */
+  reapply() {
+    const scheme = systemPrefersDark() ? "dark" : "light";
+    const id2 = resolveActiveId(prefs$1, scheme);
+    this.current = id2;
+    applyToDocument(id2);
+  }
+  /** Persist prefs to localStorage (and keep the module mirror in sync). */
+  persistPrefs() {
+    prefs$1 = this.prefs;
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs));
+    } catch {
+    }
+  }
+  /** Apply the persisted theme to <html>. Call before mount to avoid a flash. */
+  init() {
+    this.composer = readComposerStyle();
+    composerStyle = this.composer;
+    const custom = readStoredCustom();
+    this.customScheme = custom.scheme;
+    customScheme = custom.scheme;
+    this.customPrimaries = custom.primaries;
+    customPrimaries = this.customPrimaries;
+    this.savedThemes = readStoredSaved();
+    savedThemes = this.savedThemes;
+    const loaded = readPrefs(this.savedThemes);
+    const rolled = loaded.mode === "rotate" ? rollRotation(loaded) : loaded;
+    this.prefs = rolled;
+    prefs$1 = rolled;
+    if (rolled !== loaded) {
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(rolled));
+      } catch {
+      }
+    }
+    this.reapply();
+    try {
+      if (!darkQuery) darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      darkQuery.addEventListener("change", () => this.reapply());
+    } catch {
+    }
+    window.addEventListener("storage", (e) => {
+      if (e.key === PREFS_KEY && e.newValue) {
+        const next2 = readPrefs(this.savedThemes);
+        this.prefs = next2;
+        prefs$1 = next2;
+        this.reapply();
+      }
+      if (e.key === KEY$2 && e.newValue) {
+        this.prefs = { ...this.prefs, mode: "single", single: e.newValue };
+        prefs$1 = this.prefs;
+        this.reapply();
+      }
+      if (e.key === COMPOSER_KEY && e.newValue) {
+        this.composer = e.newValue || "auto";
+        composerStyle = this.composer;
+      }
+      if (e.key === CUSTOM_KEY && e.newValue !== null) {
+        const c = readStoredCustom();
+        this.customScheme = c.scheme;
+        customScheme = c.scheme;
+        this.customPrimaries = c.primaries;
+        customPrimaries = c.primaries;
+      }
+      if (e.key === SAVED_KEY) {
+        this.savedThemes = readStoredSaved();
+        savedThemes = this.savedThemes;
+      }
+      this.reapply();
+    });
+  }
+  /** Set the theme mode (single / system / rotate). Rolls rotation on enter. */
+  setMode(mode) {
+    if (mode === this.prefs.mode) return;
+    let next2 = { ...this.prefs, mode };
+    if (mode === "rotate") next2 = rollRotation(next2);
+    this.prefs = next2;
+    this.persistPrefs();
+    this.reapply();
+  }
+  /** `single` mode: pick the active theme. */
+  setSingle(id2) {
+    this.prefs = { ...this.prefs, mode: "single", single: id2 };
+    this.persistPrefs();
+    this.reapply();
+  }
+  /** `system` mode: set the light or dark slot. */
+  setSystemSlot(scheme, id2) {
+    this.prefs = scheme === "light" ? { ...this.prefs, mode: "system", systemLight: id2 } : { ...this.prefs, mode: "system", systemDark: id2 };
+    this.persistPrefs();
+    this.reapply();
+  }
+  /** `rotate` mode: toggle a theme id in/out of a scheme's pool. */
+  toggleRotatePool(scheme, id2) {
+    const pool = scheme === "light" ? this.prefs.rotateLight : this.prefs.rotateDark;
+    const nextPool = pool.includes(id2) ? pool.filter((x) => x !== id2) : [...pool, id2];
+    const base = scheme === "light" ? { ...this.prefs, rotateLight: nextPool } : { ...this.prefs, rotateDark: nextPool };
+    const next2 = rollRotation({ ...base, mode: "rotate" });
+    this.prefs = next2;
+    this.persistPrefs();
+    this.reapply();
+  }
+  /** Force a reroll now (rotates both pools, ignoring the day gate). */
+  rerotate() {
+    const next2 = rollRotation({ ...this.prefs, rotateDate: "" });
+    this.prefs = next2;
+    this.persistPrefs();
+    this.reapply();
+  }
+  /** Select a preset, a saved theme, or the custom draft (single mode).
+   *  Kept for the existing custom-editor flow + external callers. */
+  set(id2) {
+    this.setSingle(id2);
+  }
+  /** Override one primary (bg / fg / accent) on the ACTIVE custom-or-saved
+   *  theme. Editing a saved theme mutates it in place and persists; editing
+   *  the draft flips from a preset to `custom`. Derived families regenerate. */
+  setPrimary(key, hex) {
+    if (isSavedId(this.current)) {
+      const next2 = this.savedThemes.map((t) => t.id === this.current ? { ...t, primaries: { ...t.primaries, [key]: hex } } : t);
+      this.savedThemes = next2;
+      savedThemes = next2;
+      this.persistSaved();
+      applyToDocument(this.current);
+      return;
+    }
+    this.customPrimaries = { ...this.customPrimaries, [key]: hex };
+    customPrimaries = this.customPrimaries;
+    this.persistCustom();
+    syncCustomStyle(this.current);
+    if (this.current !== CUSTOM_THEME_ID) {
+      this.prefs = { ...this.prefs, mode: "single", single: CUSTOM_THEME_ID };
+      this.persistPrefs();
+      this.current = CUSTOM_THEME_ID;
+      applyToDocument(CUSTOM_THEME_ID);
+    }
+  }
+  /** Clear one primary on the active custom-or-saved theme. */
+  resetPrimary(key) {
+    if (isSavedId(this.current)) {
+      const next22 = { ...this.customPrimaries };
+      delete next22[key];
+      const updated = this.savedThemes.map((t) => t.id === this.current ? { ...t, primaries: next22 } : t);
+      this.savedThemes = updated;
+      savedThemes = updated;
+      this.persistSaved();
+      applyToDocument(this.current);
+      return;
+    }
+    const next2 = { ...this.customPrimaries };
+    delete next2[key];
+    this.customPrimaries = next2;
+    customPrimaries = next2;
+    this.persistCustom();
+    syncCustomStyle(this.current);
+  }
+  /** Clear all primaries on the active custom-or-saved theme. Saved themes
+   *  stay selected (now equal to the base palette). */
+  resetAll() {
+    if (isSavedId(this.current)) {
+      const updated = this.savedThemes.map((t) => t.id === this.current ? { ...t, primaries: {} } : t);
+      this.savedThemes = updated;
+      savedThemes = updated;
+      this.persistSaved();
+      applyToDocument(this.current);
+      return;
+    }
+    this.customPrimaries = {};
+    customPrimaries = this.customPrimaries;
+    this.persistCustom();
+    syncCustomStyle(this.current);
+  }
+  /** Set the light/dark scheme of the active custom-or-saved theme. */
+  setCustomScheme(scheme) {
+    if (isSavedId(this.current)) {
+      const updated = this.savedThemes.map((t) => t.id === this.current ? { ...t, scheme } : t);
+      this.savedThemes = updated;
+      savedThemes = updated;
+      this.persistSaved();
+      applyToDocument(this.current);
+      return;
+    }
+    this.customScheme = scheme;
+    customScheme = scheme;
+    this.persistCustom();
+    if (this.current === CUSTOM_THEME_ID) {
+      applyToDocument(CUSTOM_THEME_ID);
+    }
+  }
+  /** Snapshot the working draft into a new named saved theme and activate
+   *  it. Returns the new id (empty string on invalid name). */
+  save(name) {
+    const trimmed = name.trim();
+    if (!isValidThemeName(trimmed)) return "";
+    const id2 = makeSavedId(trimmed);
+    const t = {
+      id: id2,
+      name: trimmed,
+      scheme: this.customScheme,
+      primaries: { ...this.customPrimaries }
+    };
+    const next2 = [...this.savedThemes, t];
+    this.savedThemes = next2;
+    savedThemes = next2;
+    this.persistSaved();
+    this.prefs = { ...this.prefs, mode: "single", single: id2 };
+    this.persistPrefs();
+    this.current = id2;
+    applyToDocument(id2);
+    return id2;
+  }
+  /** Promote an LLM-produced imported theme into a saved theme and activate
+   *  it. `input` is the loose model output; this normalizes every hex (dropping
+   *  invalid ones) and derives a name when the model omitted one. Returns the
+   *  new saved id, or empty string when the import had nothing usable. */
+  addImportedTheme(input) {
+    const norm = normalizeImportedTheme(input);
+    if (!norm) return "";
+    const baseName = norm.name || "Imported theme";
+    let name = baseName;
+    const existingNames = new Set(this.savedThemes.map((t2) => t2.name));
+    if (existingNames.has(name)) {
+      let i = 2;
+      while (existingNames.has(`${baseName} ${i}`)) i++;
+      name = `${baseName} ${i}`;
+    }
+    const id2 = makeSavedId(name);
+    const t = {
+      id: id2,
+      name,
+      scheme: norm.scheme,
+      primaries: norm.primaries,
+      source: "imported"
+    };
+    const next2 = [...this.savedThemes, t];
+    this.savedThemes = next2;
+    savedThemes = next2;
+    this.persistSaved();
+    this.prefs = { ...this.prefs, mode: "single", single: id2 };
+    this.persistPrefs();
+    this.current = id2;
+    applyToDocument(id2);
+    return id2;
+  }
+  /** Rename the actively-selected saved theme. No-op for presets / draft. */
+  renameActive(name) {
+    if (!isSavedId(this.current) || !isValidThemeName(name)) return;
+    const trimmed = name.trim();
+    const updated = this.savedThemes.map((t) => t.id === this.current ? { ...t, name: trimmed } : t);
+    this.savedThemes = updated;
+    savedThemes = updated;
+    this.persistSaved();
+  }
+  /** Delete a saved theme by id. If it was active, fall back to the default
+   *  preset (its overrides leave the DOM the moment `data-custom` is cleared). */
+  deleteSaved(id2) {
+    if (!isSavedId(id2)) return;
+    const next2 = this.savedThemes.filter((t) => t.id !== id2);
+    this.savedThemes = next2;
+    savedThemes = next2;
+    this.persistSaved();
+    if (this.current === id2) {
+      this.set(DEFAULT_THEME);
+    }
+  }
+  persistCustom() {
+    try {
+      localStorage.setItem(CUSTOM_KEY, JSON.stringify({ scheme: this.customScheme, primaries: this.customPrimaries }));
+    } catch {
+    }
+  }
+  persistSaved() {
+    try {
+      localStorage.setItem(SAVED_KEY, JSON.stringify(this.savedThemes));
+    } catch {
+    }
+  }
+  setComposer(style2) {
+    this.composer = style2;
+    composerStyle = style2;
+    applyToDocument(this.current);
+    try {
+      localStorage.setItem(COMPOSER_KEY, style2);
+    } catch {
+    }
+  }
+}
+const theme = new ThemeStore();
+const STREAM_LOOKS = [
+  {
+    id: "plain",
+    label: "Plain fade (default)",
+    description: "Words simply fade in — no blur, the lightest reveal."
+  },
+  {
+    id: "blur",
+    label: "Blur",
+    description: "Words resolve from soft-focus into sharp as they fade in."
+  },
+  {
+    id: "blur-rise",
+    label: "Blur + rise",
+    description: "Blur reveal with a subtle upward settle, like text flowing in."
+  },
+  {
+    id: "warm",
+    label: "Warm ink",
+    description: "Each new word starts in the accent colour and settles to ink."
+  },
+  {
+    id: "glow",
+    label: "Glow",
+    description: "A faint accent glow trails each freshly revealed word, then fades."
+  }
+];
+const STREAM_SPEEDS = [
+  {
+    id: "low",
+    label: "Low",
+    description: "Calm, deliberate reveal close to the model's real cadence."
+  },
+  {
+    id: "medium",
+    label: "Medium (default)",
+    description: "Balanced reveal — steady on a trickle, catches up on bursts."
+  },
+  {
+    id: "high",
+    label: "High",
+    description: "Fast reveal that races through buffered text — minimal lag."
+  }
+];
+const LOOK_TOKENS = {
+  plain: "plain",
+  blur: "blur",
+  "blur-rise": "blur rise",
+  warm: "warm",
+  glow: "glow"
+};
+const LOOK_KEY = "peachpi:streamLook";
+const SPEED_KEY = "peachpi:streamSpeed";
+const DEFAULT_LOOK = "plain";
+const DEFAULT_SPEED = "medium";
+function readStored$1(key, valid, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    return v && valid.includes(v) ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+class StreamRevealStore {
+  look = DEFAULT_LOOK;
+  speed = DEFAULT_SPEED;
+  /** Apply persisted prefs to <html>. Call before mount to avoid a flash. */
+  init() {
+    this.look = readStored$1(LOOK_KEY, STREAM_LOOKS.map((l) => l.id), DEFAULT_LOOK);
+    this.speed = readStored$1(SPEED_KEY, STREAM_SPEEDS.map((s) => s.id), DEFAULT_SPEED);
+    this.applyToDocument();
+    window.addEventListener("storage", (e) => {
+      if (e.key === LOOK_KEY && e.newValue) {
+        this.look = e.newValue;
+        this.applyToDocument();
+      } else if (e.key === SPEED_KEY && e.newValue) {
+        this.speed = e.newValue;
+        this.applyToDocument();
+      }
+    });
+  }
+  applyToDocument() {
+    const root = document.documentElement;
+    root.setAttribute("data-stream-fx", LOOK_TOKENS[this.look]);
+    root.setAttribute("data-stream-speed", this.speed);
+  }
+  setLook(look) {
+    this.look = look;
+    this.applyToDocument();
+    try {
+      localStorage.setItem(LOOK_KEY, look);
+    } catch {
+    }
+  }
+  setSpeed(speed) {
+    this.speed = speed;
+    this.applyToDocument();
+    try {
+      localStorage.setItem(SPEED_KEY, speed);
+    } catch {
+    }
+  }
+}
+const streamReveal = new StreamRevealStore();
 function arrayPref(key) {
   const read = () => {
     try {
@@ -460,6 +1306,9 @@ const DEFAULT_TRIANGLE = [
 function byId(id2) {
   return ENTRIES.find((e) => e.id === id2);
 }
+function byShape(shape) {
+  return ENTRIES.filter((e) => e.shape === shape);
+}
 const KEY$1 = {
   square: "peachpi:dotMatrixLoaders:square",
   hex: "peachpi:dotMatrixLoaders:hex",
@@ -510,8 +1359,8 @@ class LoaderPrefsStore {
   }
   toggle(shape, id2) {
     const current = this[shape];
-    const next = current.includes(id2) ? current.filter((x) => x !== id2) : [...current, id2];
-    this[shape] = next.length > 0 ? next : [...DEFAULTS[shape]];
+    const next2 = current.includes(id2) ? current.filter((x) => x !== id2) : [...current, id2];
+    this[shape] = next2.length > 0 ? next2 : [...DEFAULTS[shape]];
     persist(shape, this[shape]);
   }
   setSelection(shape, ids) {
@@ -563,14 +1412,14 @@ class SnapshotStore {
   /** Reuse existing refs for unchanged entries so downstream reactivity
    *  invalidates only for entries that actually changed. Returns a snapshot
    *  with stable identity for unchanged threads/projects/etc. */
-  reconcile(next) {
+  reconcile(next2) {
     const threads = [];
     const seen = /* @__PURE__ */ new Set();
-    for (const t of next.threads) {
+    for (const t of next2.threads) {
       seen.add(t.id);
-      const prev = this.threadCache.get(t.id);
-      if (prev && shallowEqualThread(prev, t)) {
-        threads.push(prev);
+      const prev2 = this.threadCache.get(t.id);
+      if (prev2 && shallowEqualThread(prev2, t)) {
+        threads.push(prev2);
       } else {
         this.threadCache.set(t.id, t);
         threads.push(t);
@@ -580,17 +1429,17 @@ class SnapshotStore {
       if (!seen.has(id2)) this.threadCache.delete(id2);
     }
     this.prevThreads = threads;
-    this.prevProjects = shallowEqual(this.prevProjects, next.projects) ? this.prevProjects : next.projects;
-    this.prevWorktrees = shallowEqual(this.prevWorktrees, next.worktrees) ? this.prevWorktrees : next.worktrees;
-    this.prevAutomations = shallowEqual(this.prevAutomations, next.automations) ? this.prevAutomations : next.automations;
-    this.prevUi = this.prevUi && shallowEqual(this.prevUi, next.ui) ? this.prevUi : next.ui;
+    this.prevProjects = shallowEqual(this.prevProjects, next2.projects) ? this.prevProjects : next2.projects;
+    this.prevWorktrees = shallowEqual(this.prevWorktrees, next2.worktrees) ? this.prevWorktrees : next2.worktrees;
+    this.prevAutomations = shallowEqual(this.prevAutomations, next2.automations) ? this.prevAutomations : next2.automations;
+    this.prevUi = this.prevUi && shallowEqual(this.prevUi, next2.ui) ? this.prevUi : next2.ui;
     return {
-      ...next,
+      ...next2,
       threads,
       projects: this.prevProjects,
       worktrees: this.prevWorktrees,
       automations: this.prevAutomations,
-      ui: this.prevUi ?? next.ui
+      ui: this.prevUi ?? next2.ui
     };
   }
 }
@@ -670,11 +1519,11 @@ class TranscriptStore {
     this.buffering.set(threadId, buffered);
     try {
       const { items, seq } = await api.invoke("threads:getTranscript", threadId);
-      let next = items;
+      let next2 = items;
       for (const d of buffered) {
-        if (d.seq > seq) next = applyTranscriptOps(next, d.ops);
+        if (d.seq > seq) next2 = applyTranscriptOps(next2, d.ops);
       }
-      this.byThread.set(threadId, next);
+      this.byThread.set(threadId, next2);
     } finally {
       this.buffering.delete(threadId);
     }
@@ -982,11 +1831,62 @@ function parseFleet(lines) {
   return { count: count || agents.length, agents };
 }
 const KEY = "peachpi:sounds-muted";
+const VARIANT_KEY = "peachpi:done-sound-variant";
+const DEFAULT_VARIANT$1 = "arpeggio";
+const ARCHIVE_VARIANT_KEY = "peachpi:archive-sound-variant";
+const DEFAULT_ARCHIVE_VARIANT = "archive";
+const TEST_VARIANT_KEY = "peachpi:test-sound-variant";
+const DEFAULT_TEST_VARIANT = "testBench";
 function soundsMuted() {
   try {
     return localStorage.getItem(KEY) === "1";
   } catch {
     return false;
+  }
+}
+function setSoundsMuted(muted) {
+  try {
+    localStorage.setItem(KEY, muted ? "1" : "0");
+  } catch {
+  }
+}
+function getDoneSoundVariant() {
+  try {
+    return localStorage.getItem(VARIANT_KEY) ?? DEFAULT_VARIANT$1;
+  } catch {
+    return DEFAULT_VARIANT$1;
+  }
+}
+function setDoneSoundVariant(variant) {
+  try {
+    localStorage.setItem(VARIANT_KEY, variant);
+  } catch {
+  }
+}
+function getArchiveSoundVariant() {
+  try {
+    return localStorage.getItem(ARCHIVE_VARIANT_KEY) ?? DEFAULT_ARCHIVE_VARIANT;
+  } catch {
+    return DEFAULT_ARCHIVE_VARIANT;
+  }
+}
+function setArchiveSoundVariant(variant) {
+  try {
+    localStorage.setItem(ARCHIVE_VARIANT_KEY, variant);
+  } catch {
+  }
+}
+function getTestSoundVariant() {
+  try {
+    return localStorage.getItem(TEST_VARIANT_KEY) ?? DEFAULT_TEST_VARIANT;
+  } catch {
+    return DEFAULT_TEST_VARIANT;
+  }
+}
+function setTestSoundVariant(variant) {
+  try {
+    localStorage.setItem(TEST_VARIANT_KEY, variant);
+  } catch {
   }
 }
 const clickMp3 = "data:audio/mpeg;base64,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";
@@ -1022,7 +1922,7 @@ function getContext() {
   }
   return context;
 }
-function dataUriToArrayBuffer(uri) {
+function dataUriToArrayBuffer$2(uri) {
   const base64 = uri.slice(uri.indexOf(",") + 1);
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -1033,7 +1933,7 @@ async function fetchBuffer(ctx, url) {
   try {
     let data;
     if (url.startsWith("data:")) {
-      data = dataUriToArrayBuffer(url);
+      data = dataUriToArrayBuffer$2(url);
     } else {
       const response = await fetch(url);
       if (!response.ok) return void 0;
@@ -1629,6 +2529,31 @@ function SnoozedPopover($$renderer, $$props) {
 SnoozedPopover.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
+Refresh_cw[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/refresh-cw.svelte";
+function Refresh_cw($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "path",
+          { "d": "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" }
+        ],
+        ["path", { "d": "M21 3v5h-5" }],
+        [
+          "path",
+          { "d": "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" }
+        ],
+        ["path", { "d": "M8 16H3v5" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "refresh-cw" }, props, { iconNode }]));
+    },
+    Refresh_cw
+  );
+}
+Refresh_cw.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
 Check[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/check.svelte";
 function Check($$renderer, $$props) {
   $$renderer.component(
@@ -1641,6 +2566,29 @@ function Check($$renderer, $$props) {
   );
 }
 Check.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Triangle_alert[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/triangle-alert.svelte";
+function Triangle_alert($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "path",
+          {
+            "d": "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"
+          }
+        ],
+        ["path", { "d": "M12 9v4" }],
+        ["path", { "d": "M12 17h.01" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "triangle-alert" }, props, { iconNode }]));
+    },
+    Triangle_alert
+  );
+}
+Triangle_alert.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
 DotMatrixLoader[FILENAME] = "src/desktop-renderer/components/ui/dot-matrix/DotMatrixLoader.svelte";
@@ -2267,6 +3215,405 @@ function TestBurst($$renderer, $$props) {
 TestBurst.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
+const metalWhoosh4Mp3 = "data:audio/mpeg;base64,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JCZwIGXZYK3JMszsMpDSROMhAClA0CcUedFS1c1sQiA1kyUwS8KCYs0x9oiq6WKAYusldBKmsepxEM4PThUpYYyw0kUVGSBxkqWzM9MDUSkVXQXmYAlkUnAhSWrEmvMpR2M6AhUdFRBjkemHgAaXKcy1hEc3DfliQgCjSw5u6YLCmLAhKVyYyWrLHTQCpuApSqKYxapHKXl5QcV9FhlpqTNk0SEVljICizRZJay5YozFKgrCiKWWLATUlOqGmZoihURlAv8KBDiqqmBJqOZCpqF4mDRGYfV0FdNxU1XK9jAgSJXqMxpUZQIVY11OjCBpuTKV0vU8wiGbiw4mkXiLhNSaypi6jXp9wm7r1QFJrN1YK6SVSPseUVLQtquVpsGLDOLefaRxlpLQWJZxFtQqQSE6Lyv80lukgnuGWagYYOZoJ/7sH92+ecIB0cJG9COanLBkwpiopIkCY3BxhAGiEAPG04wMCTBIgC4kMDhEOEgR4tqyKAWBJ6p2qAJZFtRUhcMWqa1BSZYSXkFQlqBZ4RUxiEAxwSDgs4xBEYk31oLbSeIAjg0GEi1WL2Zy9DfKUsTDAgEw4sGCFnhzTCARHRDIiBhi2JfZAijYjWji8KvUAwiC//vUZP+E+yt2sEt5wJAAAA0gAAABL43YhA9zAcAAADSAAAAEggQPDigUAoNO9ej9PcpqisW5BrBBUkmABDy0BrAnHV6WyCzRk49QBWAhSESIaYisbHXFlW678KSAQTDALZGJiBAhCggL7oBEK0oV1RRS5FVG5N1QxTNajnQ6mMXNISBUI0wFaMzQrQgUWvT4YeuRNcaCYQBRZCUvQPCQVR6VRXYr5lrOVMkbVUmRvAzEvsMJHRoWFxkPUFBKRoKAZDmQusawCnICVoNTfmHVblVmZwiJPOmqWWBCxHIsOAoRICMSOKJysq9E6mBO201eSpx4ICUYohXgxQHXEopFQDUpXCfGT2VMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV";
+const metalWhoosh3Mp3 = "data:audio/mpeg;base64,//vUZAAP9kxnOoMJxyIAAA0gAAABL8XY7A5nicAAADSAAAAEaou0BHX0ig/sKdSfgedd99Iy79vVJfpJumdx44XZl+cYg1icekFPunqw/MSybl8xRU+sae2+kRVkMwk3QFSGYIlMuoobpoxTEib0ydRiGwogi3RdoNpZ/Ok20e+ewiRog2pHblCshNJBerwRArLJuYqz+Hed/D/zqTM9FG5rmAQGks3r38M69PbsPvMF5yWR+AYkOK+lmUWbdSx8NwEoJALj2+2Pz7qpSWJujp9c/PusMLks3ref4Y0m+/u5YzaIh7QjhnR4kzsCc+NzDoxUM6PA1oJDMYzMjEoMIhisSmJCsGJsZXFoywIYCZsgqZF3KiAMwwy4YyMYyAd6bKJxyl6jCgOiA2hjosLgKlBBxa0v2MmpdChQk4g2t9T7TC4iMiVi9F7jIIEhYNC8x5Dj1TkMHD4OBAEBQCCpMF2AyBEJjjrgEAl901kUEuAcB14IqDQDbgxCNKlTXnwsAggEGBgIgnWHQfbkuhrD8FyEeHyftlDEHfdSkQ4DIAY6pmmQv12qJWxxXIdVMNItw1ZAUBB0AmJyGJGRlj9LNTIdGUJDvRAUYh1E9z8hAAC9CCcuwIRmbVcoci1K2RKkdSiQcVtBwHMAgFR5w0jTK6hPE5EzcWRCHgwQoVqBwUhow8verCMABbpicImIAEiAvUvW5baK3ucvgvAoukW9Lns0LTkACHgA4a64uiezpINPddcjdBFBkbcmmt43N14k2Zvl2J8KBoOJPrPir/w8wxmcWcfJh682LM1Lxv9PNeXQuRBxwVrw+/Evr4I5p/zGqjALuNsEUECUy+UTFwjEjOYPHYkFbqEqscgyIZ0gkoIkGIkkAI02CDgEAi6ycYYBTYEAMoUxyD0TMtM0SWXmKaNTIUhYQkAGTw4WSEgJfSDnYrxBkgQG3dBoHMYVo8UETGYTMWgUeEyQIoBC9bLEEqgyxHbTqRUSzcJtUxmSuAkO0FixdEtujXB7KFC0aC7a//vUZEoD+4N2vgOZ4nAAAA0gAAABLQ3W/q7np8gAADSAAAAEdKQ8OJp3FywEpZgpnLmUrBKyMLMVAZTtSpLFSmIpUF9QUB1cBQALEL4LZpFgERDHhyMLgmH5ev5SamC0X2XkqNrF5wXIZOqi4IiASaYgABqpsCQkQ5pzDgEhxPFuBdVlSV6LTkrmBijNZ5AwqSDEwFTqTkW+3ZnDOUBEMNfWiVSGhbDFM1pbqllAhfA7yvSpqgDX+qNWyDE6GlOMu1lKl662NPwjuwJ+JqGnUftxKR7lh1TtEgZ9H1afPNaWI8iym0Yc4TcWYL8ZXpKxr7sOk+021NlKl8Tdd+ZVX6SQpJAzhHIxdFsxMIIFGwDgGQtIg+NBYwBThGMwpCIsyDhQNKreAhUHgNGYLiO4kGl2YiQKRCBy6wVJFAk5h5gSKDiQUQhzdJU7iMPDgQBICpms+BwGDwDtORzQEIyuIYDgWYMo8afluCQ1DBGAwIjwBkwAtVLrKao2LEa1FFdrUdhBeBljqL0heEt+1xmNOvJ52RO+XnW8qZps9GnqUCZpGWgtwbLGVmCMBwwTXajbO2zt2cJ2V/Mgd6LM2dWMMLLaGF4JGD4CQy4LPF9LcZ+15uTSnQW1FmsK1sKd0RgWmAIAFMtyJLMpLMzmGbOQsM2JyGnvG1ALAOYNCYcGIiYGg+gDUMUFgaGWLQCnTCGKsLBoAoWq3NLZNQMxUwaMqq/azXiZe4ENQ/SMTdxgjXIjR12zuG9jFotRrpcdqW3fhhpDyN0lk60NpdA3GD3Odx65NAjc25R1138kmLOtymC4Cq1novP9GZIxakAxhBkdJU0CGMLhwTAQYHBINBOGCsXaMEUiiJAoU6oTBSvHALLgZaafoopmZRUrWX3YmCnhYwFUVigYMIDkEBzOZL5CBP9BKIwl/yYCQiwQsAzKi0rqpjIwGNpWn445mFAkhUHgoAKx0U0BZfcCgGu5HpwHcLhuJBz9oYNIclLxHZOJvVb3MUdUrL9JJpXMqtpzqdst//vUZEuH+yx2vwO46nAAAA0gAAABLeHW/K5jqcgAADSAAAAESGcppCfM0ttqLbO+QAuYUgWk4r8um1uFP/KH+U06tNdj+LXWQIQDMCz7CCInWYNZlzJWfNfTFh5Td9muuQqgBAHUpMCgShCyTSAJiIK2WxqpKWtLqii6nXuFu1gA4OzuEETEYLgaAUpgaDX8dxdMNQbRLRJCjAQTs4TFTtSuXIz1rkMxt9WlNAsszd9zlrOJCpcrI9jwsNqLla1II4yB0JIy1kUPPo6bBYFbd0JE2SGYcrVJSwOiqOs1mAaSUPlBK+4Ge9zYNkTsuwyN+7HQTtV/MYBwoFhnF/megOZPC5jAsGIAMYWJYGHoFsE3RtC5wuQtsBEPMKkXCTOFvBYB1UnMazmWxrEuYWqmgwoRBNb2JCECBxaosgBlrdL7LDBRKmCaCQcDJKl3BgGQQGhjXaJ2amBi4CxjwCxZNuqmT7BgCIRF9VcFx3bVgag7KEpDi6z0oc21TsbSs+z6q1rfUqLxJhKNMudlz51mzJ3vbpYoXEjIQAgQi8qUxQ2g136V/FtIbxBrDipvwzLhGBhmAhAMDFL6jYcnQsjBOpjrrPZMR1SMhFQALJmBoExcwCGYwjIQoBRSS3GRuH7TH2SEiLbtcKACMQCWPXJIMZwcMFgTMCwAQVYKxtS96VrLgbhDxiIMYGNOAmdTEZZOzV939dKHRGBLasrUcmqamdN2V9vg4kLlTR3VhTKmSL/gyerP80Sw3N4WVQc0x1Xecx3lhV6N0bqwyHGfS56FIxtYF/3GUGU3Z+2SbhqH28iA6j9VgODEMyCXjNa7GQwYZC5jkLGLSmFByLAmdWIg8KAWIAIBt0QwSGSdMIguJtnQ5g4CFQEEQGMEgQSDkCiQDKwSAhYYLBqt60l4JomIwiJBcFAGKggADwGWWYAQAaY63i2sDCgCJgHgaGC4ViaMQ9BgKBQGFQBSYEYAAkASUANuuvNFFAQ+ywisiUjMW5MhS8SiTiapGU0EFnCeVksX//vUZE8P/AJ1vwOe7hIAAA0gAAABLD3XAg37togAADSAAAAES6SQa+0R7nIkUQW29D1S5JFOFzULV6AQWDDMFGXMBHg4W2rXPeydl60YMVarldCpzA4GjPcqjH8MggBWVO2vVrb7p6P+oOrNVprKPLS0JQQLiyTAUXjCBIRoIkSGtNHZkyNybKp1+rPEQGBUNTBSCjRriTCsgzGkDCIFUYlhVN3hnbVpW0ucYPDYY6gsz9WJikF08+3RcrYVBSQMS/bszMYZWp9f0NsbaXBsOy9w6OPU8HPQ3lK2Rr7ztbZi9q+ISw9arZHjZO+q7469rjvdBV6tAjzO9QqDwrWEWfVyJHKqWY/dxObAzH0IycYBTiZgDmPBJiIGZUvEwulCzRLoUARoLU0LuXFNS2PR4ELihAqXygmKNfhSZZEGwcAAswQCXiUD8RLaJWLWbDaRTYiX6XzI2Zuy1kWAdMCEAcwshfjWkAiMGMGgwAwPzANAIfluSlsMRtZjDk04LYPB7EEH136f6KUrOmvrCsnghraQ7TJex6GmLuU5Dqq2SVfzLWkShS2Bh0LDGwGF6joBCQYsQh6alDTofemQSteic6PABD0wdeMyaAaHWTsEbJA1eA90cjbebn5tpigY0KUcFAwMO1GCBYkT4QC2SNS5530RPTkBoCmBgbGC4un9LMGQhEGCQAJXya6wC1B0BQE/ogBYwvSAwyA5iDuxVuEe7GqWHXKMEAaV9Dr+QLBcRjkihD1R2HXueuUwTdh20/GLuSJ3YzFOvVDcBvrOQ06zochubjMKi85E91ZyKtO7E4y/WMNwKy5/RtUDAAHigmGEnPpHPOEQYmfmdTA4yckIbMQNgb45CLdwg1DQUQUSqT/WgugBENBIsLALPFCUuS65siX7TlfxSK41mJMoSxocUnFKWlwhWmErbYAlWYBQDxgOgzmDkhUZtw5ZhHgYmGCAWBgGIHUpkL5tzZG0xnjA1tK2Lgd+4tVnEYeeGlrqUP8xVBOqu973SmkbuxZsymbL//vUZEuL+3x1wKtY8nIAAA0gAAABLvnXAg57uEgAADSAAAAE5Ymsth5KN6VkGAqAuEC0JqjIAhgFgBqYM7aa3N/2vOc2sDLtawMgDgwGQxsixjCFBzBQGxcVPpktPLXTaZTPM4kDOo87RmmgoGVi46AKYUY4JgFgFtUbi1HjDoaZm8TXJciaBQLjAyB0NdYa4MBnMDIBsOASRVcLd1lK74JfwwDwRzCjC3DAkXJ1OStpcqbamdtuhgSgMJIU7W489rS3LeebcmDbEEPxLoKXe3Z+Ze+1PJ+y6hiru8dnHUxBEBRZljpW45G4bbDfj8CpPsedytLa+bkSuN044K2QwIETSASNfBMqg4wMNE/jGIlBkhMsBaPKau4XeMBgRoboJ4o+qdKwQliKaiyiwBRkBIVDQqRmMIBcwaCBEAgEHgIA22ThLZhwBkdZyEIk10vHxZAjuhKTVLACwIBxMH9A41YSGzAbDRMOUDQwKgCwMA0kCnMivPqAKyNRa89ESb5iiIT+LBPCvNnz0sBXUobCU201UvH/Zg1p/GxLih1Pl+lDFhlhoZLsGA5smMAQr6a2CiHY96vcGavy7kHKCPDVL9GCgOnjbpmIZhGFQOhgBMFVSlbsQ7IYcVzFoCbI01UiXpjCAQWAowCBYzIYQBEO16GG4P07EQZ4nSrck6icYOBiaPiYZg62YIgwYUiUYOAKjk2aEL/e7B9CUAzAoHzPJiCZYC6aYkD0MAzL+wvFgIMGVQ9fTXmnSeIxx5bmNG2JxFyXom9LiuxKYRSyp+oMqvBcmZG/0hi7lQ7ei8Xo6F+ZRVg6RTIhBeESuffyQuI12llVldUBJgAANI0Q6FEgQ6cqAR8AkVnYEITbGYyYLAQlK4eXencnUMga7l4pOw4oKEBcMCIAYOIwJHsSAy+KZQCBFQoqo5qCs6RAHQJlqi7NmOQRRRBsrypVKaEQUGLp5eCbXIMJgpBXmBOCAYAwBaHytrDmIw87rKneuSN8bbLbTH27xONyppil8rZU1Sgc//vUZEWL+yt1QkN+5tIAAA0gAAABK7nVCw3jyYgAADSAAAAE0MAAfmhoYxKZBDcYpW9clrk2mQYAAKphOgXq3EAC5gLgAQXfa/Zj8pe2NuXLFNw4AQaA/MnwakwsAjzARAKSpXcv19rdiP4zETnrcZTrDABh4LgGgCggIgxBAYTACAESXbBANmlmaOWq7RUBQBYkDAYcKNZmsjPGEkD4YNwGhYADcJ614Mt0tV8WeCEEs53HRpus6huWvzGICltDcfgqixKONvjH6s3YxlUeqSGlduloJDUh6bgCnnK0QzlNaY5EtTd6ZidSf3egS3Ks56VFQGowVZiVz8rt7qK0gdMxBkcZIBnAshQTmWiJlI6IQgxHiItYDbDhrtAA42rEOjT2UwbxUsNprpSAYpIUgMzUSGtovUNPhwDobknchKYq092JPKGRW2x16doC2wUAYYB4A5gdAhGHOkCbOIGhhYA9mEoCAFQC0J0GyeWyaGHCa5xrkQftidNADSW3cOVLNnnSidxXbYlQXHlhhjDgSiklLtN1kdmsw8QgjmL+CaCgEi5pgeADL9ceNPdE6B+MW7NhUSMAEAMwIAGDI5OWMMMHIwBgC1fPrbf2ghyXVsJHMS22qsWjMIkDUrAIMB0CoxfQBg4BBTSCnzmnCh5yp9yXWd0LgSGFMlOZnQcAFAAMKABVPperhLle6Evtp0UEhjiBdA4LBlMup6WKy+lxj7Rh4AlvOyOAn3jcViMksUU9bdGVSyXzuD+4089WlM/cqbs2caHdeW40E7an6+dLWtFpEza1DOTNNYp7U6oBKUAAN0ogx8IDAAYBT0MdgExIRGHEAPNQzsLiQJIZ2IkQ0xIs81labBk1BKEDospdojiIIOKLMVc7byIJi8oFDARcSCGUwYkSp0iopFcsqa4u8kAEFQEwEAAYD4HJgjBeGF29uZvJAhiLBdGLQBkUAfDQDiz0xEJsAIjIYLpgdvmvxR85ZDzt2YZYWzCvOxBfb7jgAQsAI19hF1VthxW6udB2//vUZFGD+551QsOY8mIAAA0gAAABLo3ZDw37uUAAADSAAAAE2kRFIQwAwFzBUEQASIY8BECAEjAgAZlENy1x4EqLzYAzVFAVAHMBIB4wKwnTEkXvMVoGEGgLDAAq5nrl0pl+cxYltSHXjXSEACGGQE8TAbmAIEKYBIEAXADZPGX5ltWApxpbwrDl1AUAkYAZgJlWBymDmAIAgkUvHGpWlPpPUj80aPZkFg4lYTTTnMd2KfII3UmGVmCOA2mHTQA0+5ZqfSyuNtYpGFY37d+3S15iKY7pLrTorJ69Bb1RV7lPJeTdztqUQQIwEG+kFDlSbl05SEAE0APBLTIh8wFcKgEYKQGVGJUHAKWnLYIHASgaMCA2wMdVtU4TBFQVLBaqVK8kyBEBhwCvJlqaQYDq9BAel4z5TkwEdUFIgVMVramDvKhTHZDCVQLlUoBIFZewUAzKoYxhuLunFwdAYNw5Ri/AwgIK4BAcg4BZJFl7kI5EwAaUb8RxvHysS6ET8BOVImlOvFn8ikeCwBwkBQ8cNOfRQ3C6Cu/FmMtLZADQFzAaGeMLkHolABU2AQParn5nGuXHvfCvOF3xAAMYBoFpgUBpGSA8AZCIMo8BOLACI1tddaUy6iudtzkOS12S95hchZggAIwCAEwcSoDg1WU114qSXxuP1lM3ILvmAgQGGdCm3Z1mRwrAIuEl5LSvY8bToLg1DIwUAc0QKkwcBdDJqKIEVwooxEbbxGJQONIxvzMB17uEsyuP/HliL0oalSjvVJROUMP0z0sTi8rsUU3jqSVo5UmJ2J17cBPqYEhSXonaeUdvYQ1FJizVACDrQBvY+EBScoOZzCQUBYZiYaQFRlnAYqIglyQhfAQlClhggtAHUUCFjprtTQRslbsn+rkzgEREDUmgARCJG1NZhMZYwPMgdz3lWnCGvvuoArGioYAYAZEAiYFYEBirEBHRcM8YVojBgPA4mBSBIiKgiVK1dQyNFzFnzs27di3K7mcaiUcXhMO9TU8oEACgkBxLpT2Z//vUZEsD+ud1RiN48nIAAA0gAAABL9XZHQ1jycAAADSAAAAEn5+ggSVu3qVx5hIBDEMRIFYt7FzAEAGldiDEsYKg/eKLckTHEQCAWCLMzdSUw9gyDAyALCACi/rEn5tXrUP15ZGLkFqDrXMEIGJZYFAkMAgHEDAPPDBk3do9UsueOmUNEICxgGCUmUsNYVAejBKANAwATNG2bVlD+P9DzZgwBswQxKxoNNNVs7pyWrMV+1HQAQJ69ZqN3cL+H0tTCV+40Jv/U1f3f+py7edCk1ljlle1Zr2flLv0FebesLACkwCur2vpMH4wgEQaAc1EhCk+b0U04+mAxyEyKQ1Jo2aYZunGFGmswDosOZxkhFM28Y07qbpacv4SMAgyiQjGu1eKKAg6HLRKU2bwElTKWYkWj+76cydDBWKF2y4hgHgEmAUBYYHYL5ibMcHAgMaYgYIRh6gmmAMAIFwAX8WHYgOADQWYAICJQAs7rhkQA0OSphlR1GuQbA8YYlAcu62wMAqEgUJl94BbuxqMQVDteAnYa2sdfAkAMYzgDwYAyKgDEQRMmlcGIbvrfjYoAQYEQBDavMrCYFoIRoXF7GBUISYH4ERgFAEjQATKYVDsswyle4ClsrZBBxgPg0oQEIH5h6grJ9tMf+HK9LyUR+BUE4GAIMBcCEwchjDS4AEMG0DgwDwJUTlFWfUq1nMkdA0swAAGDCiHyMFoApNd1CUAlv6WemJyUIzgkGcSA7XJDD1tvjSWPq1IMlAXAVVjuYYbzvb+BKSJtkVPYuU/yVv8PwdCfvtIkdfNbbtmAMBomnD0hoJyvuLPPE8VaDKAAAdFl4jDBIxIfAxcYUJmSKp25AdE6nbOgKpAuOAoIh0dFjLDs2E3EjM1rPJTBBhrkIoEgzKc6rQpLrA6iqYtOAkJL3Do3uY23SWuIjwje70FtYQANNBgAITTAYHASJJB5xqyyZhmOJEuRfgQgG6rL5amklCWcdBr78Pyw+JVaeH7EchGVSlaIipISEIhoBGoOJJI//vUZEsD+tp2SkN467AAAA0gAAABMNHZLo57ugAAADSAAAAEYhircp3LfSC2ALTFACEQLmTwBq8dswrA2mhtc6Z7r0baK+MBwTYmsIWnMIAuOJVkMzRsMCAFS2d2GojBUdfuvSTcqpZe+M6AA6Y+poZQAwkDIozKvt3tR99HxS8EIKmES/GRxzmBYKkw7J4P1JXqabDb/wc/xCBJlGjaAVn1guZa+rRzMfUcMKhQfSvGL0TjVWvnbm2uRNeq4+ZWOb3UjrE85uDCID7nZvPCHMcM5fQUj1Ve7YW+wUDQMD+mxoLM3cls1eyMABZQBlMBwyYRFZhwAo/GexqFDUMmI10LjQA6Ga6eTdJipRGig4aLCZr2tmJB4YBFxg4vGUgoZJCLUTDQkJgGYiApjUQv4nsmIAgo0UEA0HEtNImCqaDGldKcq4RXUDbisM5MAgwGCQEVnMBgkwGEjDAjNA5Y0lQ4QSFWYM4CwOBIU0TTLUCwACazugUAcDAorY9iNqm8UQbeJ/22j0MNIV+g2hekevsZCQBBm1EFAGo8rfLWttzYHth6w4iABkoEAgwlIsxXDVx0OogCRjswlwXgbWINIIAVBw/DwBs/EQCGDoymRGDjzkqaOO7cblbtLglEseOROm6brQwkOYGh6jiIQMMPxTR+k0SmWBu0teGMYs1ycJADMOSKN2w9AgRmDIAK5f5/YCeBlr3YwyuoyoHZGpu9AiEySYvSqKSRpJiSEat/GgU807krjXYxKZluAUCBblPaiNuN2J+KKCTkNjAAPFZiEtddNxCyX3LD4wJfePuV6IsyJAgBQ/z2ExyWU7O4RQS9lIBoCIKCbMDsA0wcAajAZAHEQFpgjAiGBYEcYAwQZg/iUGGqGUY/wAxn3k/miCKUYjAHxiUD9nPGBzQwIsFTSAgNYDzizDrjUOAewIpAd3N6lRPHBoBKhCsKCiZqY8SokhGnCnFA6J6okixCJSCeGBFFC3imBfwQjTS6zm8CgAC5QAjHwEAi11TBQAU1psEA//vUZEgD+8d2TyPa62AAAA0gAAABLAXZQo7ri4AAADSAAAAEArhHxx6ZoTTHhXu01k76KWMXnH7WAfIVAFZwOHNqLKGnvyxJz6WEsGVgYylkhGrQBRdAyDtdWCDgdqyFyhIALcBwoCAUYsAgpohvaBgPGSjKGDoKhAPr1b91XngJ2GWNfXI7L/s0YldaSQAlJFhTA0IJmtnDb6U8ONkd2BnQY49YqDZlSEkRablDsD32yurDEJlc6Dh/dGOQSpXI5X2VxezJzBoDR4BpDN2H/cN+6WJRG/HX4Lty23hZ7ZvSupDcoesqgEyecrV66iysNm5GIYl+b6xaHH8iD6BUAR4Kp2VWJumsLCQiYikhAAAAMKw8FQpKoCGDYRIsmGgNjIGmMBciqPGFCXGD7/HU4WnGPH0iGHTjDUMAp1jRJujFBCHMEpMcNBIFlTgBUSW6RoeQvUoQID4VAhCMvwIwhhhCIjswOtB5FglTKpRNXcEWk/DCL7O5hgqhciDqXqekHKczDXHebglbG2MobrWZfHYAc+Kt83j5vatuggQCgVwzNIDh5pyx5K4U3LnDfFOuMLuTiaSYuCwcy3/AwDMfglt0a2BKpv2x952HGWSKnJH2JEgTOCxswoIA4EUBewtY1B2X8ZxOOY27zQTBMSmiQEvxIQwSxyEz0Qk1nciYhcvwuMjIpAQKljQIvg9235hbyOw7DeGHglAjSoJlMnjfKd7MXJMGiiHZpg8ef1FNPufooYgFeEIGAqmdJ5c/tFRyCBG7ol0kcBAcgCDrkpgscBwsB9O3qVUz+Qa8/Im/TwhURs8dyGMbkhqtP1ynehAAAAYgU5jYabEEAUIDE8Cg5gJIYmFA0dMiQDN4wzoDV6PFyPQQGI2ssRRZIp2VQGH09pSnMj3DSsDBVwLzTKmWxMRC4CCQNH9gRaSGWUOS11vwuCzywT2x8K1ZxIAMg6gKx1ghIQepbrJGCLmqr2YwYkCMkibDOrwaC/TB3rRXUwQUVwosYgQGwgLjt1C4O2Bm//vUZEmH+v52UyN7zXAAAA0gAAABMY3bU81vXoAAADSAAAAEbvrnnEMDBAYMAKiIzKTATweNmdkoSWea2p92IZcNgCmAXJyt1TWLuJgCAAPMXgsMqFIT0vi0IcD3oMmU66NHxt3ekyjS2UilV2DpntPa00tWN2MVU1jI30jqUbTU/0AL2srYfMQBOgUFjEGsnib7Jvo8JIwGt+XLDw+ztMNzXQMYtugMAb9zwuqZ46STdXntvulW/4UOfyAIfwpL8bxh2xLrIqYljPtLae5YMgSWDCIpPMgTDLprANLf93yAByVaVQOBZduLPxmz+BpmjpVEgGSRik5lDQXNiEGa02QDjBgzHHn+Ahs4RsQAkXlwjwMaBvqCgCGS80WKLEDAXcbYdDGCBQlJR1DDEi95EmLtkg0IXmCCCII+SAdJMwoEaCJWs5L0FUUga64IAGMlmTIFB4LATYpwwsVRKul0mDElgAIQRhhC0QQmABNQ5mIQCQGAgkwNbrBKpcEvmttiCVo6gEzckYmQIAxLwtoFgQMAl6kgYYQAgoDS/EQE3MxEGFgNYVRQiXQCEjAQ8oyADguY4FLLECKZQGLWgdLJFA4MYDl9PJs4GDxodARQWnL+GAgaFKcS4GTjgEz9PsCAiVoGHGTiAYEREz6MOPoIFKy04cQbsWAGbnrcTNW8ngABwGOJwNumIjoWtdZs6E1B9AWidJk0wqBWOLA1bnIuoJRGDLRjSJH5eECF1zOxTPKm9IRKa20sDEDH9XfAqBTMQMDlTvuC/6+gcfhyQEglERGR3lUy15h1RhgyZa+EBkgSQFAyCVWOo0BsLUSzzwtVXOnI4qfYiAJiTlSHLyrmWAMABXgAyKHlgRbJjXnNcAQR6QOtMtZE5WY9US5S3y+YEIdxpC60fkQkCbsSsaTRITHYYwFAQDnn5e9p6sICAa0Aikela2wMqBRyI6fTjNwAoCdSNzDQAOtKHwEqHXPjIE6Way5PIhsBXZdZMJIYFHI9KVKsR6ftirzR0mCqpxhy//vUZEED+0d2VKM636AAAA0gAAABLanZRc3rnoAAADSAAAAEQuOHTJhgZZ1Zr/I4jggvKHA0tUZmzpyqaiDKb8goaBAIcdLNFlFY0QkmhCASUAxKOxsdDKqNvLzDE0NmuMLBRFEV0i2Tc4GLAAABQ6Q05M5ymAvUZXQJLS6rER03ODaIGUQHQBW5MF43MeMVOXJUolDfrDGFAKUDtq0wM+0hBxakUwalf2cYEr5vEEIVCEv3LfUuS/4YEKzlpVcBgcnKEArMGdO6y0qBpMEv6/qsDDnXvv8WAJOJgBdqBoUh1UjBLbqs9haFLKkrlK2SKDMCUHiU6FxZUt5pSv4aTrrt6ypct1xnCitLJgIAAgAGsLZj54XPMQEXESVBwqLKag5lxSYUGhAiIS81eARXLLJMlwoyWmR6V6l6jSji3EwIBBIQKgiCqNZdUwQfiAOAmhBUWcpiQUBWOMBRxWwZwYhxGiqkDBS6nHSUV0rC7LAjCUYDOXU9VcuQz1ZJg48cWbTqxWHA0VQNa5Dj7oKtdZytoGnoWnepcqY6tBkzMkVi4S3ioDLqnmOIKtdh1kReI6Ws0RkqFwMJUqrjzBQOB4GcF9WxMGeMCIDcCeJCJzKCrBMTfx1rcWWQWya6Y+6AuLEk20FUEpig5iDpM7UTSqMGHE8MJjJwDRqBQVfihbW0QgUwcB9pwvFP0oICL38d6Yk6SghArKV0xC+zqjVVTFZUh8BQgzdtZ6MIAl0qlL/Ou7r/NHZbO2QwCiQGTWhmtDUrjMZHAMmE4UnYCqVFGGqcLAEmCj9T7+uC7shZCsKw6f5ASzm61mBI5dCAMteDlMnGkTgzta1VVIAAAAEAAJEdXy6iQVQ6YACRgkbmRg+SmEtUYLAAVAJgANnJEWViBNlDJDsjyPAxhi/11F14EUmCggwEJLdgIDIglCAQAqeIKJAuBJCGWiTU2nPYqZaYXFDa14OPnWQBM/TIjaTw4GsmeJh4yHAJGQLLuPyhILJsNECOByQvQgCXmABFFGHH//vUZEOB+6Z0TmOb7HAAAA0gAAABK5HTNe3zvogAADSAAAAE55dQ7PM3YqBqmitT/gwJPGa2owNCoskUOAAIQDC6NpVa68ghAgwVSY2NEEZDEeAKVGEw4kRILSWc/0als5SR8wLH4z9CMMA4wDAWI/AXMs4iz9XqsBCC5iUY5iCFadTZY5knUFgNBQVI9CoVmKyKHdSnmKAIGAIAmDAVqptfpHWXiYCETLFWyRIpYIQAKRAGlMt+mmErjF8GmO53qCGbM6wy/JVtvbqmj5f1MGEvxFrcZeel3JAqDACHeD527UjURgILg8VgA3SXZSrjtx4LB8LBq/Upzwmb0E4cyprUABgLNirOi6YgDZ2J+9JeKWTEBAwAABAb2CBAuYegGPhYQTl8xCMGBkRiJArSrUk6IBwJnlAg4hSrBwbBawCPST7krWYe/KRRexDZEVls6l7L5GmEoqzNlsrYanQjkSgpiVq5SYrzp0rmrptGGiSgyPJf4FCwkZGDAZQClymxteLaqHm8HblNbcFTzEpdat25qWS9L5k09DhAAjaoeIgPAMpWSw0u2LEsxiUjMYPcR2ktxwQGRKcfTTBh8ToVKbEIHCA01hz7G6OMOuhgpM5yOjBYFCgFEg23Odrzv0ST7uphKnADpOujtEBrLDnbgIqANxiyxgAfmJrXHj6DmEoZBAEjoXNvRtRvl709TBsKWgP43VrT8lxiqAS1rEoJQPDhMjL89jNzOgxxmaSzq3nWpasP81yt9VmZCDhjiAzr9wyuPveTuXbV5Z+mvKHmDodAoRHxkdDO7rUvOcu6jTfxmDKKUFgFxYHPziU/qdWWOgMgACAAAGlAtNBpA0R9Sw1gYwxEGHyoIQDN+DmgjRnotGCAmNCKVNgVw3Nhih6rWHJHKDqqQQzlIx+05UZnZQYEQNMBkT3u4qkrRLkTz6DSMaGAkrEjo4yJ0DHEyyCOSfRphq708WupVI/qsIAIywK74kCgmVvRU3CLvaHfVSuoy5bQjB0y6IBWFr0MOEX8//vUZEiF+7x1yutd96AAAA0gAAABK6XXKa333oAAADSAAAAEMCgHBAamPp1GCYAJ+pQFQCzBIDjINyDtMIwILaDye5gwFpCArEabClbqyxfZABxgiaJoSQRCAphMBYcMaJ7v1q9maLASgIDTAQJxQDzGJCz0EWi+MNOIxtYCOt+GAmYbA4YbpAZs9iTGEyCiYHAAhgcg1iQCimDNm6NzMBICgOAUVVb2WSwvc3dBARAgQLRu4IAFae3ci9X4Mx3aU/+VTOlzlD/TNyneSmmmFhYD4wWwJHdgarLrkfkzljwB1+/zKYcZYECAekwAL7QuWubj/2dZXYlBNR+KskaKYBQHqVsQnmjVt1cn9egBgioJGBiwWETZkAmjMYqMmFDQkHpDjgQWA9SwyxPRsKA93EhWPNHZa8jJ1PpyIFpmvCy5OZ0k5YQ6peVrLUneWiy1N5uLYRwGMh2AcHrqSql8TsNKDBowkba4vUOCFgRAHpQu2X2QzVgc8zkOhug6/NJqdyzs/MNSe+mdMcA4wtJ2ajkGR4tPZZYZzGix12mwJfhQADDUgDqcbDBoOU9nOCwPF/oVV5dq07uohGChamsgpBwUFQpg4Dkw5DB8mjsFDAZjIEkACAUDDJAdDusaAUFqwycLJl6pNBcAhEDIjGQKIamLIWIYBQKZgGgHGCYBOUAfNVR7nIkAQTC77QaaGqj7Q0MANEQNkCV4aAwGT+5VY13Uew5Nwj8pVfpuzTe4YvW+WVyJiEDQBA6Jwv1etYbnXZa9jvHLVyViICUoAQtfUl/1av73uKzNmTy2tTmAEAgojObbnRfc4iZ2gQVQAkcgAAywEiYCwQWErqEAsOOGgCmGIFrZIEHn6NiaVEJAF/vsyWfTNeFvWswLxFVs70KNwdFW6uK2sMtJaj+SjyXzxhUoYW+YQMv+OS3tV4YQrYiKABJflHxYZTZpIGApugp0DCYyBfyRcr2blX79rC3HYalKCEqBsMh4GDkki7zOV3mAYKAkeDKEFDHMAgcDMNKr//vUZEwB+rB0yntd96AAAA0gAAABJ0nPJa16PsgAADSAAAAEhgMGL4wmhZbBgOlYHJzIVjQDOrf5vN/ooX6MKgZMYitMOgyMgyNMnQJHg3Ti5GrcECgOgYIxoKjA8HjGSUhM9jEUA2KMNY01Vwk0gcAphmEhhhFFmrALiYTQBA8BcYF4TRgFAFMMTEl/EOUbSCnJuGpxP4wDQLTAlAHRJk8MQ/Kb85v/j2Wd38+75v8ef8RncI0qqKgaBUBkiAEg+pXy3jWh3D//eEy3qJOW61bO9/8+tlnVlOspJYbPZu2bHXq7xYgYPTIOghKDWwwShxFCaEk612lAFeQqlZwc1cUuB7N10yRpkRZU8Lovy7sFr9hxacHNzeWLQDL084SylGZB93SzxpKAGWsGs97Pch1TBKhiRMHYa3zdZaoCisWABClLCBpNV1YGjFBQRHB/KSUySmqylPYwdQClnUuqEvxKHfMHkMBKOQ01VkRgCCMhgVjrCQHLjBYABPJxcsf7FZc10wAQVh4H8wCQAjCmD+BwmwVAVKoB7KpbMPOAAAQwGMwEQFTAJBEMCZAYxGQPTB7AbR0Y23B25NIkPDABAlMF4KIzjAzzAWAsC4DJgliEmAgAW3ylT86HQAQcAVTX7VyJxwhBnBQC03hBDNtdsqVSQ00pjVRdataimDXBaEQUvMku51lPsmobgdk+irV6iuklZJIMXE8tZRJC6lr958yiMQAAaBQKXM3o1pS+rTQ6cxtmot8KjnUKrEV0sjYYqsKhPwofJ2eLCxBr8zF5eztujjag2RSt2qzf8tZTTKxAUYPiwPBVezlWV+kpohEkflesvf137rMHHdB40DbGdW7vn58v56gmlmniRtFiQU3gCZeBL9VQLgEZmCqDh0Q3iDoo/GFxWmgAUBUDAgIZoOAJWOk5nllTqqEgGgYSwdBZhUJxhnJRlIFhgUEQAARPuQVnTLmGJoPDQamGw6GbOoGMRBmaIxCxUA4I3lf51VklgFDA4RzIkwjG45zAoMh0//vUZHGB+V9yyOs9jmIAAA0gAAABJvHTG61z2sAAADSAAAAEMTH4fTJUCzAsFxgBYArigAl+btzdX2kBcj0jW2lj7Vrvc3d0UdKpL+p1Il8CmDAJggnQqNbeozDUhwmyDvt1qRUk6CA8jynCGBSu2wg0MFlhLGAkaXxETTrQQnGPwJPJpsRDgYQ8QCpestEIFXawsbdp7risTky9kz+wDCn/jFNRTDqBBdj6lr/xCLlqTS2Qhs01+pDZoZVqJVLL0RSQSqtG4Zee7CcbmfO4Z2avJHZgLtSykcZ3A6sUMyqnLzFthUOGvy24UxA75LvMMBs+QLzA4WWFd5cDBsfylspgiC0tjA0ZOIGAxEkzKJQDMM4EcEgOGBuCYHAOsmeRRcUAwMBME4OAPMAADQxyyRDCfG1MEsD8aB8BwGxflmzQVSjIAwNAdMDIIkzFhcg4CEwAwKjA3IsMC0BZsxQBi1OibG6lvf005GhwO0SAWs4w1V1n38cu561rmv73X83qru52qjs213n85y5W53XdfhVp3m/ev+7v//m+6w7+n/pa+7l3dQCU0YgQgABlR0gQpkDTEKmQEUzO4guxOWGA5x2a8HQQ7c05b7OPD0zQu8oOny11nUqg+Hddh9uzxyyHIZhgGimQjiVhp0buT4O/u3Asxaed9JJBjdLUtgVsDnUEsr18cpLYsv5RV4deyTrwGAuZKKTFN0cTDgKjSIhGZMUDivwztWwQgEw84D2RfMHhgeGbZgqAIlF+WbUuhlpS4BSFnki2CjeapgLJjngjmBmDyYAwX4qAUvFuSHEcAIMAwBYwIgORQKEw91QzA8CdMVMC8DAmKxJQquWqXtFQHgAC6TBLmOCZuYDQJhCCWYgY6osIaYBQDhgVgIPvHKUiAUpKs1qka2YAAnYcCO9svjMjypqu8JXcv9q1Ms7XdfnnjVoN4/gOABWMec33HlexW5j38JtWWmxzwq7pcv59TPVr7PKsIn62GoH0Ei53zYgWmhYUSiR4e0hnYYhAwi1Z//vUZK2B+jd0xWM89kIAAA0gAAABKCHTFS1z2sgAADSAAAAERCQkp0GJAymHG4U2MZdyIwFBbbOjXhh0XE67j8Oq4r8x4KAXGe2cdpwyg6ZmYh1oo82K5McjVbBqsDy6WSjGhnn4fpXVNUm8b9SV1OLyoqscjL/F9h0Yjw4MSANrVuPJDDAJIR2GNAxcC3SgFsTDwRDDAxPBwCHiExGcbWtM3MKR0xEAAcMzNzlMjq0zsnjTRSEMAQKgwGAPjBKCCDgC2WNbUMCwCpgiAkmAMAkYHgVJiUEImMQK8YcITRgJgHkwBD/tYbuw0s0AAAzA+ItNpUHIiFnMEIH0CAjDwZgCAhMBQAlJCH6JPeVWvtS2CTAEDdEgQpqX3u41MrXO5fX/uW88McMb37psuXY82yZtNW//xv/+eFnmsLvKPH8v1U1h3Opd3v8daqUvN42tMAEakMBAAAOoRhZJMJD0+msNlaoDhmt87GX4LANLqaH3Flj+VHhfh1Va1zoBartwMvRp0MRWCYgWjHQFTuMwlhiJw4HiE9S6cF+5FPOLTuRujlroONALxvJBFl2GqvzFP06lz9WI8jvTzD9x+087EDOwtZI/3Yg3zrl5DMhPZJR1oea6YHlw12y1IcOnJdvGR7zjMphhso4ABCcTiIqMIq8ztmdxEDqYC4AphMgmiwFq3oFZ8hmYAoDYNAAMA8B4wzCljMcGpMAIAkmACShUkgNDAAjAFAOMAQC0wEwjjB6MlMnw7QwRgfwqAQYRQU4YCgioTAHK9jTCwwBaX4W5feacYDgTocFexSRWLtym+tvdLq9W1q9/1+UnMf+3Ka2mjvbzK1e/DC3Vv2Mbl3/gu39TOpV7jT1rlynpreO7ExflVrvKUsBRBiromxMcfM0JmS1YKDDUpur73nzYqAAbWpQ2jmOk4yl0FugyhYIRATJAxACSQhbvt2sw8o40l/1B1aG5PyzleBZcSkIA2auTGI/VhudkMATClTRIYcOkgSFtKl6PsEVHdmZVKZ2A31VM//vUZNeB+iN0RFN89rIAAA0gAAABK73VCK1z2sgAADSAAAAErc7rXmbMpEAFMHmYwOaBgEvRPxlxjA4OAJ6MdmIwuBVQRxk6bBkOpHcS4hiAhFDcJm4zE5mzlXqBgKMqG0Mv5cYzw32jIbCiMFEEMiINMB8ARAKl8nqQAiGDOA8DQJjABD2MLE0ow1QjzBZCwFAJSgAss4QgDhUAAwDwABoGEwfQBzGEMOPcAr8xdAKDCJBEMHoHQGgJjoBKqjW6ikRIFll1Wino+zoMAVMJUAZMGeh2hrZRX/yuYU3Y7Gf5GZvmNybiF6vjEoU1ZS+DuSinqU27NLczu/cjG5NI6X7VbOQVpdN1aLCryhnJ+rcfmrax5YvxKjYYIEjpq5ucuRBYdKCtBOClEuCLASMixQ4BUOliUMZbtBCSDFooShj6GEDYMKDDAUSITBRUIJA4SUqHQYuTPN3CwC1hTliroMNTXUDMnFUqltqOkQMAAFZiGbersXancsRTZ/XICwC2zcKUCBjGmHuI05a7XIAXyjK+ogCHPWBZ8msm6qqKhMYhjyhsoMwdkZIAyA4wFDAzJBlAc0uosOnQYYp8a3hoYCA+DgOcZc0tkz2tWkDNVTFzRGBBgeOJxqGhiQZ5mwQchh9BgXA+GJOA8YDgDqhjSWNgAEgAAyCwGRgQAkGTmD8ZqQspgsgxmBUBMYGoAIkCiYG4BRgeAQmCADSYGIZxgdEAmE7xcYBUj5g1j6BYL0xLwHwaBaGAXmAYAYPANJmgkBIwUQE1/vxFYYjrOhUEIOGCUg8Upay9ENw3GIJcxwmnUEToLTVI1H2LN1ZXDim8BP9VbsySWFQAh36zX3oj0HsGdKHYhgzmkhFnCHXRc+A2mP+88MS6LRRu9qBI1KIfYJNRmfXak5HqjvOC11+pTTdlA4DNY0WB0dDEAVHBLpSaoXUiLW3UYSECil91a70LEfGNRJ/Uv2kqKQDHEPmcLtfFh8al06pFua74+2Nb7S1MzEAVdq50nbzDocpYIuSu//vUZPQJ/Mp2v4N995AAAA0gAAABJ2nVCy35O0gAADSAAAAExL3Vj1uSvrAkrf61FaCVZ0sZ+xWam20WfyW3IHZmYBoDkrgGYkcCU46ACMgKSuasS+lCoHg8G8pSv6G4tJ703T4VbD7rwC4OJglgWGAWA4YTo+hgRgBiMAEOCBcKMxTAAAQGAIAmXaMAEBgw4gxzL4E4MBEA9hD6J3kIAgMADMBAAEMByDhEDHfCbP00qcFHFlYQhgEAHGAgAACAACqAKzCGXTLLW4IuS+MwEIgKCIE6I24rjL7M3NUibMxPRWuYra73z0+ZcakcQTIGHoUjTR2ZZBdsNlVIjCRhXQPQJtNF8oaHnPoBVeK5Edp6HEZn4oshOkiViAIJoARSAoxIowRYAk0hkvQcfZmms5KElwnrYlJ0RlkGAEmIDPABi5eNEcVGp7IDlSOyXHawqJTdl7aL3SLM+YJhjO3jla8XWaGxedo18IKkQmTM+UySubKsGzRIaBHhkMOyBabZm5RVki/G8beEvgqgIyky5TSTj1G+isbqkJCZcZoqPrE5mXmPjB/4oXPUMcNr60WAup7uQS05nIhBjRr894tN9FTGmJdMdQPwwHwhAACUCgHSIANFUAgBGBIEoYCgD5gsgWGEiCEYCigh5iEoGFUEuYJoDxgZAEhAJwGBlMDsC4wQwbjAeDdMFonIw2f5zFi+4McUi0wpBMjCBB7MC4DIwMgDCIHIeApbYZAXMBwCNPpmjtthe9LEwIwUhIJZ+XEWNLOQ/A0AUC7oekLuwGuWA3+cuWROBIKdeKS+5E6aoyeGpa87jv9TN/JpRH2sTEolr3U0sijgv27jOLrU4W2JrS7oVF7D0wBB7coHoJqUpXPLdzWs7cQnLeJwpkmcwCmWEPwxEGTDQGSxMKAZcxcDRbNqila3oralLh2IBWxBYkERoEAIHqapdoBAoBSgEo9Mog1rjRVlR5I5fVp034fQwACU9V1t3j6t7yx5fD/Q7UYLJY6q6nY0561WkxmAF2OD//vUZPeP/D92v4Nb9yAAAA0gAAABLpnXAA57+wgAADSAAAAEI2Ir8lrkOThDrNoHfmNMGWBBoET1qAQHFr9OzkoAZkMaaFDNodBRMD0Ap01aW4PfOw9WgOVTqgsrgokADMLwB8wGgITE4LhHAYzAFAjMBcA9gzoNdZcFAvDCDAdUSMAsA0w0kqj0GBkDguAMCcYAwCZIBIIgLQKA0YHYAQOEYMUMCMw64CqN4OCITD7AGYwSkBJMBWAdjAVQCswBsAnMAKAFhUABeiZMAFABJt/I5L7ENAEARFgAKpVey7Pw/HX6n30jz8tLsRLOkpIOzefCfhqWOVm4c5T15FH68jfx8I1g8snfaUPLK3/iG4IoHjonjZ1C4DgaMallDF4fa9eljXnxgdG2EOpTOXD0XmxdAQABrPxoFx7fRhF480EYkVAg4KDgvrGeYFAkg4SgDRQQLj0jVvRCRwZpCxGHS5CDMKbd2G6u+zpmb330glfVF/y1higwMBJgtxvNBmmmuNLYzK3JWY7bAGbLDvq4j0rydWA/afA2n0l7NWt4VYFeycoWuu4ZAa3PGCHeX09LpNRzhh44XGxHDBximVY50QfR2ochT6TD8X27iiAXwlg4YMJPRgxgMGAeAyGAosia4z8hAAC4URhugXlwDAVAfMPp749OALA4UUHA3oFF4TARAMMCoCswOgXzBDCwMGAbsxP6XDxR6tMdcbgwbAszAaAsFQFxICMWAlCACk+ILHgFYGe2HYDjbVDAGALIgC4ZgGUTkCu9jm7jhu3KZa9DfRSWbmr1yRQxC6eWYzHvNO0kOxStGZ12J+mz5Co28TYJ6XQVAVBDcYjDOJdG3HlszLrMahFay5EOQ8pdWjsqpX9p7do31gH2UwQuEYoFhKXiQUkwqG2hGJAtHDi5WrIApY0xp8wpg2NLx+1kKau+NAVIvSFx5d7rKedy05cZh+Vsxn2Dr8Ya67fuHUgFXboQE3NYSM3Y280SgN35VhMRiRwHSLniUGyujdB24k8sNryc//vUZOcL+wh2QCta9PAAAA0gAAABLL3XAg379cgAADSAAAAEohACd9+XQfSA2tN0dCXzOMdh8GAAhAMMibWf5GJLTyCTxZu0ELnEAFg8BoQgMmEwBIYAAD5gGgLDwFzK6SeEQARgNgqGJaBWYDQAJgFhFmJ9Mgc3xDZhXApGB2AGYBgBhgDgHmAMAoBQAwwAQwQwSTDEC4MJdD6TTtSZgws8DbMC6AajAXQC0wCoAoMASAFDAAwAVAIw+Xyh7HsrR5tVlKDBwAl2Ty2VUrwwLIo9K4fp563F4jORS5Ab+S99ZXDkYpIGjWoZl0IvwC+z42Icg2iiVuVv7bp6eOOBGJhyncuvDR00VkD6UE1IbsQtwTKU+YRFb0bh+9oeO0MUy0KwAUzVgmMQggKCFVwQBUr031or4CwAGhKAgIXpKwqNAguChk6Lhl1EcEuiU+gAQXLXFwlwsXS+SEcpcqYzOH6mFKG8g5bb9v7AqaCy3/ooWveHWYqMLmLuvs4DOGjOu8LCYi1K06Lyw07LltFWJFZWvaB+QIu2JFla7WrsPqHxXBkDIWT1WtuiWAgOmrsXmzaMsrbFLoNZy6EvS2YiOQgEPER8SCLhYADdAEACV53m5iQAAYCSAeAoQuMBUAITALgMsVQoDFqgvELASA4AbggAEMALAAjAFgB0wCcAkMBbAVDAhAH0wPcEcMLCHHzbKCJYw6YEpMERAajAagB0FAI4NADQKAEFwWnMlWK/0epIFa0o8k8htcZAvxm0BMjbPLr89i8Kx35omS0DccGuSJeMNQ3DTXXTgh2nrg6IWXKa8/DiQA/L6OxC2BvY1yW4Q88byU7dH5a4yqB5bLXQg+W8oIzTM7jcZxIgA6FTDuwVF38jA63zkrAx1vNLPzHiMxseJlEzkLgpSY0EqKMrAAQChgmGHFIh1PlAUtAv4xoiAE9S9S6VFJUJHo/KKNqrxJpYzJlEiEVSife8tw2VHMVCdtbjipHrxJgHFhSskVed90/0hIMZjAycTBWZtIXV//vUZPGJ+8J1vwOa/PIAAA0gAAABLZ3W/q3n08gAADSAAAAEC2LV3/YWsFGkN24Nkfl43YpF8RxayRlaCVTSLBo7TJVR5wK6hIAmC/EoafZbG3kvhx/etNjUaFFDpGObYxLhOTC5BVBwIAsAAszNxizJgggImNWDEYNQEZgdB9mMfo0bYJdph+gfGAgB+YD4AgKA5AwExgJAAmAsBWDQegCI+YbzgxlfbXmCyKMYGoTZgDAmGAmA2YAYAIsAojEw2BGwv5RyvenJlVVnLT51crht9BTrSRos5WkMNRVuErWHo2TZQLGaaarwDAbhw++V2O138Zs3SKOLQu+9DezcoeuJRCZlkXaXHm7P670ByuMtTj8YiFE/sdpF5v2mI7ExZfSFQqhFVRAPhFwyGLRkplD/BwxMLBIxEHEFFjgAAF9xICQQCgiEA5hKarsrWUBZ0oWJA51WuDAHQHqrtUTHnUxlLYaU4ml1vVJqZ1XcfyA24tOZhE3ubO+hfhkEbUfYatpoq/KZQ1cyIrUmvUi+XBiENN2ghiUYZ+2SDsYW0trTfPEw91+0L5QG1OMWpQ2rgO9DyjzT4YZxNxCGo8/TrxNuNdp7NGJgYFcRAEGEIEuYNIAwwAa8j3SFMoUANMBUFsxIwYDA4AhMJoNsw6Y8jyDBrMUEHwwHgCTAhAWAgBYhAIBAAZMAwYGYCZhQAWGDfgqpoX4/AYTKBGmBWAGRgJoAyYBEAMGAGACQJAA1cJ9w26zuvA5Ex7OZPGGT8cuHJTnUafi+b7QDp/oIeqBYStZ7saKVr8h+G2gp0S6PPy4D2rQpKdpEDzy56j7tdbk30EM/n5DG4CcJ2IvKYEj1tw5e7dfKfhLhwqAHgXFAEKjcisv9LTgYsDA4PDEEW0BpgOIRhAB5gMJYWAIyGWcnqn23cAqMoBwIYVOguGvBrKYiHBQFcIEMEydweUkGnE6qJVGnMgtXWAYc7DL3lScsRtsia6la521S8dtqzpt/muR41CWJVlSvXDitjSJXJl5M//vUZOyN+3B1v4ue/XAAAA0gAAABLYHW/A7jx4gAADSAAAAEZfBiTTGvvIwVmbyOTVd1hrjJHN9GX6li1k8oHdV4m8XC6b/PQuKLNFiUVlblRdpDQ59k7/vYQAElABxUAQMDcNwMA+aONAGMOiMFBYBMCBOmDiDMYAgEZgoABmMymsfXITACG7JgmB4B8WAMKgB5gAgLGA+BUYGQHpg2hPGKkfyfqCMhkABRmESBwYFwB5esRgBp7IqyZ2oHXdLnQ7PxBLdkzTpY0t9GJuOsdldFUl8VhuclrE5VHovIZe7MRZa7kNWXDmWyw27rxahh94ZYAulYSKxRYDdtmzSqR73JfdnzXXYgJTNdzclqQpvleu6680yyGYLcBjTlT7Q4nNMygVVADpv8DcAV5jXTcCKokcmKGAGBC6atiFKNAQI2DNoAKkxgVgAiAaFIRL1sDnMPLZRkOmnUn+zdsTa4pTJzsGgJkTyusnVAqu402z9qlbOwZnCb6mcsbhI4DUUUPZynJIMFzzq5Ym9LNYiwh4Yy7MRaPDjIFNlmv0tdrKyWwND2wRlLwNvL5hs8CvI6zwKUvcjizGC5awCIu4p298Ygtn4iAJUXQXMFMHEoBoMBIBqVxdb1UAgGmBcESYQAIxgTgBmCEE4YgpdZ8mitGIiDmYEwDBgMgGgYAweAWDAGTAKAPAIJQWCdMJhFoyH5lzB3DSMA8E8KARGASAegHSwi9AxGBGQxOfYs7dxJFe6j0YYq+FM6EPvWzR3pS6sdYNEGEvtPrwaE70HtIWHuM2l7U4k/MufprCgrfuLG4NibtQGrC/j9SCH4S2rSW5O4ul13vaWy2Uu68UCNdsRS5B7J1it1ZShS8LvyGHX/llS2Kp8A9mChGZsdxgUYEwqMEBMwOK0sywFy6YKBxgUDIUGCwDPoJQECwgIsWWOmKBQIia4wcFDAELktDZMrmnbkQgQAjulcmwtGCXsbNG2swUhojILCOGGCNWfdUKzkX4Q0p+WbrfarAhMAyZ+i6am6//vUZO2J+192Pot48eAAAA0gAAABLz3a+K5n08AAADSAAAAEUKYcpHBVb0mSYB8Vdr6WQig1153KhlYR0nsa1Weh/lb4MTLeBJeC2nOC4Kmy8Gnv+57AWtNcsxRea2IGhgRHgt0SCMPUQ8wZAK0dxYCBChZKdBgDgAmCQDOYkQIAKCTMEsRYxf4NzjLM+MNMCswCQQAaAm+i91ejQCIGAzMDgIQxaRCzoRfUMekCswOgODArAdMAoBQwBgBEe3VZ68yaEhh6CZS+rZVMkemgrDvfNM4chiT6pvsml5fR24Za8/tqA2hV2cu+weOsGbtK2jxlsD4t3p32WPFGQwa11TOL1Z5rzzymFWXfqKjibX2GP402NUr8PM8kDPM8Kx2y23vhxkSldyaZWzCEzU51G24DrmZZbRq4FDpjMJkEwaBRUODRyJAoKIVsDkgBoiMmKOwJ+uMFxQGgLTDd1Iw/mJslZGLDyHig1TNKxwx1LWkkGIF3lBpYr6MTDD2itQQZUcbnTrHcash1UOjyZwkADDChyumGKKNIfxg64l9t1deVSOdWHRRbRlrvSN+HqQzHgAEA9SC0l0EKwNCm41J6mfteTljayZqXxVZkaeRfKVrXkCmUruVWDgNUNzEuBnME8AMDABjIDcZeZtEAxgWANmKwA+YI4FRgihSGFFRiZAxLhg7A6mA+BUYBADoFAMMAQAsUAMBIBxgMAKmCmBUYeg3Z2yDPmL8BOGBnFAJgYAe5YiAAR5hbko9NdTjaW/KlK51Ak0nQX05URiLT5DOO01BrqwqYkDQamPNwI9ycsbkqvGqwbcSDlbc3ctQEu9pKzH/hlpbuPw0tZjjuQu5z29ZsoqqJuL9pfzT5MsSSc2ga6zikhap0x1V4OSyaCyxkDAGVNadZdjuVeAN8BCkcrxGMloiRC6Jk5IAhlfiRLJ2GiRYg0JAhe9dbV3EcuFTTN35ZwmagkS7hCS7XV6rPbZ6FA4JYdG2ftyhcw/b0Q+6KomSy+ezaiy5abioSbDZ3//vUZOiP+9d2vYOY8mAAAA0gAAABKbHY+g3598AAADSAAAAEnrQKtpkz9wX1qs3DNPPIZO4xNfj8LFgCah9VV+HFghwXNaJNO9ZgJ45xuDiw0/ErXtUV5El2s4V0xijeN/WiZl5EmQoAMYTYZwsAGUAEM6jsqdRMosgYWgF5gOgFGBmA4YOTFZsCA0GB4B6YE4ABa1MZhjahQAUAgIGAkBOYGBFBn4lnhQHgwAAHy3TI46+kdYZDc3RP7PNOiMOPE8VKwVo0NujJqhkJiHU5kY3K1dIlJp1FF9QhWEaRFC7HaK6ZIxhckUxKo4zQOodJ6Oll+btjnU6tndHmkCzICP1+j2szhLIwZyE4bTrXCcJ+aKTM0/2A3DSULgo29gTbiQM6OEzoigEOhgsGAiCDheYTCY8FEVTBQxMLAgBBQYBQYHV4AYbWACGE6l5Aopl5CzwyAwXTVBBmfI2FqxkyQJaJOxZo9FE13m6No+ZfFhjiSxWpLFgyCdpQ01cpZNBWMqUtmTkTqACAuhgJc9KmVN43rIC8kOqbohp7l0Wmu+gJEI4HSiX1EUJjck6mdFYG/h+MNJTeFjxN5SYJKNPdILbLyEUFsRUrSYZ6jgkTNtyNJj+owOQrjADAwBwCjdAAAG2hgAgBhQAwKgyGFcD2SgLGC+BsY4jMp5AARGFsAsTBJBwHIQA2CgIE2UUhQCUwNgdjDxE1NbVXwwaQbQYCsYEoBoEAECgAD7uq06JtYZQIAAXuUqaMrC3FNmIIms4CABFYnTVTcrasEohCs0WL6sLYrDzcE9FE3UZAjmi+k+oLEhYABqDdyIAdibdEKVN0eW1bnGFwsNLuN3WoWjS8ZfQKquC3ZMdIxgisTSi8KtKb7K2ErvL3txa+juj6zuWMVZM26Z5WACiexOS5mp4ITKgzWtzVgZMBgsx2JgwrIGGIgO/4VWdiQ8XgWgnUkmyRMFkC/kImMrwhJjahYtRkBeZ7VGlZ3ZWg+sGrroVbW3JALmW07jRWtKHKbNxU1T6V//vUZPIP/IF2vAOY9PAAAA0gAAABKuXa9g5jycAAADSAAAAEInoXMVLIIATsUzhtlkCLJUOQhf6QWVPtcmnzcaD2nsTYMu1/nORDR1UdcuBG5KQay/6jrzPi0p4GFuQ1poyPr6KAyFyGHRpdd2VtAl0Tn1BtkgHaEMGM2aw0pa6XhgDgXGAGBajYBgIzDCBANzwO8wYAIAUAumYtdRh817FrQ4CYwXAbTSwFdFhLSIC5Flp6qbzMMexwGuNMfNk6+3/uNNa0slpckhhIOfbvGIZsPJQOCy7OdhxlbWF4MnWHp59fLVI3VdRlLgt2fuBlrPQ97RlOnSd5lMKkrkKAOVKFjQ84DQIdZuiXGV4Oe6ag7MeJrO3Dj3PM/ipJc79qJP82SJTtFyo+IPDBZfMySk3EUzIZWM7mAykOTBABBJqAAUMFBswwGDEIeMEgAgCAkBTAQJBwoPpS/a9hbRQ8CBMB0ODztZDDKprrC5GGI3uYNBnkSC9D8odhEWHEmWBDzIClyJqTqiJEJPRnaUC0lQiq14jxHHChU00aEE5UCuhIdQQI4mCsOnGXBFiUyANuKai+oZTJYMnUzF3wgAFmsiYmqVTlujGi0yiz1tFQdmk7GOp2roFgASwAAwVAG4DEnFZP1WYAAAmAeBGSgAIaFzVhnLLVhYAgwKwYjCpATKATDAiAvESSBu7DCmEIA8YA4BJAAIMgItKUBMAYAcwBQGjAMBbMFEg40Px2zDHAgMDIB8BAFQprymxAAM02SuesOoYmmp0lbL0wnZcFujAWEtPYwsBAFJVZOiAmsl4gmlZf1lb2raXsztK9j71S5ubauK8qaMOIeF7WkojDwAatjlOvCyAABTZf0PuYlazoRgAOQKgCX3pUfUBcZBM6idMCovJjRd1mFDAAyvkjSIABQKPp8r2BoAEMs4fy1OgICGpY5axLNGWIQyEGQghj4uTEJgogLBa0zCA4RBaey3CyQWEgwdSfUyVpTHUHLygI5AAAipBUthMwcAFUvi7i718D//vUZOwP/KV2u4OY8/AAAA0gAAABLVHa8A3j08AAADSAAAAEpRZKPagrnIKPcXcYCGAfh0odfdaC7l5qTVhUYWHKJq3R5paB7Zki4bRVUQHQp7tnWMuSYj6XKtKOSasShpirzvk6TK2kIkrLLxAIb2ylkK581robMRiazYRD71u7EUDkNVVEIVqzY0BYpgPANopuDTvimYuV3jAZAcKBIwEBqYCQKZVSaMm4UkwAQNCEAkQgAJHphsHTWSTC4AxgRhQmKCSsYEYEIOAEBIAa2GvPnDCaFAuZYGhQlQwjixVFRPZS9jD0rzeh0n2dR7Fypnlxoq+6iz/t1fleiaysS5m0SIacmvGIfcBTBONMVaCNzTFhG5xxedIlww1VWA2wLbm2IM+W85UQWs0WQrDvNEVElfNWZg5aqkSZspGA10u48S74+zhgUuqyHlVkAAO5Oc1SRQEejFo7BAEMpAswiLxIHJzAgMICwIBRywBYqJPdiRM0MJEGUw697dSyQsUm+WyYG6AwFlJRRIYBbHqIeCQC2IUAhKWGWgXLWWra18IFYTJVrWaWihtCBlb6FrVpw8XzoYZWKgu4LmPq5KZ6qiVLoQC2KLdZeyJZ8gWo6DdiYAaOu2reps8KcSctOuZgyGqwi2Wks3dJr6BJv3xjjDnKh9OBpyp1HFnqrmAmCJL37aagOnUchwAUaAGMHkBAwCAAzAYApMEFA4ybQxzBLAIBQBK33hYNGmlPKYA4AA0DoZNAn4sDSNALp0KOssbFLVblnsVh1SLT31dh3x4AGbf52c2Ktq0d+12P27KXym7Y1/PEuaLoC2fNMeFTpa0NL8mnaac8DpPU/AqAI05NVeShElLWMphtQRgbtQ8zRPpYZ2V7QVSJUtahDUlGGaszmXfgBobaL4VgZhXhlgLbNxShSEk7+SzdghrO6cUwndBALjjBVExs7MVRAcahCOYmKJrGIAQ71O1hxfASwARGWw0FBGFALOIjpdDB0B6NKAQvqkw7JctEB54BRWRFfhTN//vUZNoN+2R2vBOY8vAAAA0gAAABK93W7i3jq8gAADSAAAAE91bn0g9kYyFQyOsrECS9CRiE19o6194l2qALraG/ChV2RoaM0Sde1ZkKV+p5tU1VBWEsnb9qrf4TEBT4sASq7O2msIT6RFSqkasCgj3o+wApFdz9XI5HFHYTE2st+zCOqubQtqYFCE6rfI9OEXBhcDl5TDsHgABKVhlXhB/eCpiWARWAwsAyNO0BoYBsQyMKSSNqRRMOwSLaagFFNyYMgp6V/ryLoJpN6xhsbCmWtghybYjpk7YF80qzpQp5PxnT6qDMbepkCTrWocT5bO6A4AKm7uNzEIBN8stQi0gUrKz6DV/sOW8hC1hpy8JuVw0kM+bMHOkazoba+rttSIAV4sSZ2X5XO7imDEIYoIql+v9CWxKUwBLEqhkAA0X0AkEHQVeZYKYCOxg8iFBpHgiOCcGCAWBikhYhAwAmCAQSggLg4wOGAIC0dDAIQU2QrSIZMYCNfUOcRKAdCm8odAVKo+XSdEHCLsOUqaBksQ4RsE7RwSURBf1hTBMvawJE8QuRSXkoG/S1ExW4qEsBJBSKQKIqSWW4b3DJ0iEvGBp8rFeZKplKfsBp6u/bSscl8kAKWz8IGIJiJMBqJJrMnd9YecZRJU0nbZo+a/Y6ZhtMXS0UwGwQUMFqCMABlTC0Iy85KBCAQCE3Q4BgwcRIjRDBcFgX0KHHXSzCCG0AQC6WxYBPLAcxVAJaY1NultChHZ7FoMXQ7pftASsYMXneKsnVBRdRSpPVHBQZqTEKWSqdtIjivGlsEaI4qCqS8nfR/YNi0sgiAFbnbfhHJ/X/bBCmlpeMJUrlCdcBO2+LOFpRNdhMADQI4toqddrd1wuwrEk88VRVVPd0lyPzJlouvALNWdp6y6rCumoUhmKYtGTJ/hBOoLhxsmCgdiQUkQjKaCADzAcCUzzCMCSoAIkIBgCEQGBUCAmYEASgjkqYK5kFHqkoJEZgsfWKvkawKjFJxqGyYBcFZcFiQWLsPXCC//vUZOIN+292uxOY9PAAAA0gAAABL4Ha6A7jscAAADSAAAAEkLja20MuIgy0BxwIBRsWg1AOAl67SdCPi9Wzhk2tPCUgCikhnfSuZiKgL3NaTKJkF+lAw5jJy9oIKkwxVKwRgLwjTS7KpCASBwsdSThJwIeF1UTGFIh3Vgnhh1B5GxHquW3aYl2oIYpBCPBeXjgV01Ir9CoAggJzCAGkAzAjF1Sz88zjB8B0rGQLWWcXdVMjKPAEPBIaOGaHBgsMnMXeQGxsIAVeLtl4HAZCiek0VQCLXKrM0dJY61lTBwDouQA15H5Ecv8gNYUzROUv+nKnwy9xS/ha9OtYy8lAFOGHLOssKfpNEt05q9HQR8TVb51VhbKhqfa41O3ZSMUNk6Gi405kOkErGlpe5NwvEpBg4qBThjwBl4m4DwBv6rC9CWrAU+H9l0o7YAxqLD16UNaFEzuCTIgdMEBUwQKBkTmDAQFAcWjMBjYaD5h0AmChabGgGyjSqwjcvxBZTYRiVOIiFylExo6gjktyIjIlIbqgb4CpByhMyOAOMaLgwo6gCGBNA7Qqc/COIxVAPa26qwQdYr5OLDySy/HCUGSmXe7Zf0ucrCiZDRdVL1rsablGkz0RIJmV0KUpMriLQqYuMUAFKtYie66msKWKaOCnWnQLAMs+sINABFRsbwP+QgGB2AODLWhgENFUDGOQIlEyZCQm+z1TckCosZQCAGHGCOqehLAUDpgcJOgDQMgmAwSKgBWHWKFR0HaYID0CwA/bkrKb0MASXy214KbMMVicEmAlIji8DNlvvQ5iJEjL/IsqZtNU7biz1Yz2sxXpBxEAU04U8DFUxGkqCIEFRMtkCN8QaK6KRKYLXnyYq3zHGcLHUvaRBNtjSuFOHNR7Ym1hnMLdhLdozLljLPXIq9HhkLnRrTkpfL4TQg5RBqmrxrXQnD0UBmmcyJhk4KAIPGShGCAKAhOYOFIkRTF4AOohzhNsOSBBmBYt5QYSKZNuOZCM5N+kmgUJTMGiLpRtsKNR//vUZNsN+6N2uguY43QAAA0gAAABL9Xa5A5jq8AAADSAAAAEVkkmMsuFbEACPrEUN1LU9wMUMCXxShBo0HpDEwEAqoETVqpQIcVPo0w2WhLkS0IA8qAErCkslUDAGTlIgFQEoKqBzKws4194yoAEADQCrgYO200yIvKzeEqKtMZC6DiIVJDNdTnVgWAjaSCfUNiACosEAiud3AMASuZMYCjcyGoxFOsKgSPAanyFgJARCuyYAgQYGRCYYDMYCAOpeoKvMCgIgKeRtF4AgETB4SAUALNU8yoADY0N0kKIHAIkqXyT1bAjGkYuRXrU06kJTP1abzSVKq4cAbvoaEABAYAkaGcsTLzwKlUQAC6rFV+LSeFRhgSmUIccdAAOAFa0JXo1iBlllABQOsJDTE2tFuk2Vbm4F3xIBmMOc6MPqaNdkzEUqk1C7oiAZOFVsRTKgVvZUzV3Vb02EaF1odGOS/A1ZkjfwTBqeMmNkx4GjCJnMTiEONaVQ6EgcJQKIQgKCQcMChUwwAzBAFLXhASMEgJLAMC7AVABGBRk6JAOSlUJAQEocAgwjCPpbolWShX6p2reXId5hiaBBBni+UUCzokUfcwpTNJgRkWqn4vNLIBKZRNJ3F41gQaZB8VUtBA2ujCYQMMMYRRSUTBr7HS0pIQHCiyE6AFNU+0VlmDJFMENgYgIM7CY8JTkL+yh7UdVRB2ltsVXSYEoTEQE15eXfMDkMwoBiyTDwgHMqTnTvWGARFYkYPBxkT9nzAoNGEFBKPNQWqqJKtMEwQBRIKGXh23EiAwJAQhAANAjDQYBU8QgLkIBJgEnw6yzE3HnX+vlyEt2UqPINtSTOftAU0VPSPqjZOpWg5eWyirArsL5aI5QIAaYBf0QANh6vofXkmoVgVs6hC+FUEJ5EAGus6YTK2bwQ67apGPaCgEm2zpazQBoFx1Ca74iBKAQZATTYAWapNOx2VmrXfpBxmxc5eSo27yGycrsCbnJSZYH6a+mUJIkFAjAoVL2BQsmDYHDwbos//vUZM+P/A12uAOY5PAAAA0gAAABMLnW3A7jtYgAADSAAAAEmGoXGDIBGIIJJLNsGBQHAG4KA0wNARe7+Q6YEAEPCMIwNUEZKiMBAKTLugsIKMWscxOIGnawmuWCPyYhr5W0XgSbV+kGCyhA36ohUYMSrGqQWYWzDCJ8Ep6F+VqC7jOKKIFl1zWUaCyZCeXxRSVGjEku7pbEt0JHHTU7wh3FaQWJLBnTCEqG6PUXvuqKLvZCDiJbMCBxi2Tc2dMDbM5aY5ZYasYAigYCAqYGgIDgJaohKdMGAY6xgADbpIrGICXnGgchwUT8MJll/Et0P0xEGjBMEi3KdqvGrLWBQFFpRAAxdtTNEF6y/o8BSrEbgaAi0n9SqDAMjCigoBqPyiTkR9H1UafkHsOQEpXvml+wpI9TFMV3GIIVqrhUBUkGBFqmYvwDgKAoCl812svcNgYGAxHllylisDHn8CANQYxLX3EFw4BHrXmvJRZHlniRoYABEEykwQAsMK7U1YesMRABASJjpL9noCltSjgqBM6wkwHCTwBVMgDEwcATJYaBI3BwyMIAoHBgECQwCJgSFAcKl4BQNgUKFAIS4QABgiJgMj+usL6MbCSZcVMAeG/g0NordxpSaRVKgIQRo9FYlVRIoRkWEhssMMkU4LstIWAWGeNMZ+yy7urtL8wNL1/mAasJhE0tapEZu7/M3CwWAoSBI0jHsJWnIiyitaNieajiPLXFUDqMFXZw7LfLmUVaU465SVamq61VWHNfacstijTUgQgyhZKBK9h4NHYYGWHFuU80IkZ1EAaAEOIwAC45hAYnlCelY1NbL8pBPIj0WplRVARhsFJJu0s9NZqqX0y24IAdkOCzXFhVAEi2mKRWITA9UMrWDZ+pTedVHB+5WiUFQEEAbFhLuJLl4VNUOscaQmkxkwAAUJr2ISUEqWzwMySQY67SCVWdR1kSM4CALA21TTVVVhlyz2bq1MMIACnoz9nLOlsvqwZaThpIOrBA8AazXFfStLOA0d1HF1NZ//vUZLmP+7J2toOY5PAAAA0gAAABLy3a0g7nZ8AAADSAAAAEh6W3jROoDVklTGYSjGwnTJwJDCoEDEgQTDcSAUOHFq4O/w3izmzNxsQDiI0BUhBpCEX/LIKpvMnCQnK7EiFtNN2VBCAMrAToJCC8rtpUmBAYqAui1VckDLOb9h9IyxfReBBFpR2+rGqyLLtS9QEFmgAAv2X6fFwhADqarCCQkxD0fUaMQEAoGOkCgpjriFAWy1SoSFoBWkWqQnmDAbUEw32aSVQBjL0PCAhEuqh6YABroexxR0CYK2jO0BqwCqgVBQQDhgWChJcwGBm4LdQFl3oNEAGIQsqsR8jeCQCUQBLh0BAgOrOmou1CSkMveHljrsBASGAqNIXBDBwBWIGAqGrzKCFyZ5JRfKtCBAAgSjzPl1goCeWH1AlBhIGXmMBIKDWXqwq5h9vGjO2ls18LgiV6jiJxIAoYrxRGBAOjowYvKqVwl3DIGIQwOAnILpK7TKedTQFBTkp0pVIZPAz6yuRS9fy7mNOSwkujDTEW5RNhy+FTTt1mj3trEruFAEABsSynKmibUdpsg4hg1BI0MniIwkJUoTHYS8CAroAJjOYiEZnl3EcZTIWqo4vWpoZWBCk3jOJFJS6OL2Lml8UykwS9qGrsoJV6oggoUuqDQDLKSvLIl3QEKh0EgpavEwCQgVtUqmHq5TKDBl3IylkVWgUoFLR19oDcZeLeNOhnNYVRZS6dUyf+dXkW2hcqT1c6USNjReJU0KbsrrTMi7y1nrRVe19mHLleWOvKypBMr9H2YfBB523YYMhNUsDhjGDMIsy/j5WAwzKjDEV9K0bS2SDygyEpWJYFS2yz4tSq1hyXyRSY0H8WCRRblG4Ii76LWWKFRkqA4KOIrMup2iF2oDnmRNuCA0aZWia1YvcoKl6kSgFYKz5K5VVvUyjDAV9S7jiQzS0AqcxZ4xQkNn7Za3JAM14KAl2S6qIqXzG20VND8WgGEy9OVAKulTFFGG2GpiomlxYYYygqos3s//vUZK+A+wR2sauYyeAAAA0gAAABI+XUnM1hl8gAADSAAAAEPdEAAo8mvnCr8zhwBRyhyDlRmB5jTQWKjo0HBCIUj6wJ44EdZ9Ym9r9P67TotyaKzxskFwU8L4QG/kbjkcjcJfp9YKlcom5uQQ9DMkp8JS4S8mNsoYOxxWJFUucODSnUAZe6jzwl+nJdJ6n/kEWlNy1Vw5halM1NyyLP6+sFR+ISuMSuUSuhmqWVRGPSWOROhrUsPOy6T0rYUXXmvxk0Vh9NUAmIGl2F0qIG8BqqCdDNzEoHXIkKwwU47as6bi+j3NdcF6HDcRqSuVAk9U/mEM7fiVzErmI7ATpPC+BfLhfODtIhN9y5a0clYTjM1Mi6kVk0Qh6K5YVLYFZNEIahLGwVAiKhzIhaXJS4ZkUnElCO1Z6dIax+L6+6uZaZQk6wSkxBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+const steelSlice1Mp3 = "data:audio/mpeg;base64,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0ZcmTvg4ChToMrWKIAEMBUvlpEwM1lS1ZjAKOmawhUkM1lzH+XSFAGLNShmjiCQr8z93K0FFjRWEDeFHDg3A31EMjsW8AS0XEDJ05E1y1C9SCVKYv0miXJTGZ004GGmgK4Dptoic5qYy8jLgOVJb+DAVSo9J1NaZdTLmb5cqYrXp6alaxRUo2UFJwBSJ6q9V//vUZOCK+yt2tIO62PAAAA0gAAABJ9nWyM7vIAgAADSAAAAEuYNacJ7lKVjRd3YKa9azh22j0zMhQOmIODTVQxY4/TSWuqYqarlVymks5htuPRtOVB1xYZXKhJeZrK5UtDboA3TWX2g2biDvTNlkKDrqRtrSQzJpVFojJneWBXckM19grhQM6LEXBR6TWgmBZVQ0UNSdpSRT3UDtKZKbRNW1E4vEptDz/SuQMOa9Ouk15rUKZSw1E1FVdzxq5bk5ZcFACzVW6QsBXgYICn4rKZbBSVJZFACzl3blqrZqwy1l+brDYOf6fiUWlNS1qmlUuuSp/oNa7MRaZfVrUKpcKaGnem2sw8tVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVN2UcxbLjN7TNKHIz2OzKAqMWjcwoSjBJbC5VMKDow+ExIaDQ//vUZBIP+AF2HwOPTWAAAA0gAAABAAABpAAAACAAADSAAAAEWRFZNJqe7DT6wA/b5MGS9S2TeVXYgY6BVVXrcxIk9j/QhNmSQYkJQl0Q9YnkUqKSa+ukifiFmqS4bosxAi7nQt9QkGE9DuIAT85FGqE2hJzHakUgi0MR54mkX0wjOOdGI5WtzmoVM1Q5IMKCxH6bxdjPPxRrDtxFRCVICcwaFIWBUHgOIzD/FEIRoPEaBtzSFZNNh7LSqU8zY1furuSqTbmkJEWLoDZkmCoDA6DogFbD6VLDIyURoGzJMQliy8N8URCNDRGgNmSYhIhkPkBOeNIURU4cXhcokRUoxqpMQU1FMy4xMDCqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+const steelSlice2Mp3 = "data:audio/mpeg;base64,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qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//vUZAAP8AAAaQAAAAgAAA0gAAABAAABpAAAACAAADSAAAAETEFNRTMuMTAwqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpMQU1FMy4xMDCqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+const motionMetalHitMp3 = "data:audio/mpeg;base64,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MDCqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoFWEWrmWlp0VS8UymcL1Cp1ccnRWLqEhpiqKhpEwahNE4plIgjUJo0DUNZUM1kKZPDkJgZ5W2TpLvAw4qwqtJEjAE92QMZTKQIoCC/Zeov6oszN4F4oThQo6gZQOnLmIbpwLOYKzplK8WeNbbx5odjUphpwnhgybiS5UjkPUOifih7AGJto0JlrOmksxZ4//vUZEcP97R2KBGYTkB0JyVxBYbEAAABpAAAACAAADSAAAAE1ttHOcVrQhGhobIDbnstISE4uxvup7H/WSIqcURoGzIqCoLA6B4gFZILiUVCEaB4bFDbmkKypVRdh8ZRlK4b4yTUhuayiIRoPh8gIzB8lFQhGhobIDZ5plZCQnF4TpVJecJwehIipRjQoCRprIjtTIzI8jIzIyMjIzI8glf62dXGJKHkTiEX0jcCGhHZ4ekoupIToeRUFoOjQOZMN1KRE44sxPN+zNOznCRQGBmHoLRJCRQoWYmpIFgVEYZ/XrFRZBoKigkNAyKiweNRQWqFmJAQSFxGZMqFWf/4qK1MQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV";
+const DONE_SOUND_OPTIONS = [
+  { id: "archive", label: "Precision Archive", description: "Soft press · brushed-metal sheen · sealed latch click. Low and tactile." },
+  { id: "arpeggio", label: "Arpeggio", description: "Bright ascending major arpeggio (E5→G♯5→B5→E6). Triangle." },
+  { id: "marimba", label: "Marimba", description: "Two warm, woody plucks. Soft and understated." },
+  { id: "bell", label: "Bell", description: "A single shimmering bell with a long, glassy tail." },
+  { id: "pop", label: "Pop", description: "A quick upward pitch blip. Playful and snappy." },
+  { id: "coin", label: "Coin", description: 'Classic two-note game "pickup". Square waves, retro.' },
+  { id: "chord", label: "Chord", description: "A full major chord struck together with a soft swell." },
+  { id: "metalWhoosh4", label: "Metal whoosh", description: "Close-mic'd metal whoosh hit. Recorded, not synthesized." },
+  { id: "metalWhoosh3", label: "Metal whoosh (alt)", description: "Metal whoosh hit, alternate take." },
+  { id: "steelSlice1", label: "Steel blade slice", description: "Steel blade slice — bright, precise, metallic." },
+  { id: "steelSlice2", label: "Steel blade slice (alt)", description: "Steel blade slice, alternate take." },
+  { id: "motionMetalHit", label: "Motion metal hit", description: "Motion metal hit — heavier, percussive." }
+];
+const DEFAULT_VARIANT = "archive";
+const SAMPLE_SOURCES = {
+  metalWhoosh4: metalWhoosh4Mp3,
+  metalWhoosh3: metalWhoosh3Mp3,
+  steelSlice1: steelSlice1Mp3,
+  steelSlice2: steelSlice2Mp3,
+  motionMetalHit: motionMetalHitMp3
+};
+function isSampleVariant$1(variant) {
+  return variant in SAMPLE_SOURCES;
+}
+function dataUriToArrayBuffer$1(uri) {
+  const base64 = uri.slice(uri.indexOf(",") + 1);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+async function decodeSample$1(ctx, uri) {
+  try {
+    const data = uri.startsWith("data:") ? dataUriToArrayBuffer$1(uri) : await (await fetch(uri)).arrayBuffer();
+    return await ctx.decodeAudioData(data);
+  } catch {
+    return void 0;
+  }
+}
+let sampleLoadPromise;
+const sampleBuffers$1 = /* @__PURE__ */ new Map();
+function loadSamples$1() {
+  if (sampleLoadPromise) return sampleLoadPromise;
+  const ctx = getAudioContext$1();
+  if (!ctx) {
+    sampleLoadPromise = Promise.resolve();
+    return sampleLoadPromise;
+  }
+  sampleLoadPromise = (async () => {
+    await Promise.all(
+      Object.entries(SAMPLE_SOURCES).map(async ([id2, uri]) => {
+        const buffer = await decodeSample$1(ctx, uri);
+        if (buffer) sampleBuffers$1.set(id2, buffer);
+      })
+    );
+  })();
+  return sampleLoadPromise;
+}
+function fireSample$1(ctx, buffer, peak = 0.4) {
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const gain = ctx.createGain();
+  const now2 = ctx.currentTime;
+  const duration = buffer.duration;
+  gain.gain.setValueAtTime(1e-4, now2);
+  gain.gain.linearRampToValueAtTime(peak, now2 + 8e-3);
+  gain.gain.exponentialRampToValueAtTime(1e-4, now2 + duration);
+  source.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(now2);
+  source.stop(now2 + duration + 0.02);
+}
+let sharedAudioContext$1 = null;
+function getAudioContext$1() {
+  const Ctor = window.AudioContext ?? window.webkitAudioContext;
+  if (!Ctor) return null;
+  if (!sharedAudioContext$1) {
+    sharedAudioContext$1 = new Ctor();
+  }
+  return sharedAudioContext$1;
+}
+function tone$1(ctx, { frequency, start, duration, peak, type = "sine", attack = 0.012 }) {
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
+  oscillator.type = type;
+  oscillator.frequency.value = frequency;
+  gain.gain.setValueAtTime(1e-4, start);
+  gain.gain.linearRampToValueAtTime(peak, start + attack);
+  gain.gain.exponentialRampToValueAtTime(1e-4, start + duration);
+  oscillator.connect(gain);
+  gain.connect(ctx.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.02);
+}
+let noiseBuffer$1 = null;
+function getNoiseBuffer$1(ctx) {
+  if (noiseBuffer$1 && noiseBuffer$1.sampleRate === ctx.sampleRate) return noiseBuffer$1;
+  const length = Math.floor(ctx.sampleRate * 0.4);
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i += 1) data[i] = Math.random() * 2 - 1;
+  noiseBuffer$1 = buffer;
+  return buffer;
+}
+function noiseBurst$1(ctx, { start, duration, peak, type, frequency, q = 1, sweepTo, attack = 4e-3 }) {
+  const source = ctx.createBufferSource();
+  source.buffer = getNoiseBuffer$1(ctx);
+  const filter = ctx.createBiquadFilter();
+  filter.type = type;
+  filter.frequency.setValueAtTime(frequency, start);
+  if (sweepTo) filter.frequency.exponentialRampToValueAtTime(sweepTo, start + duration);
+  filter.Q.value = q;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(1e-4, start);
+  gain.gain.linearRampToValueAtTime(peak, start + attack);
+  gain.gain.exponentialRampToValueAtTime(1e-4, start + duration);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(start);
+  source.stop(start + duration + 0.02);
+}
+function playArchive(ctx, now2) {
+  noiseBurst$1(ctx, { start: now2, duration: 0.03, peak: 0.038, type: "lowpass", frequency: 880, attack: 1e-3 });
+  tone$1(ctx, { frequency: 116, start: now2, duration: 0.05, peak: 0.05, type: "sine", attack: 2e-3 });
+  [3140, 4710, 6290].forEach((frequency, i) => {
+    tone$1(ctx, {
+      frequency,
+      start: now2 + 0.028,
+      duration: 0.072 - i * 0.018,
+      peak: 0.019 - i * 5e-3,
+      type: "sine",
+      attack: 6e-3
+    });
+  });
+  noiseBurst$1(ctx, { start: now2 + 0.105, duration: 0.012, peak: 0.05, type: "highpass", frequency: 2700, attack: 5e-4 });
+  tone$1(ctx, { frequency: 205, start: now2 + 0.105, duration: 0.03, peak: 0.042, type: "triangle", attack: 8e-4 });
+}
+function playArpeggio(ctx, now2) {
+  const notes = [659.25, 830.61, 987.77, 1318.51];
+  notes.forEach((frequency, index) => {
+    tone$1(ctx, {
+      frequency,
+      start: now2 + index * 0.06,
+      duration: 0.4,
+      peak: index === notes.length - 1 ? 0.14 : 0.09,
+      type: "triangle"
+    });
+  });
+}
+function playMarimba(ctx, now2) {
+  [587.33, 880].forEach((frequency, index) => {
+    tone$1(ctx, {
+      frequency,
+      start: now2 + index * 0.09,
+      duration: 0.32,
+      peak: 0.16,
+      type: "sine",
+      attack: 4e-3
+    });
+    tone$1(ctx, {
+      frequency: frequency * 2,
+      start: now2 + index * 0.09,
+      duration: 0.16,
+      peak: 0.04,
+      type: "sine",
+      attack: 4e-3
+    });
+  });
+}
+function playBell(ctx, now2) {
+  const partials = [
+    [880, 0.12],
+    [880 * 2.76, 0.05],
+    [880 * 5.4, 0.03]
+  ];
+  for (const [frequency, peak] of partials) {
+    tone$1(ctx, { frequency, start: now2, duration: 1.1, peak, type: "sine", attack: 5e-3 });
+  }
+}
+function playPop(ctx, now2) {
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(420, now2);
+  oscillator.frequency.exponentialRampToValueAtTime(1180, now2 + 0.12);
+  gain.gain.setValueAtTime(1e-4, now2);
+  gain.gain.linearRampToValueAtTime(0.18, now2 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(1e-4, now2 + 0.18);
+  oscillator.connect(gain);
+  gain.connect(ctx.destination);
+  oscillator.start(now2);
+  oscillator.stop(now2 + 0.2);
+}
+function playCoin(ctx, now2) {
+  tone$1(ctx, { frequency: 987.77, start: now2, duration: 0.09, peak: 0.12, type: "square", attack: 2e-3 });
+  tone$1(ctx, { frequency: 1318.51, start: now2 + 0.08, duration: 0.34, peak: 0.12, type: "square", attack: 2e-3 });
+}
+function playChord(ctx, now2) {
+  [523.25, 659.25, 783.99, 1046.5].forEach((frequency, index) => {
+    tone$1(ctx, {
+      frequency,
+      start: now2,
+      duration: 0.7,
+      peak: index === 3 ? 0.06 : 0.08,
+      type: "triangle",
+      attack: 0.03
+    });
+  });
+}
+const VARIANTS$1 = {
+  archive: playArchive,
+  arpeggio: playArpeggio,
+  marimba: playMarimba,
+  bell: playBell,
+  pop: playPop,
+  coin: playCoin,
+  chord: playChord
+};
+function resolveVariant$2(variant) {
+  if (variant) return variant;
+  const stored = getDoneSoundVariant();
+  return DONE_SOUND_OPTIONS.some((o) => o.id === stored) ? stored : DEFAULT_VARIANT;
+}
+async function play$1(variant) {
+  if (soundsMuted()) return;
+  const ctx = getAudioContext$1();
+  if (!ctx) return;
+  if (ctx.state === "suspended") {
+    try {
+      await ctx.resume();
+    } catch {
+    }
+  }
+  if (isSampleVariant$1(variant)) {
+    await loadSamples$1();
+    const buffer = sampleBuffers$1.get(variant);
+    if (buffer) fireSample$1(ctx, buffer);
+    return;
+  }
+  VARIANTS$1[variant]?.(ctx, ctx.currentTime);
+}
+function playDoneSound(variant) {
+  return play$1(resolveVariant$2(variant));
+}
+function playArchiveSound(variant) {
+  if (variant) return play$1(variant);
+  const stored = getArchiveSoundVariant();
+  return play$1(DONE_SOUND_OPTIONS.some((o) => o.id === stored) ? stored : "archive");
+}
+const TEST_SOUND_OPTIONS = [
+  {
+    id: "testBench",
+    label: "Test Bench",
+    description: "Relay tick · diagnostic scan chirp · imprint stamp. Sharper than Done. No warning beep."
+  }
+];
+const TEST_SAMPLE_SOURCES = {};
+function isSampleVariant(variant) {
+  return variant in TEST_SAMPLE_SOURCES;
+}
+let sharedAudioContext = null;
+function getAudioContext() {
+  const Ctor = window.AudioContext ?? window.webkitAudioContext;
+  if (!Ctor) return null;
+  if (!sharedAudioContext) {
+    sharedAudioContext = new Ctor();
+  }
+  return sharedAudioContext;
+}
+function tone(ctx, { frequency, start, duration, peak, type = "sine", attack = 0.012 }) {
+  const oscillator = ctx.createOscillator();
+  const gain = ctx.createGain();
+  oscillator.type = type;
+  oscillator.frequency.value = frequency;
+  gain.gain.setValueAtTime(1e-4, start);
+  gain.gain.linearRampToValueAtTime(peak, start + attack);
+  gain.gain.exponentialRampToValueAtTime(1e-4, start + duration);
+  oscillator.connect(gain);
+  gain.connect(ctx.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.02);
+}
+let noiseBuffer = null;
+function getNoiseBuffer(ctx) {
+  if (noiseBuffer && noiseBuffer.sampleRate === ctx.sampleRate) return noiseBuffer;
+  const length = Math.floor(ctx.sampleRate * 0.4);
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i += 1) data[i] = Math.random() * 2 - 1;
+  noiseBuffer = buffer;
+  return buffer;
+}
+function noiseBurst(ctx, { start, duration, peak, type, frequency, q = 1, sweepTo, attack = 4e-3 }) {
+  const source = ctx.createBufferSource();
+  source.buffer = getNoiseBuffer(ctx);
+  const filter = ctx.createBiquadFilter();
+  filter.type = type;
+  filter.frequency.setValueAtTime(frequency, start);
+  if (sweepTo) filter.frequency.exponentialRampToValueAtTime(sweepTo, start + duration);
+  filter.Q.value = q;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(1e-4, start);
+  gain.gain.linearRampToValueAtTime(peak, start + attack);
+  gain.gain.exponentialRampToValueAtTime(1e-4, start + duration);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(start);
+  source.stop(start + duration + 0.02);
+}
+function dataUriToArrayBuffer(uri) {
+  const base64 = uri.slice(uri.indexOf(",") + 1);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+async function decodeSample(ctx, uri) {
+  try {
+    const data = uri.startsWith("data:") ? dataUriToArrayBuffer(uri) : await (await fetch(uri)).arrayBuffer();
+    return await ctx.decodeAudioData(data);
+  } catch {
+    return void 0;
+  }
+}
+const sampleBuffers = /* @__PURE__ */ new Map();
+async function loadSamples() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  await Promise.all(
+    Object.entries(TEST_SAMPLE_SOURCES).map(async ([id2, uri]) => {
+      const buffer = await decodeSample(ctx, uri);
+      if (buffer) sampleBuffers.set(id2, buffer);
+    })
+  );
+}
+function fireSample(ctx, buffer, peak = 0.4) {
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const gain = ctx.createGain();
+  const now2 = ctx.currentTime;
+  const duration = buffer.duration;
+  gain.gain.setValueAtTime(1e-4, now2);
+  gain.gain.linearRampToValueAtTime(peak, now2 + 8e-3);
+  gain.gain.exponentialRampToValueAtTime(1e-4, now2 + duration);
+  source.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(now2);
+  source.stop(now2 + duration + 0.02);
+}
+function playTestBench(ctx, now2) {
+  noiseBurst(ctx, { start: now2, duration: 0.018, peak: 0.06, type: "highpass", frequency: 2400, attack: 5e-4 });
+  tone(ctx, { frequency: 168, start: now2, duration: 0.035, peak: 0.05, type: "triangle", attack: 1e-3 });
+  noiseBurst(ctx, {
+    start: now2 + 0.06,
+    duration: 0.09,
+    peak: 0.028,
+    type: "bandpass",
+    frequency: 1800,
+    sweepTo: 3600,
+    q: 2.2,
+    attack: 4e-3
+  });
+  tone(ctx, { frequency: 1320, start: now2 + 0.16, duration: 0.04, peak: 0.07, type: "square", attack: 1e-3 });
+  tone(ctx, { frequency: 2640, start: now2 + 0.16, duration: 0.06, peak: 0.03, type: "sine", attack: 2e-3 });
+}
+const VARIANTS = {
+  testBench: playTestBench
+};
+async function play(variant) {
+  if (soundsMuted()) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === "suspended") {
+    try {
+      await ctx.resume();
+    } catch {
+    }
+  }
+  if (isSampleVariant(variant)) {
+    await loadSamples();
+    const buffer = sampleBuffers.get(variant);
+    if (buffer) fireSample(ctx, buffer);
+    return;
+  }
+  VARIANTS[variant]?.(ctx, ctx.currentTime);
+}
+function playTestSound(variant) {
+  if (variant) return play(variant);
+  const stored = getTestSoundVariant();
+  return play(TEST_SOUND_OPTIONS.some((o) => o.id === stored) ? stored : "testBench");
+}
 Trash_2[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/trash-2.svelte";
 function Trash_2($$renderer, $$props) {
   $$renderer.component(
@@ -2821,6 +4168,19 @@ function mergeProps(...args) {
   }
   return result;
 }
+const srOnlyStyles = {
+  position: "absolute",
+  width: "1px",
+  height: "1px",
+  padding: "0",
+  margin: "-1px",
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  borderWidth: "0",
+  transform: "translateX(-100%)"
+};
+styleToString(srOnlyStyles);
 const defaultWindow = void 0;
 function getActiveElement$1(document2) {
   let activeElement = document2.activeElement;
@@ -2996,6 +4356,24 @@ class ElementSize {
     return this.#height();
   }
 }
+class Previous {
+  #previousCallback = () => void 0;
+  #previous = derived(() => this.#previousCallback());
+  constructor(getter, initialValue) {
+    let actualPrevious = void 0;
+    if (initialValue !== void 0) actualPrevious = initialValue;
+    this.#previousCallback = () => {
+      try {
+        return actualPrevious;
+      } finally {
+        actualPrevious = getter();
+      }
+    };
+  }
+  get current() {
+    return this.#previous();
+  }
+}
 function afterSleep(ms, cb) {
   return setTimeout(cb, ms);
 }
@@ -3031,11 +4409,11 @@ function contains(parent, child) {
   if (parent.contains(child))
     return true;
   if (rootNode && isShadowRoot(rootNode)) {
-    let next = child;
-    while (next) {
-      if (parent === next)
+    let next2 = child;
+    while (next2) {
+      if (parent === next2)
         return true;
-      next = next.parentNode || next.host;
+      next2 = next2.parentNode || next2.host;
     }
   }
   return false;
@@ -3200,8 +4578,14 @@ function boolToStr(condition) {
 function boolToEmptyStrOrUndef(condition) {
   return condition ? "" : void 0;
 }
+function boolToTrueOrUndef(condition) {
+  return condition ? true : void 0;
+}
 function getDataOpenClosed(condition) {
   return condition ? "open" : "closed";
+}
+function getDataChecked(condition) {
+  return condition ? "checked" : "unchecked";
 }
 function getDataTransitionAttrs(state) {
   if (state === "starting")
@@ -3209,6 +4593,9 @@ function getDataTransitionAttrs(state) {
   if (state === "ending")
     return { "data-ending-style": "" };
   return {};
+}
+function getAriaChecked(checked, indeterminate) {
+  return checked ? "true" : "false";
 }
 class BitsAttrs {
   #variant;
@@ -3238,9 +4625,16 @@ function createBitsAttrs(config) {
     getAttr: bitsAttrs.getAttr
   };
 }
+const ARROW_DOWN = "ArrowDown";
+const ARROW_UP = "ArrowUp";
+const END = "End";
 const ENTER = "Enter";
 const ESCAPE = "Escape";
+const HOME = "Home";
+const PAGE_DOWN = "PageDown";
+const PAGE_UP = "PageUp";
 const SPACE = " ";
+const TAB = "Tab";
 const isBrowser$1 = typeof document !== "undefined";
 const isIOS = getIsIOS();
 function getIsIOS() {
@@ -3522,6 +4916,49 @@ class DialogRootState {
   }
   set sharedProps($$value) {
     return this.#sharedProps($$value);
+  }
+}
+class DialogCloseState {
+  static create(opts) {
+    return new DialogCloseState(opts, DialogRootContext.get());
+  }
+  opts;
+  root;
+  attachment;
+  constructor(opts, root) {
+    this.opts = opts;
+    this.root = root;
+    this.attachment = attachRef(this.opts.ref);
+    this.onclick = this.onclick.bind(this);
+    this.onkeydown = this.onkeydown.bind(this);
+  }
+  onclick(e) {
+    if (this.opts.disabled.current) return;
+    if (e.button > 0) return;
+    this.root.handleClose();
+  }
+  onkeydown(e) {
+    if (this.opts.disabled.current) return;
+    if (e.key === SPACE || e.key === ENTER) {
+      e.preventDefault();
+      this.root.handleClose();
+    }
+  }
+  #props = derived(() => ({
+    id: this.opts.id.current,
+    [this.root.getBitsAttr(this.opts.variant.current)]: "",
+    onclick: this.onclick,
+    onkeydown: this.onkeydown,
+    disabled: this.opts.disabled.current ? true : void 0,
+    tabindex: 0,
+    ...this.root.sharedProps,
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
   }
 }
 class DialogActionState {
@@ -3936,9 +5373,9 @@ function createPropResolver(configOption, fallback) {
       const propValue = getProp();
       if (propValue !== void 0)
         return propValue;
-      const option = configOption(config).current;
-      if (option !== void 0)
-        return option;
+      const option2 = configOption(config).current;
+      if (option2 !== void 0)
+        return option2;
       return fallback;
     });
   };
@@ -4030,6 +5467,136 @@ function isClickTrulyOutside(event, contentNode) {
   const { clientX, clientY } = event;
   const rect = contentNode.getBoundingClientRect();
   return clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom;
+}
+function next(array, index, loop2 = true) {
+  if (array.length === 0 || index < 0 || index >= array.length)
+    return;
+  if (array.length === 1 && index === 0)
+    return array[0];
+  if (index === array.length - 1)
+    return loop2 ? array[0] : void 0;
+  return array[index + 1];
+}
+function prev(array, index, loop2 = true) {
+  if (array.length === 0 || index < 0 || index >= array.length)
+    return;
+  if (array.length === 1 && index === 0)
+    return array[0];
+  if (index === 0)
+    return loop2 ? array[array.length - 1] : void 0;
+  return array[index - 1];
+}
+function forward(array, index, increment, loop2 = true) {
+  if (array.length === 0 || index < 0 || index >= array.length)
+    return;
+  let targetIndex = index + increment;
+  if (loop2) {
+    targetIndex = (targetIndex % array.length + array.length) % array.length;
+  } else {
+    targetIndex = Math.max(0, Math.min(targetIndex, array.length - 1));
+  }
+  return array[targetIndex];
+}
+function backward(array, index, decrement, loop2 = true) {
+  if (array.length === 0 || index < 0 || index >= array.length)
+    return;
+  let targetIndex = index - decrement;
+  if (loop2) {
+    targetIndex = (targetIndex % array.length + array.length) % array.length;
+  } else {
+    targetIndex = Math.max(0, Math.min(targetIndex, array.length - 1));
+  }
+  return array[targetIndex];
+}
+function getNextMatch(values, search, currentMatch) {
+  const lowerSearch = search.toLowerCase();
+  if (lowerSearch.endsWith(" ")) {
+    const searchWithoutSpace = lowerSearch.slice(0, -1);
+    const matchesWithoutSpace = values.filter((value) => value.toLowerCase().startsWith(searchWithoutSpace));
+    if (matchesWithoutSpace.length <= 1) {
+      return getNextMatch(values, searchWithoutSpace, currentMatch);
+    }
+    const currentMatchLowercase = currentMatch?.toLowerCase();
+    if (currentMatchLowercase && currentMatchLowercase.startsWith(searchWithoutSpace) && currentMatchLowercase.charAt(searchWithoutSpace.length) === " " && search.trim() === searchWithoutSpace) {
+      return currentMatch;
+    }
+    const spacedMatches = values.filter((value) => value.toLowerCase().startsWith(lowerSearch));
+    if (spacedMatches.length > 0) {
+      const currentMatchIndex2 = currentMatch ? values.indexOf(currentMatch) : -1;
+      let wrappedMatches = wrapArray(spacedMatches, Math.max(currentMatchIndex2, 0));
+      const nextMatch2 = wrappedMatches.find((match) => match !== currentMatch);
+      return nextMatch2 || currentMatch;
+    }
+  }
+  const isRepeated = search.length > 1 && Array.from(search).every((char) => char === search[0]);
+  const normalizedSearch = isRepeated ? search[0] : search;
+  const normalizedLowerSearch = normalizedSearch.toLowerCase();
+  const currentMatchIndex = currentMatch ? values.indexOf(currentMatch) : -1;
+  let wrappedValues = wrapArray(values, Math.max(currentMatchIndex, 0));
+  const excludeCurrentMatch = normalizedSearch.length === 1;
+  if (excludeCurrentMatch)
+    wrappedValues = wrappedValues.filter((v) => v !== currentMatch);
+  const nextMatch = wrappedValues.find((value) => value?.toLowerCase().startsWith(normalizedLowerSearch));
+  return nextMatch !== currentMatch ? nextMatch : void 0;
+}
+function wrapArray(array, startIndex) {
+  return array.map((_, index) => array[(startIndex + index) % array.length]);
+}
+const defaultOptions = { afterMs: 1e4, onChange: noop };
+function boxAutoReset(defaultValue, options) {
+  const { afterMs, onChange, getWindow: getWindow2 } = { ...defaultOptions, ...options };
+  let timeout = null;
+  let value = defaultValue;
+  function resetAfter() {
+    return getWindow2().setTimeout(
+      () => {
+        value = defaultValue;
+        onChange?.(defaultValue);
+      },
+      afterMs
+    );
+  }
+  return boxWith(() => value, (v) => {
+    value = v;
+    onChange?.(v);
+    if (timeout) getWindow2().clearTimeout(timeout);
+    timeout = resetAfter();
+  });
+}
+class DOMTypeahead {
+  #opts;
+  #search;
+  #onMatch = derived(() => {
+    if (this.#opts.onMatch) return this.#opts.onMatch;
+    return (node) => node.focus();
+  });
+  #getCurrentItem = derived(() => {
+    if (this.#opts.getCurrentItem) return this.#opts.getCurrentItem;
+    return this.#opts.getActiveElement;
+  });
+  constructor(opts) {
+    this.#opts = opts;
+    this.#search = boxAutoReset("", { afterMs: 1e3, getWindow: opts.getWindow });
+    this.handleTypeaheadSearch = this.handleTypeaheadSearch.bind(this);
+    this.resetTypeahead = this.resetTypeahead.bind(this);
+  }
+  handleTypeaheadSearch(key, candidates) {
+    if (!candidates.length) return;
+    this.#search.current = this.#search.current + key;
+    const currentItem = this.#getCurrentItem()();
+    const currentMatch = candidates.find((item) => item === currentItem)?.textContent?.trim() ?? "";
+    const values = candidates.map((item) => item.textContent?.trim() ?? "");
+    const nextMatch = getNextMatch(values, this.#search.current, currentMatch);
+    const newItem = candidates.find((item) => item.textContent?.trim() === nextMatch);
+    if (newItem) this.#onMatch()(newItem);
+    return newItem;
+  }
+  resetTypeahead() {
+    this.#search.current = "";
+  }
+  get search() {
+    return this.#search.current;
+  }
 }
 const CONTEXT_MENU_TRIGGER_ATTR = "data-context-menu-trigger";
 const CONTEXT_MENU_CONTENT_ATTR = "data-context-menu-content";
@@ -4378,9 +5945,9 @@ class FocusScopeManager {
   }
   unregister(scope) {
     this.#scopeStack.current = this.#scopeStack.current.filter((s) => s !== scope);
-    const next = this.getActive();
-    if (next) {
-      next.resume();
+    const next2 = this.getActive();
+    if (next2) {
+      next2.resume();
     }
   }
   getActive() {
@@ -5081,6 +6648,36 @@ function Dialog_description($$renderer, $$props) {
 Dialog_description.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
+Hidden_input[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/utilities/hidden-input.svelte";
+function Hidden_input($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { value = void 0, $$slots, $$events, ...restProps } = $$props;
+      const mergedProps = derived(() => mergeProps(restProps, {
+        "aria-hidden": "true",
+        tabindex: -1,
+        style: { ...srOnlyStyles, position: "absolute", top: "0", left: "0" }
+      }));
+      if (mergedProps().type === "checkbox") {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<input${attributes({ ...mergedProps(), value }, void 0, void 0, void 0, 4)}/>`);
+        push_element($$renderer2, "input", 22, 1);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<input${attributes({ value, ...mergedProps() }, void 0, void 0, void 0, 4)}/>`);
+        push_element($$renderer2, "input", 24, 1);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]-->`);
+      bind_props($$props, { value });
+    },
+    Hidden_input
+  );
+}
+Hidden_input.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
 function get(valueOrGetValue) {
   return typeof valueOrGetValue === "function" ? valueOrGetValue() : valueOrGetValue;
 }
@@ -5505,6 +7102,906 @@ function Floating_layer($$renderer, $$props) {
   );
 }
 Floating_layer.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+class DataTypeahead {
+  #opts;
+  #candidateValues = derived(() => this.#opts.candidateValues());
+  #search;
+  constructor(opts) {
+    this.#opts = opts;
+    this.#search = boxAutoReset("", { afterMs: 1e3, getWindow: this.#opts.getWindow });
+    this.handleTypeaheadSearch = this.handleTypeaheadSearch.bind(this);
+    this.resetTypeahead = this.resetTypeahead.bind(this);
+  }
+  handleTypeaheadSearch(key) {
+    if (!this.#opts.enabled() || !this.#candidateValues().length) return;
+    this.#search.current = this.#search.current + key;
+    const currentItem = this.#opts.getCurrentItem();
+    const currentMatch = this.#candidateValues().find((item) => item === currentItem) ?? "";
+    const values = this.#candidateValues().map((item) => item ?? "");
+    const nextMatch = getNextMatch(values, this.#search.current, currentMatch);
+    const newItem = this.#candidateValues().find((item) => item === nextMatch);
+    if (newItem) {
+      this.#opts.onMatch(newItem);
+    }
+    return newItem;
+  }
+  resetTypeahead() {
+    this.#search.current = "";
+  }
+}
+const FIRST_KEYS = [ARROW_DOWN, PAGE_UP, HOME];
+const LAST_KEYS = [ARROW_UP, PAGE_DOWN, END];
+const FIRST_LAST_KEYS = [...FIRST_KEYS, ...LAST_KEYS];
+const selectAttrs = createBitsAttrs({
+  component: "select",
+  parts: [
+    "trigger",
+    "content",
+    "item",
+    "viewport",
+    "scroll-up-button",
+    "scroll-down-button",
+    "group",
+    "group-label",
+    "separator",
+    "arrow",
+    "input",
+    "content-wrapper",
+    "item-text",
+    "value"
+  ]
+});
+const SelectRootContext = new Context$1("Select.Root | Combobox.Root");
+const SelectGroupContext = new Context$1("Select.Group | Combobox.Group");
+const SelectContentContext = new Context$1("Select.Content | Combobox.Content");
+class SelectBaseRootState {
+  opts;
+  touchedInput = false;
+  inputNode = null;
+  contentNode = null;
+  contentPresence;
+  viewportNode = null;
+  triggerNode = null;
+  valueNode = null;
+  valueId = "";
+  highlightedNode = null;
+  #highlightedValue = derived(() => {
+    if (!this.highlightedNode) return null;
+    return this.highlightedNode.getAttribute("data-value");
+  });
+  get highlightedValue() {
+    return this.#highlightedValue();
+  }
+  set highlightedValue($$value) {
+    return this.#highlightedValue($$value);
+  }
+  #highlightedId = derived(() => {
+    if (!this.highlightedNode) return void 0;
+    return this.highlightedNode.id;
+  });
+  get highlightedId() {
+    return this.#highlightedId();
+  }
+  set highlightedId($$value) {
+    return this.#highlightedId($$value);
+  }
+  #highlightedLabel = derived(() => {
+    if (!this.highlightedNode) return null;
+    return this.highlightedNode.getAttribute("data-label");
+  });
+  get highlightedLabel() {
+    return this.#highlightedLabel();
+  }
+  set highlightedLabel($$value) {
+    return this.#highlightedLabel($$value);
+  }
+  contentIsPositioned = false;
+  isUsingKeyboard = false;
+  isCombobox = false;
+  domContext = new DOMContext(() => null);
+  constructor(opts) {
+    this.opts = opts;
+    this.isCombobox = opts.isCombobox;
+    this.contentPresence = new PresenceManager({
+      ref: boxWith(() => this.contentNode),
+      open: this.opts.open,
+      onComplete: () => {
+        this.opts.onOpenChangeComplete.current(this.opts.open.current);
+      }
+    });
+  }
+  setHighlightedNode(node, initial = false) {
+    this.highlightedNode = node;
+    if (node && (this.isUsingKeyboard || initial)) {
+      this.scrollHighlightedNodeIntoView(node);
+    }
+  }
+  scrollHighlightedNodeIntoView(node) {
+    if (!this.viewportNode || !this.contentIsPositioned) return;
+    node.scrollIntoView({ block: this.opts.scrollAlignment.current });
+  }
+  getCandidateNodes() {
+    const node = this.contentNode;
+    if (!node) return [];
+    return Array.from(node.querySelectorAll(`[${this.getBitsAttr("item")}]:not([data-disabled])`));
+  }
+  setHighlightedToFirstCandidate(initial = false) {
+    this.setHighlightedNode(null);
+    let nodes = this.getCandidateNodes();
+    if (!nodes.length) return;
+    if (this.viewportNode) {
+      const viewportRect = this.viewportNode.getBoundingClientRect();
+      nodes = nodes.filter((node) => {
+        if (!this.viewportNode) return false;
+        const nodeRect = node.getBoundingClientRect();
+        const isNodeFullyVisible = nodeRect.right <= viewportRect.right && nodeRect.left >= viewportRect.left && nodeRect.bottom <= viewportRect.bottom && nodeRect.top >= viewportRect.top;
+        return isNodeFullyVisible;
+      });
+    }
+    this.setHighlightedNode(nodes[0], initial);
+  }
+  getNodeByValue(value) {
+    const candidateNodes = this.getCandidateNodes();
+    return candidateNodes.find((node) => node.dataset.value === value) ?? null;
+  }
+  /**
+   * Resolves the display label for a value: `items` entry when present, otherwise the
+   * mounted item's `data-label` or its text content.
+   */
+  getLabelForValue(value) {
+    if (value === "") return "";
+    const fromItems = this.opts.items.current.find((item) => item.value === value)?.label;
+    if (fromItems !== void 0) return fromItems;
+    const node = this.getNodeByValue(value);
+    if (node) {
+      const dataLabel = node.getAttribute("data-label");
+      if (dataLabel !== null && dataLabel !== "") return dataLabel;
+      return node.textContent?.trim() ?? value;
+    }
+    return value;
+  }
+  setOpen(open) {
+    this.opts.open.current = open;
+  }
+  toggleOpen() {
+    this.opts.open.current = !this.opts.open.current;
+  }
+  handleOpen() {
+    this.setOpen(true);
+  }
+  handleClose() {
+    this.setHighlightedNode(null);
+    this.setOpen(false);
+  }
+  toggleMenu() {
+    this.toggleOpen();
+  }
+  getBitsAttr = (part) => {
+    return selectAttrs.getAttr(part, this.isCombobox ? "combobox" : void 0);
+  };
+}
+class SelectSingleRootState extends SelectBaseRootState {
+  opts;
+  isMulti = false;
+  #hasValue = derived(() => this.opts.value.current !== "");
+  get hasValue() {
+    return this.#hasValue();
+  }
+  set hasValue($$value) {
+    return this.#hasValue($$value);
+  }
+  #currentLabel = derived(() => {
+    if (!this.opts.items.current.length) return "";
+    return this.opts.items.current.find((item) => item.value === this.opts.value.current)?.label ?? "";
+  });
+  get currentLabel() {
+    return this.#currentLabel();
+  }
+  set currentLabel($$value) {
+    return this.#currentLabel($$value);
+  }
+  #candidateLabels = derived(() => {
+    if (!this.opts.items.current.length) return [];
+    const filteredItems = this.opts.items.current.filter((item) => !item.disabled);
+    return filteredItems.map((item) => item.label);
+  });
+  get candidateLabels() {
+    return this.#candidateLabels();
+  }
+  set candidateLabels($$value) {
+    return this.#candidateLabels($$value);
+  }
+  #dataTypeaheadEnabled = derived(() => {
+    if (this.isMulti) return false;
+    if (this.opts.items.current.length === 0) return false;
+    return true;
+  });
+  get dataTypeaheadEnabled() {
+    return this.#dataTypeaheadEnabled();
+  }
+  set dataTypeaheadEnabled($$value) {
+    return this.#dataTypeaheadEnabled($$value);
+  }
+  constructor(opts) {
+    super(opts);
+    this.opts = opts;
+    watch$1(() => this.opts.open.current, () => {
+      if (!this.opts.open.current) return;
+      this.setInitialHighlightedNode();
+    });
+  }
+  includesItem(itemValue) {
+    return this.opts.value.current === itemValue;
+  }
+  toggleItem(itemValue, itemLabel = itemValue) {
+    const newValue = this.includesItem(itemValue) ? "" : itemValue;
+    this.opts.value.current = newValue;
+    if (newValue !== "") {
+      this.opts.inputValue.current = itemLabel;
+    }
+  }
+  setInitialHighlightedNode() {
+    afterTick(() => {
+      if (this.highlightedNode && this.domContext.getDocument().contains(this.highlightedNode)) return;
+      if (this.opts.value.current !== "") {
+        const node = this.getNodeByValue(this.opts.value.current);
+        if (node) {
+          this.setHighlightedNode(node, true);
+          return;
+        }
+      }
+      this.setHighlightedToFirstCandidate(true);
+    });
+  }
+}
+class SelectMultipleRootState extends SelectBaseRootState {
+  opts;
+  isMulti = true;
+  #hasValue = derived(() => this.opts.value.current.length > 0);
+  get hasValue() {
+    return this.#hasValue();
+  }
+  set hasValue($$value) {
+    return this.#hasValue($$value);
+  }
+  constructor(opts) {
+    super(opts);
+    this.opts = opts;
+    watch$1(() => this.opts.open.current, () => {
+      if (!this.opts.open.current) return;
+      this.setInitialHighlightedNode();
+    });
+  }
+  includesItem(itemValue) {
+    return this.opts.value.current.includes(itemValue);
+  }
+  toggleItem(itemValue, itemLabel = itemValue) {
+    if (this.includesItem(itemValue)) {
+      this.opts.value.current = this.opts.value.current.filter((v) => v !== itemValue);
+    } else {
+      this.opts.value.current = [...this.opts.value.current, itemValue];
+    }
+    this.opts.inputValue.current = itemLabel;
+  }
+  setInitialHighlightedNode() {
+    afterTick(() => {
+      if (!this.domContext) return;
+      if (this.highlightedNode && this.domContext.getDocument().contains(this.highlightedNode)) return;
+      if (this.opts.value.current.length && this.opts.value.current[0] !== "") {
+        const node = this.getNodeByValue(this.opts.value.current[0]);
+        if (node) {
+          this.setHighlightedNode(node, true);
+          return;
+        }
+      }
+      this.setHighlightedToFirstCandidate(true);
+    });
+  }
+}
+class SelectRootState {
+  static create(props) {
+    const { type, ...rest } = props;
+    const rootState = type === "single" ? new SelectSingleRootState(rest) : new SelectMultipleRootState(rest);
+    return SelectRootContext.set(rootState);
+  }
+}
+class SelectTriggerState {
+  static create(opts) {
+    return new SelectTriggerState(opts, SelectRootContext.get());
+  }
+  opts;
+  root;
+  attachment;
+  #domTypeahead;
+  #dataTypeahead;
+  constructor(opts, root) {
+    this.opts = opts;
+    this.root = root;
+    this.attachment = attachRef(opts.ref, (v) => this.root.triggerNode = v);
+    this.root.domContext = new DOMContext(opts.ref);
+    this.#domTypeahead = new DOMTypeahead({
+      getCurrentItem: () => this.root.highlightedNode,
+      onMatch: (node) => {
+        this.root.setHighlightedNode(node);
+      },
+      getActiveElement: () => this.root.domContext.getActiveElement(),
+      getWindow: () => this.root.domContext.getWindow()
+    });
+    this.#dataTypeahead = new DataTypeahead({
+      getCurrentItem: () => {
+        if (this.root.isMulti) return "";
+        return this.root.currentLabel;
+      },
+      onMatch: (label) => {
+        if (this.root.isMulti) return;
+        if (!this.root.opts.items.current) return;
+        const matchedItem = this.root.opts.items.current.find((item) => item.label === label);
+        if (!matchedItem) return;
+        this.root.opts.value.current = matchedItem.value;
+      },
+      enabled: () => !this.root.isMulti && this.root.dataTypeaheadEnabled,
+      candidateValues: () => this.root.isMulti ? [] : this.root.candidateLabels,
+      getWindow: () => this.root.domContext.getWindow()
+    });
+    this.onkeydown = this.onkeydown.bind(this);
+    this.onpointerdown = this.onpointerdown.bind(this);
+    this.onpointerup = this.onpointerup.bind(this);
+    this.onclick = this.onclick.bind(this);
+  }
+  #handleOpen() {
+    this.root.opts.open.current = true;
+    this.#dataTypeahead.resetTypeahead();
+    this.#domTypeahead.resetTypeahead();
+  }
+  #handlePointerOpen(_) {
+    this.#handleOpen();
+  }
+  /**
+   * Logic used to handle keyboard selection/deselection.
+   *
+   * If it returns true, it means the item was selected and whatever is calling
+   * this function should return early
+   *
+   */
+  #handleKeyboardSelection() {
+    const isCurrentSelectedValue = this.root.highlightedValue === this.root.opts.value.current;
+    if (!this.root.opts.allowDeselect.current && isCurrentSelectedValue && !this.root.isMulti) {
+      this.root.handleClose();
+      return true;
+    }
+    if (this.root.highlightedValue !== null) {
+      this.root.toggleItem(this.root.highlightedValue, this.root.highlightedLabel ?? void 0);
+    }
+    if (!this.root.isMulti && !isCurrentSelectedValue) {
+      this.root.handleClose();
+      return true;
+    }
+    return false;
+  }
+  onkeydown(e) {
+    this.root.isUsingKeyboard = true;
+    if (e.key === ARROW_UP || e.key === ARROW_DOWN) e.preventDefault();
+    if (!this.root.opts.open.current) {
+      if (e.key === ENTER || e.key === SPACE || e.key === ARROW_DOWN || e.key === ARROW_UP) {
+        e.preventDefault();
+        this.root.handleOpen();
+      } else if (!this.root.isMulti && this.root.dataTypeaheadEnabled) {
+        this.#dataTypeahead.handleTypeaheadSearch(e.key);
+        return;
+      }
+      if (this.root.hasValue) return;
+      const candidateNodes2 = this.root.getCandidateNodes();
+      if (!candidateNodes2.length) return;
+      if (e.key === ARROW_DOWN) {
+        const firstCandidate = candidateNodes2[0];
+        this.root.setHighlightedNode(firstCandidate);
+      } else if (e.key === ARROW_UP) {
+        const lastCandidate = candidateNodes2[candidateNodes2.length - 1];
+        this.root.setHighlightedNode(lastCandidate);
+      }
+      return;
+    }
+    if (e.key === TAB) {
+      this.root.handleClose();
+      return;
+    }
+    if ((e.key === ENTER || // if we're currently "typing ahead", we don't want to select the item
+    // just yet as the item the user is trying to get to may have a space in it,
+    // so we defer handling the close for this case until further down
+    e.key === SPACE && this.#domTypeahead.search === "") && !e.isComposing) {
+      e.preventDefault();
+      const shouldReturn = this.#handleKeyboardSelection();
+      if (shouldReturn) return;
+    }
+    if (e.key === ARROW_UP && e.altKey) {
+      this.root.handleClose();
+    }
+    if (FIRST_LAST_KEYS.includes(e.key)) {
+      e.preventDefault();
+      const candidateNodes2 = this.root.getCandidateNodes();
+      const currHighlightedNode = this.root.highlightedNode;
+      const currIndex = currHighlightedNode ? candidateNodes2.indexOf(currHighlightedNode) : -1;
+      const loop2 = this.root.opts.loop.current;
+      let nextItem;
+      if (e.key === ARROW_DOWN) {
+        nextItem = next(candidateNodes2, currIndex, loop2);
+      } else if (e.key === ARROW_UP) {
+        nextItem = prev(candidateNodes2, currIndex, loop2);
+      } else if (e.key === PAGE_DOWN) {
+        nextItem = forward(candidateNodes2, currIndex, 10, loop2);
+      } else if (e.key === PAGE_UP) {
+        nextItem = backward(candidateNodes2, currIndex, 10, loop2);
+      } else if (e.key === HOME) {
+        nextItem = candidateNodes2[0];
+      } else if (e.key === END) {
+        nextItem = candidateNodes2[candidateNodes2.length - 1];
+      }
+      if (!nextItem) return;
+      this.root.setHighlightedNode(nextItem);
+      return;
+    }
+    const isModifierKey = e.ctrlKey || e.altKey || e.metaKey;
+    const isCharacterKey = e.key.length === 1;
+    const isSpaceKey = e.key === SPACE;
+    const candidateNodes = this.root.getCandidateNodes();
+    if (e.key === TAB) return;
+    if (!isModifierKey && (isCharacterKey || isSpaceKey)) {
+      const matchedNode = this.#domTypeahead.handleTypeaheadSearch(e.key, candidateNodes);
+      if (!matchedNode && isSpaceKey) {
+        e.preventDefault();
+        this.#handleKeyboardSelection();
+      }
+      return;
+    }
+    if (!this.root.highlightedNode) {
+      this.root.setHighlightedToFirstCandidate();
+    }
+  }
+  onclick(e) {
+    const currTarget = e.currentTarget;
+    currTarget.focus();
+  }
+  onpointerdown(e) {
+    if (this.root.opts.disabled.current) return;
+    if (e.pointerType === "touch") return e.preventDefault();
+    const target = e.target;
+    if (target?.hasPointerCapture(e.pointerId)) {
+      target?.releasePointerCapture(e.pointerId);
+    }
+    if (e.button === 0 && e.ctrlKey === false) {
+      if (this.root.opts.open.current === false) {
+        this.#handlePointerOpen(e);
+      } else {
+        this.root.handleClose();
+      }
+    }
+  }
+  onpointerup(e) {
+    if (this.root.opts.disabled.current) return;
+    e.preventDefault();
+    if (e.pointerType === "touch") {
+      if (this.root.opts.open.current === false) {
+        this.#handlePointerOpen(e);
+      } else {
+        this.root.handleClose();
+      }
+    }
+  }
+  #props = derived(() => ({
+    id: this.opts.id.current,
+    disabled: this.root.opts.disabled.current ? true : void 0,
+    "aria-haspopup": "listbox",
+    "aria-expanded": boolToStr(this.root.opts.open.current),
+    "aria-activedescendant": this.root.highlightedId,
+    "data-state": getDataOpenClosed(this.root.opts.open.current),
+    "data-disabled": boolToEmptyStrOrUndef(this.root.opts.disabled.current),
+    "data-placeholder": this.root.hasValue ? void 0 : "",
+    [this.root.getBitsAttr("trigger")]: "",
+    onpointerdown: this.onpointerdown,
+    onkeydown: this.onkeydown,
+    onclick: this.onclick,
+    onpointerup: this.onpointerup,
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+class SelectContentState {
+  static create(opts) {
+    return SelectContentContext.set(new SelectContentState(opts, SelectRootContext.get()));
+  }
+  opts;
+  root;
+  attachment;
+  isPositioned = false;
+  domContext;
+  constructor(opts, root) {
+    this.opts = opts;
+    this.root = root;
+    this.attachment = attachRef(opts.ref, (v) => this.root.contentNode = v);
+    this.domContext = new DOMContext(this.opts.ref);
+    if (this.root.domContext === null) {
+      this.root.domContext = this.domContext;
+    }
+    watch$1(() => this.root.opts.open.current, () => {
+      if (this.root.opts.open.current) return;
+      this.root.contentIsPositioned = false;
+      this.isPositioned = false;
+    });
+    watch$1([() => this.isPositioned, () => this.root.highlightedNode], () => {
+      if (!this.isPositioned || !this.root.highlightedNode) return;
+      this.root.scrollHighlightedNodeIntoView(this.root.highlightedNode);
+    });
+    this.onpointermove = this.onpointermove.bind(this);
+  }
+  onpointermove(_) {
+    this.root.isUsingKeyboard = false;
+  }
+  #styles = derived(() => {
+    return getFloatingContentCSSVars(this.root.isCombobox ? "combobox" : "select");
+  });
+  onInteractOutside = (e) => {
+    if (e.target === this.root.triggerNode || e.target === this.root.inputNode) {
+      e.preventDefault();
+      return;
+    }
+    this.opts.onInteractOutside.current(e);
+    if (e.defaultPrevented) return;
+    this.root.handleClose();
+  };
+  onEscapeKeydown = (e) => {
+    this.opts.onEscapeKeydown.current(e);
+    if (e.defaultPrevented) return;
+    this.root.handleClose();
+  };
+  onOpenAutoFocus = (e) => {
+    e.preventDefault();
+  };
+  onCloseAutoFocus = (e) => {
+    e.preventDefault();
+  };
+  get shouldRender() {
+    return this.root.contentPresence.shouldRender;
+  }
+  #snippetProps = derived(() => ({ open: this.root.opts.open.current }));
+  get snippetProps() {
+    return this.#snippetProps();
+  }
+  set snippetProps($$value) {
+    return this.#snippetProps($$value);
+  }
+  #props = derived(() => ({
+    id: this.opts.id.current,
+    role: "listbox",
+    "aria-multiselectable": this.root.isMulti ? "true" : void 0,
+    "data-state": getDataOpenClosed(this.root.opts.open.current),
+    ...getDataTransitionAttrs(this.root.contentPresence.transitionStatus),
+    [this.root.getBitsAttr("content")]: "",
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      outline: "none",
+      boxSizing: "border-box",
+      pointerEvents: "auto",
+      ...this.#styles()
+    },
+    onpointermove: this.onpointermove,
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+  popperProps = {
+    onInteractOutside: this.onInteractOutside,
+    onEscapeKeydown: this.onEscapeKeydown,
+    onOpenAutoFocus: this.onOpenAutoFocus,
+    onCloseAutoFocus: this.onCloseAutoFocus,
+    trapFocus: false,
+    loop: false,
+    onPlaced: () => {
+      if (this.root.opts.open.current) {
+        this.root.contentIsPositioned = true;
+        this.isPositioned = true;
+      }
+    }
+  };
+}
+class SelectItemState {
+  static create(opts) {
+    return new SelectItemState(opts, SelectRootContext.get());
+  }
+  opts;
+  root;
+  attachment;
+  #isSelected = derived(() => this.root.includesItem(this.opts.value.current));
+  get isSelected() {
+    return this.#isSelected();
+  }
+  set isSelected($$value) {
+    return this.#isSelected($$value);
+  }
+  #isHighlighted = derived(() => this.root.highlightedValue === this.opts.value.current);
+  get isHighlighted() {
+    return this.#isHighlighted();
+  }
+  set isHighlighted($$value) {
+    return this.#isHighlighted($$value);
+  }
+  prevHighlighted = new Previous(() => this.isHighlighted);
+  mounted = false;
+  constructor(opts, root) {
+    this.opts = opts;
+    this.root = root;
+    this.attachment = attachRef(opts.ref);
+    watch$1([() => this.isHighlighted, () => this.prevHighlighted.current], () => {
+      if (this.isHighlighted) {
+        this.opts.onHighlight.current();
+      } else if (this.prevHighlighted.current) {
+        this.opts.onUnhighlight.current();
+      }
+    });
+    watch$1(() => this.mounted, () => {
+      if (!this.mounted) return;
+      this.root.setInitialHighlightedNode();
+    });
+    this.onpointerdown = this.onpointerdown.bind(this);
+    this.onpointerup = this.onpointerup.bind(this);
+    this.onpointermove = this.onpointermove.bind(this);
+  }
+  handleSelect() {
+    if (this.opts.disabled.current) return;
+    const isCurrentSelectedValue = this.opts.value.current === this.root.opts.value.current;
+    if (!this.root.opts.allowDeselect.current && isCurrentSelectedValue && !this.root.isMulti) {
+      this.root.handleClose();
+      return;
+    }
+    this.root.toggleItem(this.opts.value.current, this.opts.label.current);
+    if (!this.root.isMulti && !isCurrentSelectedValue) {
+      this.root.handleClose();
+    }
+  }
+  #snippetProps = derived(() => ({ selected: this.isSelected, highlighted: this.isHighlighted }));
+  get snippetProps() {
+    return this.#snippetProps();
+  }
+  set snippetProps($$value) {
+    return this.#snippetProps($$value);
+  }
+  onpointerdown(e) {
+    e.preventDefault();
+  }
+  /**
+   * Using `pointerup` instead of `click` allows power users to pointerdown
+   * the trigger, then release pointerup on an item to select it vs having to do
+   * multiple clicks.
+   */
+  onpointerup(e) {
+    if (e.defaultPrevented || !this.opts.ref.current) return;
+    if (e.pointerType === "touch" && !isIOS) {
+      on(
+        this.opts.ref.current,
+        "click",
+        () => {
+          this.handleSelect();
+          this.root.setHighlightedNode(this.opts.ref.current);
+        },
+        { once: true }
+      );
+      return;
+    }
+    e.preventDefault();
+    this.handleSelect();
+    if (e.pointerType === "touch") {
+      this.root.setHighlightedNode(this.opts.ref.current);
+    }
+  }
+  onpointermove(e) {
+    if (e.pointerType === "touch") return;
+    if (this.root.highlightedNode !== this.opts.ref.current) {
+      this.root.setHighlightedNode(this.opts.ref.current);
+    }
+  }
+  #props = derived(() => ({
+    id: this.opts.id.current,
+    role: "option",
+    "aria-selected": this.root.includesItem(this.opts.value.current) ? "true" : void 0,
+    "data-value": this.opts.value.current,
+    "data-disabled": boolToEmptyStrOrUndef(this.opts.disabled.current),
+    "data-highlighted": this.root.highlightedValue === this.opts.value.current && !this.opts.disabled.current ? "" : void 0,
+    "data-selected": this.root.includesItem(this.opts.value.current) ? "" : void 0,
+    "data-label": this.opts.label.current,
+    [this.root.getBitsAttr("item")]: "",
+    onpointermove: this.onpointermove,
+    onpointerdown: this.onpointerdown,
+    onpointerup: this.onpointerup,
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+class SelectGroupState {
+  static create(opts) {
+    return SelectGroupContext.set(new SelectGroupState(opts, SelectRootContext.get()));
+  }
+  opts;
+  root;
+  labelNode = null;
+  attachment;
+  constructor(opts, root) {
+    this.opts = opts;
+    this.root = root;
+    this.attachment = attachRef(opts.ref);
+  }
+  #props = derived(() => ({
+    id: this.opts.id.current,
+    role: "group",
+    [this.root.getBitsAttr("group")]: "",
+    "aria-labelledby": this.labelNode?.id ?? void 0,
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+class SelectGroupHeadingState {
+  static create(opts) {
+    return new SelectGroupHeadingState(opts, SelectGroupContext.get());
+  }
+  opts;
+  group;
+  attachment;
+  constructor(opts, group) {
+    this.opts = opts;
+    this.group = group;
+    this.attachment = attachRef(opts.ref, (v) => this.group.labelNode = v);
+  }
+  #props = derived(() => ({
+    id: this.opts.id.current,
+    [this.group.root.getBitsAttr("group-label")]: "",
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+class SelectHiddenInputState {
+  static create(opts) {
+    return new SelectHiddenInputState(opts, SelectRootContext.get());
+  }
+  opts;
+  root;
+  #shouldRender = derived(() => this.root.opts.name.current !== "");
+  get shouldRender() {
+    return this.#shouldRender();
+  }
+  set shouldRender($$value) {
+    return this.#shouldRender($$value);
+  }
+  constructor(opts, root) {
+    this.opts = opts;
+    this.root = root;
+    this.onfocus = this.onfocus.bind(this);
+  }
+  onfocus(e) {
+    e.preventDefault();
+    if (!this.root.isCombobox) {
+      this.root.triggerNode?.focus();
+    } else {
+      this.root.inputNode?.focus();
+    }
+  }
+  #props = derived(() => ({
+    disabled: boolToTrueOrUndef(this.root.opts.disabled.current),
+    required: boolToTrueOrUndef(this.root.opts.required.current),
+    name: this.root.opts.name.current,
+    value: this.opts.value.current,
+    onfocus: this.onfocus
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+class SelectViewportState {
+  static create(opts) {
+    return new SelectViewportState(opts, SelectContentContext.get());
+  }
+  opts;
+  content;
+  root;
+  attachment;
+  prevScrollTop = 0;
+  constructor(opts, content) {
+    this.opts = opts;
+    this.content = content;
+    this.root = content.root;
+    this.attachment = attachRef(opts.ref, (v) => {
+      this.root.viewportNode = v;
+    });
+  }
+  #props = derived(() => ({
+    id: this.opts.id.current,
+    role: "presentation",
+    [this.root.getBitsAttr("viewport")]: "",
+    style: {
+      // we use position: 'relative' here on the `viewport` so that when we call
+      // `selectedItem.offsetTop` in calculations, the offset is relative to the viewport
+      // (independent of the scrollUpButton).
+      position: "relative",
+      flex: 1,
+      overflow: "auto"
+    },
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+Select_hidden_input[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/select/components/select-hidden-input.svelte";
+function Select_hidden_input($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { value = void 0, autocomplete } = $$props;
+      const hiddenInputState = SelectHiddenInputState.create({ value: boxWith(() => value) });
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        if (hiddenInputState.shouldRender) {
+          $$renderer3.push("<!--[0-->");
+          Hidden_input($$renderer3, spread_props([
+            hiddenInputState.props,
+            {
+              autocomplete,
+              get value() {
+                return value;
+              },
+              set value($$value) {
+                value = $$value;
+                $$settled = false;
+              }
+            }
+          ]));
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]-->`);
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+      bind_props($$props, { value });
+    },
+    Select_hidden_input
+  );
+}
+Select_hidden_input.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
 Floating_layer_anchor[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/utilities/floating-layer/components/floating-layer-anchor.svelte";
@@ -5976,6 +8473,338 @@ function Popper_layer_force_mount($$renderer, $$props) {
   );
 }
 Popper_layer_force_mount.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Select_content[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/select/components/select-content.svelte";
+function Select_content($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        id: id2 = createId(uid),
+        ref = null,
+        forceMount = false,
+        side = "bottom",
+        onInteractOutside = noop,
+        onEscapeKeydown = noop,
+        children,
+        child,
+        preventScroll = false,
+        style: style2,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const contentState = SelectContentState.create({
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v),
+        onInteractOutside: boxWith(() => onInteractOutside),
+        onEscapeKeydown: boxWith(() => onEscapeKeydown)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, contentState.props));
+      if (forceMount) {
+        $$renderer2.push("<!--[0-->");
+        {
+          let popper = function($$renderer3, { props, wrapperProps }) {
+            validate_snippet_args($$renderer3);
+            const finalProps = mergeProps(props, { style: contentState.props.style }, { style: style2 });
+            if (child) {
+              $$renderer3.push("<!--[0-->");
+              child($$renderer3, {
+                props: finalProps,
+                wrapperProps,
+                ...contentState.snippetProps
+              });
+              $$renderer3.push(`<!---->`);
+            } else {
+              $$renderer3.push("<!--[-1-->");
+              $$renderer3.push(`<div${attributes({ ...wrapperProps })}>`);
+              push_element($$renderer3, "div", 56, 4);
+              $$renderer3.push(`<div${attributes({ ...finalProps })}>`);
+              push_element($$renderer3, "div", 57, 5);
+              children?.($$renderer3);
+              $$renderer3.push(`<!----></div>`);
+              pop_element();
+              $$renderer3.push(`</div>`);
+              pop_element();
+            }
+            $$renderer3.push(`<!--]-->`);
+          };
+          prevent_snippet_stringification(popper);
+          Popper_layer_force_mount($$renderer2, spread_props([
+            mergedProps(),
+            contentState.popperProps,
+            {
+              ref: contentState.opts.ref,
+              side,
+              enabled: contentState.root.opts.open.current,
+              id: id2,
+              preventScroll,
+              forceMount: true,
+              shouldRender: contentState.shouldRender,
+              popper,
+              $$slots: { popper: true }
+            }
+          ]));
+        }
+      } else if (!forceMount) {
+        $$renderer2.push("<!--[1-->");
+        {
+          let popper = function($$renderer3, { props, wrapperProps }) {
+            validate_snippet_args($$renderer3);
+            const finalProps = mergeProps(props, { style: contentState.props.style }, { style: style2 });
+            if (child) {
+              $$renderer3.push("<!--[0-->");
+              child($$renderer3, {
+                props: finalProps,
+                wrapperProps,
+                ...contentState.snippetProps
+              });
+              $$renderer3.push(`<!---->`);
+            } else {
+              $$renderer3.push("<!--[-1-->");
+              $$renderer3.push(`<div${attributes({ ...wrapperProps })}>`);
+              push_element($$renderer3, "div", 81, 4);
+              $$renderer3.push(`<div${attributes({ ...finalProps })}>`);
+              push_element($$renderer3, "div", 82, 5);
+              children?.($$renderer3);
+              $$renderer3.push(`<!----></div>`);
+              pop_element();
+              $$renderer3.push(`</div>`);
+              pop_element();
+            }
+            $$renderer3.push(`<!--]-->`);
+          };
+          prevent_snippet_stringification(popper);
+          Popper_layer($$renderer2, spread_props([
+            mergedProps(),
+            contentState.popperProps,
+            {
+              ref: contentState.opts.ref,
+              side,
+              open: contentState.root.opts.open.current,
+              id: id2,
+              preventScroll,
+              forceMount: false,
+              shouldRender: contentState.shouldRender,
+              popper,
+              $$slots: { popper: true }
+            }
+          ]));
+        }
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]-->`);
+      bind_props($$props, { ref });
+    },
+    Select_content
+  );
+}
+Select_content.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Mounted[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/utilities/mounted.svelte";
+function Mounted($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { mounted = false, onMountedChange = noop } = $$props;
+      bind_props($$props, { mounted });
+    },
+    Mounted
+  );
+}
+Mounted.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Select_item[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/select/components/select-item.svelte";
+function Select_item($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        id: id2 = createId(uid),
+        ref = null,
+        value,
+        label = value,
+        disabled = false,
+        children,
+        child,
+        onHighlight = noop,
+        onUnhighlight = noop,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const itemState = SelectItemState.create({
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v),
+        value: boxWith(() => value),
+        disabled: boxWith(() => disabled),
+        label: boxWith(() => label),
+        onHighlight: boxWith(() => onHighlight),
+        onUnhighlight: boxWith(() => onUnhighlight)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, itemState.props));
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        if (child) {
+          $$renderer3.push("<!--[0-->");
+          child($$renderer3, { props: mergedProps(), ...itemState.snippetProps });
+          $$renderer3.push(`<!---->`);
+        } else {
+          $$renderer3.push("<!--[-1-->");
+          $$renderer3.push(`<div${attributes({ ...mergedProps() })}>`);
+          push_element($$renderer3, "div", 43, 1);
+          children?.($$renderer3, itemState.snippetProps);
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+        }
+        $$renderer3.push(`<!--]--> `);
+        Mounted($$renderer3, {
+          get mounted() {
+            return itemState.mounted;
+          },
+          set mounted($$value) {
+            itemState.mounted = $$value;
+            $$settled = false;
+          }
+        });
+        $$renderer3.push(`<!---->`);
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+      bind_props($$props, { ref });
+    },
+    Select_item
+  );
+}
+Select_item.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Select_group[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/select/components/select-group.svelte";
+function Select_group($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        id: id2 = createId(uid),
+        ref = null,
+        children,
+        child,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const groupState = SelectGroupState.create({
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, groupState.props));
+      if (child) {
+        $$renderer2.push("<!--[0-->");
+        child($$renderer2, { props: mergedProps() });
+        $$renderer2.push(`<!---->`);
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<div${attributes({ ...mergedProps() })}>`);
+        push_element($$renderer2, "div", 31, 1);
+        children?.($$renderer2);
+        $$renderer2.push(`<!----></div>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]-->`);
+      bind_props($$props, { ref });
+    },
+    Select_group
+  );
+}
+Select_group.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Select_group_heading[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/select/components/select-group-heading.svelte";
+function Select_group_heading($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        id: id2 = createId(uid),
+        ref = null,
+        child,
+        children,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const groupHeadingState = SelectGroupHeadingState.create({
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, groupHeadingState.props));
+      if (child) {
+        $$renderer2.push("<!--[0-->");
+        child($$renderer2, { props: mergedProps() });
+        $$renderer2.push(`<!---->`);
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<div${attributes({ ...mergedProps() })}>`);
+        push_element($$renderer2, "div", 30, 1);
+        children?.($$renderer2);
+        $$renderer2.push(`<!----></div>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]-->`);
+      bind_props($$props, { ref });
+    },
+    Select_group_heading
+  );
+}
+Select_group_heading.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Select_viewport[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/select/components/select-viewport.svelte";
+function Select_viewport($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        id: id2 = createId(uid),
+        ref = null,
+        children,
+        child,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const viewportState = SelectViewportState.create({
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, viewportState.props));
+      if (child) {
+        $$renderer2.push("<!--[0-->");
+        child($$renderer2, { props: mergedProps() });
+        $$renderer2.push(`<!---->`);
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<div${attributes({ ...mergedProps() })}>`);
+        push_element($$renderer2, "div", 31, 1);
+        children?.($$renderer2);
+        $$renderer2.push(`<!----></div>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]-->`);
+      bind_props($$props, { ref });
+    },
+    Select_viewport
+  );
+}
+Select_viewport.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
 function isPointInPolygon(point, polygon) {
@@ -6823,6 +9652,197 @@ function Popover_trigger($$renderer, $$props) {
 Popover_trigger.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
+Dialog[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/dialog/components/dialog.svelte";
+function Dialog($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let {
+        open = false,
+        onOpenChange = noop,
+        onOpenChangeComplete = noop,
+        children
+      } = $$props;
+      DialogRootState.create({
+        variant: boxWith(() => "dialog"),
+        open: boxWith(() => open, (v) => {
+          open = v;
+          onOpenChange(v);
+        }),
+        onOpenChangeComplete: boxWith(() => onOpenChangeComplete)
+      });
+      children?.($$renderer2);
+      $$renderer2.push(`<!---->`);
+      bind_props($$props, { open });
+    },
+    Dialog
+  );
+}
+Dialog.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Dialog_close[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/dialog/components/dialog-close.svelte";
+function Dialog_close($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        children,
+        child,
+        id: id2 = createId(uid),
+        ref = null,
+        disabled = false,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const closeState = DialogCloseState.create({
+        variant: boxWith(() => "close"),
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v),
+        disabled: boxWith(() => Boolean(disabled))
+      });
+      const mergedProps = derived(() => mergeProps(restProps, closeState.props));
+      if (child) {
+        $$renderer2.push("<!--[0-->");
+        child($$renderer2, { props: mergedProps() });
+        $$renderer2.push(`<!---->`);
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<button${attributes({ ...mergedProps() })}>`);
+        push_element($$renderer2, "button", 34, 1);
+        children?.($$renderer2);
+        $$renderer2.push(`<!----></button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]-->`);
+      bind_props($$props, { ref });
+    },
+    Dialog_close
+  );
+}
+Dialog_close.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Dialog_content[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/dialog/components/dialog-content.svelte";
+function Dialog_content($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        id: id2 = createId(uid),
+        children,
+        child,
+        ref = null,
+        forceMount = false,
+        onCloseAutoFocus = noop,
+        onOpenAutoFocus = noop,
+        onEscapeKeydown = noop,
+        onInteractOutside = noop,
+        trapFocus = true,
+        preventScroll = true,
+        restoreScrollDelay = null,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const contentState = DialogContentState.create({
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, contentState.props));
+      if (contentState.shouldRender || forceMount) {
+        $$renderer2.push("<!--[0-->");
+        {
+          let focusScope = function($$renderer3, { props: focusScopeProps }) {
+            validate_snippet_args($$renderer3);
+            Escape_layer($$renderer3, spread_props([
+              mergedProps(),
+              {
+                enabled: contentState.root.opts.open.current,
+                ref: contentState.opts.ref,
+                onEscapeKeydown: (e) => {
+                  onEscapeKeydown(e);
+                  if (e.defaultPrevented) return;
+                  contentState.root.handleClose();
+                },
+                children: prevent_snippet_stringification(($$renderer4) => {
+                  Dismissible_layer($$renderer4, spread_props([
+                    mergedProps(),
+                    {
+                      ref: contentState.opts.ref,
+                      enabled: contentState.root.opts.open.current,
+                      onInteractOutside: (e) => {
+                        onInteractOutside(e);
+                        if (e.defaultPrevented) return;
+                        contentState.root.handleClose();
+                      },
+                      children: prevent_snippet_stringification(($$renderer5) => {
+                        Text_selection_layer($$renderer5, spread_props([
+                          mergedProps(),
+                          {
+                            ref: contentState.opts.ref,
+                            enabled: contentState.root.opts.open.current,
+                            children: prevent_snippet_stringification(($$renderer6) => {
+                              if (child) {
+                                $$renderer6.push("<!--[0-->");
+                                if (contentState.root.opts.open.current) {
+                                  $$renderer6.push("<!--[0-->");
+                                  Scroll_lock($$renderer6, { preventScroll, restoreScrollDelay });
+                                } else {
+                                  $$renderer6.push("<!--[-1-->");
+                                }
+                                $$renderer6.push(`<!--]--> `);
+                                child($$renderer6, {
+                                  props: mergeProps(mergedProps(), focusScopeProps),
+                                  ...contentState.snippetProps
+                                });
+                                $$renderer6.push(`<!---->`);
+                              } else {
+                                $$renderer6.push("<!--[-1-->");
+                                Scroll_lock($$renderer6, { preventScroll });
+                                $$renderer6.push(`<!----> <div${attributes({ ...mergeProps(mergedProps(), focusScopeProps) })}>`);
+                                push_element($$renderer6, "div", 86, 7);
+                                children?.($$renderer6);
+                                $$renderer6.push(`<!----></div>`);
+                                pop_element();
+                              }
+                              $$renderer6.push(`<!--]-->`);
+                            }),
+                            $$slots: { default: true }
+                          }
+                        ]));
+                      }),
+                      $$slots: { default: true }
+                    }
+                  ]));
+                }),
+                $$slots: { default: true }
+              }
+            ]));
+          };
+          prevent_snippet_stringification(focusScope);
+          Focus_scope($$renderer2, {
+            ref: contentState.opts.ref,
+            loop: true,
+            trapFocus,
+            enabled: contentState.root.opts.open.current,
+            onOpenAutoFocus,
+            onCloseAutoFocus,
+            focusScope
+          });
+        }
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]-->`);
+      bind_props($$props, { ref });
+    },
+    Dialog_content
+  );
+}
+Dialog_content.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
 Popover[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/popover/components/popover.svelte";
 function Popover($$renderer, $$props) {
   $$renderer.component(
@@ -6852,6 +9872,407 @@ function Popover($$renderer, $$props) {
   );
 }
 Popover.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Select[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/select/components/select.svelte";
+function Select($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let {
+        value = void 0,
+        onValueChange = noop,
+        name = "",
+        disabled = false,
+        type,
+        open = false,
+        onOpenChange = noop,
+        onOpenChangeComplete = noop,
+        loop: loop2 = false,
+        scrollAlignment = "nearest",
+        required = false,
+        items = [],
+        allowDeselect = false,
+        autocomplete,
+        children
+      } = $$props;
+      function handleDefaultValue() {
+        if (value !== void 0) return;
+        value = type === "single" ? "" : [];
+      }
+      handleDefaultValue();
+      watch$1.pre(() => value, () => {
+        handleDefaultValue();
+      });
+      let inputValue = "";
+      const rootState = SelectRootState.create({
+        type,
+        value: boxWith(() => value, (v) => {
+          value = v;
+          onValueChange(v);
+        }),
+        disabled: boxWith(() => disabled),
+        required: boxWith(() => required),
+        open: boxWith(() => open, (v) => {
+          open = v;
+          onOpenChange(v);
+        }),
+        loop: boxWith(() => loop2),
+        scrollAlignment: boxWith(() => scrollAlignment),
+        name: boxWith(() => name),
+        isCombobox: false,
+        items: boxWith(() => items),
+        allowDeselect: boxWith(() => allowDeselect),
+        inputValue: boxWith(() => inputValue, (v) => inputValue = v),
+        onOpenChangeComplete: boxWith(() => onOpenChangeComplete)
+      });
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        Floating_layer($$renderer3, {
+          children: prevent_snippet_stringification(($$renderer4) => {
+            children?.($$renderer4);
+            $$renderer4.push(`<!---->`);
+          })
+        });
+        $$renderer3.push(`<!----> `);
+        if (Array.isArray(rootState.opts.value.current)) {
+          $$renderer3.push("<!--[0-->");
+          if (rootState.opts.value.current.length === 0) {
+            $$renderer3.push("<!--[0-->");
+            Select_hidden_input($$renderer3, { autocomplete });
+          } else {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`<!--[-->`);
+            const each_array = ensure_array_like(rootState.opts.value.current);
+            for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+              let item = each_array[$$index];
+              Select_hidden_input($$renderer3, { value: item, autocomplete });
+            }
+            $$renderer3.push(`<!--]-->`);
+          }
+          $$renderer3.push(`<!--]-->`);
+        } else {
+          $$renderer3.push("<!--[-1-->");
+          Select_hidden_input($$renderer3, {
+            autocomplete,
+            get value() {
+              return rootState.opts.value.current;
+            },
+            set value($$value) {
+              rootState.opts.value.current = $$value;
+              $$settled = false;
+            }
+          });
+        }
+        $$renderer3.push(`<!--]-->`);
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+      bind_props($$props, { value, open });
+    },
+    Select
+  );
+}
+Select.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Select_trigger[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/select/components/select-trigger.svelte";
+function Select_trigger($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        id: id2 = createId(uid),
+        ref = null,
+        child,
+        children,
+        type = "button",
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const triggerState = SelectTriggerState.create({
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, triggerState.props, { type }));
+      if (Floating_layer_anchor) {
+        $$renderer2.push("<!--[-->");
+        Floating_layer_anchor($$renderer2, {
+          id: id2,
+          ref: triggerState.opts.ref,
+          children: prevent_snippet_stringification(($$renderer3) => {
+            if (child) {
+              $$renderer3.push("<!--[0-->");
+              child($$renderer3, { props: mergedProps() });
+              $$renderer3.push(`<!---->`);
+            } else {
+              $$renderer3.push("<!--[-1-->");
+              $$renderer3.push(`<button${attributes({ ...mergedProps() })}>`);
+              push_element($$renderer3, "button", 34, 2);
+              children?.($$renderer3);
+              $$renderer3.push(`<!----></button>`);
+              pop_element();
+            }
+            $$renderer3.push(`<!--]-->`);
+          })
+        });
+        $$renderer2.push("<!--]-->");
+      } else {
+        $$renderer2.push("<!--[!-->");
+        $$renderer2.push("<!--]-->");
+      }
+      bind_props($$props, { ref });
+    },
+    Select_trigger
+  );
+}
+Select_trigger.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+const switchAttrs = createBitsAttrs({ component: "switch", parts: ["root", "thumb"] });
+const SwitchRootContext = new Context$1("Switch.Root");
+class SwitchRootState {
+  static create(opts) {
+    return SwitchRootContext.set(new SwitchRootState(opts));
+  }
+  opts;
+  attachment;
+  constructor(opts) {
+    this.opts = opts;
+    this.attachment = attachRef(opts.ref);
+    this.onkeydown = this.onkeydown.bind(this);
+    this.onclick = this.onclick.bind(this);
+  }
+  #toggle() {
+    this.opts.checked.current = !this.opts.checked.current;
+  }
+  onkeydown(e) {
+    if (!(e.key === ENTER || e.key === SPACE) || this.opts.disabled.current) return;
+    e.preventDefault();
+    this.#toggle();
+  }
+  onclick(_) {
+    if (this.opts.disabled.current) return;
+    this.#toggle();
+  }
+  #sharedProps = derived(() => ({
+    "data-disabled": boolToEmptyStrOrUndef(this.opts.disabled.current),
+    "data-state": getDataChecked(this.opts.checked.current),
+    "data-required": boolToEmptyStrOrUndef(this.opts.required.current)
+  }));
+  get sharedProps() {
+    return this.#sharedProps();
+  }
+  set sharedProps($$value) {
+    return this.#sharedProps($$value);
+  }
+  #snippetProps = derived(() => ({ checked: this.opts.checked.current }));
+  get snippetProps() {
+    return this.#snippetProps();
+  }
+  set snippetProps($$value) {
+    return this.#snippetProps($$value);
+  }
+  #props = derived(() => ({
+    ...this.sharedProps,
+    id: this.opts.id.current,
+    role: "switch",
+    disabled: boolToTrueOrUndef(this.opts.disabled.current),
+    "aria-checked": getAriaChecked(this.opts.checked.current),
+    "aria-required": boolToStr(this.opts.required.current),
+    [switchAttrs.root]: "",
+    onclick: this.onclick,
+    onkeydown: this.onkeydown,
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+class SwitchInputState {
+  static create() {
+    return new SwitchInputState(SwitchRootContext.get());
+  }
+  root;
+  #shouldRender = derived(() => this.root.opts.name.current !== void 0);
+  get shouldRender() {
+    return this.#shouldRender();
+  }
+  set shouldRender($$value) {
+    return this.#shouldRender($$value);
+  }
+  constructor(root) {
+    this.root = root;
+  }
+  #props = derived(() => ({
+    type: "checkbox",
+    name: this.root.opts.name.current,
+    value: this.root.opts.value.current,
+    checked: this.root.opts.checked.current,
+    disabled: this.root.opts.disabled.current,
+    required: this.root.opts.required.current
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+class SwitchThumbState {
+  static create(opts) {
+    return new SwitchThumbState(opts, SwitchRootContext.get());
+  }
+  opts;
+  root;
+  attachment;
+  constructor(opts, root) {
+    this.opts = opts;
+    this.root = root;
+    this.attachment = attachRef(opts.ref);
+  }
+  #snippetProps = derived(() => ({ checked: this.root.opts.checked.current }));
+  get snippetProps() {
+    return this.#snippetProps();
+  }
+  set snippetProps($$value) {
+    return this.#snippetProps($$value);
+  }
+  #props = derived(() => ({
+    ...this.root.sharedProps,
+    id: this.opts.id.current,
+    [switchAttrs.thumb]: "",
+    ...this.attachment
+  }));
+  get props() {
+    return this.#props();
+  }
+  set props($$value) {
+    return this.#props($$value);
+  }
+}
+Switch_input[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/switch/components/switch-input.svelte";
+function Switch_input($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const inputState = SwitchInputState.create();
+      if (inputState.shouldRender) {
+        $$renderer2.push("<!--[0-->");
+        Hidden_input($$renderer2, spread_props([inputState.props]));
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]-->`);
+    },
+    Switch_input
+  );
+}
+Switch_input.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Switch[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/switch/components/switch.svelte";
+function Switch($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        child,
+        children,
+        ref = null,
+        id: id2 = createId(uid),
+        disabled = false,
+        required = false,
+        checked = false,
+        value = "on",
+        name = void 0,
+        type = "button",
+        onCheckedChange = noop,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const rootState = SwitchRootState.create({
+        checked: boxWith(() => checked, (v) => {
+          checked = v;
+          onCheckedChange?.(v);
+        }),
+        disabled: boxWith(() => disabled ?? false),
+        required: boxWith(() => required),
+        value: boxWith(() => value),
+        name: boxWith(() => name),
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, rootState.props, { type }));
+      if (child) {
+        $$renderer2.push("<!--[0-->");
+        child($$renderer2, { props: mergedProps(), ...rootState.snippetProps });
+        $$renderer2.push(`<!---->`);
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<button${attributes({ ...mergedProps() })}>`);
+        push_element($$renderer2, "button", 51, 1);
+        children?.($$renderer2, rootState.snippetProps);
+        $$renderer2.push(`<!----></button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--> `);
+      Switch_input($$renderer2);
+      $$renderer2.push(`<!---->`);
+      bind_props($$props, { ref, checked });
+    },
+    Switch
+  );
+}
+Switch.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Switch_thumb[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/bits-ui/dist/bits/switch/components/switch-thumb.svelte";
+function Switch_thumb($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const uid = props_id($$renderer2);
+      let {
+        child,
+        children,
+        ref = null,
+        id: id2 = createId(uid),
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const thumbState = SwitchThumbState.create({
+        id: boxWith(() => id2),
+        ref: boxWith(() => ref, (v) => ref = v)
+      });
+      const mergedProps = derived(() => mergeProps(restProps, thumbState.props));
+      if (child) {
+        $$renderer2.push("<!--[0-->");
+        child($$renderer2, { props: mergedProps(), ...thumbState.snippetProps });
+        $$renderer2.push(`<!---->`);
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<span${attributes({ ...mergedProps() })}>`);
+        push_element($$renderer2, "span", 31, 1);
+        children?.($$renderer2, thumbState.snippetProps);
+        $$renderer2.push(`<!----></span>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]-->`);
+      bind_props($$props, { ref });
+    },
+    Switch_thumb
+  );
+}
+Switch_thumb.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
 ConfirmDialog[FILENAME] = "src/desktop-renderer/components/ui/dialog/ConfirmDialog.svelte";
@@ -7126,15 +10547,15 @@ class UsagePrefsStore {
   /** Toggle a metric key on/off for `provider`, preserving order. */
   pin(provider, metricKey) {
     const cur = this.highlights[provider] ?? [];
-    const next = cur.includes(metricKey) ? cur.filter((k) => k !== metricKey) : [...cur, metricKey];
-    this.highlights = { ...this.highlights, [provider]: next };
+    const next2 = cur.includes(metricKey) ? cur.filter((k) => k !== metricKey) : [...cur, metricKey];
+    this.highlights = { ...this.highlights, [provider]: next2 };
     highlightsPref.write(this.highlights);
   }
   /** Reset a provider to its default featured metric (clear any pins). */
   reset(provider) {
-    const next = { ...this.highlights };
-    delete next[provider];
-    this.highlights = next;
+    const next2 = { ...this.highlights };
+    delete next2[provider];
+    this.highlights = next2;
     highlightsPref.write(this.highlights);
   }
   /** Explicitly show nothing for `provider` in the sidebar line, while keeping
@@ -7238,6 +10659,23 @@ function urgencyClass(u) {
   if (u >= 0.7) return "text-warning";
   return "text-fg-soft";
 }
+Circle_slash[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/circle-slash.svelte";
+function Circle_slash($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        ["circle", { "cx": "12", "cy": "12", "r": "10" }],
+        ["line", { "x1": "9", "x2": "15", "y1": "15", "y2": "9" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "circle-slash" }, props, { iconNode }]));
+    },
+    Circle_slash
+  );
+}
+Circle_slash.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
 Sidebar[FILENAME] = "src/desktop-renderer/app/Sidebar.svelte";
 function Sidebar($$renderer, $$props) {
   $$renderer.component(
@@ -7264,7 +10702,7 @@ function Sidebar($$renderer, $$props) {
         onGoForward,
         canGoBack = false,
         canGoForward = false,
-        remoteFirst = false
+        remoteFirst: remoteFirst2 = false
         /** Remote-first mode on: the Remote item glows red + pulses. */
       } = $$props;
       let expanded = {};
@@ -7800,9 +11238,9 @@ function Sidebar($$renderer, $$props) {
             $$renderer4.push(` <button${attr_class(
               `main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] ${activeView === "remote" ? "main-nav-item--active text-fg" : "text-muted hover:text-fg"}`,
               "svelte-1t46z1g"
-            )} data-testid="nav-remote"${attr("data-remote-first", remoteFirst ? "on" : void 0)}>`);
+            )} data-testid="nav-remote"${attr("data-remote-first", remoteFirst2 ? "on" : void 0)}>`);
             push_element($$renderer4, "button", 891, 6);
-            $$renderer4.push(`<span${attr_class(`flex items-center gap-2.5 ${remoteFirst ? "remote-first-pulse" : ""}`, "svelte-1t46z1g")}>`);
+            $$renderer4.push(`<span${attr_class(`flex items-center gap-2.5 ${remoteFirst2 ? "remote-first-pulse" : ""}`, "svelte-1t46z1g")}>`);
             push_element($$renderer4, "span", 898, 8);
             Radio($$renderer4, { size: 15 });
             $$renderer4.push(`<!----> Remote</span>`);
@@ -8578,12 +12016,12 @@ function hasChanged(a, b) {
     return !shallowCompare(a, b);
   return a !== b;
 }
-function shallowCompare(next, prev) {
-  const prevLength = prev.length;
-  if (prevLength !== next.length)
+function shallowCompare(next2, prev2) {
+  const prevLength = prev2.length;
+  if (prevLength !== next2.length)
     return false;
   for (let i = 0; i < prevLength; i++) {
-    if (prev[i] !== next[i])
+    if (prev2[i] !== next2[i])
       return false;
   }
   return true;
@@ -9484,10 +12922,10 @@ function isControllingVariants(props) {
 function isVariantNode(props) {
   return Boolean(isControllingVariants(props) || props.variants);
 }
-function updateMotionValuesFromProps(element2, next, prev) {
-  for (const key in next) {
-    const nextValue = next[key];
-    const prevValue = prev[key];
+function updateMotionValuesFromProps(element2, next2, prev2) {
+  for (const key in next2) {
+    const nextValue = next2[key];
+    const prevValue = prev2[key];
     if (isMotionValue$1(nextValue)) {
       element2.addValue(key, nextValue);
     } else if (isMotionValue$1(prevValue)) {
@@ -9506,11 +12944,11 @@ function updateMotionValuesFromProps(element2, next, prev) {
       }
     }
   }
-  for (const key in prev) {
-    if (next[key] === void 0)
+  for (const key in prev2) {
+    if (next2[key] === void 0)
       element2.removeValue(key);
   }
-  return next;
+  return next2;
 }
 const propEventHandlers = [
   "AnimationStart",
@@ -12551,11 +15989,11 @@ class VisualElementDragControls {
     if (!offset2 || !shouldDrag(axis, drag, this.currentDirection))
       return;
     const axisValue = this.getAxisMotionValue(axis);
-    let next = this.originPoint[axis] + offset2[axis];
+    let next2 = this.originPoint[axis] + offset2[axis];
     if (this.constraints && this.constraints[axis]) {
-      next = applyConstraints(next, this.constraints[axis], this.elastic[axis]);
+      next2 = applyConstraints(next2, this.constraints[axis], this.elastic[axis]);
     }
-    axisValue.set(next);
+    axisValue.set(next2);
   }
   resolveConstraints() {
     const { dragConstraints, dragElastic } = this.getProps();
@@ -13704,12 +17142,12 @@ class CavemanStore {
     this.level = state.level;
   }
   async toggle(threadId) {
-    const next = !this.enabled;
-    this.enabled = next;
-    const state = await api.invoke("app:setCavemanEnabled", next);
+    const next2 = !this.enabled;
+    this.enabled = next2;
+    const state = await api.invoke("app:setCavemanEnabled", next2);
     this.enabled = state.enabled;
     this.level = state.level;
-    await api.invoke("threads:runCommand", threadId, next ? `/caveman ${state.level}` : "/caveman off");
+    await api.invoke("threads:runCommand", threadId, next2 ? `/caveman ${state.level}` : "/caveman off");
   }
   /** Persist the on-level the composer toggle maps to. */
   async setLevel(level) {
@@ -13725,7 +17163,8 @@ function createIpcStore(opts) {
   const load2 = async (force = false) => {
     if (!force && loaded) return;
     loaded = true;
-    value = await api.invoke(opts.loadChannel);
+    const next2 = await api.invoke(opts.loadChannel);
+    if (next2 !== void 0) value = next2;
   };
   const set = async (...args) => {
     value = await api.invoke(opts.setChannel, ...args);
@@ -13738,20 +17177,20 @@ function createIpcStore(opts) {
     set
   };
 }
-const store$1 = createIpcStore({
+const store$3 = createIpcStore({
   loadChannel: "app:getAutoCompact",
   setChannel: "app:setAutoCompact",
   default: { percent: 80, tokens: null }
 });
 const autoCompact = {
   get percent() {
-    return store$1.state.percent;
+    return store$3.state.percent;
   },
   get tokens() {
-    return store$1.state.tokens;
+    return store$3.state.tokens;
   },
-  load: (force) => store$1.load(force),
-  set: (settings) => store$1.set(settings)
+  load: (force) => store$3.load(force),
+  set: (settings) => store$3.set(settings)
 };
 class SideChatStore {
   open = false;
@@ -14023,8 +17462,8 @@ function ModelSelector($$renderer, $$props) {
         onPick(m.provider, m.id);
       }
       function selectSlot(index) {
-        const option = pinnedOptions()[index];
-        if (option) selectModel(option);
+        const option2 = pinnedOptions()[index];
+        if (option2) selectModel(option2);
       }
       function openMenu() {
         if (!open) toggleMenu();
@@ -14080,11 +17519,11 @@ function ModelSelector($$renderer, $$props) {
       $$renderer2.push(` <!--[-->`);
       const each_array = ensure_array_like(sliderOptions());
       for (let index = 0, $$length = each_array.length; index < $$length; index++) {
-        let option = each_array[index];
-        const isActive = keyOf(option.provider, option.id) === activeKey();
-        $$renderer2.push(`<button${attr_class(`model-selector__slider-label model-selector__slider-label--slot model-selector__slider-label--slot-${stringify(index)}${isActive ? " model-selector__slider-label--selected" : ""}`, "svelte-16nuqib")} type="button"${attr("title", `Switch to ${option.name}`)}${attr("data-testid", index === 0 ? "model-selector" : void 0)}>`);
+        let option2 = each_array[index];
+        const isActive = keyOf(option2.provider, option2.id) === activeKey();
+        $$renderer2.push(`<button${attr_class(`model-selector__slider-label model-selector__slider-label--slot model-selector__slider-label--slot-${stringify(index)}${isActive ? " model-selector__slider-label--selected" : ""}`, "svelte-16nuqib")} type="button"${attr("title", `Switch to ${option2.name}`)}${attr("data-testid", index === 0 ? "model-selector" : void 0)}>`);
         push_element($$renderer2, "button", 176, 10);
-        $$renderer2.push(`${escape_html(shortLabel(option.name))}</button>`);
+        $$renderer2.push(`${escape_html(shortLabel(option2.name))}</button>`);
         pop_element();
       }
       $$renderer2.push(`<!--]--> `);
@@ -14150,13 +17589,13 @@ function ModelSelector($$renderer, $$props) {
             $$renderer2.push(` <!--[-->`);
             const each_array_2 = ensure_array_like(group.items);
             for (let $$index_2 = 0, $$length2 = each_array_2.length; $$index_2 < $$length2; $$index_2++) {
-              let option = each_array_2[$$index_2];
-              const isActive = option.provider === model?.provider && option.id === model?.id;
+              let option2 = each_array_2[$$index_2];
+              const isActive = option2.provider === model?.provider && option2.id === model?.id;
               $$renderer2.push(`<div${attr_class(`model-selector__item${isActive ? " model-selector__item--active" : ""}`, "svelte-16nuqib")} role="button" tabindex="0">`);
               push_element($$renderer2, "div", 240, 14);
               $$renderer2.push(`<span class="model-selector__item-label">`);
               push_element($$renderer2, "span", 247, 16);
-              $$renderer2.push(`${escape_html(option.name)}</span>`);
+              $$renderer2.push(`${escape_html(option2.name)}</span>`);
               pop_element();
               $$renderer2.push(` `);
               if (isActive) {
@@ -14182,7 +17621,7 @@ function ModelSelector($$renderer, $$props) {
               $$renderer2.push(`<!--]--> `);
               if (onToggleScoped) {
                 $$renderer2.push("<!--[0-->");
-                const isScoped = scopedKeys().has(keyOf(option.provider, option.id));
+                const isScoped = scopedKeys().has(keyOf(option2.provider, option2.id));
                 $$renderer2.push(`<button${attr_class(`model-selector__item-scope${isScoped ? " is-scoped" : ""}`, "svelte-16nuqib")} type="button" tabindex="-1"${attr("title", isScoped ? "Remove from scoped models" : "Add to scoped models")}>`);
                 push_element($$renderer2, "button", 266, 20);
                 $$renderer2.push(`${escape_html(isScoped ? "scoped ✓" : "+ scope")}</button>`);
@@ -14236,14 +17675,14 @@ function ModelSelector($$renderer, $$props) {
 ModelSelector.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
-const store = createIpcStore({
+const store$2 = createIpcStore({
   loadChannel: "app:listScopedModels",
   setChannel: "app:setModelScoped",
   default: []
 });
 const scopedModels = {
   get models() {
-    return store.state;
+    return store$2.state;
   },
   /** Start listening for cross-window scope changes. Idempotent. */
   init() {
@@ -14251,8 +17690,8 @@ const scopedModels = {
       void this.load(true);
     });
   },
-  load: (force = false) => store.load(force),
-  toggle: (provider, id2, scoped) => store.set(provider, id2, scoped)
+  load: (force = false) => store$2.load(force),
+  toggle: (provider, id2, scoped) => store$2.set(provider, id2, scoped)
 };
 Model_scope_select[FILENAME] = "src/desktop-renderer/components/ui/model-scope-select/model-scope-select.svelte";
 function Model_scope_select($$renderer, $$props) {
@@ -14544,7 +17983,7 @@ const DEFAULT_SLOTS = [
   null,
   null
 ];
-function pad(arr, fill) {
+function pad$1(arr, fill) {
   const out = arr.slice(0, SLOT_COUNT);
   while (out.length < SLOT_COUNT) out.push(fill);
   return out;
@@ -14555,7 +17994,7 @@ function readSlots() {
     if (!raw) return DEFAULT_SLOTS.map((s) => s ? { ...s } : null);
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return DEFAULT_SLOTS.map((s) => s ? { ...s } : null);
-    return pad(parsed.map((s) => s && typeof s === "object" && s.ref && s.behavior ? s : null), null);
+    return pad$1(parsed.map((s) => s && typeof s === "object" && s.ref && s.behavior ? s : null), null);
   } catch {
     return DEFAULT_SLOTS.map((s) => s ? { ...s } : null);
   }
@@ -14563,17 +18002,17 @@ function readSlots() {
 function readToggles() {
   try {
     const raw = localStorage.getItem(TOGGLES_KEY);
-    if (!raw) return pad([], false);
+    if (!raw) return pad$1([], false);
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? pad(parsed.map(Boolean), false) : pad([], false);
+    return Array.isArray(parsed) ? pad$1(parsed.map(Boolean), false) : pad$1([], false);
   } catch {
-    return pad([], false);
+    return pad$1([], false);
   }
 }
 class QuickSlotsStore {
-  slots = pad([], null);
+  slots = pad$1([], null);
   /** Local on/off state for "toggle" behaviors, indexed by slot. */
-  toggles = pad([], false);
+  toggles = pad$1([], false);
   initialized = false;
   init() {
     if (this.initialized) return;
@@ -14613,10 +18052,10 @@ class QuickSlotsStore {
   }
   /** Flip a "toggle" behavior's local LED state and return the new value. */
   flipToggle(index) {
-    const next = !this.toggles[index];
-    this.toggles = this.toggles.map((v, i) => i === index ? next : v);
+    const next2 = !this.toggles[index];
+    this.toggles = this.toggles.map((v, i) => i === index ? next2 : v);
     this.persistToggles();
-    return next;
+    return next2;
   }
 }
 const quickSlots = new QuickSlotsStore();
@@ -15092,9 +18531,9 @@ function Composer($$renderer, $$props) {
         const levels = meta().availableThinkingLevels;
         if (levels.length === 0) return;
         const idx = levels.indexOf(meta().thinkingLevel);
-        const next = levels[(idx + direction + levels.length) % levels.length];
+        const next2 = levels[(idx + direction + levels.length) % levels.length];
         playRotary();
-        sessionMetas.set(await api.invoke("threads:setThinking", thread.id, next));
+        sessionMetas.set(await api.invoke("threads:setThinking", thread.id, next2));
       }
       let chipWidth = 0;
       let commands = [];
@@ -17691,16 +21130,18 @@ function ThreadView($$renderer, $$props) {
                 let it = each_array_1[$$index_1];
                 if (it.kind === "assistant") {
                   $$renderer4.push("<!--[0-->");
+                  const itStreaming = it.streaming && thread.status === "running";
+                  const itInThinking = itStreaming && !!it.thinking && !it.text;
                   $$renderer4.push(`<div class="item-enter assistant-message group/assistant text-[13.5px] leading-relaxed text-fg">`);
-                  push_element($$renderer4, "div", 1e3, 18);
+                  push_element($$renderer4, "div", 1002, 18);
                   if (it.thinking) {
                     $$renderer4.push("<!--[0-->");
-                    $$renderer4.push(`<details class="collapse-anim group mb-1 text-xs text-faint">`);
-                    push_element($$renderer4, "details", 1002, 22);
+                    $$renderer4.push(`<details class="collapse-anim group mb-1 text-xs text-faint"${attr("open", itStreaming && !it.text, true)}>`);
+                    push_element($$renderer4, "details", 1004, 22);
                     $$renderer4.push(`<summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">`);
-                    push_element($$renderer4, "summary", 1003, 24);
+                    push_element($$renderer4, "summary", 1005, 24);
                     $$renderer4.push(`<span class="mr-1 inline-block transition-transform group-open:rotate-90">`);
-                    push_element($$renderer4, "span", 1004, 26);
+                    push_element($$renderer4, "span", 1006, 26);
                     $$renderer4.push(`›</span>`);
                     pop_element();
                     $$renderer4.push(`Thinking</summary>`);
@@ -17708,7 +21149,8 @@ function ThreadView($$renderer, $$props) {
                     $$renderer4.push(` `);
                     ThinkingBlock($$renderer4, {
                       text: it.thinking,
-                      streaming: false,
+                      streaming: itStreaming,
+                      cursor: itInThinking,
                       revealKey: `${it.id}:thinking`
                     });
                     $$renderer4.push(`<!----></details>`);
@@ -17736,19 +21178,19 @@ function ThreadView($$renderer, $$props) {
               if (item.kind === "user") {
                 $$renderer4.push("<!--[0-->");
                 $$renderer4.push(`<div${attr_class("item-enter flex max-w-[85%] flex-col gap-2 self-end", void 0, { "thread-find-hit": item.id === currentMatchId() })}${attr("data-item-id", item.id)}>`);
-                push_element($$renderer4, "div", 1019, 10);
+                push_element($$renderer4, "div", 1021, 10);
                 if (item.images && item.images.length > 0) {
                   $$renderer4.push("<!--[0-->");
                   $$renderer4.push(`<div class="flex flex-wrap justify-end gap-2">`);
-                  push_element($$renderer4, "div", 1021, 14);
+                  push_element($$renderer4, "div", 1023, 14);
                   $$renderer4.push(`<!--[-->`);
                   const each_array_2 = ensure_array_like(item.images);
                   for (let i = 0, $$length = each_array_2.length; i < $$length; i++) {
                     let img = each_array_2[i];
                     $$renderer4.push(`<button type="button" class="block cursor-zoom-in" title="Click to enlarge">`);
-                    push_element($$renderer4, "button", 1023, 18);
+                    push_element($$renderer4, "button", 1025, 18);
                     $$renderer4.push(`<img${attr("src", `data:${img.mimeType};base64,${img.data}`)} alt="Attached image" class="h-28 w-28 rounded-lg border border-border-strong/40 object-cover"/>`);
-                    push_element($$renderer4, "img", 1029, 20);
+                    push_element($$renderer4, "img", 1031, 20);
                     pop_element();
                     $$renderer4.push(`</button>`);
                     pop_element();
@@ -17768,10 +21210,10 @@ function ThreadView($$renderer, $$props) {
                       if (skill) {
                         $$renderer5.push("<!--[0-->");
                         $$renderer5.push(`<button type="button" class="skill-chip self-end" title="View skill" data-testid="skill-chip">`);
-                        push_element($$renderer5, "button", 1043, 20);
+                        push_element($$renderer5, "button", 1045, 20);
                         Book_open($$renderer5, { size: 12 });
                         $$renderer5.push(`<!----> <span>`);
-                        push_element($$renderer5, "span", 1051, 22);
+                        push_element($$renderer5, "span", 1053, 22);
                         $$renderer5.push(`${escape_html(skill.name)}</span>`);
                         pop_element();
                         $$renderer5.push(`</button>`);
@@ -17780,7 +21222,7 @@ function ThreadView($$renderer, $$props) {
                         if (skill.args) {
                           $$renderer5.push("<!--[0-->");
                           $$renderer5.push(`<div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">`);
-                          push_element($$renderer5, "div", 1054, 22);
+                          push_element($$renderer5, "div", 1056, 22);
                           $$renderer5.push(`${escape_html(skill.args)}</div>`);
                           pop_element();
                         } else {
@@ -17790,7 +21232,7 @@ function ThreadView($$renderer, $$props) {
                       } else if (body) {
                         $$renderer5.push("<!--[1-->");
                         $$renderer5.push(`<div class="rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg select-text">`);
-                        push_element($$renderer5, "div", 1059, 20);
+                        push_element($$renderer5, "div", 1061, 20);
                         $$renderer5.push(`${escape_html(body)}</div>`);
                         pop_element();
                       } else {
@@ -17815,15 +21257,15 @@ function ThreadView($$renderer, $$props) {
                 const isStreaming = item.streaming && thread.status === "running";
                 const inThinking = isStreaming && !!item.thinking && !item.text;
                 $$renderer4.push(`<div${attr_class("item-enter assistant-message group/assistant text-[13.5px] leading-relaxed text-fg select-text", void 0, { "thread-find-hit": item.id === currentMatchId() })}${attr("data-item-id", item.id)}>`);
-                push_element($$renderer4, "div", 1078, 10);
+                push_element($$renderer4, "div", 1080, 10);
                 if (item.thinking) {
                   $$renderer4.push("<!--[0-->");
                   $$renderer4.push(`<details class="collapse-anim group mb-1 text-xs text-faint"${attr("open", isStreaming && !item.text, true)}>`);
-                  push_element($$renderer4, "details", 1080, 14);
+                  push_element($$renderer4, "details", 1082, 14);
                   $$renderer4.push(`<summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">`);
-                  push_element($$renderer4, "summary", 1081, 16);
+                  push_element($$renderer4, "summary", 1083, 16);
                   $$renderer4.push(`<span class="mr-1 inline-block transition-transform group-open:rotate-90">`);
-                  push_element($$renderer4, "span", 1082, 18);
+                  push_element($$renderer4, "span", 1084, 18);
                   $$renderer4.push(`›</span>`);
                   pop_element();
                   $$renderer4.push(`Thinking</summary>`);
@@ -17851,7 +21293,7 @@ function ThreadView($$renderer, $$props) {
                 if (item.error) {
                   $$renderer4.push("<!--[0-->");
                   $$renderer4.push(`<p class="mt-2 rounded-lg border border-danger-border/40 bg-danger-surface/30 px-3 py-1.5 text-xs text-danger">`);
-                  push_element($$renderer4, "p", 1089, 14);
+                  push_element($$renderer4, "p", 1091, 14);
                   $$renderer4.push(`${escape_html(item.error)}</p>`);
                   pop_element();
                 } else {
@@ -17861,26 +21303,26 @@ function ThreadView($$renderer, $$props) {
                 if (!isStreaming && item.text) {
                   $$renderer4.push("<!--[0-->");
                   $$renderer4.push(`<div class="assistant-actions">`);
-                  push_element($$renderer4, "div", 1092, 14);
+                  push_element($$renderer4, "div", 1094, 14);
                   CopyButton($$renderer4, { text: item.text });
                   $$renderer4.push(`<!----> `);
                   if (thread.status !== "running" && turnMap().endById.has(item.id) && !thread.remoteHostId) {
                     $$renderer4.push("<!--[0-->");
                     turnMap().endById.get(item.id);
                     $$renderer4.push(`<button type="button" class="copy-btn" title="Rewind the conversation to before this turn" data-testid="rewind-turn">`);
-                    push_element($$renderer4, "button", 1096, 18);
+                    push_element($$renderer4, "button", 1098, 18);
                     Undo_2($$renderer4, { size: 13 });
                     $$renderer4.push(`<!----> <span>`);
-                    push_element($$renderer4, "span", 1103, 40);
+                    push_element($$renderer4, "span", 1105, 40);
                     $$renderer4.push(`Rewind</span>`);
                     pop_element();
                     $$renderer4.push(`</button>`);
                     pop_element();
                     $$renderer4.push(` <button type="button" class="copy-btn" title="Fork into a new thread at this point" data-testid="fork-turn">`);
-                    push_element($$renderer4, "button", 1105, 18);
+                    push_element($$renderer4, "button", 1107, 18);
                     Git_branch($$renderer4, { size: 13 });
                     $$renderer4.push(`<!----> <span>`);
-                    push_element($$renderer4, "span", 1112, 44);
+                    push_element($$renderer4, "span", 1114, 44);
                     $$renderer4.push(`Fork</span>`);
                     pop_element();
                     $$renderer4.push(`</button>`);
@@ -17908,7 +21350,7 @@ function ThreadView($$renderer, $$props) {
                   if (entity) {
                     $$renderer4.push("<!--[0-->");
                     $$renderer4.push(`<div${attr_class("item-enter", void 0, { "thread-find-hit": item.id === currentMatchId() })}${attr("data-item-id", item.id)}>`);
-                    push_element($$renderer4, "div", 1124, 14);
+                    push_element($$renderer4, "div", 1126, 14);
                     SubagentCard($$renderer4, { entity, live: fleet().get(name) });
                     $$renderer4.push(`<!----></div>`);
                     pop_element();
@@ -17923,14 +21365,14 @@ function ThreadView($$renderer, $$props) {
                 if (item.running) {
                   $$renderer4.push("<!--[0-->");
                   $$renderer4.push(`<div${attr_class("item-enter w-full rounded-lg border border-border-strong/40 bg-surface-2/40 px-4 py-3", void 0, { "thread-find-hit": item.id === currentMatchId() })}${attr("data-item-id", item.id)}>`);
-                  push_element($$renderer4, "div", 1131, 12);
+                  push_element($$renderer4, "div", 1133, 12);
                   $$renderer4.push(`<div class="flex items-center gap-2 text-[11px] font-semibold tracking-wider text-muted uppercase">`);
-                  push_element($$renderer4, "div", 1132, 14);
+                  push_element($$renderer4, "div", 1134, 14);
                   BrailleSpinner($$renderer4, { class: "working-label__spinner shrink-0" });
                   $$renderer4.push(`<!----> ${escape_html(item.reason === "manual" ? "Compacting…" : "Auto-compacting…")}</div>`);
                   pop_element();
                   $$renderer4.push(` <p class="mt-1 text-xs text-faint italic">`);
-                  push_element($$renderer4, "p", 1136, 14);
+                  push_element($$renderer4, "p", 1138, 14);
                   $$renderer4.push(`Summarising the conversation to free up context…</p>`);
                   pop_element();
                   $$renderer4.push(`</div>`);
@@ -17939,26 +21381,26 @@ function ThreadView($$renderer, $$props) {
                   $$renderer4.push("<!--[-1-->");
                   const compacted = !item.error && !item.aborted;
                   $$renderer4.push(`<button type="button"${attr_class(`item-enter flex w-full cursor-pointer items-center gap-2 rounded-lg border bg-surface/60 px-3 py-2 text-xs font-semibold text-muted transition-colors select-none hover:bg-surface ${compacted ? "" : "border-border-strong/30"}`, void 0, { "thread-find-hit": item.id === currentMatchId() })}${attr_style(compacted ? "border-color: oklch(0.6 0.16 52 / 0.45)" : "")}${attr("data-item-id", item.id)} data-testid="compaction-card">`);
-                  push_element($$renderer4, "button", 1140, 12);
+                  push_element($$renderer4, "button", 1142, 12);
                   $$renderer4.push(`<span class="shrink-0 opacity-70"${attr_style(compacted ? "color: oklch(0.6 0.16 52)" : "")}>`);
-                  push_element($$renderer4, "span", 1151, 14);
+                  push_element($$renderer4, "span", 1153, 14);
                   $$renderer4.push(`⌘</span>`);
                   pop_element();
                   $$renderer4.push(` <span${attr_class(`font-semibold ${item.error ? "text-danger" : ""}`)}${attr_style(compacted ? "color: oklch(0.6 0.16 52)" : "")}>`);
-                  push_element($$renderer4, "span", 1152, 14);
+                  push_element($$renderer4, "span", 1154, 14);
                   $$renderer4.push(`${escape_html(item.aborted ? "Compaction aborted" : item.error ? "Compaction failed" : item.reason === "manual" ? "Context compacted" : "Context compacted automatically")}</span>`);
                   pop_element();
                   $$renderer4.push(` `);
                   if (item.tokensBefore && item.tokensAfter) {
                     $$renderer4.push("<!--[0-->");
                     $$renderer4.push(`<span class="font-medium text-faint">`);
-                    push_element($$renderer4, "span", 1165, 16);
+                    push_element($$renderer4, "span", 1167, 16);
                     $$renderer4.push(`· ${escape_html(fmtTokens(item.tokensBefore))} → ${escape_html(fmtTokens(item.tokensAfter))} tokens</span>`);
                     pop_element();
                   } else if (item.tokensBefore) {
                     $$renderer4.push("<!--[1-->");
                     $$renderer4.push(`<span class="font-medium text-faint">`);
-                    push_element($$renderer4, "span", 1167, 16);
+                    push_element($$renderer4, "span", 1169, 16);
                     $$renderer4.push(`· ${escape_html(fmtTokens(item.tokensBefore))} summarised</span>`);
                     pop_element();
                   } else {
@@ -17968,7 +21410,7 @@ function ThreadView($$renderer, $$props) {
                   if (item.summary || item.error) {
                     $$renderer4.push("<!--[0-->");
                     $$renderer4.push(`<span class="ml-auto shrink-0 text-fainter">`);
-                    push_element($$renderer4, "span", 1170, 16);
+                    push_element($$renderer4, "span", 1172, 16);
                     $$renderer4.push(`⤢</span>`);
                     pop_element();
                   } else {
@@ -17981,7 +21423,7 @@ function ThreadView($$renderer, $$props) {
               } else if (item.kind === "retry") {
                 $$renderer4.push("<!--[5-->");
                 $$renderer4.push(`<div${attr_class(`item-enter flex w-full items-center gap-2 rounded-lg border bg-surface/60 px-3 py-2 text-xs font-semibold text-muted transition-colors select-none ${item.running ? "border-border-strong/30" : "border-danger-border/40"}`, void 0, { "thread-find-hit": item.id === currentMatchId() })}${attr("data-item-id", item.id)} data-testid="retry-card">`);
-                push_element($$renderer4, "div", 1175, 12);
+                push_element($$renderer4, "div", 1177, 12);
                 if (item.running) {
                   $$renderer4.push("<!--[0-->");
                   BrailleSpinner($$renderer4, {
@@ -17991,30 +21433,30 @@ function ThreadView($$renderer, $$props) {
                     dotSize: 2.5
                   });
                   $$renderer4.push(`<!----> <span class="font-semibold text-danger">`);
-                  push_element($$renderer4, "span", 1183, 16);
+                  push_element($$renderer4, "span", 1185, 16);
                   $$renderer4.push(`Connection failed</span>`);
                   pop_element();
                   $$renderer4.push(` <span class="font-medium text-faint">`);
-                  push_element($$renderer4, "span", 1184, 16);
+                  push_element($$renderer4, "span", 1186, 16);
                   $$renderer4.push(`· attempt ${escape_html(item.attempt)}/${escape_html(item.maxAttempts)} — retrying…</span>`);
                   pop_element();
                 } else {
                   $$renderer4.push("<!--[-1-->");
                   $$renderer4.push(`<span class="shrink-0 text-danger" aria-hidden="true">`);
-                  push_element($$renderer4, "span", 1186, 16);
+                  push_element($$renderer4, "span", 1188, 16);
                   $$renderer4.push(`⚠</span>`);
                   pop_element();
                   $$renderer4.push(` <span class="font-semibold text-danger">`);
-                  push_element($$renderer4, "span", 1187, 16);
+                  push_element($$renderer4, "span", 1189, 16);
                   $$renderer4.push(`Connection failed</span>`);
                   pop_element();
                   $$renderer4.push(` <span class="font-medium text-faint">`);
-                  push_element($$renderer4, "span", 1188, 16);
+                  push_element($$renderer4, "span", 1190, 16);
                   $$renderer4.push(`· attempt ${escape_html(item.attempt)}/${escape_html(item.maxAttempts)} — gave up</span>`);
                   pop_element();
                 }
                 $$renderer4.push(`<!--]--> <span class="ml-auto shrink-0 text-fainter truncate max-w-[60%]"${attr("title", item.error)}>`);
-                push_element($$renderer4, "span", 1190, 14);
+                push_element($$renderer4, "span", 1192, 14);
                 $$renderer4.push(`${escape_html(item.error)}</span>`);
                 pop_element();
                 $$renderer4.push(`</div>`);
@@ -18024,7 +21466,7 @@ function ThreadView($$renderer, $$props) {
               } else {
                 $$renderer4.push("<!--[-1-->");
                 $$renderer4.push(`<p${attr_class("item-enter text-center text-xs text-faint italic", void 0, { "thread-find-hit": item.id === currentMatchId() })}${attr("data-item-id", item.id)}>`);
-                push_element($$renderer4, "p", 1195, 12);
+                push_element($$renderer4, "p", 1197, 12);
                 $$renderer4.push(`${escape_html(item.text)}</p>`);
                 pop_element();
               }
@@ -18074,21 +21516,21 @@ function ThreadView($$renderer, $$props) {
             if (tail.length > 0) {
               $$renderer3.push("<!--[0-->");
               $$renderer3.push(`<div class="rewound-divider svelte-17w65lb">`);
-              push_element($$renderer3, "div", 1205, 10);
+              push_element($$renderer3, "div", 1207, 10);
               $$renderer3.push(`<span>`);
-              push_element($$renderer3, "span", 1205, 39);
+              push_element($$renderer3, "span", 1207, 39);
               $$renderer3.push(`Rewound · ${escape_html(tail.length)} item${escape_html(tail.length === 1 ? "" : "s")} dropped from context</span>`);
               pop_element();
               $$renderer3.push(`</div>`);
               pop_element();
               $$renderer3.push(` <div class="rewound-tail svelte-17w65lb" aria-hidden="true">`);
-              push_element($$renderer3, "div", 1206, 10);
+              push_element($$renderer3, "div", 1208, 10);
               $$renderer3.push(`<!--[-->`);
               const each_array_5 = ensure_array_like(tail);
               for (let $$index_5 = 0, $$length = each_array_5.length; $$index_5 < $$length; $$index_5++) {
                 let it = each_array_5[$$index_5];
                 $$renderer3.push(`<div class="rewound-item svelte-17w65lb">`);
-                push_element($$renderer3, "div", 1208, 14);
+                push_element($$renderer3, "div", 1210, 14);
                 $$renderer3.push(`${escape_html(itemText(it).slice(0, 280) || "(…)")}</div>`);
                 pop_element();
               }
@@ -18105,7 +21547,7 @@ function ThreadView($$renderer, $$props) {
           if (thread.status === "running" && !items().some((i) => i.kind === "assistant" && i.streaming) && !items().some((i) => i.kind === "tool" && i.status === "running") && !items().some((i) => i.kind === "compaction" && i.running)) {
             $$renderer3.push("<!--[0-->");
             $$renderer3.push(`<div class="item-enter text-xs">`);
-            push_element($$renderer3, "div", 1214, 8);
+            push_element($$renderer3, "div", 1216, 8);
             WorkingLabel($$renderer3, { label: "Working…" });
             $$renderer3.push(`<!----></div>`);
             pop_element();
@@ -18117,11 +21559,11 @@ function ThreadView($$renderer, $$props) {
           for (let i = 0, $$length = each_array_6.length; i < $$length; i++) {
             let steerText = each_array_6[i];
             $$renderer3.push(`<div class="item-enter flex max-w-[85%] flex-col gap-2 self-end" data-testid="pending-steer">`);
-            push_element($$renderer3, "div", 1219, 8);
+            push_element($$renderer3, "div", 1221, 8);
             $$renderer3.push(`<div class="group/steer relative rounded-2xl rounded-br-md border border-dashed border-border-strong/60 bg-surface-2/40 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg-soft select-text">`);
-            push_element($$renderer3, "div", 1220, 10);
+            push_element($$renderer3, "div", 1222, 10);
             $$renderer3.push(`${escape_html(steerText)} <button type="button" class="absolute -top-2 -right-2 hidden size-5 items-center justify-center rounded-full border border-border-strong bg-surface text-muted group-hover/steer:flex hover:bg-danger hover:text-fg" title="Cancel this steer" aria-label="Cancel steering message" data-testid="cancel-pending-steer">`);
-            push_element($$renderer3, "button", 1222, 12);
+            push_element($$renderer3, "button", 1224, 12);
             X($$renderer3, { size: 11 });
             $$renderer3.push(`<!----></button>`);
             pop_element();
@@ -18145,9 +21587,9 @@ function ThreadView($$renderer, $$props) {
           for (let $$index_7 = 0, $$length = each_array_7.length; $$index_7 < $$length; $$index_7++) {
             let widget = each_array_7[$$index_7];
             $$renderer3.push(`<div class="mx-6 mb-1 shrink-0 rounded-lg border border-border bg-surface/60 px-3 py-2" data-testid="extension-widget">`);
-            push_element($$renderer3, "div", 1251, 4);
+            push_element($$renderer3, "div", 1253, 4);
             $$renderer3.push(`<pre class="overflow-x-auto font-mono text-[10px] leading-relaxed text-muted">`);
-            push_element($$renderer3, "pre", 1252, 6);
+            push_element($$renderer3, "pre", 1254, 6);
             $$renderer3.push(`${escape_html(widget.lines.join("\n"))}</pre>`);
             pop_element();
             $$renderer3.push(`</div>`);
@@ -18158,20 +21600,20 @@ function ThreadView($$renderer, $$props) {
           $$renderer3.push("<!--[-1-->");
         }
         $$renderer3.push(`<!--]--> <div${attr_class("composer-dock svelte-17w65lb", void 0, { "composer-dock--centered": isEmpty() })}>`);
-        push_element($$renderer3, "div", 1257, 2);
+        push_element($$renderer3, "div", 1259, 2);
         if (isEmpty() && thread.projectId) {
           $$renderer3.push("<!--[0-->");
           $$renderer3.push(`<div class="composer-device new-thread__bar svelte-17w65lb">`);
-          push_element($$renderer3, "div", 1259, 6);
+          push_element($$renderer3, "div", 1261, 6);
           $$renderer3.push(`<button type="button" class="new-thread__environment"${attr("aria-pressed", isWorktree())} data-testid="environment-toggle"${attr("title", isWorktree() ? "Working in an isolated git worktree" : "Working in the project directory")}>`);
-          push_element($$renderer3, "button", 1260, 8);
+          push_element($$renderer3, "button", 1262, 8);
           $$renderer3.push(`${escape_html(isWorktree() ? "⎇ Worktree" : "◈ Local")}</button>`);
           pop_element();
           $$renderer3.push(` <button type="button" class="new-thread__record svelte-17w65lb" data-testid="start-recording" title="Record a desktop task → synthesize a skill in this chat" aria-label="Start recording">`);
-          push_element($$renderer3, "button", 1273, 8);
+          push_element($$renderer3, "button", 1275, 8);
           Circle($$renderer3, { size: 11, class: "fill-red-500 text-red-500" });
           $$renderer3.push(`<!----> <span>`);
-          push_element($$renderer3, "span", 1282, 10);
+          push_element($$renderer3, "span", 1284, 10);
           $$renderer3.push(`Record</span>`);
           pop_element();
           $$renderer3.push(`</button>`);
@@ -18253,6 +21695,6203 @@ function ThreadView($$renderer, $$props) {
 ThreadView.render = function() {
   throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
 };
+Pencil[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/pencil.svelte";
+function Pencil($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "path",
+          {
+            "d": "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
+          }
+        ],
+        ["path", { "d": "m15 5 4 4" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "pencil" }, props, { iconNode }]));
+    },
+    Pencil
+  );
+}
+Pencil.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Monitor[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/monitor.svelte";
+function Monitor($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "rect",
+          { "width": "20", "height": "14", "x": "2", "y": "3", "rx": "2" }
+        ],
+        ["line", { "x1": "8", "x2": "16", "y1": "21", "y2": "21" }],
+        ["line", { "x1": "12", "x2": "12", "y1": "17", "y2": "21" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "monitor" }, props, { iconNode }]));
+    },
+    Monitor
+  );
+}
+Monitor.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+const DEFAULT_SCHEDULE = {
+  frequency: "daily",
+  time: "09:00"
+};
+const DAY_LABELS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday"
+];
+function parseTime(time2) {
+  const [h, m] = (time2 ?? "").split(":");
+  const hour = Number.parseInt(h ?? "0", 10);
+  const minute = Number.parseInt(m ?? "0", 10);
+  return {
+    hour: Number.isFinite(hour) ? Math.max(0, Math.min(23, hour)) : 0,
+    minute: Number.isFinite(minute) ? Math.max(0, Math.min(59, minute)) : 0
+  };
+}
+const isInt = (s) => /^\d+$/.test(s);
+const pad = (n) => n.toString().padStart(2, "0");
+function cronToSchedule(cron) {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [min, hour, dom, mon, dow] = parts;
+  if (!isInt(min) || mon !== "*") return null;
+  const minute = Number(min);
+  if (hour === "*" && dom === "*" && dow === "*") {
+    return { frequency: "hourly", time: `00:${pad(minute)}` };
+  }
+  if (!isInt(hour)) return null;
+  const time2 = `${pad(Number(hour))}:${pad(minute)}`;
+  if (dom === "*" && dow === "*") return { frequency: "daily", time: time2 };
+  if (dom === "*" && isInt(dow)) {
+    return { frequency: "weekly", time: time2, dayOfWeek: Number(dow) };
+  }
+  if (dom === "1" && dow === "*") return { frequency: "monthly", time: time2 };
+  return null;
+}
+function formatTime(time2) {
+  const { hour, minute } = parseTime(time2);
+  return `${hour}:${pad(minute)}`;
+}
+function automationScheduleLabel(schedule) {
+  switch (schedule.frequency) {
+    case "hourly":
+      return `Hourly at :${pad(parseTime(schedule.time).minute)}`;
+    case "daily":
+      return `Daily at ${formatTime(schedule.time)}`;
+    case "weekly": {
+      const day = DAY_LABELS[schedule.dayOfWeek ?? 1] ?? "Monday";
+      return `${day}s at ${formatTime(schedule.time)}`;
+    }
+    case "monthly":
+      return `Monthly on the 1st at ${formatTime(schedule.time)}`;
+  }
+}
+function cronLabel(cron) {
+  const schedule = cronToSchedule(cron);
+  return schedule ? automationScheduleLabel(schedule) : cron;
+}
+Select_1[FILENAME] = "src/desktop-renderer/components/ui/select/select.svelte";
+prevent_snippet_stringification(option);
+function option($$renderer, item) {
+  validate_snippet_args($$renderer);
+  {
+    let children = function($$renderer2, { selected }) {
+      validate_snippet_args($$renderer2);
+      $$renderer2.push(`<span class="truncate">`);
+      push_element($$renderer2, "span", 54, 6);
+      $$renderer2.push(`${escape_html(item.label)}</span>`);
+      pop_element();
+      $$renderer2.push(` `);
+      if (selected) {
+        $$renderer2.push("<!--[0-->");
+        Check($$renderer2, { class: "size-4 shrink-0 text-fg" });
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]-->`);
+    };
+    prevent_snippet_stringification(children);
+    if (Select_item) {
+      $$renderer.push("<!--[-->");
+      Select_item($$renderer, {
+        value: item.value,
+        label: item.label,
+        class: "flex cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm text-fg-soft outline-none select-none data-[highlighted]:bg-surface-2 data-[highlighted]:text-fg data-[disabled]:opacity-40",
+        children,
+        $$slots: { default: true }
+      });
+      $$renderer.push("<!--]-->");
+    } else {
+      $$renderer.push("<!--[!-->");
+      $$renderer.push("<!--]-->");
+    }
+  }
+}
+function Select_1($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let {
+        value = "",
+        items,
+        placeholder = "Select…",
+        disabled = false,
+        class: className,
+        contentClass,
+        onValueChange,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      const selectedLabel = derived(() => items.find((i) => i.value === value)?.label);
+      const sections = derived(() => {
+        const order2 = [];
+        const map = /* @__PURE__ */ new Map();
+        for (const item of items) {
+          const key = item.group ?? "";
+          if (!map.has(key)) {
+            map.set(key, []);
+            order2.push(key);
+          }
+          map.get(key).push(item);
+        }
+        return order2.map((key) => ({ key, items: map.get(key) }));
+      });
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        if (Select) {
+          $$renderer3.push("<!--[-->");
+          Select($$renderer3, {
+            type: "single",
+            items,
+            onValueChange,
+            disabled,
+            get value() {
+              return value;
+            },
+            set value($$value) {
+              value = $$value;
+              $$settled = false;
+            },
+            children: prevent_snippet_stringification(($$renderer4) => {
+              if (Select_trigger) {
+                $$renderer4.push("<!--[-->");
+                Select_trigger($$renderer4, spread_props([
+                  restProps,
+                  {
+                    "data-slot": "select-trigger",
+                    class: cn("flex items-center justify-between gap-2 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none transition-colors hover:border-border-focus focus:border-border-focus disabled:opacity-40 data-[state=open]:border-border-focus", className),
+                    children: prevent_snippet_stringification(($$renderer5) => {
+                      $$renderer5.push(`<span${attr_class(clsx(cn("truncate", selectedLabel() ? "text-fg" : "text-faint")))}>`);
+                      push_element($$renderer5, "span", 71, 4);
+                      $$renderer5.push(`${escape_html(selectedLabel() ?? placeholder)}</span>`);
+                      pop_element();
+                      $$renderer5.push(` `);
+                      Chevron_down($$renderer5, { class: "size-4 shrink-0 text-faint" });
+                      $$renderer5.push(`<!---->`);
+                    }),
+                    $$slots: { default: true }
+                  }
+                ]));
+                $$renderer4.push("<!--]-->");
+              } else {
+                $$renderer4.push("<!--[!-->");
+                $$renderer4.push("<!--]-->");
+              }
+              $$renderer4.push(` `);
+              if (Portal) {
+                $$renderer4.push("<!--[-->");
+                Portal($$renderer4, {
+                  children: prevent_snippet_stringification(($$renderer5) => {
+                    if (Select_content) {
+                      $$renderer5.push("<!--[-->");
+                      Select_content($$renderer5, {
+                        "data-slot": "select-content",
+                        sideOffset: 4,
+                        class: cn("z-50 max-h-72 min-w-(--bits-select-anchor-width) overflow-y-auto rounded-lg border border-border-strong bg-surface p-1 shadow-lg outline-none", contentClass),
+                        children: prevent_snippet_stringification(($$renderer6) => {
+                          if (Select_viewport) {
+                            $$renderer6.push("<!--[-->");
+                            Select_viewport($$renderer6, {
+                              children: prevent_snippet_stringification(($$renderer7) => {
+                                $$renderer7.push(`<!--[-->`);
+                                const each_array = ensure_array_like(sections());
+                                for (let $$index_2 = 0, $$length = each_array.length; $$index_2 < $$length; $$index_2++) {
+                                  let section = each_array[$$index_2];
+                                  if (section.key) {
+                                    $$renderer7.push("<!--[0-->");
+                                    if (Select_group) {
+                                      $$renderer7.push("<!--[-->");
+                                      Select_group($$renderer7, {
+                                        children: prevent_snippet_stringification(($$renderer8) => {
+                                          if (Select_group_heading) {
+                                            $$renderer8.push("<!--[-->");
+                                            Select_group_heading($$renderer8, {
+                                              class: "px-2 py-1 text-xs font-medium text-faint",
+                                              children: prevent_snippet_stringification(($$renderer9) => {
+                                                $$renderer9.push(`<!---->${escape_html(section.key)}`);
+                                              }),
+                                              $$slots: { default: true }
+                                            });
+                                            $$renderer8.push("<!--]-->");
+                                          } else {
+                                            $$renderer8.push("<!--[!-->");
+                                            $$renderer8.push("<!--]-->");
+                                          }
+                                          $$renderer8.push(` <!--[-->`);
+                                          const each_array_1 = ensure_array_like(section.items);
+                                          for (let $$index = 0, $$length2 = each_array_1.length; $$index < $$length2; $$index++) {
+                                            let item = each_array_1[$$index];
+                                            option($$renderer8, item);
+                                          }
+                                          $$renderer8.push(`<!--]-->`);
+                                        }),
+                                        $$slots: { default: true }
+                                      });
+                                      $$renderer7.push("<!--]-->");
+                                    } else {
+                                      $$renderer7.push("<!--[!-->");
+                                      $$renderer7.push("<!--]-->");
+                                    }
+                                  } else {
+                                    $$renderer7.push("<!--[-1-->");
+                                    $$renderer7.push(`<!--[-->`);
+                                    const each_array_2 = ensure_array_like(section.items);
+                                    for (let $$index_1 = 0, $$length2 = each_array_2.length; $$index_1 < $$length2; $$index_1++) {
+                                      let item = each_array_2[$$index_1];
+                                      option($$renderer7, item);
+                                    }
+                                    $$renderer7.push(`<!--]-->`);
+                                  }
+                                  $$renderer7.push(`<!--]-->`);
+                                }
+                                $$renderer7.push(`<!--]-->`);
+                              }),
+                              $$slots: { default: true }
+                            });
+                            $$renderer6.push("<!--]-->");
+                          } else {
+                            $$renderer6.push("<!--[!-->");
+                            $$renderer6.push("<!--]-->");
+                          }
+                        }),
+                        $$slots: { default: true }
+                      });
+                      $$renderer5.push("<!--]-->");
+                    } else {
+                      $$renderer5.push("<!--[!-->");
+                      $$renderer5.push("<!--]-->");
+                    }
+                  })
+                });
+                $$renderer4.push("<!--]-->");
+              } else {
+                $$renderer4.push("<!--[!-->");
+                $$renderer4.push("<!--]-->");
+              }
+            }),
+            $$slots: { default: true }
+          });
+          $$renderer3.push("<!--]-->");
+        } else {
+          $$renderer3.push("<!--[!-->");
+          $$renderer3.push("<!--]-->");
+        }
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+      bind_props($$props, { value });
+    },
+    Select_1
+  );
+}
+Select_1.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+AutomationPromptField[FILENAME] = "src/desktop-renderer/app/AutomationPromptField.svelte";
+function AutomationPromptField($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let {
+        value = "",
+        connections = [],
+        projectId = null,
+        placeholder = ""
+      } = $$props;
+      let cursor = 0;
+      let selIndex = 0;
+      let slashCatalog = [];
+      let connCatalog = [];
+      function tokenContext(trigger) {
+        const before = value.slice(0, cursor);
+        const at = before.lastIndexOf(trigger);
+        if (at === -1) return null;
+        if (at > 0 && !/\s/.test(before[at - 1])) return null;
+        const token = before.slice(at + 1);
+        if (/\s/.test(token)) return null;
+        return { start: at, query: token.toLowerCase() };
+      }
+      const slashContext = derived(() => tokenContext("/"));
+      const atContext = derived(() => tokenContext("@"));
+      const activeKind = derived(() => {
+        if (slashContext() && atContext()) return slashContext().start > atContext().start ? "slash" : "at";
+        if (slashContext()) return "slash";
+        if (atContext()) return "at";
+        return null;
+      });
+      const activeContext = derived(() => activeKind() === "slash" ? slashContext() : atContext());
+      const query = derived(() => activeContext()?.query ?? null);
+      const slashMatches = derived(() => {
+        if (activeKind() !== "slash" || query() === null) return [];
+        return slashCatalog.filter((c) => c.name.toLowerCase().includes(query())).sort((a, b) => Number(!a.name.toLowerCase().startsWith(query())) - Number(!b.name.toLowerCase().startsWith(query()))).slice(0, 20);
+      });
+      const atMatches = derived(() => {
+        if (activeKind() !== "at" || query() === null) return [];
+        return connCatalog.filter((c) => c.name.toLowerCase().includes(query())).sort((a, b) => Number(!a.name.toLowerCase().startsWith(query())) - Number(!b.name.toLowerCase().startsWith(query()))).slice(0, 20);
+      });
+      const matchCount = derived(() => activeKind() === "slash" ? slashMatches().length : atMatches().length);
+      const menuOpen = derived(() => activeKind() !== null && true && matchCount() > 0);
+      $$renderer2.push(`<div class="relative flex flex-col gap-2">`);
+      push_element($$renderer2, "div", 212, 0);
+      $$renderer2.push(`<textarea class="min-h-24 resize-none rounded-lg border border-border-strong bg-bg px-3 py-2 text-sm outline-none focus:border-border-focus"${attr("placeholder", placeholder)} data-testid="automation-prompt">`);
+      push_element($$renderer2, "textarea", 213, 2);
+      const $$body = escape_html(value);
+      if ($$body) {
+        $$renderer2.push(`${$$body}`);
+      }
+      $$renderer2.push(`</textarea>`);
+      pop_element();
+      $$renderer2.push(` `);
+      if (connections.length > 0) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<div class="flex flex-wrap gap-1.5">`);
+        push_element($$renderer2, "div", 226, 4);
+        $$renderer2.push(`<!--[-->`);
+        const each_array = ensure_array_like(connections);
+        for (let i = 0, $$length = each_array.length; i < $$length; i++) {
+          let conn = each_array[i];
+          $$renderer2.push(`<span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[12px] text-fg-soft">`);
+          push_element($$renderer2, "span", 228, 8);
+          ConnectorIcon($$renderer2, { logoUrl: conn.logoUrl ?? null, label: conn.name, size: 12 });
+          $$renderer2.push(`<!----> ${escape_html(conn.name)} <button type="button" class="text-faint hover:text-fg" aria-label="Remove connection">`);
+          push_element($$renderer2, "button", 231, 10);
+          X($$renderer2, { size: 11 });
+          $$renderer2.push(`<!----></button>`);
+          pop_element();
+          $$renderer2.push(`</span>`);
+          pop_element();
+        }
+        $$renderer2.push(`<!--]--></div>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--> `);
+      if (menuOpen()) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<div class="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-lg border border-border-strong bg-surface p-1 shadow-lg" data-testid="automation-prompt-menu">`);
+        push_element($$renderer2, "div", 243, 4);
+        if (activeKind() === "slash") {
+          $$renderer2.push("<!--[0-->");
+          $$renderer2.push(`<!--[-->`);
+          const each_array_1 = ensure_array_like(slashMatches());
+          for (let i = 0, $$length = each_array_1.length; i < $$length; i++) {
+            let item = each_array_1[i];
+            $$renderer2.push(`<button type="button"${attr_class(`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${i === selIndex ? "bg-surface-2 text-fg" : "text-fg-soft"}`)}>`);
+            push_element($$renderer2, "button", 249, 10);
+            if (item.kind === "skill") {
+              $$renderer2.push("<!--[0-->");
+              Book_open($$renderer2, { size: 14, class: "shrink-0 text-faint" });
+            } else {
+              $$renderer2.push("<!--[-1-->");
+              Message_square_text($$renderer2, { size: 14, class: "shrink-0 text-faint" });
+            }
+            $$renderer2.push(`<!--]--> <span class="shrink-0 font-medium">`);
+            push_element($$renderer2, "span", 258, 12);
+            $$renderer2.push(`/${escape_html(item.name)}</span>`);
+            pop_element();
+            $$renderer2.push(` <span class="truncate text-[12px] text-faint">`);
+            push_element($$renderer2, "span", 259, 12);
+            $$renderer2.push(`${escape_html(item.description)}</span>`);
+            pop_element();
+            $$renderer2.push(`</button>`);
+            pop_element();
+          }
+          $$renderer2.push(`<!--]-->`);
+        } else {
+          $$renderer2.push("<!--[-1-->");
+          $$renderer2.push(`<!--[-->`);
+          const each_array_2 = ensure_array_like(atMatches());
+          for (let i = 0, $$length = each_array_2.length; i < $$length; i++) {
+            let conn = each_array_2[i];
+            $$renderer2.push(`<button type="button"${attr_class(`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${i === selIndex ? "bg-surface-2 text-fg" : "text-fg-soft"}`)}>`);
+            push_element($$renderer2, "button", 264, 10);
+            if (conn.logoUrl) {
+              $$renderer2.push("<!--[0-->");
+              ConnectorIcon($$renderer2, { logoUrl: conn.logoUrl, label: conn.name, size: 14 });
+            } else {
+              $$renderer2.push("<!--[-1-->");
+              Plug($$renderer2, { size: 14, class: "shrink-0 text-faint" });
+            }
+            $$renderer2.push(`<!--]--> <span class="shrink-0 font-medium">`);
+            push_element($$renderer2, "span", 273, 12);
+            $$renderer2.push(`${escape_html(conn.name)}</span>`);
+            pop_element();
+            $$renderer2.push(` <span class="truncate text-[12px] text-faint">`);
+            push_element($$renderer2, "span", 274, 12);
+            $$renderer2.push(`${escape_html(conn.kind === "custom" ? conn.baseUrl : conn.toolkitSlug)}</span>`);
+            pop_element();
+            $$renderer2.push(`</button>`);
+            pop_element();
+          }
+          $$renderer2.push(`<!--]-->`);
+        }
+        $$renderer2.push(`<!--]--></div>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+      bind_props($$props, { value, connections });
+    },
+    AutomationPromptField
+  );
+}
+AutomationPromptField.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+AutomationDialog[FILENAME] = "src/desktop-renderer/app/AutomationDialog.svelte";
+function AutomationDialog($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let {
+        open = false,
+        projects,
+        automation = null
+        /** When set, the dialog edits this automation instead of creating a new one. */
+      } = $$props;
+      const editing = derived(() => automation != null);
+      const FREQUENCIES = [
+        { value: "hourly", label: "Hourly" },
+        { value: "daily", label: "Daily" },
+        { value: "weekly", label: "Weekly" },
+        { value: "monthly", label: "Monthly" }
+      ];
+      let name = "";
+      let prompt = "";
+      let connections = [];
+      let projectId = "";
+      let frequency = DEFAULT_SCHEDULE.frequency;
+      let time2 = DEFAULT_SCHEDULE.time;
+      let modelKey = "";
+      let nextPreview = null;
+      const selectedProject = derived(() => projects.find((p) => p.id === projectId) ?? null);
+      const canWorktree = derived(() => selectedProject()?.kind === "repo");
+      const scopedModelList = derived(() => scopedModels.models.filter((m) => m.scoped));
+      const modelItems = derived(() => scopedModelList().map((m) => ({
+        value: `${m.provider}	${m.id}`,
+        label: m.name,
+        group: m.provider
+      })));
+      const canCreate = derived(() => name.trim().length > 0 && prompt.trim().length > 0 && Boolean(nextPreview));
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        if (Dialog) {
+          $$renderer3.push("<!--[-->");
+          Dialog($$renderer3, {
+            get open() {
+              return open;
+            },
+            set open($$value) {
+              open = $$value;
+              $$settled = false;
+            },
+            children: prevent_snippet_stringification(($$renderer4) => {
+              if (Portal) {
+                $$renderer4.push("<!--[-->");
+                Portal($$renderer4, {
+                  children: prevent_snippet_stringification(($$renderer5) => {
+                    if (Dialog_overlay) {
+                      $$renderer5.push("<!--[-->");
+                      Dialog_overlay($$renderer5, { class: "fixed inset-0 z-50 bg-black/40" });
+                      $$renderer5.push("<!--]-->");
+                    } else {
+                      $$renderer5.push("<!--[!-->");
+                      $$renderer5.push("<!--]-->");
+                    }
+                    $$renderer5.push(` `);
+                    if (Dialog_content) {
+                      $$renderer5.push("<!--[-->");
+                      Dialog_content($$renderer5, {
+                        class: "fixed top-1/2 left-1/2 z-50 flex w-[min(34rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border-strong bg-surface p-5 shadow-2xl",
+                        "data-testid": "automation-dialog",
+                        children: prevent_snippet_stringification(($$renderer6) => {
+                          $$renderer6.push(`<div class="flex items-start justify-between gap-3">`);
+                          push_element($$renderer6, "div", 182, 6);
+                          $$renderer6.push(`<div class="min-w-0">`);
+                          push_element($$renderer6, "div", 183, 8);
+                          if (Dialog_title) {
+                            $$renderer6.push("<!--[-->");
+                            Dialog_title($$renderer6, {
+                              class: "text-sm font-semibold text-fg",
+                              children: prevent_snippet_stringification(($$renderer7) => {
+                                $$renderer7.push(`<!---->${escape_html(editing() ? "Edit automation" : "New automation")}`);
+                              }),
+                              $$slots: { default: true }
+                            });
+                            $$renderer6.push("<!--]-->");
+                          } else {
+                            $$renderer6.push("<!--[!-->");
+                            $$renderer6.push("<!--]-->");
+                          }
+                          $$renderer6.push(` `);
+                          if (Dialog_description) {
+                            $$renderer6.push("<!--[-->");
+                            Dialog_description($$renderer6, {
+                              class: "mt-0.5 text-[12px] text-faint",
+                              children: prevent_snippet_stringification(($$renderer7) => {
+                                $$renderer7.push(`<!---->Schedule a recurring prompt — it fires into a fresh thread.`);
+                              }),
+                              $$slots: { default: true }
+                            });
+                            $$renderer6.push("<!--]-->");
+                          } else {
+                            $$renderer6.push("<!--[!-->");
+                            $$renderer6.push("<!--]-->");
+                          }
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                          $$renderer6.push(` `);
+                          if (Dialog_close) {
+                            $$renderer6.push("<!--[-->");
+                            Dialog_close($$renderer6, {
+                              class: "rounded-md p-1 text-faint hover:bg-surface-2 hover:text-fg",
+                              "aria-label": "Close",
+                              children: prevent_snippet_stringification(($$renderer7) => {
+                                X($$renderer7, { size: 16 });
+                              }),
+                              $$slots: { default: true }
+                            });
+                            $$renderer6.push("<!--]-->");
+                          } else {
+                            $$renderer6.push("<!--[!-->");
+                            $$renderer6.push("<!--]-->");
+                          }
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                          $$renderer6.push(` <input class="rounded-lg border border-border-strong bg-bg px-3 py-2 text-sm font-medium outline-none focus:border-border-focus" placeholder="Automation title (e.g. Morning triage)"${attr("value", name)}/>`);
+                          push_element($$renderer6, "input", 197, 6);
+                          pop_element();
+                          $$renderer6.push(` `);
+                          AutomationPromptField($$renderer6, {
+                            projectId: projectId || null,
+                            placeholder: "Prompt to run. Type / for skills, @ for connections.",
+                            get value() {
+                              return prompt;
+                            },
+                            set value($$value) {
+                              prompt = $$value;
+                              $$settled = false;
+                            },
+                            get connections() {
+                              return connections;
+                            },
+                            set connections($$value) {
+                              connections = $$value;
+                              $$settled = false;
+                            }
+                          });
+                          $$renderer6.push(`<!----> <div class="grid grid-cols-2 gap-3">`);
+                          push_element($$renderer6, "div", 210, 6);
+                          $$renderer6.push(`<div class="flex flex-col gap-1.5">`);
+                          push_element($$renderer6, "div", 211, 8);
+                          $$renderer6.push(`<span class="text-[11px] font-medium uppercase tracking-wide text-fainter">`);
+                          push_element($$renderer6, "span", 212, 10);
+                          $$renderer6.push(`Project</span>`);
+                          pop_element();
+                          $$renderer6.push(` `);
+                          Select_1($$renderer6, {
+                            placeholder: "New chat",
+                            items: [
+                              { value: "", label: "New chat" },
+                              ...projects.map((p) => ({ value: p.id, label: p.name }))
+                            ],
+                            get value() {
+                              return projectId;
+                            },
+                            set value($$value) {
+                              projectId = $$value;
+                              $$settled = false;
+                            }
+                          });
+                          $$renderer6.push(`<!----></div>`);
+                          pop_element();
+                          $$renderer6.push(` <div class="flex flex-col gap-1.5">`);
+                          push_element($$renderer6, "div", 223, 8);
+                          $$renderer6.push(`<span class="text-[11px] font-medium uppercase tracking-wide text-fainter">`);
+                          push_element($$renderer6, "span", 224, 10);
+                          $$renderer6.push(`Runs in</span>`);
+                          pop_element();
+                          $$renderer6.push(` <div${attr_class(`flex items-center gap-1 rounded-lg border border-border-strong bg-bg p-1 ${canWorktree() ? "" : "opacity-50"}`)}>`);
+                          push_element($$renderer6, "div", 225, 10);
+                          $$renderer6.push(`<button type="button"${attr_class(`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors ${"bg-surface-2 text-fg"}`)}>`);
+                          push_element($$renderer6, "button", 230, 12);
+                          Monitor($$renderer6, { size: 14 });
+                          $$renderer6.push(`<!----> Local</button>`);
+                          pop_element();
+                          $$renderer6.push(` <button type="button"${attr("disabled", !canWorktree(), true)}${attr("title", canWorktree() ? "Run in a fresh isolated git worktree" : "Worktrees need a git repo project")}${attr_class(`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors disabled:cursor-not-allowed ${"text-muted hover:text-fg"}`)}>`);
+                          push_element($$renderer6, "button", 240, 12);
+                          Git_branch_plus($$renderer6, { size: 14 });
+                          $$renderer6.push(`<!----> Worktree</button>`);
+                          pop_element();
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                          $$renderer6.push(` <div class="flex flex-col gap-1.5">`);
+                          push_element($$renderer6, "div", 258, 6);
+                          $$renderer6.push(`<span class="text-[11px] font-medium uppercase tracking-wide text-fainter">`);
+                          push_element($$renderer6, "span", 259, 8);
+                          $$renderer6.push(`Model</span>`);
+                          pop_element();
+                          $$renderer6.push(` `);
+                          Select_1($$renderer6, {
+                            placeholder: "Default (pi picks)",
+                            items: [{ value: "", label: "Default" }, ...modelItems()],
+                            get value() {
+                              return modelKey;
+                            },
+                            set value($$value) {
+                              modelKey = $$value;
+                              $$settled = false;
+                            }
+                          });
+                          $$renderer6.push(`<!----></div>`);
+                          pop_element();
+                          $$renderer6.push(` <div class="flex flex-col gap-1.5">`);
+                          push_element($$renderer6, "div", 270, 6);
+                          $$renderer6.push(`<span class="text-[11px] font-medium uppercase tracking-wide text-fainter">`);
+                          push_element($$renderer6, "span", 271, 8);
+                          $$renderer6.push(`Schedule</span>`);
+                          pop_element();
+                          $$renderer6.push(` <div class="flex items-center gap-1 rounded-lg border border-border-strong bg-bg p-1">`);
+                          push_element($$renderer6, "div", 272, 8);
+                          $$renderer6.push(`<!--[-->`);
+                          const each_array = ensure_array_like(FREQUENCIES);
+                          for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+                            let f = each_array[$$index];
+                            $$renderer6.push(`<button type="button"${attr_class(`flex-1 rounded-md px-2 py-1 text-[13px] transition-colors ${frequency === f.value ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"}`)}>`);
+                            push_element($$renderer6, "button", 274, 12);
+                            $$renderer6.push(`${escape_html(f.label)}</button>`);
+                            pop_element();
+                          }
+                          $$renderer6.push(`<!--]--></div>`);
+                          pop_element();
+                          $$renderer6.push(` <div class="flex flex-wrap items-center gap-2">`);
+                          push_element($$renderer6, "div", 284, 8);
+                          {
+                            $$renderer6.push("<!--[-1-->");
+                          }
+                          $$renderer6.push(`<!--]--> `);
+                          {
+                            $$renderer6.push("<!--[0-->");
+                            $$renderer6.push(`<input type="time" class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm outline-none focus:border-border-focus"${attr("value", time2)}/>`);
+                            push_element($$renderer6, "input", 294, 12);
+                            pop_element();
+                          }
+                          $$renderer6.push(`<!--]--></div>`);
+                          pop_element();
+                          $$renderer6.push(` <span${attr_class(`text-[12px] ${"text-danger"}`)}>`);
+                          push_element($$renderer6, "span", 304, 8);
+                          $$renderer6.push(`${escape_html("Invalid schedule")}</span>`);
+                          pop_element();
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                          $$renderer6.push(` `);
+                          {
+                            $$renderer6.push("<!--[-1-->");
+                          }
+                          $$renderer6.push(`<!--]--> <div class="flex justify-end gap-2">`);
+                          push_element($$renderer6, "div", 315, 6);
+                          if (Dialog_close) {
+                            $$renderer6.push("<!--[-->");
+                            Dialog_close($$renderer6, {
+                              class: "rounded-lg border border-border px-3 py-1.5 text-[13px] text-fg-soft hover:bg-surface-2",
+                              children: prevent_snippet_stringification(($$renderer7) => {
+                                $$renderer7.push(`<!---->Cancel`);
+                              }),
+                              $$slots: { default: true }
+                            });
+                            $$renderer6.push("<!--]-->");
+                          } else {
+                            $$renderer6.push("<!--[!-->");
+                            $$renderer6.push("<!--]-->");
+                          }
+                          $$renderer6.push(` <button class="rounded-lg bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-fg disabled:opacity-30"${attr("disabled", !canCreate(), true)}${attr("data-testid", editing() ? "save-automation" : "create-automation")}>`);
+                          push_element($$renderer6, "button", 321, 8);
+                          $$renderer6.push(`${escape_html(editing() ? "Save" : "Create")}</button>`);
+                          pop_element();
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                        }),
+                        $$slots: { default: true }
+                      });
+                      $$renderer5.push("<!--]-->");
+                    } else {
+                      $$renderer5.push("<!--[!-->");
+                      $$renderer5.push("<!--]-->");
+                    }
+                  })
+                });
+                $$renderer4.push("<!--]-->");
+              } else {
+                $$renderer4.push("<!--[!-->");
+                $$renderer4.push("<!--]-->");
+              }
+            }),
+            $$slots: { default: true }
+          });
+          $$renderer3.push("<!--]-->");
+        } else {
+          $$renderer3.push("<!--[!-->");
+          $$renderer3.push("<!--]-->");
+        }
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+      bind_props($$props, { open });
+    },
+    AutomationDialog
+  );
+}
+AutomationDialog.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Switch_1[FILENAME] = "src/desktop-renderer/components/ui/switch/switch.svelte";
+function Switch_1($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let {
+        checked = false,
+        disabled = false,
+        class: className,
+        onCheckedChange,
+        $$slots,
+        $$events,
+        ...restProps
+      } = $$props;
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        if (Switch) {
+          $$renderer3.push("<!--[-->");
+          Switch($$renderer3, spread_props([
+            { disabled, onCheckedChange },
+            restProps,
+            {
+              class: cn("relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-success data-[state=unchecked]:bg-surface-3", className),
+              get checked() {
+                return checked;
+              },
+              set checked($$value) {
+                checked = $$value;
+                $$settled = false;
+              },
+              children: prevent_snippet_stringification(($$renderer4) => {
+                if (Switch_thumb) {
+                  $$renderer4.push("<!--[-->");
+                  Switch_thumb($$renderer4, {
+                    class: "pointer-events-none block size-4 rounded-full bg-white shadow-sm transition-transform data-[state=checked]:translate-x-[1.125rem] data-[state=unchecked]:translate-x-0.5"
+                  });
+                  $$renderer4.push("<!--]-->");
+                } else {
+                  $$renderer4.push("<!--[!-->");
+                  $$renderer4.push("<!--]-->");
+                }
+              }),
+              $$slots: { default: true }
+            }
+          ]));
+          $$renderer3.push("<!--]-->");
+        } else {
+          $$renderer3.push("<!--[!-->");
+          $$renderer3.push("<!--]-->");
+        }
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+      bind_props($$props, { checked });
+    },
+    Switch_1
+  );
+}
+Switch_1.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+AutomationsView[FILENAME] = "src/desktop-renderer/app/AutomationsView.svelte";
+function AutomationsView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { projects, automations, onSelectThread } = $$props;
+      let editing = null;
+      let runsFor = null;
+      let runs = [];
+      let dialogOpen = false;
+      const fmt = (iso) => iso ? new Date(iso).toLocaleString(void 0, { dateStyle: "medium", timeStyle: "short" }) : "—";
+      const projectName = (id2) => id2 === null ? "Chat" : projects.find((p) => p.id === id2)?.name ?? "?";
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        $$renderer3.push(`<main class="flex h-full flex-1 flex-col" data-testid="automations-view">`);
+        push_element($$renderer3, "main", 54, 0);
+        $$renderer3.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-6">`);
+        push_element($$renderer3, "header", 55, 2);
+        $$renderer3.push(`<h1 class="text-sm font-medium text-fg-soft">`);
+        push_element($$renderer3, "h1", 56, 4);
+        $$renderer3.push(`Automations</h1>`);
+        pop_element();
+        $$renderer3.push(` <button class="rounded-lg bg-primary px-3 py-1 text-sm font-medium text-primary-fg" data-testid="new-automation">`);
+        push_element($$renderer3, "button", 57, 4);
+        $$renderer3.push(`New</button>`);
+        pop_element();
+        $$renderer3.push(`</header>`);
+        pop_element();
+        $$renderer3.push(` `);
+        AutomationDialog($$renderer3, {
+          projects,
+          automation: editing,
+          get open() {
+            return dialogOpen;
+          },
+          set open($$value) {
+            dialogOpen = $$value;
+            $$settled = false;
+          }
+        });
+        $$renderer3.push(`<!----> <div class="flex-1 overflow-y-auto px-6 pb-6">`);
+        push_element($$renderer3, "div", 69, 2);
+        $$renderer3.push(`<div class="mx-auto flex max-w-2xl flex-col gap-3">`);
+        push_element($$renderer3, "div", 70, 4);
+        const each_array = ensure_array_like(automations);
+        if (each_array.length !== 0) {
+          $$renderer3.push("<!--[-->");
+          for (let $$index_1 = 0, $$length = each_array.length; $$index_1 < $$length; $$index_1++) {
+            let auto = each_array[$$index_1];
+            $$renderer3.push(`<div class="rounded-lg border border-border bg-surface/50 px-4 py-3">`);
+            push_element($$renderer3, "div", 72, 8);
+            $$renderer3.push(`<div class="flex items-center gap-3">`);
+            push_element($$renderer3, "div", 73, 10);
+            Switch_1($$renderer3, {
+              checked: auto.enabled,
+              onCheckedChange: () => api.invoke("automations:setEnabled", auto.id, !auto.enabled),
+              "aria-label": "Toggle automation"
+            });
+            $$renderer3.push(`<!----> <div class="min-w-0 flex-1">`);
+            push_element($$renderer3, "div", 79, 12);
+            $$renderer3.push(`<span class="block truncate text-sm text-fg">`);
+            push_element($$renderer3, "span", 80, 14);
+            $$renderer3.push(`${escape_html(auto.name)}</span>`);
+            pop_element();
+            $$renderer3.push(` <span class="flex items-center gap-1 text-xs text-faint">`);
+            push_element($$renderer3, "span", 81, 14);
+            $$renderer3.push(`<span>`);
+            push_element($$renderer3, "span", 82, 16);
+            $$renderer3.push(`${escape_html(cronLabel(auto.cron))}</span>`);
+            pop_element();
+            $$renderer3.push(` · ${escape_html(projectName(auto.projectId))} `);
+            if (auto.projectId) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`· <span class="inline-flex items-center gap-0.5">`);
+              push_element($$renderer3, "span", 85, 20);
+              if (auto.environment === "worktree") {
+                $$renderer3.push("<!--[0-->");
+                Git_branch_plus($$renderer3, { size: 11 });
+                $$renderer3.push(`<!----> worktree`);
+              } else {
+                $$renderer3.push("<!--[-1-->");
+                Monitor($$renderer3, { size: 11 });
+                $$renderer3.push(`<!----> local`);
+              }
+              $$renderer3.push(`<!--]--></span>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--> `);
+            if (auto.model) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`· ${escape_html(auto.model.name)}`);
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--> · next ${escape_html(auto.enabled ? fmt(auto.nextFireAt) : "paused")}</span>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+            $$renderer3.push(` <button class="rounded p-1.5 text-faint hover:bg-surface-2 hover:text-fg" aria-label="Edit automation" data-testid="edit-automation">`);
+            push_element($$renderer3, "button", 93, 12);
+            Pencil($$renderer3, { size: 14 });
+            $$renderer3.push(`<!----></button>`);
+            pop_element();
+            $$renderer3.push(` <button class="rounded px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg">`);
+            push_element($$renderer3, "button", 98, 12);
+            $$renderer3.push(`Run now</button>`);
+            pop_element();
+            $$renderer3.push(` <button class="rounded px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg">`);
+            push_element($$renderer3, "button", 102, 12);
+            $$renderer3.push(`History</button>`);
+            pop_element();
+            $$renderer3.push(` <button class="rounded p-1.5 text-faint hover:bg-surface-2 hover:text-danger">`);
+            push_element($$renderer3, "button", 106, 12);
+            Trash_2($$renderer3, { size: 14 });
+            $$renderer3.push(`<!----></button>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+            $$renderer3.push(` <p class="mt-1.5 line-clamp-2 text-xs whitespace-pre-wrap text-faint">`);
+            push_element($$renderer3, "p", 111, 10);
+            $$renderer3.push(`${escape_html(auto.prompt)}</p>`);
+            pop_element();
+            $$renderer3.push(` `);
+            if (runsFor === auto.id) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<div class="mt-2 border-t border-border pt-2">`);
+              push_element($$renderer3, "div", 113, 12);
+              const each_array_1 = ensure_array_like(runs);
+              if (each_array_1.length !== 0) {
+                $$renderer3.push("<!--[-->");
+                for (let $$index = 0, $$length2 = each_array_1.length; $$index < $$length2; $$index++) {
+                  let run2 = each_array_1[$$index];
+                  $$renderer3.push(`<div class="flex items-center justify-between py-0.5 text-xs">`);
+                  push_element($$renderer3, "div", 115, 16);
+                  $$renderer3.push(`<span class="text-faint">`);
+                  push_element($$renderer3, "span", 116, 18);
+                  $$renderer3.push(`${escape_html(fmt(run2.firedAt))}</span>`);
+                  pop_element();
+                  $$renderer3.push(` `);
+                  if (run2.threadId) {
+                    $$renderer3.push("<!--[0-->");
+                    $$renderer3.push(`<button class="text-muted hover:text-fg">`);
+                    push_element($$renderer3, "button", 118, 20);
+                    $$renderer3.push(`Open thread →</button>`);
+                    pop_element();
+                  } else {
+                    $$renderer3.push("<!--[-1-->");
+                    $$renderer3.push(`<span class="text-danger">`);
+                    push_element($$renderer3, "span", 123, 20);
+                    $$renderer3.push(`failed</span>`);
+                    pop_element();
+                  }
+                  $$renderer3.push(`<!--]--></div>`);
+                  pop_element();
+                }
+              } else {
+                $$renderer3.push("<!--[!-->");
+                $$renderer3.push(`<p class="text-xs text-fainter">`);
+                push_element($$renderer3, "p", 127, 16);
+                $$renderer3.push(`No runs yet.</p>`);
+                pop_element();
+              }
+              $$renderer3.push(`<!--]--></div>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--></div>`);
+            pop_element();
+          }
+        } else {
+          $$renderer3.push("<!--[!-->");
+          $$renderer3.push(`<p class="mt-8 text-center text-sm text-fainter">`);
+          push_element($$renderer3, "p", 133, 8);
+          $$renderer3.push(`No automations. Schedule a recurring prompt — it fires into a fresh thread.</p>`);
+          pop_element();
+        }
+        $$renderer3.push(`<!--]--></div>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(`</main>`);
+        pop_element();
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+    },
+    AutomationsView
+  );
+}
+AutomationsView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+SkillsView[FILENAME] = "src/desktop-renderer/app/SkillsView.svelte";
+function SkillsView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { projects, projectId } = $$props;
+      let scope = projectId;
+      let selected = null;
+      let query = "";
+      let pending = null;
+      let dialogOpen = false;
+      let removing = false;
+      let dialogError = "";
+      const filtered = derived(() => {
+        const skills = [];
+        const q = query.trim().toLowerCase();
+        if (!q) return skills;
+        return skills.filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
+      });
+      const groups = derived(() => {
+        const order2 = [];
+        const map = /* @__PURE__ */ new Map();
+        for (const s of filtered()) {
+          const key = s.source === "user" ? "Global" : s.source === "project" ? "Project" : cap(s.source);
+          if (!map.has(key)) {
+            map.set(key, []);
+            order2.push(key);
+          }
+          map.get(key).push(s);
+        }
+        return order2.map((key) => ({ key, items: map.get(key) }));
+      });
+      async function confirmRemove() {
+        return;
+      }
+      const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        $$renderer3.push(`<main class="flex h-full flex-1" data-testid="skills-view">`);
+        push_element($$renderer3, "main", 185, 0);
+        $$renderer3.push(`<aside class="flex w-64 shrink-0 flex-col border-r border-border bg-bg">`);
+        push_element($$renderer3, "aside", 187, 2);
+        $$renderer3.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-4">`);
+        push_element($$renderer3, "header", 188, 4);
+        $$renderer3.push(`<h1 class="text-sm font-semibold text-fg">`);
+        push_element($$renderer3, "h1", 189, 6);
+        $$renderer3.push(`Skills</h1>`);
+        pop_element();
+        $$renderer3.push(` <button class="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-fg" title="Refresh" aria-label="Refresh" data-testid="refresh-skills">`);
+        push_element($$renderer3, "button", 190, 6);
+        Refresh_cw($$renderer3, { size: 15, class: "" });
+        $$renderer3.push(`<!----></button>`);
+        pop_element();
+        $$renderer3.push(`</header>`);
+        pop_element();
+        $$renderer3.push(` <div class="px-3 pb-2">`);
+        push_element($$renderer3, "div", 199, 4);
+        $$renderer3.push(`<div class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 focus-within:border-border-focus">`);
+        push_element($$renderer3, "div", 200, 6);
+        Search($$renderer3, { size: 14, class: "shrink-0 text-muted" });
+        $$renderer3.push(`<!----> <input class="w-full bg-transparent text-sm text-fg outline-none placeholder:text-fainter" placeholder="Search skills…"${attr("value", query)} data-testid="skill-search"/>`);
+        push_element($$renderer3, "input", 202, 8);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(` <div class="px-3 pb-2">`);
+        push_element($$renderer3, "div", 213, 4);
+        Select_1($$renderer3, {
+          class: "rounded-lg bg-surface px-2 py-1 text-xs",
+          value: scope ?? "",
+          onValueChange: (v) => scope = v || null,
+          items: [
+            { value: "", label: "Global only" },
+            ...projects.map((p) => ({ value: p.id, label: p.name }))
+          ]
+        });
+        $$renderer3.push(`<!----></div>`);
+        pop_element();
+        $$renderer3.push(` <nav class="flex-1 overflow-y-auto px-2 pb-4">`);
+        push_element($$renderer3, "nav", 222, 4);
+        if (filtered().length === 0) {
+          $$renderer3.push("<!--[1-->");
+          $$renderer3.push(`<p class="px-2 pt-3 text-xs text-fainter">`);
+          push_element($$renderer3, "p", 226, 8);
+          $$renderer3.push(`${escape_html("No skills found.")}</p>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+          $$renderer3.push(`<!--[-->`);
+          const each_array = ensure_array_like(groups());
+          for (let $$index_1 = 0, $$length = each_array.length; $$index_1 < $$length; $$index_1++) {
+            let group = each_array[$$index_1];
+            $$renderer3.push(`<p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">`);
+            push_element($$renderer3, "p", 231, 10);
+            $$renderer3.push(`${escape_html(group.key)}</p>`);
+            pop_element();
+            $$renderer3.push(` <!--[-->`);
+            const each_array_1 = ensure_array_like(group.items);
+            for (let $$index = 0, $$length2 = each_array_1.length; $$index < $$length2; $$index++) {
+              let skill = each_array_1[$$index];
+              $$renderer3.push(`<button${attr_class("flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface", void 0, { "bg-surface": selected?.filePath === skill.filePath })}${attr("data-testid", `sidebar-skill`)}>`);
+              push_element($$renderer3, "button", 233, 12);
+              $$renderer3.push(`<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted">`);
+              push_element($$renderer3, "span", 239, 14);
+              Book_open($$renderer3, { size: 12 });
+              $$renderer3.push(`<!----></span>`);
+              pop_element();
+              $$renderer3.push(` <span${attr_class(`flex-1 truncate text-sm ${selected?.filePath === skill.filePath ? "text-fg" : "text-muted"}`)}>`);
+              push_element($$renderer3, "span", 240, 14);
+              $$renderer3.push(`${escape_html(skill.name)}</span>`);
+              pop_element();
+              $$renderer3.push(`</button>`);
+              pop_element();
+            }
+            $$renderer3.push(`<!--]-->`);
+          }
+          $$renderer3.push(`<!--]-->`);
+        }
+        $$renderer3.push(`<!--]--></nav>`);
+        pop_element();
+        $$renderer3.push(`</aside>`);
+        pop_element();
+        $$renderer3.push(` <section class="flex flex-1 flex-col overflow-y-auto">`);
+        push_element($$renderer3, "section", 249, 2);
+        {
+          $$renderer3.push("<!--[-1-->");
+          $$renderer3.push(`<div class="flex flex-1 items-center justify-center text-sm text-fainter">`);
+          push_element($$renderer3, "div", 319, 6);
+          $$renderer3.push(`${escape_html("No skills found.")}</div>`);
+          pop_element();
+        }
+        $$renderer3.push(`<!--]--></section>`);
+        pop_element();
+        $$renderer3.push(`</main>`);
+        pop_element();
+        $$renderer3.push(` `);
+        ConfirmDialog($$renderer3, {
+          title: `Delete ${pending?.name}?`,
+          description: "",
+          confirmLabel: "Delete",
+          destructive: true,
+          busy: removing,
+          error: dialogError,
+          onConfirm: confirmRemove,
+          get open() {
+            return dialogOpen;
+          },
+          set open($$value) {
+            dialogOpen = $$value;
+            $$settled = false;
+          }
+        });
+        $$renderer3.push(`<!---->`);
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+    },
+    SkillsView
+  );
+}
+SkillsView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+ExtensionsView[FILENAME] = "src/desktop-renderer/app/ExtensionsView.svelte";
+function ExtensionsView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { projects, projectId } = $$props;
+      let scope = projectId;
+      let query = "";
+      let toggling = false;
+      let toggleError = "";
+      let selectedPath = null;
+      const selected = derived(() => null);
+      async function toggleEnabled(ext, nextEnabled) {
+        if (toggling) return;
+        toggling = true;
+        toggleError = "";
+        const key = ext.removeSpec ?? ext.path;
+        try {
+          const res = await api.invoke("extensions:setEnabled", key, nextEnabled);
+          if (!res.ok) toggleError = res.error ?? "Failed.";
+        } catch (err) {
+          toggleError = String(err);
+        } finally {
+          toggling = false;
+        }
+      }
+      const filtered = derived(() => {
+        const exts = [];
+        const q = query.trim().toLowerCase();
+        if (!q) return exts;
+        return exts.filter((e) => e.name.toLowerCase().includes(q) || e.source.toLowerCase().includes(q));
+      });
+      const groups = derived(() => {
+        const order2 = ["Failed", "Global", "Project", "Other"];
+        const map = /* @__PURE__ */ new Map();
+        for (const k of order2) map.set(k, []);
+        for (const e of filtered()) {
+          const label = e.source === "error" ? "Failed" : e.source === "user" ? "Global" : e.source === "project" ? "Project" : "Other";
+          map.get(label).push(e);
+        }
+        return order2.map((key) => ({ key, items: map.get(key) })).filter((g) => g.items.length > 0);
+      });
+      let pending = null;
+      let dialogOpen = false;
+      let removing = false;
+      let dialogError = "";
+      async function confirmRemove() {
+        return;
+      }
+      const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        $$renderer3.push(`<main class="flex h-full flex-1" data-testid="extensions-view">`);
+        push_element($$renderer3, "main", 147, 0);
+        $$renderer3.push(`<aside class="flex w-64 shrink-0 flex-col border-r border-border bg-bg">`);
+        push_element($$renderer3, "aside", 149, 2);
+        $$renderer3.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-4">`);
+        push_element($$renderer3, "header", 150, 4);
+        $$renderer3.push(`<h1 class="text-sm font-semibold text-fg">`);
+        push_element($$renderer3, "h1", 151, 6);
+        $$renderer3.push(`Extensions</h1>`);
+        pop_element();
+        $$renderer3.push(` <button class="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition hover:bg-surface hover:text-fg" title="Refresh" aria-label="Refresh" data-testid="refresh-extensions">`);
+        push_element($$renderer3, "button", 152, 6);
+        Refresh_cw($$renderer3, { size: 15, class: "" });
+        $$renderer3.push(`<!----></button>`);
+        pop_element();
+        $$renderer3.push(`</header>`);
+        pop_element();
+        $$renderer3.push(` <div class="px-3 pb-2">`);
+        push_element($$renderer3, "div", 161, 4);
+        $$renderer3.push(`<div class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 focus-within:border-border-focus">`);
+        push_element($$renderer3, "div", 162, 6);
+        Search($$renderer3, { size: 14, class: "shrink-0 text-muted" });
+        $$renderer3.push(`<!----> <input class="w-full bg-transparent text-sm text-fg outline-none placeholder:text-fainter" placeholder="Search extensions…"${attr("value", query)} data-testid="extension-search"/>`);
+        push_element($$renderer3, "input", 164, 8);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(` <div class="px-3 pb-2">`);
+        push_element($$renderer3, "div", 173, 4);
+        Select_1($$renderer3, {
+          class: "rounded-lg bg-surface px-2 py-1 text-xs",
+          value: scope ?? "",
+          onValueChange: (v) => scope = v || null,
+          items: [
+            { value: "", label: "Global only" },
+            ...projects.map((p) => ({ value: p.id, label: p.name }))
+          ]
+        });
+        $$renderer3.push(`<!----></div>`);
+        pop_element();
+        $$renderer3.push(` <nav class="flex-1 overflow-y-auto px-2 pb-4">`);
+        push_element($$renderer3, "nav", 182, 4);
+        if (filtered().length === 0) {
+          $$renderer3.push("<!--[1-->");
+          $$renderer3.push(`<p class="px-2 pt-3 text-xs text-fainter">`);
+          push_element($$renderer3, "p", 186, 8);
+          $$renderer3.push(`${escape_html("No extensions found.")}</p>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+          $$renderer3.push(`<!--[-->`);
+          const each_array = ensure_array_like(groups());
+          for (let $$index_1 = 0, $$length = each_array.length; $$index_1 < $$length; $$index_1++) {
+            let group = each_array[$$index_1];
+            $$renderer3.push(`<p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">`);
+            push_element($$renderer3, "p", 191, 10);
+            $$renderer3.push(`${escape_html(group.key)}</p>`);
+            pop_element();
+            $$renderer3.push(` <!--[-->`);
+            const each_array_1 = ensure_array_like(group.items);
+            for (let $$index = 0, $$length2 = each_array_1.length; $$index < $$length2; $$index++) {
+              let ext = each_array_1[$$index];
+              $$renderer3.push(`<button${attr_class("flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface", void 0, { "bg-surface": selectedPath === ext.path })} data-testid="sidebar-extension">`);
+              push_element($$renderer3, "button", 193, 12);
+              $$renderer3.push(`<span${attr_class("flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted", void 0, { "text-red-400": !!ext.error })}>`);
+              push_element($$renderer3, "span", 199, 14);
+              if (ext.error) {
+                $$renderer3.push("<!--[0-->");
+                Triangle_alert($$renderer3, { size: 12 });
+              } else {
+                $$renderer3.push("<!--[-1-->");
+                Puzzle($$renderer3, { size: 12 });
+              }
+              $$renderer3.push(`<!--]--></span>`);
+              pop_element();
+              $$renderer3.push(` <span${attr_class(`flex-1 truncate text-sm ${selectedPath === ext.path ? "text-fg" : ext.error ? "text-red-400" : "text-muted"}`)}>`);
+              push_element($$renderer3, "span", 202, 14);
+              $$renderer3.push(`${escape_html(ext.name)}</span>`);
+              pop_element();
+              $$renderer3.push(` `);
+              if (ext.tools.length > 0) {
+                $$renderer3.push("<!--[0-->");
+                $$renderer3.push(`<span class="num-badge">`);
+                push_element($$renderer3, "span", 204, 16);
+                $$renderer3.push(`${escape_html(ext.tools.length)}</span>`);
+                pop_element();
+              } else {
+                $$renderer3.push("<!--[-1-->");
+              }
+              $$renderer3.push(`<!--]--></button>`);
+              pop_element();
+            }
+            $$renderer3.push(`<!--]-->`);
+          }
+          $$renderer3.push(`<!--]-->`);
+        }
+        $$renderer3.push(`<!--]--></nav>`);
+        pop_element();
+        $$renderer3.push(`</aside>`);
+        pop_element();
+        $$renderer3.push(` <section class="flex flex-1 flex-col overflow-y-auto">`);
+        push_element($$renderer3, "section", 214, 2);
+        if (selected()) {
+          $$renderer3.push("<!--[0-->");
+          const ext = selected();
+          $$renderer3.push(`<div class="mx-auto w-full max-w-3xl px-8 py-6">`);
+          push_element($$renderer3, "div", 217, 6);
+          $$renderer3.push(`<div class="flex items-start gap-3">`);
+          push_element($$renderer3, "div", 218, 8);
+          $$renderer3.push(`<span${attr_class("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-muted", void 0, { "text-red-400": !!ext.error })}>`);
+          push_element($$renderer3, "span", 219, 10);
+          if (ext.error) {
+            $$renderer3.push("<!--[0-->");
+            Triangle_alert($$renderer3, { size: 16 });
+          } else {
+            $$renderer3.push("<!--[-1-->");
+            Puzzle($$renderer3, { size: 16 });
+          }
+          $$renderer3.push(`<!--]--></span>`);
+          pop_element();
+          $$renderer3.push(` <div class="min-w-0 flex-1">`);
+          push_element($$renderer3, "div", 222, 10);
+          $$renderer3.push(`<div class="flex items-center gap-2">`);
+          push_element($$renderer3, "div", 223, 12);
+          $$renderer3.push(`<h2 class="truncate text-lg font-semibold text-fg">`);
+          push_element($$renderer3, "h2", 224, 14);
+          $$renderer3.push(`${escape_html(ext.name)}</h2>`);
+          pop_element();
+          $$renderer3.push(` <span class="rounded-md bg-surface px-1.5 py-0.5 text-[11px] text-muted">`);
+          push_element($$renderer3, "span", 225, 14);
+          $$renderer3.push(`${escape_html(cap(ext.source))}</span>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <p class="mt-0.5 truncate font-mono text-[11px] text-fainter">`);
+          push_element($$renderer3, "p", 227, 12);
+          $$renderer3.push(`${escape_html(ext.path)}</p>`);
+          pop_element();
+          $$renderer3.push(` `);
+          if (toggleError) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`<p class="mt-2 text-xs text-red-400" data-testid="extension-toggle-error">`);
+            push_element($$renderer3, "p", 229, 14);
+            $$renderer3.push(`${escape_html(toggleError)}</p>`);
+            pop_element();
+          } else {
+            $$renderer3.push("<!--[-1-->");
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex shrink-0 items-center gap-2">`);
+          push_element($$renderer3, "div", 232, 10);
+          $$renderer3.push(`<div class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5"${attr("title", ext.disabled ? "Disabled: moved out of pi's load list — restart to unload" : "Loaded by pi")}>`);
+          push_element($$renderer3, "div", 233, 12);
+          Switch_1($$renderer3, {
+            checked: !ext.disabled,
+            disabled: !ext.removeSpec && !ext.deletePath || !!ext.error || toggling,
+            onCheckedChange: (checked) => void toggleEnabled(ext, checked)
+          });
+          $$renderer3.push(`<!----> <span class="text-xs text-muted">`);
+          push_element($$renderer3, "span", 244, 14);
+          $$renderer3.push(`${escape_html(ext.disabled ? "Off" : "On")}</span>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          if (ext.removeSpec || ext.deletePath) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`<button class="flex shrink-0 items-center gap-1.5 rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm font-medium text-fg transition hover:border-red-500/50 hover:text-red-400 disabled:opacity-50"${attr("disabled", removing, true)}${attr("title", ext.removeSpec ? `pi remove ${ext.removeSpec}` : `Delete ${ext.deletePath}`)} data-testid="remove-extension">`);
+            push_element($$renderer3, "button", 247, 14);
+            Trash_2($$renderer3, { size: 14 });
+            $$renderer3.push(`<!----><span>`);
+            push_element($$renderer3, "span", 254, 36);
+            $$renderer3.push(`${escape_html(ext.removeSpec ? "Uninstall" : "Delete")}</span>`);
+            pop_element();
+            $$renderer3.push(`</button>`);
+            pop_element();
+          } else {
+            $$renderer3.push("<!--[-1-->");
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          if (ext.error) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`<p class="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">`);
+            push_element($$renderer3, "p", 261, 10);
+            $$renderer3.push(`${escape_html(ext.error)}</p>`);
+            pop_element();
+          } else {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`<dl class="mt-6 overflow-hidden rounded-xl border border-border bg-surface text-sm">`);
+            push_element($$renderer3, "dl", 263, 10);
+            $$renderer3.push(`<div class="flex justify-between gap-4 px-4 py-2.5">`);
+            push_element($$renderer3, "div", 264, 12);
+            $$renderer3.push(`<dt class="text-muted">`);
+            push_element($$renderer3, "dt", 265, 14);
+            $$renderer3.push(`Source</dt>`);
+            pop_element();
+            $$renderer3.push(` <dd class="text-fg">`);
+            push_element($$renderer3, "dd", 266, 14);
+            $$renderer3.push(`${escape_html(cap(ext.source))}</dd>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+            $$renderer3.push(` <div class="flex justify-between gap-4 border-t border-border px-4 py-2.5">`);
+            push_element($$renderer3, "div", 268, 12);
+            $$renderer3.push(`<dt class="text-muted">`);
+            push_element($$renderer3, "dt", 269, 14);
+            $$renderer3.push(`Tools</dt>`);
+            pop_element();
+            $$renderer3.push(` <dd class="text-fg">`);
+            push_element($$renderer3, "dd", 270, 14);
+            $$renderer3.push(`${escape_html(ext.tools.length)}</dd>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+            $$renderer3.push(` <div class="flex justify-between gap-4 border-t border-border px-4 py-2.5">`);
+            push_element($$renderer3, "div", 272, 12);
+            $$renderer3.push(`<dt class="text-muted">`);
+            push_element($$renderer3, "dt", 273, 14);
+            $$renderer3.push(`Commands</dt>`);
+            pop_element();
+            $$renderer3.push(` <dd class="text-fg">`);
+            push_element($$renderer3, "dd", 274, 14);
+            $$renderer3.push(`${escape_html(ext.commands.length)}</dd>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+            $$renderer3.push(`</dl>`);
+            pop_element();
+            $$renderer3.push(` `);
+            if (ext.tools.length > 0) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<h3 class="mt-6 text-sm font-semibold text-fg flex items-center gap-2">`);
+              push_element($$renderer3, "h3", 279, 12);
+              Wrench($$renderer3, { size: 13 });
+              $$renderer3.push(`<!----> Tools <span class="text-fainter">`);
+              push_element($$renderer3, "span", 279, 110);
+              $$renderer3.push(`${escape_html(ext.tools.length)}</span>`);
+              pop_element();
+              $$renderer3.push(`</h3>`);
+              pop_element();
+              $$renderer3.push(` <div class="mt-2 flex flex-wrap gap-1.5">`);
+              push_element($$renderer3, "div", 280, 12);
+              $$renderer3.push(`<!--[-->`);
+              const each_array_2 = ensure_array_like(ext.tools);
+              for (let $$index_2 = 0, $$length = each_array_2.length; $$index_2 < $$length; $$index_2++) {
+                let t = each_array_2[$$index_2];
+                $$renderer3.push(`<span class="rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-[11px] text-fg-soft">`);
+                push_element($$renderer3, "span", 282, 16);
+                $$renderer3.push(`${escape_html(t)}</span>`);
+                pop_element();
+              }
+              $$renderer3.push(`<!--]--></div>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--> `);
+            if (ext.commands.length > 0) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<h3 class="mt-6 text-sm font-semibold text-fg flex items-center gap-2">`);
+              push_element($$renderer3, "h3", 288, 12);
+              Puzzle($$renderer3, { size: 13 });
+              $$renderer3.push(`<!----> Commands <span class="text-fainter">`);
+              push_element($$renderer3, "span", 288, 113);
+              $$renderer3.push(`${escape_html(ext.commands.length)}</span>`);
+              pop_element();
+              $$renderer3.push(`</h3>`);
+              pop_element();
+              $$renderer3.push(` <div class="mt-2 flex flex-wrap gap-1.5">`);
+              push_element($$renderer3, "div", 289, 12);
+              $$renderer3.push(`<!--[-->`);
+              const each_array_3 = ensure_array_like(ext.commands);
+              for (let $$index_3 = 0, $$length = each_array_3.length; $$index_3 < $$length; $$index_3++) {
+                let c = each_array_3[$$index_3];
+                $$renderer3.push(`<span class="rounded-md border border-border bg-surface px-2 py-0.5 font-mono text-[11px] text-fg-soft">`);
+                push_element($$renderer3, "span", 291, 16);
+                $$renderer3.push(`/${escape_html(c)}</span>`);
+                pop_element();
+              }
+              $$renderer3.push(`<!--]--></div>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]-->`);
+          }
+          $$renderer3.push(`<!--]--> <p class="mt-6 text-[11px] text-fainter">`);
+          push_element($$renderer3, "p", 297, 8);
+          $$renderer3.push(`Extensions load from <code class="rounded bg-surface px-1">`);
+          push_element($$renderer3, "code", 298, 31);
+          $$renderer3.push(`~/.pi/agent/extensions</code>`);
+          pop_element();
+          $$renderer3.push(` and each project's <code class="rounded bg-surface px-1">`);
+          push_element($$renderer3, "code", 299, 10);
+          $$renderer3.push(`.pi/extensions</code>`);
+          pop_element();
+          $$renderer3.push(`. Packages uninstall via <code class="rounded bg-surface px-1">`);
+          push_element($$renderer3, "code", 299, 94);
+          $$renderer3.push(`pi remove</code>`);
+          pop_element();
+          $$renderer3.push(`;
+          local extensions are deleted from disk. Changes apply to new sessions.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+          $$renderer3.push(`<div class="flex flex-1 items-center justify-center text-sm text-fainter">`);
+          push_element($$renderer3, "div", 304, 6);
+          $$renderer3.push(`${escape_html("No extensions found.")}</div>`);
+          pop_element();
+        }
+        $$renderer3.push(`<!--]--></section>`);
+        pop_element();
+        $$renderer3.push(`</main>`);
+        pop_element();
+        $$renderer3.push(` `);
+        ConfirmDialog($$renderer3, {
+          title: `Delete ${pending?.name}?`,
+          description: `Permanently deletes from disk:
+${""}`,
+          confirmLabel: "Delete",
+          destructive: true,
+          busy: removing,
+          error: dialogError,
+          onConfirm: confirmRemove,
+          get open() {
+            return dialogOpen;
+          },
+          set open($$value) {
+            dialogOpen = $$value;
+            $$settled = false;
+          }
+        });
+        $$renderer3.push(`<!---->`);
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+    },
+    ExtensionsView
+  );
+}
+ExtensionsView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+DoneBurstPlayground[FILENAME] = "src/desktop-renderer/app/DoneBurstPlayground.svelte";
+function DoneBurstPlayground($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const VARIANTS2 = [
+        {
+          id: "archiveSlide",
+          label: "Precision archive slide",
+          desc: "Press · metallic glint sweep · slide, fade & collapse (no particles)"
+        },
+        {
+          id: "archiveSwipe",
+          label: "Archive swipe",
+          desc: "Snappier · longer throw with a slight tilt · brighter glint"
+        },
+        {
+          id: "archiveShing",
+          label: "Archive shing",
+          desc: "Twin crossing glints · chrome brightness ping · crisp collapse"
+        },
+        {
+          id: "archiveVacuum",
+          label: "Archive vacuum",
+          desc: "Extreme · squash, skew & motion-blur sucked toward Done"
+        },
+        {
+          id: "popSpark",
+          label: "Pop & sparkle",
+          desc: "Stepped pop · smooth radial sparks"
+        },
+        {
+          id: "stamp",
+          label: "Approval stamp",
+          desc: "Hard stepped stamp · smooth shockwave rings"
+        },
+        {
+          id: "confetti",
+          label: "Confetti",
+          desc: "Bouncy smooth pop · arcing confetti with gravity"
+        },
+        {
+          id: "twos",
+          label: "Full on-twos",
+          desc: "Everything stepped (high step count, textured)"
+        },
+        {
+          id: "spring",
+          label: "Springy ring",
+          desc: "Smooth spring pop · double ring pulse · fine dots"
+        }
+      ];
+      const N = 16;
+      const baseColors = [
+        "var(--color-accent)",
+        "#ffffff",
+        "#fbbf24",
+        "#f472b6",
+        "#34d399"
+      ];
+      function makeParticles(vid) {
+        const isConfetti = vid === "confetti";
+        return Array.from({ length: N }, (_, i) => {
+          const a = i / N * Math.PI * 2 + i % 2 * 0.2;
+          const cos = Math.cos(a);
+          const sin = Math.sin(a);
+          return {
+            dx: cos * 32,
+            dy: sin * 32,
+            cf: cos * 26,
+            spin: (i % 2 ? 1 : -1) * (360 + i * 28),
+            color: baseColors[i % baseColors.length],
+            size: isConfetti ? 4 + i % 2 : 3 + i % 3,
+            square: isConfetti ? i % 2 === 0 : false
+          };
+        });
+      }
+      const particlesByVariant = Object.fromEntries(VARIANTS2.map((v) => [v.id, makeParticles(v.id)]));
+      let runs = {};
+      let popping = {};
+      $$renderer2.push(`<div class="flex flex-col gap-3 svelte-1o6j8v3">`);
+      push_element($$renderer2, "div", 73, 0);
+      $$renderer2.push(`<!--[-->`);
+      const each_array = ensure_array_like(VARIANTS2);
+      for (let $$index_1 = 0, $$length = each_array.length; $$index_1 < $$length; $$index_1++) {
+        let v = each_array[$$index_1];
+        const isActive = doneAnim.current === v.id;
+        const particles = particlesByVariant[v.id];
+        $$renderer2.push(`<div class="flex items-center justify-between gap-3 svelte-1o6j8v3">`);
+        push_element($$renderer2, "div", 77, 4);
+        $$renderer2.push(`<label class="flex min-w-0 cursor-pointer items-center gap-2 svelte-1o6j8v3">`);
+        push_element($$renderer2, "label", 79, 6);
+        $$renderer2.push(`<input type="radio" name="done-anim"${attr("checked", isActive, true)} class="accent-[var(--color-accent)] svelte-1o6j8v3"/>`);
+        push_element($$renderer2, "input", 80, 8);
+        pop_element();
+        $$renderer2.push(` <div class="svelte-1o6j8v3">`);
+        push_element($$renderer2, "div", 87, 8);
+        $$renderer2.push(`<p class="text-xs text-fg svelte-1o6j8v3">`);
+        push_element($$renderer2, "p", 88, 10);
+        $$renderer2.push(`${escape_html(v.label)}</p>`);
+        pop_element();
+        $$renderer2.push(` <p class="text-[11px] text-faint svelte-1o6j8v3">`);
+        push_element($$renderer2, "p", 89, 10);
+        $$renderer2.push(`${escape_html(v.desc)}</p>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(`</label>`);
+        pop_element();
+        $$renderer2.push(` <div class="relative flex shrink-0 items-center svelte-1o6j8v3">`);
+        push_element($$renderer2, "div", 94, 6);
+        $$renderer2.push(`<div${attr_class("mock-row svelte-1o6j8v3", void 0, {
+          "popping": popping[v.id],
+          "pop--archiveSlide": popping[v.id] && v.id === "archiveSlide",
+          "pop--archiveSwipe": popping[v.id] && v.id === "archiveSwipe",
+          "pop--archiveShing": popping[v.id] && v.id === "archiveShing",
+          "pop--archiveVacuum": popping[v.id] && v.id === "archiveVacuum",
+          "pop--popSpark": popping[v.id] && v.id === "popSpark",
+          "pop--stamp": popping[v.id] && v.id === "stamp",
+          "pop--confetti": popping[v.id] && v.id === "confetti",
+          "pop--twos": popping[v.id] && v.id === "twos",
+          "pop--spring": popping[v.id] && v.id === "spring"
+        })}>`);
+        push_element($$renderer2, "div", 95, 8);
+        Check($$renderer2, { size: 13, class: "shrink-0 text-accent" });
+        $$renderer2.push(`<!----> <span class="truncate svelte-1o6j8v3">`);
+        push_element($$renderer2, "span", 97, 10);
+        $$renderer2.push(`Mock thread</span>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <!---->`);
+        {
+          if (runs[v.id]) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<div${attr_class(`burst burst--${stringify(v.id)}`, "svelte-1o6j8v3")}>`);
+            push_element($$renderer2, "div", 102, 12);
+            if (!v.id.startsWith("archive")) {
+              $$renderer2.push("<!--[0-->");
+              $$renderer2.push(`<span class="ring svelte-1o6j8v3">`);
+              push_element($$renderer2, "span", 104, 14);
+              $$renderer2.push(`</span>`);
+              pop_element();
+              $$renderer2.push(` <span class="ring ring2 svelte-1o6j8v3">`);
+              push_element($$renderer2, "span", 105, 14);
+              $$renderer2.push(`</span>`);
+              pop_element();
+              $$renderer2.push(` <!--[-->`);
+              const each_array_1 = ensure_array_like(particles);
+              for (let i = 0, $$length2 = each_array_1.length; i < $$length2; i++) {
+                let p = each_array_1[i];
+                $$renderer2.push(`<span${attr_class("spark svelte-1o6j8v3", void 0, { "square": p.square })}${attr_style(`--dx:${stringify(p.dx)}px; --dy:${stringify(p.dy)}px; --cf:${stringify(p.cf)}px; --spin:${stringify(p.spin)}deg; width:${stringify(p.size)}px; height:${stringify(p.size)}px; background:${stringify(p.color)};`)}>`);
+                push_element($$renderer2, "span", 107, 16);
+                $$renderer2.push(`</span>`);
+                pop_element();
+              }
+              $$renderer2.push(`<!--]-->`);
+            } else {
+              $$renderer2.push("<!--[-1-->");
+            }
+            $$renderer2.push(`<!--]--></div>`);
+            pop_element();
+          } else {
+            $$renderer2.push("<!--[-1-->");
+          }
+          $$renderer2.push(`<!--]-->`);
+        }
+        $$renderer2.push(`<!----> <button class="ml-3 rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:border-border-focus svelte-1o6j8v3">`);
+        push_element($$renderer2, "button", 118, 8);
+        $$renderer2.push(`Play</button>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+    },
+    DoneBurstPlayground
+  );
+}
+DoneBurstPlayground.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Flask_conical[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/flask-conical.svelte";
+function Flask_conical($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "path",
+          {
+            "d": "M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"
+          }
+        ],
+        ["path", { "d": "M6.453 15h11.094" }],
+        ["path", { "d": "M8.5 2h7" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "flask-conical" }, props, { iconNode }]));
+    },
+    Flask_conical
+  );
+}
+Flask_conical.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+TestBurstPlayground[FILENAME] = "src/desktop-renderer/app/TestBurstPlayground.svelte";
+function TestBurstPlayground($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const VARIANTS2 = [
+        {
+          id: "testBench",
+          label: "Test bench stamp",
+          desc: "Press · amber scan sweep · TEST badge stamp · settle into testing state (no particles)"
+        }
+      ];
+      let runs = {};
+      let popping = {};
+      $$renderer2.push(`<div class="flex flex-col gap-3">`);
+      push_element($$renderer2, "div", 30, 0);
+      $$renderer2.push(`<!--[-->`);
+      const each_array = ensure_array_like(VARIANTS2);
+      for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+        let v = each_array[$$index];
+        const isActive = testAnim.current === v.id;
+        $$renderer2.push(`<div class="flex items-center justify-between gap-3">`);
+        push_element($$renderer2, "div", 33, 4);
+        $$renderer2.push(`<label class="flex min-w-0 cursor-pointer items-center gap-2">`);
+        push_element($$renderer2, "label", 35, 6);
+        $$renderer2.push(`<input type="radio" name="test-anim"${attr("checked", isActive, true)} class="accent-[var(--color-accent)]"/>`);
+        push_element($$renderer2, "input", 36, 8);
+        pop_element();
+        $$renderer2.push(` <div>`);
+        push_element($$renderer2, "div", 43, 8);
+        $$renderer2.push(`<p class="text-xs text-fg">`);
+        push_element($$renderer2, "p", 44, 10);
+        $$renderer2.push(`${escape_html(v.label)}</p>`);
+        pop_element();
+        $$renderer2.push(` <p class="text-[11px] text-faint">`);
+        push_element($$renderer2, "p", 45, 10);
+        $$renderer2.push(`${escape_html(v.desc)}</p>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(`</label>`);
+        pop_element();
+        $$renderer2.push(` <div class="relative flex shrink-0 items-center">`);
+        push_element($$renderer2, "div", 50, 6);
+        $$renderer2.push(`<div${attr_class("mock-row svelte-ux06iv", void 0, {
+          "popping": popping[v.id],
+          "pop--testBench": popping[v.id] && v.id === "testBench"
+        })}>`);
+        push_element($$renderer2, "div", 51, 8);
+        Flask_conical($$renderer2, { size: 13, class: "shrink-0 text-amber-500" });
+        $$renderer2.push(`<!----> <span class="truncate">`);
+        push_element($$renderer2, "span", 57, 10);
+        $$renderer2.push(`Mock thread</span>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <!---->`);
+        {
+          if (runs[v.id]) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<div${attr_class(`burst burst--${stringify(v.id)}`, "svelte-ux06iv")}>`);
+            push_element($$renderer2, "div", 62, 12);
+            $$renderer2.push(`</div>`);
+            pop_element();
+          } else {
+            $$renderer2.push("<!--[-1-->");
+          }
+          $$renderer2.push(`<!--]-->`);
+        }
+        $$renderer2.push(`<!----> <button class="ml-3 rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:border-border-focus">`);
+        push_element($$renderer2, "button", 66, 8);
+        $$renderer2.push(`Play</button>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+    },
+    TestBurstPlayground
+  );
+}
+TestBurstPlayground.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+DotMatrixPlayground[FILENAME] = "src/desktop-renderer/app/DotMatrixPlayground.svelte";
+function DotMatrixPlayground($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      const TABS = [
+        { id: "square", label: "Square", surface: "Chat surface" },
+        { id: "hex", label: "Hex", surface: "Sidebar" },
+        { id: "triangle", label: "Triangle", surface: "Agents" }
+      ];
+      let active = "square";
+      const entries = derived(() => byShape(active));
+      const selected = derived(() => loaderPrefs.selection(active));
+      let hovered = null;
+      function isOn(id2) {
+        return selected().includes(id2);
+      }
+      $$renderer2.push(`<div class="space-y-4">`);
+      push_element($$renderer2, "div", 30, 0);
+      $$renderer2.push(`<div class="flex gap-1 rounded-md bg-surface-2 p-1">`);
+      push_element($$renderer2, "div", 32, 2);
+      $$renderer2.push(`<!--[-->`);
+      const each_array = ensure_array_like(TABS);
+      for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+        let tab = each_array[$$index];
+        $$renderer2.push(`<button type="button"${attr_class(`flex-1 rounded px-3 py-1.5 text-xs transition-colors ${active === tab.id ? "bg-surface text-fg shadow-sm" : "text-faint hover:text-fg"}`)}>`);
+        push_element($$renderer2, "button", 34, 6);
+        $$renderer2.push(`${escape_html(tab.label)} <span class="ml-1 text-fainter">`);
+        push_element($$renderer2, "span", 42, 8);
+        $$renderer2.push(`· ${escape_html(tab.surface)}</span>`);
+        pop_element();
+        $$renderer2.push(`</button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+      $$renderer2.push(` <p class="text-xs text-faint">`);
+      push_element($$renderer2, "p", 47, 2);
+      $$renderer2.push(`${escape_html(selected().length)} selected · the random spinner draws from these. Click a tile to toggle. Hover to animate.</p>`);
+      pop_element();
+      $$renderer2.push(` <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">`);
+      push_element($$renderer2, "div", 52, 2);
+      $$renderer2.push(`<!--[-->`);
+      const each_array_1 = ensure_array_like(entries());
+      for (let $$index_1 = 0, $$length = each_array_1.length; $$index_1 < $$length; $$index_1++) {
+        let entry = each_array_1[$$index_1];
+        const on2 = isOn(entry.id);
+        const Comp = entry.component;
+        $$renderer2.push(`<button type="button"${attr_class(`relative flex flex-col items-center gap-2 rounded-lg border p-3 transition-colors ${on2 ? "border-accent/60 bg-accent/10" : "border-border bg-surface/40 hover:border-border"}`)}${attr("aria-pressed", on2)}>`);
+        push_element($$renderer2, "button", 56, 6);
+        $$renderer2.push(`<div class="flex h-10 items-center justify-center">`);
+        push_element($$renderer2, "div", 67, 8);
+        if (Comp) {
+          $$renderer2.push("<!--[-->");
+          Comp($$renderer2, {
+            size: 32,
+            dotSize: 5,
+            bloom: false,
+            animated: hovered === entry.id
+          });
+          $$renderer2.push("<!--]-->");
+        } else {
+          $$renderer2.push("<!--[!-->");
+          $$renderer2.push("<!--]-->");
+        }
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <span class="line-clamp-1 text-center text-[11px] text-fg">`);
+        push_element($$renderer2, "span", 70, 8);
+        $$renderer2.push(`${escape_html(entry.name)}</span>`);
+        pop_element();
+        $$renderer2.push(` <span class="text-[10px] text-fainter">`);
+        push_element($$renderer2, "span", 71, 8);
+        $$renderer2.push(`${escape_html(entry.id)}</span>`);
+        pop_element();
+        $$renderer2.push(` `);
+        if (on2) {
+          $$renderer2.push("<!--[0-->");
+          $$renderer2.push(`<span class="absolute right-1.5 top-1.5 text-accent" aria-hidden="true">`);
+          push_element($$renderer2, "span", 73, 10);
+          Check($$renderer2, { size: 13 });
+          $$renderer2.push(`<!----></span>`);
+          pop_element();
+        } else {
+          $$renderer2.push("<!--[-1-->");
+        }
+        $$renderer2.push(`<!--]--></button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+    },
+    DotMatrixPlayground
+  );
+}
+DotMatrixPlayground.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+ThemeGrid[FILENAME] = "src/desktop-renderer/app/ThemeGrid.svelte";
+function ThemeGrid($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let lightCards = derived(() => [
+        ...THEMES.filter((t) => t.scheme === "light"),
+        ...theme.savedThemes.filter((t) => t.scheme === "light").map(savedCard)
+      ]);
+      let darkCards = derived(() => [
+        ...THEMES.filter((t) => t.scheme === "dark"),
+        ...theme.savedThemes.filter((t) => t.scheme === "dark").map(savedCard)
+      ]);
+      function savedCard(t) {
+        return {
+          id: t.id,
+          label: t.name,
+          scheme: t.scheme,
+          saved: true,
+          imported: t.source === "imported"
+        };
+      }
+      let activeLight = derived(() => activeIdFor("light"));
+      let activeDark = derived(() => activeIdFor("dark"));
+      function activeIdFor(scheme) {
+        const p = theme.prefs;
+        if (p.mode === "single") return theme.current;
+        if (p.mode === "system") return scheme === "light" ? p.systemLight : p.systemDark;
+        return scheme === "light" ? p.rotateActiveLight : p.rotateActiveDark;
+      }
+      function inPool(id2, scheme) {
+        const pool = scheme === "light" ? theme.prefs.rotateLight : theme.prefs.rotateDark;
+        return pool.includes(id2);
+      }
+      $$renderer2.push(`<div class="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2.5">`);
+      push_element($$renderer2, "div", 74, 0);
+      $$renderer2.push(`<!--[-->`);
+      const each_array = ensure_array_like([...darkCards(), ...lightCards()]);
+      for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+        let card = each_array[$$index];
+        const isActive = card.id === (card.scheme === "light" ? activeLight() : activeDark());
+        const checked = theme.prefs.mode === "rotate" && inPool(card.id, card.scheme);
+        const showRing = isActive;
+        $$renderer2.push(`<button type="button"${attr_class("theme-card group relative flex flex-col gap-2 overflow-hidden rounded-lg border p-2 text-left transition-all svelte-h0soz9", void 0, {
+          "ring-2": showRing,
+          "ring-offset-2": showRing,
+          "opacity-70": theme.prefs.mode === "rotate" && !checked && !isActive
+        })} style="border-color: var(--color-border-strong);"${attr("aria-pressed", isActive)}${attr("data-testid", `theme-card-${card.id}`)}>`);
+        push_element($$renderer2, "button", 79, 4);
+        $$renderer2.push(`<div class="theme-scope pointer-events-none grid grid-cols-4 gap-1 rounded"${attr("data-theme", card.id)} style="aspect-ratio: 2 / 1;">`);
+        push_element($$renderer2, "div", 91, 6);
+        $$renderer2.push(`<div class="rounded-sm" style="background: var(--color-bg);">`);
+        push_element($$renderer2, "div", 96, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="rounded-sm" style="background: var(--color-surface-3);">`);
+        push_element($$renderer2, "div", 97, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="rounded-sm" style="background: var(--color-accent);">`);
+        push_element($$renderer2, "div", 98, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="rounded-sm" style="background: var(--color-primary);">`);
+        push_element($$renderer2, "div", 99, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="col-span-2 rounded-sm" style="background: var(--color-surface-2);">`);
+        push_element($$renderer2, "div", 100, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="rounded-sm" style="background: var(--color-fg);">`);
+        push_element($$renderer2, "div", 101, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="rounded-sm" style="background: var(--color-warning);">`);
+        push_element($$renderer2, "div", 102, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="col-span-2 rounded-sm" style="background: var(--color-surface); border-top: 1px solid var(--color-border);">`);
+        push_element($$renderer2, "div", 103, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="rounded-sm" style="background: var(--color-danger);">`);
+        push_element($$renderer2, "div", 104, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="rounded-sm" style="background: var(--color-success);">`);
+        push_element($$renderer2, "div", 105, 8);
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` <div class="flex items-center justify-between gap-1">`);
+        push_element($$renderer2, "div", 107, 6);
+        $$renderer2.push(`<span class="truncate text-xs font-medium" style="color: var(--color-fg);">`);
+        push_element($$renderer2, "span", 108, 8);
+        $$renderer2.push(`${escape_html(card.label)}</span>`);
+        pop_element();
+        $$renderer2.push(` <div class="flex items-center gap-1">`);
+        push_element($$renderer2, "div", 109, 8);
+        if (card.saved && card.imported) {
+          $$renderer2.push("<!--[0-->");
+          $$renderer2.push(`<span class="shrink-0 rounded px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide" style="background: var(--color-surface-3); color: var(--color-fg-soft);" title="Imported">`);
+          push_element($$renderer2, "span", 111, 12);
+          $$renderer2.push(`Imported</span>`);
+          pop_element();
+        } else {
+          $$renderer2.push("<!--[-1-->");
+        }
+        $$renderer2.push(`<!--]--> `);
+        if (checked) {
+          $$renderer2.push("<!--[0-->");
+          Check($$renderer2, {
+            class: "size-3.5 shrink-0 text-accent",
+            "aria-hidden": "true"
+          });
+        } else {
+          $$renderer2.push("<!--[-1-->");
+        }
+        $$renderer2.push(`<!--]--></div>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+        $$renderer2.push(` `);
+        if (showRing) {
+          $$renderer2.push("<!--[0-->");
+          $$renderer2.push(`<span class="sr-only">`);
+          push_element($$renderer2, "span", 119, 8);
+          $$renderer2.push(`(active)</span>`);
+          pop_element();
+        } else {
+          $$renderer2.push("<!--[-1-->");
+        }
+        $$renderer2.push(`<!--]--></button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+    },
+    ThemeGrid
+  );
+}
+ThemeGrid.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Link[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/link.svelte";
+function Link($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "path",
+          {
+            "d": "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"
+          }
+        ],
+        [
+          "path",
+          {
+            "d": "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+          }
+        ]
+      ];
+      Icon($$renderer2, spread_props([{ name: "link" }, props, { iconNode }]));
+    },
+    Link
+  );
+}
+Link.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Type[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/type.svelte";
+function Type($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        ["path", { "d": "M12 4v16" }],
+        ["path", { "d": "M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" }],
+        ["path", { "d": "M9 20h6" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "type" }, props, { iconNode }]));
+    },
+    Type
+  );
+}
+Type.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Image[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/image.svelte";
+function Image($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "rect",
+          {
+            "width": "18",
+            "height": "18",
+            "x": "3",
+            "y": "3",
+            "rx": "2",
+            "ry": "2"
+          }
+        ],
+        ["circle", { "cx": "9", "cy": "9", "r": "2" }],
+        ["path", { "d": "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "image" }, props, { iconNode }]));
+    },
+    Image
+  );
+}
+Image.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+class VisionProxyStore {
+  installed = false;
+  /** Mode: fallback | always | off. Default reflects the extension default. */
+  mode = "fallback";
+  provider = "anthropic";
+  modelId = "claude-sonnet-4-5";
+  modeLocked = false;
+  modelLocked = false;
+  loaded = false;
+  async load() {
+    if (this.loaded) return;
+    this.loaded = true;
+    const c = await api.invoke("app:getVisionProxyConfig");
+    this.apply(c);
+  }
+  async setMode(mode) {
+    const c = await api.invoke("app:setVisionProxyMode", mode);
+    this.apply(c);
+  }
+  async setModel(model) {
+    const plain = { provider: model.provider, id: model.id, name: model.name };
+    const c = await api.invoke("app:setVisionProxyModel", plain);
+    this.apply(c);
+  }
+  async install() {
+    const res = await api.invoke("app:installVisionProxy");
+    if (res.ok) {
+      const installState = await api.invoke("app:getVisionProxyInstallState");
+      this.installed = installState.installed;
+    }
+    return res;
+  }
+  apply(c) {
+    this.installed = c.installed;
+    this.mode = c.mode;
+    this.provider = c.provider;
+    this.modelId = c.modelId;
+    this.modeLocked = c.modeLocked;
+    this.modelLocked = c.modelLocked;
+  }
+}
+const visionProxy = new VisionProxyStore();
+ImportThemeDialog[FILENAME] = "src/desktop-renderer/app/ImportThemeDialog.svelte";
+function ImportThemeDialog($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { open = false } = $$props;
+      const MODES = [
+        {
+          id: "name",
+          label: "Name",
+          icon: Type,
+          hint: "iTerm2 scheme name (e.g. Dracula)"
+        },
+        {
+          id: "url",
+          label: "URL",
+          icon: Link,
+          hint: "Link to a color-scheme file or screenshot"
+        },
+        {
+          id: "paste",
+          label: "Screenshot",
+          icon: Image,
+          hint: "Paste an image from the clipboard"
+        }
+      ];
+      let mode = "name";
+      let nameText = "";
+      let urlText = "";
+      let pastedImage = null;
+      let busy = false;
+      let error = "";
+      let lastImportedId = "";
+      function reset() {
+        mode = "name";
+        nameText = "";
+        urlText = "";
+        pastedImage = null;
+        busy = false;
+        error = "";
+        lastImportedId = "";
+      }
+      const canSubmit = derived(() => !busy && (mode === "name" && nameText.trim().length > 0 || mode === "url" && urlText.trim().length > 0 || mode === "paste" && pastedImage !== null));
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        if (Dialog) {
+          $$renderer3.push("<!--[-->");
+          Dialog($$renderer3, {
+            onOpenChange: (o) => {
+              if (!o) reset();
+            },
+            get open() {
+              return open;
+            },
+            set open($$value) {
+              open = $$value;
+              $$settled = false;
+            },
+            children: prevent_snippet_stringification(($$renderer4) => {
+              if (Portal) {
+                $$renderer4.push("<!--[-->");
+                Portal($$renderer4, {
+                  children: prevent_snippet_stringification(($$renderer5) => {
+                    if (Dialog_overlay) {
+                      $$renderer5.push("<!--[-->");
+                      Dialog_overlay($$renderer5, { class: "fixed inset-0 z-50 bg-black/40" });
+                      $$renderer5.push("<!--]-->");
+                    } else {
+                      $$renderer5.push("<!--[!-->");
+                      $$renderer5.push("<!--]-->");
+                    }
+                    $$renderer5.push(` `);
+                    if (Dialog_content) {
+                      $$renderer5.push("<!--[-->");
+                      Dialog_content($$renderer5, {
+                        class: "fixed top-1/2 left-1/2 z-50 flex w-[min(34rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border border-border-strong bg-surface p-5 shadow-2xl",
+                        "data-testid": "theme-import-dialog",
+                        children: prevent_snippet_stringification(($$renderer6) => {
+                          $$renderer6.push(`<div class="flex items-start justify-between gap-3">`);
+                          push_element($$renderer6, "div", 176, 6);
+                          $$renderer6.push(`<div class="min-w-0">`);
+                          push_element($$renderer6, "div", 177, 8);
+                          if (Dialog_title) {
+                            $$renderer6.push("<!--[-->");
+                            Dialog_title($$renderer6, {
+                              class: "text-sm font-semibold text-fg",
+                              children: prevent_snippet_stringification(($$renderer7) => {
+                                $$renderer7.push(`<!---->Import a theme`);
+                              }),
+                              $$slots: { default: true }
+                            });
+                            $$renderer6.push("<!--]-->");
+                          } else {
+                            $$renderer6.push("<!--[!-->");
+                            $$renderer6.push("<!--]-->");
+                          }
+                          $$renderer6.push(` `);
+                          if (Dialog_description) {
+                            $$renderer6.push("<!--[-->");
+                            Dialog_description($$renderer6, {
+                              class: "mt-0.5 text-[12px] text-faint",
+                              children: prevent_snippet_stringification(($$renderer7) => {
+                                $$renderer7.push(`<!---->Name a scheme, paste a URL, or drop a screenshot — the vision model reads the colors.`);
+                              }),
+                              $$slots: { default: true }
+                            });
+                            $$renderer6.push("<!--]-->");
+                          } else {
+                            $$renderer6.push("<!--[!-->");
+                            $$renderer6.push("<!--]-->");
+                          }
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                          $$renderer6.push(` `);
+                          if (Dialog_close) {
+                            $$renderer6.push("<!--[-->");
+                            Dialog_close($$renderer6, {
+                              class: "rounded-md p-1 text-faint transition-colors hover:bg-surface-2 hover:text-fg",
+                              "aria-label": "Close",
+                              children: prevent_snippet_stringification(($$renderer7) => {
+                                X($$renderer7, { size: 16 });
+                              }),
+                              $$slots: { default: true }
+                            });
+                            $$renderer6.push("<!--]-->");
+                          } else {
+                            $$renderer6.push("<!--[!-->");
+                            $$renderer6.push("<!--]-->");
+                          }
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                          $$renderer6.push(` <div class="flex gap-1.5" role="tablist" aria-label="Import source">`);
+                          push_element($$renderer6, "div", 192, 6);
+                          $$renderer6.push(`<!--[-->`);
+                          const each_array = ensure_array_like(MODES);
+                          for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+                            let m = each_array[$$index];
+                            const active = mode === m.id;
+                            $$renderer6.push(`<button type="button" role="tab"${attr("aria-selected", active)}${attr_class("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors", void 0, {
+                              "bg-surface-3": active,
+                              "text-fg": active,
+                              "bg-surface-2": !active,
+                              "text-muted": !active
+                            })}${attr("data-testid", `theme-import-mode-${m.id}`)}>`);
+                            push_element($$renderer6, "button", 195, 10);
+                            if (m.icon) {
+                              $$renderer6.push("<!--[-->");
+                              m.icon($$renderer6, { class: "size-3.5" });
+                              $$renderer6.push("<!--]-->");
+                            } else {
+                              $$renderer6.push("<!--[!-->");
+                              $$renderer6.push("<!--]-->");
+                            }
+                            $$renderer6.push(` ${escape_html(m.label)}</button>`);
+                            pop_element();
+                          }
+                          $$renderer6.push(`<!--]--></div>`);
+                          pop_element();
+                          $$renderer6.push(` <div class="min-h-[5rem]">`);
+                          push_element($$renderer6, "div", 214, 6);
+                          if (mode === "name") {
+                            $$renderer6.push("<!--[0-->");
+                            $$renderer6.push(`<input type="text" class="w-full rounded-lg border border-border-strong bg-bg px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-border-focus" placeholder="e.g. Dracula, Tokyo Night, Gruvbox"${attr("value", nameText)} aria-label="iTerm2 scheme name" data-testid="theme-import-name"/>`);
+                            push_element($$renderer6, "input", 216, 10);
+                            pop_element();
+                          } else if (mode === "url") {
+                            $$renderer6.push("<!--[1-->");
+                            $$renderer6.push(`<input type="url" class="w-full rounded-lg border border-border-strong bg-bg px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-border-focus" placeholder="https://…/colors.json or https://…/screenshot.png"${attr("value", urlText)} aria-label="Theme URL" data-testid="theme-import-url"/>`);
+                            push_element($$renderer6, "input", 226, 10);
+                            pop_element();
+                          } else if (mode === "paste") {
+                            $$renderer6.push("<!--[2-->");
+                            $$renderer6.push(`<div class="flex min-h-[5rem] cursor-default flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border p-4 text-center" role="button" tabindex="0" aria-label="Paste or drop an image here. Press to focus, then paste." data-testid="theme-import-dropzone">`);
+                            push_element($$renderer6, "div", 236, 10);
+                            if (pastedImage) {
+                              $$renderer6.push("<!--[0-->");
+                              $$renderer6.push(`<img${attr("src", `data:${stringify(pastedImage.mimeType)};base64,${stringify(pastedImage.data)}`)} alt="Pasted screenshot" class="max-h-32 rounded border border-border"/>`);
+                              push_element($$renderer6, "img", 248, 14);
+                              pop_element();
+                              $$renderer6.push(` <button type="button" class="text-xs text-faint transition-colors hover:text-fg">`);
+                              push_element($$renderer6, "button", 253, 14);
+                              $$renderer6.push(`Remove</button>`);
+                              pop_element();
+                            } else {
+                              $$renderer6.push("<!--[-1-->");
+                              Image($$renderer6, { class: "size-6 text-faint" });
+                              $$renderer6.push(`<!----> <p class="text-xs text-muted">`);
+                              push_element($$renderer6, "p", 260, 14);
+                              $$renderer6.push(`Paste (⌘V) or drop an image here</p>`);
+                              pop_element();
+                            }
+                            $$renderer6.push(`<!--]--></div>`);
+                            pop_element();
+                          } else {
+                            $$renderer6.push("<!--[-1-->");
+                          }
+                          $$renderer6.push(`<!--]--></div>`);
+                          pop_element();
+                          $$renderer6.push(` `);
+                          if (error) {
+                            $$renderer6.push("<!--[0-->");
+                            $$renderer6.push(`<p class="text-xs text-danger" data-testid="theme-import-error">`);
+                            push_element($$renderer6, "p", 268, 8);
+                            $$renderer6.push(`${escape_html(error)}</p>`);
+                            pop_element();
+                          } else if (lastImportedId) {
+                            $$renderer6.push("<!--[1-->");
+                            $$renderer6.push(`<div class="flex items-center justify-between gap-2 text-xs text-fg-soft">`);
+                            push_element($$renderer6, "div", 270, 8);
+                            $$renderer6.push(`<span>`);
+                            push_element($$renderer6, "span", 271, 10);
+                            $$renderer6.push(`Imported as “${escape_html(theme.savedThemes.find((t) => t.id === lastImportedId)?.name ?? "theme")}” and applied.</span>`);
+                            pop_element();
+                            $$renderer6.push(` <button type="button" class="text-faint transition-colors hover:text-fg">`);
+                            push_element($$renderer6, "button", 272, 10);
+                            $$renderer6.push(`Undo</button>`);
+                            pop_element();
+                            $$renderer6.push(`</div>`);
+                            pop_element();
+                          } else {
+                            $$renderer6.push("<!--[-1-->");
+                          }
+                          $$renderer6.push(`<!--]--> <div class="mt-1 flex items-center justify-between gap-3 border-t border-border pt-3">`);
+                          push_element($$renderer6, "div", 280, 6);
+                          $$renderer6.push(`<span class="text-[11px] text-faint" data-testid="theme-import-model-label">`);
+                          push_element($$renderer6, "span", 281, 8);
+                          $$renderer6.push(`Using ${escape_html("vision proxy model")}</span>`);
+                          pop_element();
+                          $$renderer6.push(` <div class="flex items-center gap-2">`);
+                          push_element($$renderer6, "div", 284, 8);
+                          if (lastImportedId) {
+                            $$renderer6.push("<!--[0-->");
+                            $$renderer6.push(`<button type="button" class="rounded-md px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg">`);
+                            push_element($$renderer6, "button", 286, 12);
+                            $$renderer6.push(`Done</button>`);
+                            pop_element();
+                          } else {
+                            $$renderer6.push("<!--[-1-->");
+                            $$renderer6.push(`<button type="button" class="rounded-md px-3 py-1.5 text-xs text-faint transition-colors hover:bg-surface-2 hover:text-fg">`);
+                            push_element($$renderer6, "button", 292, 12);
+                            $$renderer6.push(`Cancel</button>`);
+                            pop_element();
+                            $$renderer6.push(` <button type="button" class="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-40"${attr("disabled", !canSubmit(), true)} data-testid="theme-import-run">`);
+                            push_element($$renderer6, "button", 297, 12);
+                            Sparkles($$renderer6, { class: "size-3.5" });
+                            $$renderer6.push(`<!----> ${escape_html(busy ? "Reading…" : "Generate")}</button>`);
+                            pop_element();
+                          }
+                          $$renderer6.push(`<!--]--></div>`);
+                          pop_element();
+                          $$renderer6.push(`</div>`);
+                          pop_element();
+                        }),
+                        $$slots: { default: true }
+                      });
+                      $$renderer5.push("<!--]-->");
+                    } else {
+                      $$renderer5.push("<!--[!-->");
+                      $$renderer5.push("<!--]-->");
+                    }
+                  })
+                });
+                $$renderer4.push("<!--]-->");
+              } else {
+                $$renderer4.push("<!--[!-->");
+                $$renderer4.push("<!--]-->");
+              }
+            }),
+            $$slots: { default: true }
+          });
+          $$renderer3.push("<!--]-->");
+        } else {
+          $$renderer3.push("<!--[!-->");
+          $$renderer3.push("<!--]-->");
+        }
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+      bind_props($$props, { open });
+    },
+    ImportThemeDialog
+  );
+}
+ImportThemeDialog.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Rotate_ccw[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/rotate-ccw.svelte";
+function Rotate_ccw($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "path",
+          { "d": "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }
+        ],
+        ["path", { "d": "M3 3v5h5" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "rotate-ccw" }, props, { iconNode }]));
+    },
+    Rotate_ccw
+  );
+}
+Rotate_ccw.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Shuffle[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/shuffle.svelte";
+function Shuffle($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        ["path", { "d": "m18 14 4 4-4 4" }],
+        ["path", { "d": "m18 2 4 4-4 4" }],
+        [
+          "path",
+          {
+            "d": "M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22"
+          }
+        ],
+        ["path", { "d": "M2 6h1.972a4 4 0 0 1 3.6 2.2" }],
+        ["path", { "d": "M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "shuffle" }, props, { iconNode }]));
+    },
+    Shuffle
+  );
+}
+Shuffle.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+ThemeControls[FILENAME] = "src/desktop-renderer/app/ThemeControls.svelte";
+prevent_snippet_stringification(primarySwatch);
+function primarySwatch($$renderer, { slot, primaries }) {
+  validate_snippet_args($$renderer);
+  const value = primaries[slot.id] ?? "";
+  const token = slot.token ?? `--color-${slot.id}`;
+  const swatchVar = value ? `var(${token})` : "transparent";
+  $$renderer.push(`<div class="flex items-center gap-2">`);
+  push_element($$renderer, "div", 235, 2);
+  $$renderer.push(`<label class="relative flex size-6 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-border-strong"${attr("title", value || "Inherit from base")}${attr_style(`background: ${swatchVar};`)}>`);
+  push_element($$renderer, "label", 236, 4);
+  $$renderer.push(`<input type="color" class="absolute inset-0 size-full cursor-pointer opacity-0"${attr("value", value || "#000000")}${attr("aria-label", `${slot.label} color`)}${attr("data-testid", `primary-input-${slot.id}`)}/>`);
+  push_element($$renderer, "input", 241, 6);
+  pop_element();
+  $$renderer.push(`</label>`);
+  pop_element();
+  $$renderer.push(` <span class="min-w-0 text-xs text-fg-soft">`);
+  push_element($$renderer, "span", 250, 4);
+  $$renderer.push(`${escape_html(slot.label)}</span>`);
+  pop_element();
+  $$renderer.push(` `);
+  if (value) {
+    $$renderer.push("<!--[0-->");
+    $$renderer.push(`<button type="button" class="shrink-0 rounded p-1 text-faint transition-colors hover:bg-surface-2 hover:text-fg" title="Inherit from base"${attr("aria-label", `Inherit ${stringify(slot.label)} from base`)}${attr("data-testid", `primary-reset-${slot.id}`)}>`);
+    push_element($$renderer, "button", 252, 6);
+    Rotate_ccw($$renderer, { class: "size-3.5" });
+    $$renderer.push(`<!----></button>`);
+    pop_element();
+  } else {
+    $$renderer.push("<!--[-1-->");
+  }
+  $$renderer.push(`<!--]--></div>`);
+  pop_element();
+}
+function ThemeControls($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let importOpen = false;
+      const MODE_OPTIONS = [
+        { id: "single", label: "Single", hint: "One theme, always." },
+        {
+          id: "system",
+          label: "Match system",
+          hint: "Light theme + dark theme; follows your OS."
+        },
+        {
+          id: "rotate",
+          label: "Surprise me",
+          hint: "Random light + dark theme each day."
+        }
+      ];
+      const editing = derived(() => theme.current === CUSTOM_THEME_ID || isSavedId(theme.current));
+      const activePrimaries2 = derived(() => isSavedId(theme.current) ? theme.savedThemes.find((t) => t.id === theme.current)?.primaries ?? {} : theme.customPrimaries);
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        $$renderer3.push(`<div class="space-y-4">`);
+        push_element($$renderer3, "div", 57, 0);
+        $$renderer3.push(`<div class="flex items-start justify-between gap-3">`);
+        push_element($$renderer3, "div", 59, 2);
+        $$renderer3.push(`<div>`);
+        push_element($$renderer3, "div", 60, 4);
+        $$renderer3.push(`<h2 class="text-sm text-fg">`);
+        push_element($$renderer3, "h2", 61, 6);
+        $$renderer3.push(`Theme</h2>`);
+        pop_element();
+        $$renderer3.push(` <p class="text-xs text-faint">`);
+        push_element($$renderer3, "p", 62, 6);
+        $$renderer3.push(`<!--[-->`);
+        const each_array = ensure_array_like(MODE_OPTIONS);
+        for (let i = 0, $$length = each_array.length; i < $$length; i++) {
+          let opt = each_array[i];
+          if (i) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`·`);
+          } else {
+            $$renderer3.push("<!--[-1-->");
+          }
+          $$renderer3.push(`<!--]-->`);
+          if (theme.prefs.mode === opt.id) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`${escape_html(opt.hint)}`);
+          } else {
+            $$renderer3.push("<!--[-1-->");
+          }
+          $$renderer3.push(`<!--]-->`);
+        }
+        $$renderer3.push(`<!--]--></p>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(` <button type="button" class="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-muted transition-colors hover:border-border-focus hover:text-fg" data-testid="theme-import-button" title="Import a theme from a name, URL, or screenshot">`);
+        push_element($$renderer3, "button", 66, 4);
+        Sparkles($$renderer3, { class: "size-3.5" });
+        $$renderer3.push(`<!----> Import</button>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(` <div class="mt-2 flex flex-wrap gap-1.5" role="tablist" aria-label="Theme mode">`);
+        push_element($$renderer3, "div", 77, 2);
+        $$renderer3.push(`<!--[-->`);
+        const each_array_1 = ensure_array_like(MODE_OPTIONS);
+        for (let $$index_1 = 0, $$length = each_array_1.length; $$index_1 < $$length; $$index_1++) {
+          let opt = each_array_1[$$index_1];
+          $$renderer3.push(`<button type="button" role="tab"${attr("aria-selected", theme.prefs.mode === opt.id)}${attr_class("rounded-md px-3 py-1.5 text-xs transition-colors", void 0, {
+            "bg-surface-3": theme.prefs.mode === opt.id,
+            "text-fg": theme.prefs.mode === opt.id,
+            "bg-surface-2": theme.prefs.mode !== opt.id,
+            "text-muted": theme.prefs.mode !== opt.id,
+            "hover:text-fg": theme.prefs.mode !== opt.id
+          })}${attr("data-testid", `theme-mode-${opt.id}`)}>`);
+          push_element($$renderer3, "button", 79, 8);
+          $$renderer3.push(`${escape_html(opt.label)}</button>`);
+          pop_element();
+        }
+        $$renderer3.push(`<!--]--></div>`);
+        pop_element();
+        $$renderer3.push(` <div>`);
+        push_element($$renderer3, "div", 96, 2);
+        if (theme.prefs.mode === "rotate") {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<div class="mb-2 flex items-center justify-between">`);
+          push_element($$renderer3, "div", 98, 6);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 99, 8);
+          $$renderer3.push(`<h3 class="text-xs font-medium text-fg-soft">`);
+          push_element($$renderer3, "h3", 100, 10);
+          $$renderer3.push(`Rotation pool</h3>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 101, 10);
+          $$renderer3.push(`Check themes to add them to the daily roll. Empty pools keep the defaults.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <button type="button" class="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-border-focus hover:text-fg" data-testid="theme-reroll" title="Reroll the current picks">`);
+          push_element($$renderer3, "button", 103, 8);
+          Shuffle($$renderer3, { class: "size-3.5" });
+          $$renderer3.push(`<!----> Reroll</button>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+        } else if (theme.prefs.mode === "system") {
+          $$renderer3.push("<!--[1-->");
+          $$renderer3.push(`<div class="mb-2 flex items-center gap-6 text-xs text-muted">`);
+          push_element($$renderer3, "div", 115, 6);
+          $$renderer3.push(`<span>`);
+          push_element($$renderer3, "span", 116, 8);
+          $$renderer3.push(`<span class="font-medium text-fg-soft">`);
+          push_element($$renderer3, "span", 116, 14);
+          $$renderer3.push(`Light:</span>`);
+          pop_element();
+          $$renderer3.push(` ${escape_html(THEMES.find((t) => t.id === theme.prefs.systemLight)?.label ?? theme.prefs.systemLight)}</span>`);
+          pop_element();
+          $$renderer3.push(` <span>`);
+          push_element($$renderer3, "span", 117, 8);
+          $$renderer3.push(`<span class="font-medium text-fg-soft">`);
+          push_element($$renderer3, "span", 117, 14);
+          $$renderer3.push(`Dark:</span>`);
+          pop_element();
+          $$renderer3.push(` ${escape_html(THEMES.find((t) => t.id === theme.prefs.systemDark)?.label ?? theme.prefs.systemDark)}</span>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        ThemeGrid($$renderer3);
+        $$renderer3.push(`<!----></div>`);
+        pop_element();
+        $$renderer3.push(` `);
+        ImportThemeDialog($$renderer3, {
+          get open() {
+            return importOpen;
+          },
+          set open($$value) {
+            importOpen = $$value;
+            $$settled = false;
+          }
+        });
+        $$renderer3.push(`<!----> `);
+        if (editing()) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<div class="space-y-4 border-t border-border pt-4">`);
+          push_element($$renderer3, "div", 127, 2);
+          $$renderer3.push(`<div class="flex flex-wrap items-center gap-x-6 gap-y-3">`);
+          push_element($$renderer3, "div", 128, 4);
+          $$renderer3.push(`<label class="flex items-center gap-2 text-xs text-muted">`);
+          push_element($$renderer3, "label", 129, 6);
+          $$renderer3.push(`Base `);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: isSavedId(theme.current) ? theme.savedThemes.find((t) => t.id === theme.current)?.scheme ?? "dark" : theme.customScheme,
+            onValueChange: (v) => theme.setCustomScheme(v),
+            items: [
+              { value: "dark", label: "Dark" },
+              { value: "light", label: "Light" }
+            ],
+            "data-testid": "custom-scheme-select",
+            "aria-label": "Theme base"
+          });
+          $$renderer3.push(`<!----></label>`);
+          pop_element();
+          $$renderer3.push(` `);
+          if (isSavedId(theme.current)) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`<button type="button" class="ml-auto rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg" data-testid="theme-rename">`);
+            push_element($$renderer3, "button", 145, 8);
+            $$renderer3.push(`Rename</button>`);
+            pop_element();
+            $$renderer3.push(` <button type="button" class="rounded-md px-2 py-1 text-xs text-danger transition-colors hover:bg-danger-surface hover:text-danger" data-testid="theme-delete">`);
+            push_element($$renderer3, "button", 151, 8);
+            $$renderer3.push(`Delete</button>`);
+            pop_element();
+          } else {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`<button type="button" class="ml-auto rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-border-focus hover:text-fg" data-testid="theme-save">`);
+            push_element($$renderer3, "button", 158, 8);
+            $$renderer3.push(`Save as…</button>`);
+            pop_element();
+            $$renderer3.push(` <button type="button" class="rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-2 hover:text-fg" data-testid="custom-reset-all">`);
+            push_element($$renderer3, "button", 164, 8);
+            $$renderer3.push(`Reset to base</button>`);
+            pop_element();
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          {
+            $$renderer3.push("<!--[-1-->");
+          }
+          $$renderer3.push(`<!--]--> <div class="flex flex-wrap gap-x-8 gap-y-3">`);
+          push_element($$renderer3, "div", 211, 4);
+          $$renderer3.push(`<!--[-->`);
+          const each_array_2 = ensure_array_like(PRIMARY_SLOTS);
+          for (let $$index_2 = 0, $$length = each_array_2.length; $$index_2 < $$length; $$index_2++) {
+            let slot = each_array_2[$$index_2];
+            primarySwatch($$renderer3, { slot, primaries: activePrimaries2() });
+          }
+          $$renderer3.push(`<!--]--> <!--[-->`);
+          const each_array_3 = ensure_array_like(STATUS_SLOTS);
+          for (let $$index_3 = 0, $$length = each_array_3.length; $$index_3 < $$length; $$index_3++) {
+            let slot = each_array_3[$$index_3];
+            primarySwatch($$renderer3, { slot, primaries: activePrimaries2() });
+          }
+          $$renderer3.push(`<!--]--> <!--[-->`);
+          const each_array_4 = ensure_array_like(DEVICE_SLOTS);
+          for (let $$index_4 = 0, $$length = each_array_4.length; $$index_4 < $$length; $$index_4++) {
+            let slot = each_array_4[$$index_4];
+            primarySwatch($$renderer3, { slot, primaries: activePrimaries2() });
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-fainter">`);
+          push_element($$renderer3, "p", 222, 4);
+          $$renderer3.push(`Surfaces, borders, and text shades are derived from your three colors. Warning and error each derive their own
+      border and surface. Metal, screen, and screen text restyle the composer device. Active label recolours the
+      lit sidebar nav item.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--></div>`);
+        pop_element();
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+    },
+    ThemeControls
+  );
+}
+ThemeControls.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+SubagentsSection[FILENAME] = "src/desktop-renderer/app/SubagentsSection.svelte";
+function SubagentsSection($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { projects } = $$props;
+      let projectId = "";
+      let agents = [];
+      let selected = null;
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        $$renderer3.push(`<div class="flex flex-col gap-3">`);
+        push_element($$renderer3, "div", 42, 0);
+        $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+        push_element($$renderer3, "div", 43, 2);
+        $$renderer3.push(`<div>`);
+        push_element($$renderer3, "div", 44, 4);
+        $$renderer3.push(`<h2 class="text-sm text-fg">`);
+        push_element($$renderer3, "h2", 45, 6);
+        $$renderer3.push(`Subagents</h2>`);
+        pop_element();
+        $$renderer3.push(` <p class="text-xs text-faint">`);
+        push_element($$renderer3, "p", 46, 6);
+        $$renderer3.push(`Cheap models launched by pi's <code>`);
+        push_element($$renderer3, "code", 47, 38);
+        $$renderer3.push(`subagent</code>`);
+        pop_element();
+        $$renderer3.push(` tool for scouting,
+        research, and verification. These stay unchanged day-to-day — tweak model
+        or reasoning per agent if needed.</p>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(` `);
+        Select_1($$renderer3, {
+          class: "bg-surface-2 px-2 py-1 text-xs",
+          items: [
+            { value: "", label: "Global only" },
+            ...projects.map((p) => ({ value: p.id, label: p.name }))
+          ],
+          "aria-label": "Agent scope",
+          get value() {
+            return projectId;
+          },
+          set value($$value) {
+            projectId = $$value;
+            $$settled = false;
+          }
+        });
+        $$renderer3.push(`<!----></div>`);
+        pop_element();
+        $$renderer3.push(` <div class="flex h-[26rem] min-h-0 rounded-md border border-border">`);
+        push_element($$renderer3, "div", 60, 2);
+        $$renderer3.push(`<div class="w-64 shrink-0 overflow-y-auto border-r border-border/70 px-2 py-2">`);
+        push_element($$renderer3, "div", 61, 4);
+        const each_array = ensure_array_like(agents);
+        if (each_array.length !== 0) {
+          $$renderer3.push("<!--[-->");
+          for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+            let agent = each_array[$$index];
+            $$renderer3.push(`<button${attr_class(`mb-1 w-full rounded-lg px-3 py-2 text-left transition-colors ${selected?.filePath === agent.filePath ? "bg-surface-2" : "hover:bg-surface"}`)}>`);
+            push_element($$renderer3, "button", 63, 8);
+            $$renderer3.push(`<div class="flex items-center gap-2">`);
+            push_element($$renderer3, "div", 68, 10);
+            $$renderer3.push(`<span class="truncate text-sm text-fg">`);
+            push_element($$renderer3, "span", 69, 12);
+            $$renderer3.push(`${escape_html(agent.name)}</span>`);
+            pop_element();
+            $$renderer3.push(` `);
+            if (!agent.enabled) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<span class="rounded bg-surface-2 px-1 text-[9px] text-faint">`);
+              push_element($$renderer3, "span", 70, 32);
+              $$renderer3.push(`off</span>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--> <span class="ml-auto shrink-0 text-[10px] text-fainter">`);
+            push_element($$renderer3, "span", 71, 12);
+            $$renderer3.push(`${escape_html(agent.scope)}</span>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+            $$renderer3.push(` `);
+            if (agent.description) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<p class="mt-0.5 line-clamp-2 text-xs text-faint">`);
+              push_element($$renderer3, "p", 74, 12);
+              $$renderer3.push(`${escape_html(agent.description)}</p>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--></button>`);
+            pop_element();
+          }
+        } else {
+          $$renderer3.push("<!--[!-->");
+          $$renderer3.push(`<p class="mt-8 px-3 text-center text-xs text-fainter">`);
+          push_element($$renderer3, "p", 78, 8);
+          $$renderer3.push(`No agents found. Add markdown agent files to ~/.pi/agent/agents or &lt;project>/.pi/agents.</p>`);
+          pop_element();
+        }
+        $$renderer3.push(`<!--]--></div>`);
+        pop_element();
+        $$renderer3.push(` <div class="flex-1 overflow-y-auto px-4 py-3">`);
+        push_element($$renderer3, "div", 84, 4);
+        {
+          $$renderer3.push("<!--[-1-->");
+          $$renderer3.push(`<p class="mt-12 text-center text-sm text-fainter">`);
+          push_element($$renderer3, "p", 139, 8);
+          $$renderer3.push(`Select an agent to view or override its model and reasoning.</p>`);
+          pop_element();
+        }
+        $$renderer3.push(`<!--]--></div>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+    },
+    SubagentsSection
+  );
+}
+SubagentsSection.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+const store$1 = createIpcStore({
+  loadChannel: "app:getPiSettings",
+  setChannel: "app:setPiSettings",
+  default: {
+    retry: {
+      enabled: true,
+      maxRetries: 3,
+      baseDelayMs: 2e3,
+      provider: { timeoutMs: null, maxRetries: 0, maxRetryDelayMs: 6e4 }
+    },
+    steeringMode: "one-at-a-time",
+    followUpMode: "one-at-a-time",
+    autoUpdateExtensions: true,
+    insomnia: false,
+    telemetryConsent: null
+  }
+});
+const piSettings = {
+  get retryEnabled() {
+    return store$1.state.retry.enabled;
+  },
+  get retryMaxRetries() {
+    return store$1.state.retry.maxRetries;
+  },
+  get retryBaseDelayMs() {
+    return store$1.state.retry.baseDelayMs;
+  },
+  get steeringMode() {
+    return store$1.state.steeringMode;
+  },
+  get followUpMode() {
+    return store$1.state.followUpMode;
+  },
+  get autoUpdateExtensions() {
+    return store$1.state.autoUpdateExtensions;
+  },
+  get insomnia() {
+    return store$1.state.insomnia;
+  },
+  load: (force) => store$1.load(force),
+  patch: (update) => store$1.set(update)
+};
+SettingsView[FILENAME] = "src/desktop-renderer/app/SettingsView.svelte";
+function SettingsView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { initialQuery = "", onOpenPlayroom } = $$props;
+      const hudAutoReveal = derived(() => snapshot.current?.ui.hudAutoRevealOnFinish ?? false);
+      const NAV = [
+        {
+          id: "appearance",
+          label: "Appearance",
+          items: [
+            {
+              id: "playroom",
+              label: "Playroom",
+              keywords: "appearance playroom live stage tune look feel messages done animation alerts chassis"
+            },
+            {
+              id: "theme",
+              label: "Theme",
+              keywords: "theme appearance applies to every window colors"
+            },
+            {
+              id: "composer",
+              label: "Composer",
+              keywords: "composer light silver dark anodized chassis auto follows your theme"
+            },
+            {
+              id: "sidebar",
+              label: "Sidebar engraving",
+              keywords: "sidebar engraving metal surface letterpress text tune sidebar-device"
+            },
+            {
+              id: "caveman",
+              label: "Caveman intensity",
+              keywords: "caveman intensity level composer toggle"
+            },
+            {
+              id: "hud",
+              label: "HUD auto-reveal",
+              keywords: "hud auto-reveal expand chat thread finishes"
+            },
+            {
+              id: "doneAnimation",
+              label: "Done animation",
+              keywords: "done animation mark done card animation preview play"
+            },
+            {
+              id: "loaders",
+              label: "Loaders",
+              keywords: "loaders dot matrix spinner square hex triangle sidebar chat agents hourglass neon drift glow bloom animate"
+            },
+            {
+              id: "streaming",
+              label: "Streaming",
+              keywords: "streaming text assistant replies reveal stream"
+            }
+          ]
+        },
+        {
+          id: "sounds",
+          label: "Sounds",
+          items: [
+            {
+              id: "sounds",
+              label: "Sounds",
+              keywords: "sounds button clicks done chime mute"
+            },
+            {
+              id: "doneChime",
+              label: "Done chime",
+              keywords: "done chime celebration cue thread finishes preview"
+            },
+            {
+              id: "threadDoneSound",
+              label: "Thread done sound",
+              keywords: "thread done sound mark done archive click precision archive latch metallic preview"
+            },
+            {
+              id: "testBenchSound",
+              label: "Test bench sound",
+              keywords: "test bench sound mark to test relay tick diagnostic chirp stamp flask inspection preview"
+            },
+            {
+              id: "testAnimation",
+              label: "Test bench animation",
+              keywords: "test animation mark to test card animation preview play bench stamp scan relay"
+            }
+          ]
+        },
+        {
+          id: "behavior",
+          label: "Behavior",
+          items: [
+            {
+              id: "autoCompact",
+              label: "Auto-compaction",
+              keywords: "auto-compaction compact context usage threshold tokens percentage"
+            },
+            {
+              id: "retry",
+              label: "Retry on error",
+              keywords: "retry on error network drop transient exponential backoff wait doubles"
+            },
+            {
+              id: "messageDelivery",
+              label: "Message delivery",
+              keywords: "message delivery steering mode follow-up mode"
+            },
+            {
+              id: "extensions",
+              label: "Extensions",
+              keywords: "extensions auto update packages pi update periodic refresh"
+            },
+            {
+              id: "insomnia",
+              label: "Keep awake",
+              keywords: "insomnia sleep idle caffeinate prevent mac awake while running"
+            },
+            {
+              id: "subagents",
+              label: "Subagents",
+              keywords: "subagents agents scouting research verification cheap model roster subagent roster"
+            }
+          ]
+        },
+        {
+          id: "models",
+          label: "Models",
+          items: [
+            {
+              id: "utilityModel",
+              label: "Utility model",
+              keywords: "utility model background tasks thread titles commit messages fast inexpensive"
+            },
+            {
+              id: "scopedModels",
+              label: "Scoped models",
+              keywords: "scoped models scopedmodels enable disable model scope composer selector enabled models available list"
+            },
+            {
+              id: "visionProxy",
+              label: "Vision proxy",
+              keywords: "vision proxy images description describe blind text-only model fallback always off consent claude gemini qwen"
+            }
+          ]
+        },
+        {
+          id: "system",
+          label: "System",
+          items: [
+            {
+              id: "computerUse",
+              label: "Computer use",
+              keywords: "computer use agent browser cua driver native desktop automation accessibility permissions install setup"
+            },
+            {
+              id: "about",
+              label: "About",
+              keywords: "about peach-pi version"
+            }
+          ]
+        }
+      ];
+      const NAV_ITEMS = NAV.flatMap((g) => g.items);
+      const itemById = new Map(NAV_ITEMS.map((it) => [it.id, it]));
+      let query = initialQuery;
+      let engrave = {
+        angle: 78,
+        metalL: 0.79,
+        metalR: 0.92,
+        lipPx: 2,
+        lipOp: 0.8,
+        inkL: 0.2,
+        inkC: 5e-3,
+        inkH: 250
+      };
+      const q = derived(() => query.trim().toLowerCase());
+      let scopedModelsOpen = false;
+      function hit(id2) {
+        const it = itemById.get(id2);
+        if (!it) return false;
+        return q() === "" || it.keywords.includes(q());
+      }
+      function groupHasMatch(g) {
+        return g.items.some((it) => hit(it.id));
+      }
+      const anyMatch = derived(() => q() === "" || NAV_ITEMS.some((it) => it.keywords.includes(q())));
+      let activeId = "";
+      let muted = soundsMuted();
+      let doneVariant = getDoneSoundVariant();
+      let archiveVariant = getArchiveSoundVariant();
+      let testVariant = getTestSoundVariant();
+      let version = "";
+      let models = [];
+      let utilityModel = null;
+      let selectedKey = "";
+      const keyOf = (m) => `${m.provider}:${m.id}`;
+      const byKey = derived(() => new Map(models.map((m) => [keyOf(m), m])));
+      const grouped = derived(() => {
+        const groups = /* @__PURE__ */ new Map();
+        for (const m of models) {
+          const arr = groups.get(m.provider);
+          if (arr) arr.push(m);
+          else groups.set(m.provider, [m]);
+        }
+        return [...groups.entries()].map(([provider, items]) => ({ provider, items }));
+      });
+      const retryTotalSeconds = derived(() => {
+        if (piSettings.retryMaxRetries <= 0) return 0;
+        const totalMs = piSettings.retryBaseDelayMs * (Math.pow(2, piSettings.retryMaxRetries) - 1);
+        return Math.round(totalMs / 1e3);
+      });
+      function formatDuration(seconds) {
+        if (seconds < 60) return `${seconds}s`;
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return s > 0 ? `${m}m ${s}s` : `${m}m`;
+      }
+      function toggleSounds() {
+        muted = !muted;
+        setSoundsMuted(muted);
+      }
+      function pickDoneVariant(value) {
+        const v = value;
+        doneVariant = v;
+        setDoneSoundVariant(v);
+        playDoneSound(v);
+      }
+      function pickArchiveVariant(value) {
+        const v = value;
+        archiveVariant = v;
+        setArchiveSoundVariant(v);
+        playArchiveSound(v);
+      }
+      function pickTestVariant(value) {
+        const v = value;
+        testVariant = v;
+        setTestSoundVariant(v);
+        playTestSound(v);
+      }
+      async function pickUtilityModel(key) {
+        selectedKey = key;
+        const model = key ? byKey().get(key) ?? null : null;
+        utilityModel = await api.invoke("app:setUtilityModel", model);
+        selectedKey = utilityModel ? keyOf(utilityModel) : "";
+      }
+      const visionKey = derived(() => `${visionProxy.provider}:${visionProxy.modelId}`);
+      let installingVision = false;
+      let visionError = "";
+      let installingBrowser = false;
+      const browserReady = derived(() => false);
+      const cuaReady = derived(() => false);
+      const computerUseReady = derived(() => browserReady() && cuaReady());
+      async function pickVisionModel(key) {
+        if (visionProxy.modelLocked || !key) return;
+        const model = byKey().get(key);
+        if (!model) return;
+        visionError = "";
+        try {
+          await visionProxy.setModel(model);
+        } catch (err) {
+          visionError = String(err);
+        }
+      }
+      function toggleRetryEnabled() {
+        void piSettings.patch({
+          retry: {
+            enabled: !piSettings.retryEnabled,
+            maxRetries: piSettings.retryMaxRetries,
+            baseDelayMs: piSettings.retryBaseDelayMs,
+            provider: { timeoutMs: null, maxRetries: 0, maxRetryDelayMs: 6e4 }
+          }
+        });
+      }
+      function pickSteeringMode(value) {
+        void piSettings.patch({ steeringMode: value });
+      }
+      function pickFollowUpMode(value) {
+        void piSettings.patch({ followUpMode: value });
+      }
+      function toggleAutoUpdateExtensions() {
+        void piSettings.patch({ autoUpdateExtensions: !piSettings.autoUpdateExtensions });
+      }
+      function toggleInsomnia() {
+        void piSettings.patch({ insomnia: !piSettings.insomnia });
+      }
+      let updatingExtensions = false;
+      function pickCavemanLevel(value) {
+        void caveman.setLevel(value);
+      }
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        $$renderer3.push(`<main class="flex h-full flex-1 flex-col" data-testid="settings-view">`);
+        push_element($$renderer3, "main", 562, 0);
+        $$renderer3.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center gap-3 px-6">`);
+        push_element($$renderer3, "header", 563, 2);
+        $$renderer3.push(`<h1 class="text-sm font-medium text-fg-soft">`);
+        push_element($$renderer3, "h1", 564, 4);
+        $$renderer3.push(`Settings</h1>`);
+        pop_element();
+        $$renderer3.push(` <input type="search"${attr("value", query)} placeholder="Search settings…" class="ml-auto w-48 rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg outline-none focus:border-border-focus" data-testid="settings-search" aria-label="Search settings"/>`);
+        push_element($$renderer3, "input", 565, 4);
+        pop_element();
+        $$renderer3.push(`</header>`);
+        pop_element();
+        $$renderer3.push(` <div class="flex min-h-0 flex-1">`);
+        push_element($$renderer3, "div", 575, 2);
+        $$renderer3.push(`<nav class="settings-nav w-48 shrink-0 overflow-y-auto px-2 py-4 svelte-1olud30" aria-label="Settings sections">`);
+        push_element($$renderer3, "nav", 577, 4);
+        $$renderer3.push(`<!--[-->`);
+        const each_array = ensure_array_like(NAV);
+        for (let $$index_1 = 0, $$length = each_array.length; $$index_1 < $$length; $$index_1++) {
+          let g = each_array[$$index_1];
+          if (groupHasMatch(g)) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`<div class="mb-4">`);
+            push_element($$renderer3, "div", 580, 10);
+            $$renderer3.push(`<p class="settings-nav-group mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-fainter">`);
+            push_element($$renderer3, "p", 581, 12);
+            $$renderer3.push(`${escape_html(g.label)}</p>`);
+            pop_element();
+            $$renderer3.push(` <ul class="flex flex-col gap-0.5">`);
+            push_element($$renderer3, "ul", 582, 12);
+            $$renderer3.push(`<!--[-->`);
+            const each_array_1 = ensure_array_like(g.items);
+            for (let $$index = 0, $$length2 = each_array_1.length; $$index < $$length2; $$index++) {
+              let it = each_array_1[$$index];
+              if (hit(it.id)) {
+                $$renderer3.push("<!--[0-->");
+                $$renderer3.push(`<li>`);
+                push_element($$renderer3, "li", 585, 18);
+                $$renderer3.push(`<button type="button"${attr_class(`settings-nav-item w-full rounded-md px-2 py-1 text-left text-xs text-fg-soft transition-colors hover:bg-surface-2 hover:text-fg ${activeId === it.id ? "is-active bg-surface-2 text-fg" : ""}`, "svelte-1olud30")}${attr("aria-current", activeId === it.id ? "true" : void 0)}>`);
+                push_element($$renderer3, "button", 586, 20);
+                $$renderer3.push(`${escape_html(it.label)}</button>`);
+                pop_element();
+                $$renderer3.push(`</li>`);
+                pop_element();
+              } else {
+                $$renderer3.push("<!--[-1-->");
+              }
+              $$renderer3.push(`<!--]-->`);
+            }
+            $$renderer3.push(`<!--]--></ul>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+          } else {
+            $$renderer3.push("<!--[-1-->");
+          }
+          $$renderer3.push(`<!--]-->`);
+        }
+        $$renderer3.push(`<!--]--></nav>`);
+        pop_element();
+        $$renderer3.push(` <div class="flex-1 overflow-y-auto px-6 py-6">`);
+        push_element($$renderer3, "div", 601, 4);
+        $$renderer3.push(`<div class="mx-auto flex max-w-xl flex-col gap-4">`);
+        push_element($$renderer3, "div", 602, 6);
+        if (!anyMatch()) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<p class="text-center text-xs text-fainter" data-testid="settings-search-empty">`);
+          push_element($$renderer3, "p", 604, 10);
+          $$renderer3.push(`No settings match “${escape_html(query.trim())}”.</p>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("playroom")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="playroom">`);
+          push_element($$renderer3, "section", 610, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 611, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 612, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 613, 14);
+          $$renderer3.push(`Appearance Playroom</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 614, 14);
+          $$renderer3.push(`A live, isolated stage for tuning how the app looks and feels — send messages, mark done, fire alerts.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <button class="settings-btn rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg transition-colors hover:bg-surface-3" data-testid="settings-open-playroom">`);
+          push_element($$renderer3, "button", 616, 12);
+          $$renderer3.push(`Open</button>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("theme")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="theme">`);
+          push_element($$renderer3, "section", 626, 8);
+          ThemeControls($$renderer3);
+          $$renderer3.push(`<!----></section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("composer")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="composer">`);
+          push_element($$renderer3, "section", 632, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 633, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 634, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 635, 14);
+          $$renderer3.push(`Composer</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 636, 14);
+          $$renderer3.push(`Light (silver) or dark (anodized) chassis. Auto follows your theme.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: theme.composer,
+            onValueChange: (v) => theme.setComposer(v),
+            items: theme.composerOptions.map((opt) => ({ value: opt.id, label: opt.label })),
+            "data-testid": "composer-style-select",
+            "aria-label": "Composer appearance"
+          });
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("sidebar")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="sidebar">`);
+          push_element($$renderer3, "section", 651, 8);
+          $$renderer3.push(`<div class="mb-3">`);
+          push_element($$renderer3, "div", 652, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 653, 12);
+          $$renderer3.push(`Sidebar engraving</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 654, 12);
+          $$renderer3.push(`Tune the sidebar metal surface and letterpress text. Values override sidebar-device.css in real time.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="grid grid-cols-2 gap-x-6 gap-y-3">`);
+          push_element($$renderer3, "div", 656, 10);
+          $$renderer3.push(`<label class="flex flex-col gap-0.5">`);
+          push_element($$renderer3, "label", 657, 12);
+          $$renderer3.push(`<span class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "span", 658, 14);
+          $$renderer3.push(`Gradient angle: ${escape_html(engrave.angle)}°</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="range" class="accent-primary" min="0" max="90" step="1"${attr("value", engrave.angle)}/>`);
+          push_element($$renderer3, "input", 659, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex flex-col gap-0.5">`);
+          push_element($$renderer3, "label", 661, 12);
+          $$renderer3.push(`<span class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "span", 662, 14);
+          $$renderer3.push(`Metal left L: ${escape_html(engrave.metalL.toFixed(3))}</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="range" class="accent-primary" min="0.5" max="0.95" step="0.005"${attr("value", engrave.metalL)}/>`);
+          push_element($$renderer3, "input", 663, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex flex-col gap-0.5">`);
+          push_element($$renderer3, "label", 665, 12);
+          $$renderer3.push(`<span class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "span", 666, 14);
+          $$renderer3.push(`Metal right L: ${escape_html(engrave.metalR.toFixed(3))}</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="range" class="accent-primary" min="0.6" max="0.98" step="0.005"${attr("value", engrave.metalR)}/>`);
+          push_element($$renderer3, "input", 667, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex flex-col gap-0.5">`);
+          push_element($$renderer3, "label", 669, 12);
+          $$renderer3.push(`<span class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "span", 670, 14);
+          $$renderer3.push(`Lip size: ${escape_html(engrave.lipPx)}px</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="range" class="accent-primary" min="0" max="6" step="0.5"${attr("value", engrave.lipPx)}/>`);
+          push_element($$renderer3, "input", 671, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex flex-col gap-0.5">`);
+          push_element($$renderer3, "label", 673, 12);
+          $$renderer3.push(`<span class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "span", 674, 14);
+          $$renderer3.push(`Lip opacity: ${escape_html(engrave.lipOp.toFixed(2))}</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="range" class="accent-primary" min="0" max="1" step="0.05"${attr("value", engrave.lipOp)}/>`);
+          push_element($$renderer3, "input", 675, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex flex-col gap-0.5">`);
+          push_element($$renderer3, "label", 677, 12);
+          $$renderer3.push(`<span class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "span", 678, 14);
+          $$renderer3.push(`Ink lightness: ${escape_html(engrave.inkL.toFixed(3))}</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="range" class="accent-primary" min="0.08" max="0.55" step="0.005"${attr("value", engrave.inkL)}/>`);
+          push_element($$renderer3, "input", 679, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex flex-col gap-0.5">`);
+          push_element($$renderer3, "label", 681, 12);
+          $$renderer3.push(`<span class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "span", 682, 14);
+          $$renderer3.push(`Ink chroma: ${escape_html(engrave.inkC.toFixed(3))}</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="range" class="accent-primary" min="0" max="0.08" step="0.001"${attr("value", engrave.inkC)}/>`);
+          push_element($$renderer3, "input", 683, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex flex-col gap-0.5">`);
+          push_element($$renderer3, "label", 685, 12);
+          $$renderer3.push(`<span class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "span", 686, 14);
+          $$renderer3.push(`Ink hue: ${escape_html(engrave.inkH.toFixed(0))}°</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="range" class="accent-primary" min="0" max="360" step="1"${attr("value", engrave.inkH)}/>`);
+          push_element($$renderer3, "input", 687, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("caveman")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="caveman">`);
+          push_element($$renderer3, "section", 694, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 695, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 696, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 697, 14);
+          $$renderer3.push(`Caveman intensity</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 698, 14);
+          $$renderer3.push(`Level the composer caveman toggle maps to when on.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: caveman.level,
+            onValueChange: pickCavemanLevel,
+            items: [
+              { value: "full", label: "Full" },
+              { value: "ultra", label: "Ultra" }
+            ],
+            "data-testid": "caveman-level-select",
+            "aria-label": "Caveman intensity"
+          });
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("hud")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="hud">`);
+          push_element($$renderer3, "section", 716, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 717, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 718, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 719, 14);
+          $$renderer3.push(`HUD auto-reveal</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 720, 14);
+          $$renderer3.push(`Expand the HUD chat when its own thread finishes.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <input type="checkbox"${attr("checked", hudAutoReveal(), true)} data-testid="settings-hud-auto-reveal"/>`);
+          push_element($$renderer3, "input", 722, 12);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("doneAnimation")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="doneAnimation">`);
+          push_element($$renderer3, "section", 733, 8);
+          $$renderer3.push(`<div class="mb-3">`);
+          push_element($$renderer3, "div", 734, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 735, 12);
+          $$renderer3.push(`Done animation</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 736, 12);
+          $$renderer3.push(`Pick the "mark Done" card animation. Press Play to preview each.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          DoneBurstPlayground($$renderer3);
+          $$renderer3.push(`<!----></section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("loaders")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="loaders">`);
+          push_element($$renderer3, "section", 743, 8);
+          $$renderer3.push(`<div class="mb-3">`);
+          push_element($$renderer3, "div", 744, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 745, 12);
+          $$renderer3.push(`Dot matrix loaders</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 746, 12);
+          $$renderer3.push(`Curate which spinners appear where. Square → chat, Hex → sidebar, Triangle → agents.
+              A random loader from the selected set is picked each time one appears.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          DotMatrixPlayground($$renderer3);
+          $$renderer3.push(`<!----></section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("streaming")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="streaming">`);
+          push_element($$renderer3, "section", 756, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 757, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 758, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 759, 14);
+          $$renderer3.push(`Streaming text</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 760, 14);
+          $$renderer3.push(`How assistant replies reveal as they stream in.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex flex-col items-end gap-2">`);
+          push_element($$renderer3, "div", 762, 12);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: streamReveal.look,
+            onValueChange: (v) => streamReveal.setLook(v),
+            items: STREAM_LOOKS.map((l) => ({ value: l.id, label: l.label })),
+            "data-testid": "stream-look-select",
+            "aria-label": "Reveal look"
+          });
+          $$renderer3.push(`<!----> `);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: streamReveal.speed,
+            onValueChange: (v) => streamReveal.setSpeed(v),
+            items: STREAM_SPEEDS.map((s) => ({ value: s.id, label: s.label })),
+            "data-testid": "stream-speed-select",
+            "aria-label": "Reveal speed"
+          });
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("sounds")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="sounds">`);
+          push_element($$renderer3, "section", 785, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between">`);
+          push_element($$renderer3, "div", 786, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 787, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 788, 14);
+          $$renderer3.push(`Sounds</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 789, 14);
+          $$renderer3.push(`Button clicks and the done chime.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Switch_1($$renderer3, {
+            checked: !muted,
+            onCheckedChange: toggleSounds,
+            "data-testid": "sounds-toggle",
+            "aria-label": "Toggle sounds"
+          });
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("doneChime")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="doneChime">`);
+          push_element($$renderer3, "section", 802, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 803, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 804, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 805, 14);
+          $$renderer3.push(`Done chime</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 806, 14);
+          $$renderer3.push(`Pick a celebration cue for when a thread finishes, then preview it.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex items-center gap-2">`);
+          push_element($$renderer3, "div", 808, 12);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: doneVariant,
+            onValueChange: pickDoneVariant,
+            items: DONE_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label })),
+            "data-testid": "done-sound-select",
+            "aria-label": "Done chime"
+          });
+          $$renderer3.push(`<!----> <button class="settings-btn rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"${attr("disabled", muted, true)} data-testid="done-sound-preview">`);
+          push_element($$renderer3, "button", 817, 14);
+          $$renderer3.push(`Play</button>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <p class="mt-2 text-xs text-fainter">`);
+          push_element($$renderer3, "p", 825, 10);
+          $$renderer3.push(`${escape_html(DONE_SOUND_OPTIONS.find((o) => o.id === doneVariant)?.description)}</p>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("threadDoneSound")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="threadDoneSound">`);
+          push_element($$renderer3, "section", 832, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 833, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 834, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 835, 14);
+          $$renderer3.push(`Thread done sound</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 836, 14);
+          $$renderer3.push(`The cue played when you mark a thread done (the archive action).</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex items-center gap-2">`);
+          push_element($$renderer3, "div", 838, 12);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: archiveVariant,
+            onValueChange: pickArchiveVariant,
+            items: DONE_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label })),
+            "data-testid": "archive-sound-select",
+            "aria-label": "Thread done sound"
+          });
+          $$renderer3.push(`<!----> <button class="settings-btn rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"${attr("disabled", muted, true)} data-testid="archive-sound-preview">`);
+          push_element($$renderer3, "button", 847, 14);
+          $$renderer3.push(`Play</button>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <p class="mt-2 text-xs text-fainter">`);
+          push_element($$renderer3, "p", 855, 10);
+          $$renderer3.push(`${escape_html(DONE_SOUND_OPTIONS.find((o) => o.id === archiveVariant)?.description)}</p>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("testBenchSound")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="testBenchSound">`);
+          push_element($$renderer3, "section", 862, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 863, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 864, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 865, 14);
+          $$renderer3.push(`Test bench sound</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 866, 14);
+          $$renderer3.push(`The cue played when you mark a thread for testing (the Eye action).</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex items-center gap-2">`);
+          push_element($$renderer3, "div", 868, 12);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: testVariant,
+            onValueChange: pickTestVariant,
+            items: TEST_SOUND_OPTIONS.map((o) => ({ value: o.id, label: o.label })),
+            "data-testid": "test-sound-select",
+            "aria-label": "Test bench sound"
+          });
+          $$renderer3.push(`<!----> <button class="settings-btn rounded-md border border-border-strong bg-surface-2 px-2.5 py-1 text-xs text-fg transition-colors hover:bg-surface-3 disabled:opacity-50"${attr("disabled", muted, true)} data-testid="test-sound-preview">`);
+          push_element($$renderer3, "button", 877, 14);
+          $$renderer3.push(`Play</button>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <p class="mt-2 text-xs text-fainter">`);
+          push_element($$renderer3, "p", 885, 10);
+          $$renderer3.push(`${escape_html(TEST_SOUND_OPTIONS.find((o) => o.id === testVariant)?.description)}</p>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("testAnimation")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="testAnimation">`);
+          push_element($$renderer3, "section", 892, 8);
+          $$renderer3.push(`<div class="mb-3">`);
+          push_element($$renderer3, "div", 893, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 894, 12);
+          $$renderer3.push(`Test bench animation</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 895, 12);
+          $$renderer3.push(`The "mark to test" card animation. Press Play to preview. (Sound plays too.)</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          TestBurstPlayground($$renderer3);
+          $$renderer3.push(`<!----></section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("autoCompact")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="autoCompact">`);
+          push_element($$renderer3, "section", 902, 8);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 903, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 904, 12);
+          $$renderer3.push(`Auto-compaction</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 905, 12);
+          $$renderer3.push(`Conversations compact automatically once context usage crosses either
+              threshold — whichever is reached first. Leave the token cap blank to
+              trigger on percentage alone.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="mt-3 flex flex-col gap-3">`);
+          push_element($$renderer3, "div", 911, 10);
+          $$renderer3.push(`<label class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "label", 912, 12);
+          $$renderer3.push(`<span class="text-xs text-fg">`);
+          push_element($$renderer3, "span", 913, 14);
+          $$renderer3.push(`Context used (%)</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="number" min="1" max="100"${attr("value", autoCompact.percent)} class="settings-input w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus" data-testid="auto-compact-percent" aria-label="Auto-compact percentage"/>`);
+          push_element($$renderer3, "input", 914, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "label", 925, 12);
+          $$renderer3.push(`<span class="text-xs text-fg">`);
+          push_element($$renderer3, "span", 926, 14);
+          $$renderer3.push(`Token count</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="number" min="0" step="1000" placeholder="none"${attr("value", autoCompact.tokens ?? "")} class="settings-input w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus" data-testid="auto-compact-tokens" aria-label="Auto-compact token count"/>`);
+          push_element($$renderer3, "input", 927, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("retry")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="retry">`);
+          push_element($$renderer3, "section", 944, 8);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 945, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 946, 12);
+          $$renderer3.push(`Retry on error</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 947, 12);
+          $$renderer3.push(`When a request fails (network drop, transient error), pi retries with
+              exponential backoff — each wait doubles.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="mt-3 flex flex-col gap-3">`);
+          push_element($$renderer3, "div", 952, 10);
+          $$renderer3.push(`<div class="flex items-center justify-between">`);
+          push_element($$renderer3, "div", 953, 12);
+          $$renderer3.push(`<span class="text-xs text-fg">`);
+          push_element($$renderer3, "span", 954, 14);
+          $$renderer3.push(`Enabled</span>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Switch_1($$renderer3, {
+            checked: piSettings.retryEnabled,
+            onCheckedChange: toggleRetryEnabled,
+            "data-testid": "retry-enabled-toggle",
+            "aria-label": "Toggle retry"
+          });
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "label", 962, 12);
+          $$renderer3.push(`<span class="text-xs text-fg">`);
+          push_element($$renderer3, "span", 963, 14);
+          $$renderer3.push(`Retries</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="number" min="0" max="10"${attr("value", piSettings.retryMaxRetries)} class="settings-input w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus" data-testid="retry-count" aria-label="Number of retries"/>`);
+          push_element($$renderer3, "input", 964, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "label", 975, 12);
+          $$renderer3.push(`<span class="text-xs text-fg">`);
+          push_element($$renderer3, "span", 976, 14);
+          $$renderer3.push(`Initial wait (seconds)</span>`);
+          pop_element();
+          $$renderer3.push(` <input type="number" min="0.5" step="0.5"${attr("value", piSettings.retryBaseDelayMs / 1e3)} class="settings-input w-28 rounded-md border border-border-strong bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-border-focus" data-testid="retry-initial-delay" aria-label="Initial wait seconds"/>`);
+          push_element($$renderer3, "input", 977, 14);
+          pop_element();
+          $$renderer3.push(`</label>`);
+          pop_element();
+          $$renderer3.push(` `);
+          if (piSettings.retryMaxRetries > 0) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`<div class="rounded-md bg-surface-2 px-3 py-2 text-xs text-faint">`);
+            push_element($$renderer3, "div", 989, 14);
+            $$renderer3.push(`<span class="text-fg-soft">`);
+            push_element($$renderer3, "span", 990, 16);
+            $$renderer3.push(`Total retry window:</span>`);
+            pop_element();
+            $$renderer3.push(` ${escape_html(formatDuration(retryTotalSeconds()))} <span class="text-faint">`);
+            push_element($$renderer3, "span", 992, 16);
+            $$renderer3.push(`(${escape_html(piSettings.retryMaxRetries)} retries,
+                  ${escape_html(piSettings.retryBaseDelayMs / 1e3)}s → ${escape_html(piSettings.retryBaseDelayMs / 1e3 * Math.pow(2, piSettings.retryMaxRetries - 1))}s)</span>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+          } else {
+            $$renderer3.push("<!--[-1-->");
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("messageDelivery")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="messageDelivery">`);
+          push_element($$renderer3, "section", 1003, 8);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 1004, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 1005, 12);
+          $$renderer3.push(`Message delivery</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 1006, 12);
+          $$renderer3.push(`How steering and follow-up messages are sent.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="mt-3 flex flex-col gap-3">`);
+          push_element($$renderer3, "div", 1008, 10);
+          $$renderer3.push(`<label class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "label", 1009, 12);
+          $$renderer3.push(`<span class="text-xs text-fg">`);
+          push_element($$renderer3, "span", 1010, 14);
+          $$renderer3.push(`Steering mode</span>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: piSettings.steeringMode,
+            onValueChange: pickSteeringMode,
+            items: [
+              { value: "one-at-a-time", label: "One at a time" },
+              { value: "all", label: "All" }
+            ],
+            "data-testid": "steering-mode-select",
+            "aria-label": "Steering mode"
+          });
+          $$renderer3.push(`<!----></label>`);
+          pop_element();
+          $$renderer3.push(` <label class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "label", 1023, 12);
+          $$renderer3.push(`<span class="text-xs text-fg">`);
+          push_element($$renderer3, "span", 1024, 14);
+          $$renderer3.push(`Follow-up mode</span>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Select_1($$renderer3, {
+            class: "rounded-md bg-surface-2",
+            value: piSettings.followUpMode,
+            onValueChange: pickFollowUpMode,
+            items: [
+              { value: "one-at-a-time", label: "One at a time" },
+              { value: "all", label: "All" }
+            ],
+            "data-testid": "followup-mode-select",
+            "aria-label": "Follow-up mode"
+          });
+          $$renderer3.push(`<!----></label>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("extensions")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="extensions">`);
+          push_element($$renderer3, "section", 1042, 8);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 1043, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 1044, 12);
+          $$renderer3.push(`Extensions</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 1045, 12);
+          $$renderer3.push(`Keep installed pi packages up to date by running <code>`);
+          push_element($$renderer3, "code", 1047, 14);
+          $$renderer3.push(`pi update --extensions</code>`);
+          pop_element();
+          $$renderer3.push(` on launch and periodically. Runs
+              only while no thread is active; restart to load new versions.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="mt-3 flex flex-col gap-3">`);
+          push_element($$renderer3, "div", 1051, 10);
+          $$renderer3.push(`<div class="flex items-center justify-between">`);
+          push_element($$renderer3, "div", 1052, 12);
+          $$renderer3.push(`<span class="text-xs text-fg">`);
+          push_element($$renderer3, "span", 1053, 14);
+          $$renderer3.push(`Auto-update</span>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Switch_1($$renderer3, {
+            checked: piSettings.autoUpdateExtensions,
+            onCheckedChange: toggleAutoUpdateExtensions,
+            "data-testid": "auto-update-extensions-toggle",
+            "aria-label": "Toggle extension auto-update"
+          });
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+          $$renderer3.push(` <button class="settings-btn self-start rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"${attr("disabled", updatingExtensions, true)} data-testid="update-extensions-now">`);
+          push_element($$renderer3, "button", 1061, 12);
+          $$renderer3.push(`${escape_html("Update now")}</button>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("insomnia")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="insomnia">`);
+          push_element($$renderer3, "section", 1074, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 1075, 10);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 1076, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 1077, 14);
+          $$renderer3.push(`Keep awake while running</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 1078, 14);
+          $$renderer3.push(`Prevent macOS idle sleep while an agent run is active. Releases the
+                moment the run goes idle. Mac only.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Switch_1($$renderer3, {
+            checked: piSettings.insomnia,
+            onCheckedChange: toggleInsomnia,
+            "data-testid": "insomnia-toggle",
+            "aria-label": "Toggle keep awake"
+          });
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("subagents")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="subagents" data-testid="subagents-section">`);
+          push_element($$renderer3, "section", 1094, 8);
+          SubagentsSection($$renderer3, { projects: snapshot.current?.projects ?? [] });
+          $$renderer3.push(`<!----></section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("utilityModel")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="utilityModel">`);
+          push_element($$renderer3, "section", 1100, 8);
+          $$renderer3.push(`<div>`);
+          push_element($$renderer3, "div", 1101, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 1102, 12);
+          $$renderer3.push(`Utility model</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 1103, 12);
+          $$renderer3.push(`Background tasks like thread titles and commit messages use this fast,
+              inexpensive model. Choose from your scoped models (same as the
+              composer). Leave on “Default” to auto-pick.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Select_1($$renderer3, {
+            class: "mt-3 w-full rounded-md bg-surface-2",
+            value: selectedKey,
+            onValueChange: pickUtilityModel,
+            items: [
+              { value: "", label: "Default (auto-pick)" },
+              ...grouped().flatMap((group) => group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider })))
+            ],
+            "data-testid": "utility-model-select",
+            "aria-label": "Utility model"
+          });
+          $$renderer3.push(`<!----></section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("scopedModels")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="scopedModels" data-testid="scoped-models-section">`);
+          push_element($$renderer3, "section", 1126, 8);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-4">`);
+          push_element($$renderer3, "div", 1127, 10);
+          $$renderer3.push(`<div class="min-w-0">`);
+          push_element($$renderer3, "div", 1128, 12);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 1129, 14);
+          $$renderer3.push(`Scoped models</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 1130, 14);
+          $$renderer3.push(`Which models appear in the composer selector. Shared with <code>`);
+          push_element($$renderer3, "code", 1132, 16);
+          $$renderer3.push(`pi /model</code>`);
+          pop_element();
+          $$renderer3.push(` in <code>`);
+          push_element($$renderer3, "code", 1132, 42);
+          $$renderer3.push(`settings.json</code>`);
+          pop_element();
+          $$renderer3.push(`.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          Model_scope_select($$renderer3, {
+            class: "min-w-44",
+            get open() {
+              return scopedModelsOpen;
+            },
+            set open($$value) {
+              scopedModelsOpen = $$value;
+              $$settled = false;
+            }
+          });
+          $$renderer3.push(`<!----></div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("visionProxy")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="visionProxy">`);
+          push_element($$renderer3, "section", 1141, 8);
+          $$renderer3.push(`<div class="mb-2">`);
+          push_element($$renderer3, "div", 1142, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 1143, 12);
+          $$renderer3.push(`Vision proxy</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 1144, 12);
+          $$renderer3.push(`Routes images to a vision-capable model, collects descriptions, and
+              injects them into the agent's context — so text-only models can
+              "see" your images across turns. Requires restart after install.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          if (!visionProxy.installed) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`<div class="flex items-center justify-between gap-3">`);
+            push_element($$renderer3, "div", 1152, 12);
+            $$renderer3.push(`<span class="text-xs text-faint">`);
+            push_element($$renderer3, "span", 1153, 14);
+            $$renderer3.push(`Not installed. Installs <code>`);
+            push_element($$renderer3, "code", 1154, 40);
+            $$renderer3.push(`npm:pi-vision-proxy</code>`);
+            pop_element();
+            $$renderer3.push(` via pi.</span>`);
+            pop_element();
+            $$renderer3.push(` <button class="settings-btn rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"${attr("disabled", installingVision, true)} data-testid="install-vision-proxy">`);
+            push_element($$renderer3, "button", 1156, 14);
+            $$renderer3.push(`${escape_html("Install")}</button>`);
+            pop_element();
+            $$renderer3.push(`</div>`);
+            pop_element();
+            $$renderer3.push(` `);
+            if (visionError) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<p class="mt-2 text-xs text-danger" data-testid="vision-proxy-error">`);
+              push_element($$renderer3, "p", 1166, 14);
+              $$renderer3.push(`${escape_html(visionError)}</p>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]-->`);
+          } else {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`<div class="flex flex-col gap-3">`);
+            push_element($$renderer3, "div", 1169, 12);
+            $$renderer3.push(`<div>`);
+            push_element($$renderer3, "div", 1170, 14);
+            $$renderer3.push(`<label class="mb-1 block text-xs text-fg">`);
+            push_element($$renderer3, "label", 1171, 16);
+            $$renderer3.push(`Vision model</label>`);
+            pop_element();
+            $$renderer3.push(` `);
+            Select_1($$renderer3, {
+              class: "w-full rounded-md bg-surface-2",
+              value: visionKey(),
+              onValueChange: pickVisionModel,
+              disabled: visionProxy.modelLocked,
+              items: grouped().flatMap((group) => group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider }))),
+              "data-testid": "vision-model-select",
+              "aria-label": "Vision model"
+            });
+            $$renderer3.push(`<!----> `);
+            if (visionProxy.modelLocked) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<p class="mt-1 text-[11px] text-fainter">`);
+              push_element($$renderer3, "p", 1184, 18);
+              $$renderer3.push(`Locked by <code>`);
+              push_element($$renderer3, "code", 1185, 30);
+              $$renderer3.push(`PI_VISION_PROXY_MODEL</code>`);
+              pop_element();
+              $$renderer3.push(` env var.</p>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--></div>`);
+            pop_element();
+            $$renderer3.push(` <div>`);
+            push_element($$renderer3, "div", 1189, 14);
+            $$renderer3.push(`<label class="mb-1 block text-xs text-fg">`);
+            push_element($$renderer3, "label", 1190, 16);
+            $$renderer3.push(`Mode</label>`);
+            pop_element();
+            $$renderer3.push(` `);
+            Select_1($$renderer3, {
+              class: "w-full rounded-md bg-surface-2",
+              value: visionProxy.mode,
+              onValueChange: (v) => visionProxy.setMode(v),
+              disabled: visionProxy.modeLocked,
+              items: [
+                {
+                  value: "fallback",
+                  label: "Fallback — only when active model can't see images"
+                },
+                {
+                  value: "always",
+                  label: "Always — always route through the proxy"
+                },
+                { value: "off", label: "Off — disabled" }
+              ],
+              "data-testid": "vision-mode-select",
+              "aria-label": "Vision proxy mode"
+            });
+            $$renderer3.push(`<!----> `);
+            if (visionProxy.modeLocked) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<p class="mt-1 text-[11px] text-fainter">`);
+              push_element($$renderer3, "p", 1205, 18);
+              $$renderer3.push(`Locked by <code>`);
+              push_element($$renderer3, "code", 1206, 30);
+              $$renderer3.push(`PI_VISION_PROXY_MODE</code>`);
+              pop_element();
+              $$renderer3.push(` env var.</p>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--></div>`);
+            pop_element();
+            $$renderer3.push(` `);
+            if (visionError) {
+              $$renderer3.push("<!--[0-->");
+              $$renderer3.push(`<p class="text-xs text-danger" data-testid="vision-proxy-error">`);
+              push_element($$renderer3, "p", 1211, 16);
+              $$renderer3.push(`${escape_html(visionError)}</p>`);
+              pop_element();
+            } else {
+              $$renderer3.push("<!--[-1-->");
+            }
+            $$renderer3.push(`<!--]--></div>`);
+            pop_element();
+          }
+          $$renderer3.push(`<!--]--></section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("computerUse")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="computerUse" data-testid="computer-use-section">`);
+          push_element($$renderer3, "section", 1219, 8);
+          $$renderer3.push(`<div class="mb-3">`);
+          push_element($$renderer3, "div", 1220, 10);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 1221, 12);
+          $$renderer3.push(`Computer use</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-xs text-faint">`);
+          push_element($$renderer3, "p", 1222, 12);
+          $$renderer3.push(`Lets the agent drive real apps when no CLI/API path exists. Web pages
+              use the native <code>`);
+          push_element($$renderer3, "code", 1224, 29);
+          $$renderer3.push(`agent_browser</code>`);
+          pop_element();
+          $$renderer3.push(` tool; native macOS apps use
+              the <code>`);
+          push_element($$renderer3, "code", 1225, 18);
+          $$renderer3.push(`cua-driver</code>`);
+          pop_element();
+          $$renderer3.push(` (background, no focus steal). Run the
+              checks below to install + grant access.</p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex flex-col gap-3">`);
+          push_element($$renderer3, "div", 1230, 10);
+          $$renderer3.push(`<div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">`);
+          push_element($$renderer3, "div", 1232, 12);
+          $$renderer3.push(`<div class="min-w-0">`);
+          push_element($$renderer3, "div", 1233, 14);
+          $$renderer3.push(`<p class="text-xs text-fg">`);
+          push_element($$renderer3, "p", 1234, 16);
+          $$renderer3.push(`agent-browser engine</p>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "p", 1235, 16);
+          {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`Binary not on PATH — install with <code>`);
+            push_element($$renderer3, "code", 1239, 54);
+            $$renderer3.push(`npm i -g agent-browser</code>`);
+            pop_element();
+          }
+          $$renderer3.push(`<!--]--></p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          {
+            $$renderer3.push("<!--[-1-->");
+            Circle_slash($$renderer3, { size: 16, class: "text-fainter" });
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">`);
+          push_element($$renderer3, "div", 1251, 12);
+          $$renderer3.push(`<div class="min-w-0 flex-1">`);
+          push_element($$renderer3, "div", 1252, 14);
+          $$renderer3.push(`<p class="text-xs text-fg">`);
+          push_element($$renderer3, "p", 1253, 16);
+          $$renderer3.push(`Native <code>`);
+          push_element($$renderer3, "code", 1253, 50);
+          $$renderer3.push(`agent_browser</code>`);
+          pop_element();
+          $$renderer3.push(` tool</p>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "p", 1254, 16);
+          {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`Not installed — exposes the typed browser tool`);
+          }
+          $$renderer3.push(`<!--]--></p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`<button class="settings-btn rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"${attr("disabled", installingBrowser, true)} data-testid="install-agent-browser">`);
+            push_element($$renderer3, "button", 1265, 16);
+            $$renderer3.push(`${escape_html("Install")}</button>`);
+            pop_element();
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">`);
+          push_element($$renderer3, "div", 1277, 12);
+          $$renderer3.push(`<div class="min-w-0">`);
+          push_element($$renderer3, "div", 1278, 14);
+          $$renderer3.push(`<p class="text-xs text-fg">`);
+          push_element($$renderer3, "p", 1279, 16);
+          $$renderer3.push(`Cua Driver</p>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "p", 1280, 16);
+          {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`Not installed — native macOS desktop automation`);
+          }
+          $$renderer3.push(`<!--]--></p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          {
+            $$renderer3.push("<!--[-1-->");
+            Circle_slash($$renderer3, { size: 16, class: "text-fainter" });
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(` <div class="flex items-center justify-between gap-3 rounded-md bg-surface-2/40 px-3 py-2">`);
+          push_element($$renderer3, "div", 1296, 12);
+          $$renderer3.push(`<div class="min-w-0 flex-1">`);
+          push_element($$renderer3, "div", 1297, 14);
+          $$renderer3.push(`<p class="text-xs text-fg">`);
+          push_element($$renderer3, "p", 1298, 16);
+          $$renderer3.push(`macOS Accessibility + Screen Recording</p>`);
+          pop_element();
+          $$renderer3.push(` <p class="text-[11px] text-fainter">`);
+          push_element($$renderer3, "p", 1299, 16);
+          {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`Install Cua Driver first`);
+          }
+          $$renderer3.push(`<!--]--></p>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`<button class="settings-btn rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg hover:bg-surface-3 disabled:opacity-50"${attr("disabled", true, true)} data-testid="grant-cua-permissions">`);
+            push_element($$renderer3, "button", 1316, 16);
+            $$renderer3.push(`${escape_html("Grant access")}</button>`);
+            pop_element();
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(` `);
+          if (computerUseReady()) {
+            $$renderer3.push("<!--[0-->");
+            $$renderer3.push(`<p class="text-xs text-emerald-500" data-testid="computer-use-ready">`);
+            push_element($$renderer3, "p", 1328, 14);
+            $$renderer3.push(`✓ Computer use is set up. The agent will prefer programmatic paths,
+                then <code>`);
+            push_element($$renderer3, "code", 1330, 21);
+            $$renderer3.push(`agent_browser</code>`);
+            pop_element();
+            $$renderer3.push(` for web, then <code>`);
+            push_element($$renderer3, "code", 1330, 62);
+            $$renderer3.push(`cua-driver</code>`);
+            pop_element();
+            $$renderer3.push(` for native desktop.</p>`);
+            pop_element();
+          } else {
+            $$renderer3.push("<!--[-1-->");
+            $$renderer3.push(`<p class="text-xs text-faint">`);
+            push_element($$renderer3, "p", 1333, 14);
+            $$renderer3.push(`Computer use is optional. The agent prefers CLI/API/connector paths; it only
+                drives UI when no programmatic route exists.</p>`);
+            pop_element();
+          }
+          $$renderer3.push(`<!--]--></div>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        if (hit("about")) {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<section class="settings-section rounded-lg border border-border bg-surface/50 p-4 svelte-1olud30" data-settings-section="about">`);
+          push_element($$renderer3, "section", 1343, 8);
+          $$renderer3.push(`<h2 class="text-sm text-fg">`);
+          push_element($$renderer3, "h2", 1344, 10);
+          $$renderer3.push(`About</h2>`);
+          pop_element();
+          $$renderer3.push(` <p class="mt-1 text-xs text-faint">`);
+          push_element($$renderer3, "p", 1345, 10);
+          $$renderer3.push(`peach-pi ${escape_html(version)}</p>`);
+          pop_element();
+          $$renderer3.push(`</section>`);
+          pop_element();
+        } else {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--></div>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(`</div>`);
+        pop_element();
+        $$renderer3.push(`</main>`);
+        pop_element();
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+    },
+    SettingsView
+  );
+}
+SettingsView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Server[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/server.svelte";
+function Server($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "rect",
+          {
+            "width": "20",
+            "height": "8",
+            "x": "2",
+            "y": "2",
+            "rx": "2",
+            "ry": "2"
+          }
+        ],
+        [
+          "rect",
+          {
+            "width": "20",
+            "height": "8",
+            "x": "2",
+            "y": "14",
+            "rx": "2",
+            "ry": "2"
+          }
+        ],
+        ["line", { "x1": "6", "x2": "6.01", "y1": "6", "y2": "6" }],
+        ["line", { "x1": "6", "x2": "6.01", "y1": "18", "y2": "18" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "server" }, props, { iconNode }]));
+    },
+    Server
+  );
+}
+Server.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+ConnectorsView[FILENAME] = "src/desktop-renderer/app/ConnectorsView.svelte";
+function ConnectorsView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let connections = [];
+      let catalogue = [];
+      let mcpServers = [];
+      let query = "";
+      let selectedSlug = null;
+      let mode = "none";
+      let customConnections = [];
+      const connectedToolkits = derived(() => {
+        const bySlug = /* @__PURE__ */ new Map();
+        for (const c of connections) {
+          const e = bySlug.get(c.toolkitSlug);
+          if (e) e.count += 1;
+          else bySlug.set(c.toolkitSlug, {
+            slug: c.toolkitSlug,
+            name: c.name,
+            logoUrl: c.logoUrl,
+            count: 1
+          });
+        }
+        const q = query.trim().toLowerCase();
+        return [...bySlug.values()].filter((t) => !q || t.name.toLowerCase().includes(q) || t.slug.includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+      });
+      const notConnected = derived(() => catalogue.filter((t) => t.connectedCount === 0));
+      $$renderer2.push(`<main class="flex h-full flex-1" data-testid="connections-view">`);
+      push_element($$renderer2, "main", 407, 0);
+      $$renderer2.push(`<aside class="flex w-64 shrink-0 flex-col border-r border-border bg-bg">`);
+      push_element($$renderer2, "aside", 409, 2);
+      $$renderer2.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center px-4">`);
+      push_element($$renderer2, "header", 410, 4);
+      $$renderer2.push(`<h1 class="text-sm font-semibold text-fg">`);
+      push_element($$renderer2, "h1", 411, 6);
+      $$renderer2.push(`Connectors</h1>`);
+      pop_element();
+      $$renderer2.push(`</header>`);
+      pop_element();
+      $$renderer2.push(` <div class="px-3 pb-2">`);
+      push_element($$renderer2, "div", 413, 4);
+      $$renderer2.push(`<div class="flex items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 focus-within:border-border-focus">`);
+      push_element($$renderer2, "div", 414, 6);
+      Search($$renderer2, { size: 14, class: "shrink-0 text-muted" });
+      $$renderer2.push(`<!----> <input class="w-full bg-transparent text-sm text-fg outline-none placeholder:text-fainter" placeholder="Search apps to connect…"${attr("value", query)} data-testid="connector-search"/>`);
+      push_element($$renderer2, "input", 416, 8);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(` <nav class="flex-1 overflow-y-auto px-2 pb-4">`);
+      push_element($$renderer2, "nav", 427, 4);
+      $$renderer2.push(`<p class="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-fainter">`);
+      push_element($$renderer2, "p", 428, 6);
+      $$renderer2.push(`Connected</p>`);
+      pop_element();
+      $$renderer2.push(` <!--[-->`);
+      const each_array = ensure_array_like(connectedToolkits());
+      for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+        let t = each_array[$$index];
+        $$renderer2.push(`<button${attr_class("flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface", void 0, { "bg-surface": selectedSlug === t.slug })}${attr("data-testid", `sidebar-${t.slug}`)}>`);
+        push_element($$renderer2, "button", 430, 8);
+        ConnectorIcon($$renderer2, { logoUrl: t.logoUrl, label: t.name, size: 20 });
+        $$renderer2.push(`<!----> <span class="flex-1 truncate text-sm text-fg">`);
+        push_element($$renderer2, "span", 437, 10);
+        $$renderer2.push(`${escape_html(t.name)}</span>`);
+        pop_element();
+        $$renderer2.push(` `);
+        if (t.count > 1) {
+          $$renderer2.push("<!--[0-->");
+          $$renderer2.push(`<span class="num-badge">`);
+          push_element($$renderer2, "span", 439, 12);
+          $$renderer2.push(`${escape_html(t.count)}</span>`);
+          pop_element();
+        } else {
+          $$renderer2.push("<!--[-1-->");
+        }
+        $$renderer2.push(`<!--]--></button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--> <!--[-->`);
+      const each_array_1 = ensure_array_like(customConnections);
+      for (let $$index_1 = 0, $$length = each_array_1.length; $$index_1 < $$length; $$index_1++) {
+        let c = each_array_1[$$index_1];
+        $$renderer2.push(`<button${attr_class("flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface", void 0, {
+          "bg-surface": mode === "custom"
+        })}${attr("data-testid", `sidebar-custom-${c.id}`)}>`);
+        push_element($$renderer2, "button", 444, 8);
+        ConnectorIcon($$renderer2, { logoUrl: c.logoUrl, label: c.name, size: 20 });
+        $$renderer2.push(`<!----> <span class="flex-1 truncate text-sm text-fg">`);
+        push_element($$renderer2, "span", 451, 10);
+        $$renderer2.push(`${escape_html(c.name)}</span>`);
+        pop_element();
+        $$renderer2.push(`</button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--> <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">`);
+      push_element($$renderer2, "p", 455, 6);
+      $$renderer2.push(`MCP servers</p>`);
+      pop_element();
+      $$renderer2.push(` `);
+      if (mcpServers.length > 0) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<!--[-->`);
+        const each_array_2 = ensure_array_like(mcpServers);
+        for (let $$index_2 = 0, $$length = each_array_2.length; $$index_2 < $$length; $$index_2++) {
+          let s = each_array_2[$$index_2];
+          $$renderer2.push(`<button${attr_class("flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface", void 0, { "bg-surface": mode === "mcp" })}${attr("data-testid", `sidebar-mcp-${s.name}`)}>`);
+          push_element($$renderer2, "button", 458, 10);
+          $$renderer2.push(`<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted">`);
+          push_element($$renderer2, "span", 464, 12);
+          Server($$renderer2, { size: 12 });
+          $$renderer2.push(`<!----></span>`);
+          pop_element();
+          $$renderer2.push(` <span${attr_class(`flex-1 truncate text-sm ${"text-muted"}`)}>`);
+          push_element($$renderer2, "span", 465, 12);
+          $$renderer2.push(`${escape_html(s.name)}</span>`);
+          pop_element();
+          $$renderer2.push(` `);
+          if (s.connected) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<span class="num-badge"${attr("title", `${stringify(s.toolCount ?? 0)} tools`)}>`);
+            push_element($$renderer2, "span", 467, 14);
+            $$renderer2.push(`${escape_html(s.toolCount ?? 0)}</span>`);
+            pop_element();
+          } else {
+            $$renderer2.push("<!--[-1-->");
+          }
+          $$renderer2.push(`<!--]--></button>`);
+          pop_element();
+        }
+        $$renderer2.push(`<!--]-->`);
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<button class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg" data-testid="sidebar-mcp-empty">`);
+        push_element($$renderer2, "button", 472, 8);
+        Server($$renderer2, { size: 13 });
+        $$renderer2.push(`<!----> No MCP servers configured</button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--> <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">`);
+      push_element($$renderer2, "p", 479, 6);
+      $$renderer2.push(`Not connected</p>`);
+      pop_element();
+      $$renderer2.push(` <button class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg" title="Add a custom connection" aria-label="Add a custom connection" data-testid="add-custom">`);
+      push_element($$renderer2, "button", 480, 6);
+      Plus($$renderer2, { size: 13 });
+      $$renderer2.push(`<!----> Add custom connection</button>`);
+      pop_element();
+      $$renderer2.push(` <!--[-->`);
+      const each_array_3 = ensure_array_like(notConnected());
+      for (let $$index_3 = 0, $$length = each_array_3.length; $$index_3 < $$length; $$index_3++) {
+        let t = each_array_3[$$index_3];
+        $$renderer2.push(`<button${attr_class("flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface", void 0, { "bg-surface": selectedSlug === t.slug })}${attr("data-testid", `sidebar-${t.slug}`)}>`);
+        push_element($$renderer2, "button", 488, 8);
+        ConnectorIcon($$renderer2, { logoUrl: t.logoUrl, label: t.name, size: 20 });
+        $$renderer2.push(`<!----> <span class="flex-1 truncate text-sm text-muted">`);
+        push_element($$renderer2, "span", 495, 10);
+        $$renderer2.push(`${escape_html(t.name)}</span>`);
+        pop_element();
+        $$renderer2.push(`</button>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--> `);
+      if (notConnected().length === 0 && connectedToolkits().length === 0) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<p class="px-2 py-4 text-xs text-fainter">`);
+        push_element($$renderer2, "p", 499, 8);
+        $$renderer2.push(`No matching apps.</p>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></nav>`);
+      pop_element();
+      $$renderer2.push(`</aside>`);
+      pop_element();
+      $$renderer2.push(` <section class="flex flex-1 flex-col overflow-y-auto">`);
+      push_element($$renderer2, "section", 505, 2);
+      {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--> `);
+      {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<div class="flex flex-1 items-center justify-center text-sm text-fainter">`);
+        push_element($$renderer2, "div", 511, 6);
+        $$renderer2.push(`Select a connector to view its details.</div>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--></section>`);
+      pop_element();
+      $$renderer2.push(`</main>`);
+      pop_element();
+    },
+    ConnectorsView
+  );
+}
+ConnectorsView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+BwsView[FILENAME] = "src/desktop-renderer/app/BwsView.svelte";
+function BwsView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let error = "";
+      let draftKey = "";
+      let draftValue = "";
+      let draftNote = "";
+      let deleteOpen = false;
+      async function executeDelete() {
+        return;
+      }
+      function fields($$renderer3) {
+        validate_snippet_args($$renderer3);
+        $$renderer3.push(`<label class="flex flex-col gap-1">`);
+        push_element($$renderer3, "label", 545, 2);
+        $$renderer3.push(`<span class="text-xs font-medium text-fg">`);
+        push_element($$renderer3, "span", 546, 4);
+        $$renderer3.push(`Key</span>`);
+        pop_element();
+        $$renderer3.push(` <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm text-fg outline-none focus:border-border-focus" placeholder="STRIPE_API_KEY"${attr("value", draftKey)} data-testid="bws-field-key"/>`);
+        push_element($$renderer3, "input", 547, 4);
+        pop_element();
+        $$renderer3.push(`</label>`);
+        pop_element();
+        $$renderer3.push(` <label class="flex flex-col gap-1">`);
+        push_element($$renderer3, "label", 550, 2);
+        $$renderer3.push(`<span class="text-xs font-medium text-fg">`);
+        push_element($$renderer3, "span", 551, 4);
+        $$renderer3.push(`Value</span>`);
+        pop_element();
+        $$renderer3.push(` <textarea class="min-h-[60px] resize-y rounded-lg border border-border-strong bg-bg px-3 py-1.5 font-mono text-sm text-fg outline-none focus:border-border-focus" placeholder="••••••••" data-testid="bws-field-value">`);
+        push_element($$renderer3, "textarea", 552, 4);
+        const $$body = escape_html(draftValue);
+        if ($$body) {
+          $$renderer3.push(`${$$body}`);
+        }
+        $$renderer3.push(`</textarea>`);
+        pop_element();
+        $$renderer3.push(`</label>`);
+        pop_element();
+        $$renderer3.push(` <label class="flex flex-col gap-1">`);
+        push_element($$renderer3, "label", 555, 2);
+        $$renderer3.push(`<span class="text-xs font-medium text-fg">`);
+        push_element($$renderer3, "span", 556, 4);
+        $$renderer3.push(`Note <span class="text-fainter">`);
+        push_element($$renderer3, "span", 556, 51);
+        $$renderer3.push(`(optional)</span>`);
+        pop_element();
+        $$renderer3.push(`</span>`);
+        pop_element();
+        $$renderer3.push(` <input class="rounded-lg border border-border-strong bg-bg px-3 py-1.5 text-sm text-fg outline-none focus:border-border-focus" placeholder="What this is for"${attr("value", draftNote)} data-testid="bws-field-note"/>`);
+        push_element($$renderer3, "input", 557, 4);
+        pop_element();
+        $$renderer3.push(`</label>`);
+        pop_element();
+      }
+      let $$settled = true;
+      let $$inner_renderer;
+      function $$render_inner($$renderer3) {
+        prevent_snippet_stringification(fields);
+        $$renderer3.push(`<main class="flex h-full flex-1 flex-col overflow-y-auto" data-testid="bws-view">`);
+        push_element($$renderer3, "main", 262, 0);
+        $$renderer3.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center gap-2 px-6">`);
+        push_element($$renderer3, "header", 263, 2);
+        Key_round($$renderer3, { size: 16, class: "text-muted" });
+        $$renderer3.push(`<!----> <h1 class="text-sm font-semibold text-fg">`);
+        push_element($$renderer3, "h1", 265, 4);
+        $$renderer3.push(`Secrets · BWS</h1>`);
+        pop_element();
+        $$renderer3.push(` `);
+        {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> <div class="ml-auto flex items-center gap-2">`);
+        push_element($$renderer3, "div", 271, 4);
+        {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--></div>`);
+        pop_element();
+        $$renderer3.push(`</header>`);
+        pop_element();
+        $$renderer3.push(` <div class="mx-auto w-full max-w-3xl px-6 pb-10">`);
+        push_element($$renderer3, "div", 303, 2);
+        {
+          $$renderer3.push("<!--[-1-->");
+        }
+        $$renderer3.push(`<!--]--> `);
+        {
+          $$renderer3.push("<!--[0-->");
+          $$renderer3.push(`<p class="py-10 text-center text-sm text-fainter">`);
+          push_element($$renderer3, "p", 309, 6);
+          $$renderer3.push(`Loading…</p>`);
+          pop_element();
+        }
+        $$renderer3.push(`<!--]--></div>`);
+        pop_element();
+        $$renderer3.push(`</main>`);
+        pop_element();
+        $$renderer3.push(` `);
+        ConfirmDialog($$renderer3, {
+          title: "Delete secret?",
+          description: `Permanently deletes “${""}” from Secrets Manager. This cannot be undone.`,
+          confirmLabel: "Delete",
+          cancelLabel: "Cancel",
+          destructive: true,
+          error,
+          onConfirm: () => void executeDelete(),
+          get open() {
+            return deleteOpen;
+          },
+          set open($$value) {
+            deleteOpen = $$value;
+            $$settled = false;
+          }
+        });
+        $$renderer3.push(`<!---->`);
+      }
+      do {
+        $$settled = true;
+        $$inner_renderer = $$renderer2.copy();
+        $$render_inner($$inner_renderer);
+      } while (!$$settled);
+      $$renderer2.subsume($$inner_renderer);
+    },
+    BwsView
+  );
+}
+BwsView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+const store = createIpcStore({
+  loadChannel: "handoff:getMode",
+  setChannel: "handoff:setMode",
+  default: { enabled: false, targetMachine: null, hasRemoteMachine: false }
+});
+const remoteFirst = {
+  get mode() {
+    return store.state;
+  },
+  /** Load + start listening for cross-window handoff state changes. Idempotent. */
+  init() {
+    void this.load();
+    api.on("event:handoffChanged", () => {
+      void this.load(true);
+    });
+  },
+  load: (force = false) => store.load(force),
+  toggle: (next2) => store.set(next2)
+};
+RemoteView[FILENAME] = "src/desktop-renderer/app/RemoteView.svelte";
+function RemoteView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let hosts = [];
+      $$renderer2.push(`<div class="flex h-full flex-col">`);
+      push_element($$renderer2, "div", 184, 0);
+      $$renderer2.push(`<header class="flex items-center justify-between border-b border-border px-6 py-3">`);
+      push_element($$renderer2, "header", 185, 2);
+      $$renderer2.push(`<h2 class="flex items-center gap-2 text-sm font-semibold text-fg">`);
+      push_element($$renderer2, "h2", 186, 4);
+      Radio($$renderer2, { size: 15 });
+      $$renderer2.push(`<!----> Remote Sessions</h2>`);
+      pop_element();
+      $$renderer2.push(` <button class="rounded p-1.5 text-muted hover:bg-surface-2 hover:text-fg" title="Refresh">`);
+      push_element($$renderer2, "button", 189, 4);
+      Refresh_cw($$renderer2, { size: 14 });
+      $$renderer2.push(`<!----></button>`);
+      pop_element();
+      $$renderer2.push(`</header>`);
+      pop_element();
+      $$renderer2.push(` <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">`);
+      push_element($$renderer2, "div", 198, 2);
+      {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--> <section class="mb-6 rounded-md border border-border bg-surface-1 px-3.5 py-3">`);
+      push_element($$renderer2, "section", 206, 4);
+      $$renderer2.push(`<div class="flex items-center justify-between gap-3">`);
+      push_element($$renderer2, "div", 207, 6);
+      $$renderer2.push(`<div class="min-w-0">`);
+      push_element($$renderer2, "div", 208, 8);
+      $$renderer2.push(`<p class="text-[13px] font-medium text-fg">`);
+      push_element($$renderer2, "p", 209, 10);
+      $$renderer2.push(`Remote-first mode</p>`);
+      pop_element();
+      $$renderer2.push(` <p class="mt-0.5 text-xs text-faint">`);
+      push_element($$renderer2, "p", 210, 10);
+      $$renderer2.push(`${escape_html(remoteFirst.mode.enabled ? remoteFirst.mode.hasRemoteMachine ? `New threads + messages hand off to ${remoteFirst.mode.targetMachine ?? "the remote machine"}.` : "On, but no remote machine is registered — add a machine below." : "New threads + messages run locally; nothing is handed off.")}</p>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(` `);
+      Switch_1($$renderer2, {
+        checked: remoteFirst.mode.enabled,
+        onCheckedChange: (v) => remoteFirst.toggle(v),
+        "data-testid": "remote-first-toggle",
+        "aria-label": "Toggle remote-first mode"
+      });
+      $$renderer2.push(`<!----></div>`);
+      pop_element();
+      $$renderer2.push(`</section>`);
+      pop_element();
+      $$renderer2.push(` <section class="mb-6">`);
+      push_element($$renderer2, "section", 228, 4);
+      $$renderer2.push(`<h3 class="mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-faint uppercase">`);
+      push_element($$renderer2, "h3", 229, 6);
+      Monitor($$renderer2, { size: 13 });
+      $$renderer2.push(`<!----> Host — serve this machine</h3>`);
+      pop_element();
+      $$renderer2.push(` <div class="rounded-lg border border-border bg-surface-2 p-3">`);
+      push_element($$renderer2, "div", 232, 6);
+      {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+      $$renderer2.push(`</section>`);
+      pop_element();
+      $$renderer2.push(` <section class="mb-6">`);
+      push_element($$renderer2, "section", 361, 4);
+      $$renderer2.push(`<h3 class="mb-2 flex items-center justify-between text-xs font-semibold tracking-wide text-faint uppercase">`);
+      push_element($$renderer2, "h3", 362, 6);
+      $$renderer2.push(`<span class="flex items-center gap-1.5">`);
+      push_element($$renderer2, "span", 363, 8);
+      Radio($$renderer2, { size: 13 });
+      $$renderer2.push(`<!----> Attach — watch a master</span>`);
+      pop_element();
+      $$renderer2.push(` <button class="rounded p-1 text-muted hover:bg-surface-2 hover:text-fg" title="Add master">`);
+      push_element($$renderer2, "button", 364, 8);
+      Plus($$renderer2, { size: 13 });
+      $$renderer2.push(`<!----></button>`);
+      pop_element();
+      $$renderer2.push(`</h3>`);
+      pop_element();
+      $$renderer2.push(` `);
+      {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--> <!--[-->`);
+      const each_array_2 = ensure_array_like(hosts);
+      for (let $$index_2 = 0, $$length = each_array_2.length; $$index_2 < $$length; $$index_2++) {
+        let h = each_array_2[$$index_2];
+        $$renderer2.push(`<div class="mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5">`);
+        push_element($$renderer2, "div", 464, 8);
+        Radio($$renderer2, { size: 13, class: "shrink-0 text-faint" });
+        $$renderer2.push(`<!----> <span class="text-[13px] font-medium text-fg">`);
+        push_element($$renderer2, "span", 466, 10);
+        $$renderer2.push(`${escape_html(h.name)}</span>`);
+        pop_element();
+        $$renderer2.push(` <span class="truncate font-mono text-[11px] text-faint">`);
+        push_element($$renderer2, "span", 467, 10);
+        $$renderer2.push(`${escape_html(h.host)}</span>`);
+        pop_element();
+        $$renderer2.push(` <button class="ml-auto rounded p-1 text-muted hover:bg-red-500/20 hover:text-red-400" title="Disconnect">`);
+        push_element($$renderer2, "button", 468, 10);
+        Trash_2($$renderer2, { size: 12 });
+        $$renderer2.push(`<!----></button>`);
+        pop_element();
+        $$renderer2.push(`</div>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--> `);
+      if (hosts.length > 0) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<p class="px-1 pt-1 text-[11px] leading-relaxed text-faint">`);
+        push_element($$renderer2, "p", 478, 8);
+        $$renderer2.push(`Threads from connected masters appear in the sidebar, tagged remote — open
+          and steer them like local threads.</p>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></section>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+    },
+    RemoteView
+  );
+}
+RemoteView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Send[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/send.svelte";
+function Send($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        [
+          "path",
+          {
+            "d": "M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"
+          }
+        ],
+        ["path", { "d": "m21.854 2.147-10.94 10.939" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "send" }, props, { iconNode }]));
+    },
+    Send
+  );
+}
+Send.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Info[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/info.svelte";
+function Info($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        ["circle", { "cx": "12", "cy": "12", "r": "10" }],
+        ["path", { "d": "M12 16v-4" }],
+        ["path", { "d": "M12 8h.01" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "info" }, props, { iconNode }]));
+    },
+    Info
+  );
+}
+Info.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+Circle_x[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/circle-x.svelte";
+function Circle_x($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        ["circle", { "cx": "12", "cy": "12", "r": "10" }],
+        ["path", { "d": "m15 9-6 6" }],
+        ["path", { "d": "m9 9 6 6" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "circle-x" }, props, { iconNode }]));
+    },
+    Circle_x
+  );
+}
+Circle_x.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+PlayroomView[FILENAME] = "src/desktop-renderer/app/PlayroomView.svelte";
+function PlayroomView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let seq = 0;
+      let messages = [
+        {
+          id: ++seq,
+          role: "user",
+          text: "Show me how a reply streams in."
+        },
+        {
+          id: ++seq,
+          role: "assistant",
+          text: "Sure — this text reveals through the **real** streaming engine, so your\nchosen *look* and *speed* apply live. Edit a colour on the right and the\nwhole stage repaints instantly.",
+          streaming: false
+        }
+      ];
+      let input = "";
+      let donePopping = false;
+      $$renderer2.push(`<main class="flex h-full flex-1 svelte-v6b4fo" data-testid="playroom-view">`);
+      push_element($$renderer2, "main", 134, 0);
+      $$renderer2.push(`<section class="flex min-w-0 flex-1 flex-col svelte-v6b4fo">`);
+      push_element($$renderer2, "section", 136, 2);
+      $$renderer2.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center px-6 svelte-v6b4fo">`);
+      push_element($$renderer2, "header", 137, 4);
+      $$renderer2.push(`<h1 class="text-sm font-medium text-fg-soft svelte-v6b4fo">`);
+      push_element($$renderer2, "h1", 138, 6);
+      $$renderer2.push(`Appearance Playroom</h1>`);
+      pop_element();
+      $$renderer2.push(` <span class="ml-3 text-xs text-fainter svelte-v6b4fo">`);
+      push_element($$renderer2, "span", 139, 6);
+      $$renderer2.push(`Live stage — send messages, mark done, fire alerts.</span>`);
+      pop_element();
+      $$renderer2.push(`</header>`);
+      pop_element();
+      $$renderer2.push(` <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4 svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 143, 4);
+      $$renderer2.push(`<div class="mx-auto flex max-w-2xl flex-col gap-4 svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 144, 6);
+      $$renderer2.push(`<!--[-->`);
+      const each_array = ensure_array_like(messages);
+      for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+        let m = each_array[$$index];
+        if (m.role === "user") {
+          $$renderer2.push("<!--[0-->");
+          $$renderer2.push(`<div class="item-enter flex justify-end svelte-v6b4fo">`);
+          push_element($$renderer2, "div", 147, 12);
+          $$renderer2.push(`<div class="max-w-[80%] rounded-2xl rounded-br-md border border-border-strong/40 bg-surface-2/80 px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-fg svelte-v6b4fo">`);
+          push_element($$renderer2, "div", 148, 14);
+          $$renderer2.push(`${escape_html(m.text)}</div>`);
+          pop_element();
+          $$renderer2.push(`</div>`);
+          pop_element();
+        } else {
+          $$renderer2.push("<!--[-1-->");
+          $$renderer2.push(`<div class="item-enter assistant-message text-[13.5px] leading-relaxed text-fg svelte-v6b4fo">`);
+          push_element($$renderer2, "div", 153, 12);
+          StreamingText($$renderer2, {
+            text: m.text,
+            streaming: m.streaming ?? false,
+            revealKey: `play-${m.id}`
+          });
+          $$renderer2.push(`<!----></div>`);
+          pop_element();
+        }
+        $$renderer2.push(`<!--]-->`);
+      }
+      $$renderer2.push(`<!--]--> <div class="relative mt-2 flex items-center gap-3 self-start rounded-lg border border-border bg-surface/60 px-3 py-2 svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 160, 8);
+      $$renderer2.push(`<span${attr_class("mock-row flex items-center gap-2 text-[13px] text-fg svelte-v6b4fo", void 0, {
+        "popping": donePopping,
+        "pop--popSpark": donePopping,
+        "pop--stamp": donePopping,
+        "pop--confetti": donePopping,
+        "pop--twos": donePopping,
+        "pop--spring": donePopping
+      })}>`);
+      push_element($$renderer2, "span", 161, 10);
+      Check($$renderer2, { size: 14, class: "text-accent" });
+      $$renderer2.push(`<!----> Dummy thread</span>`);
+      pop_element();
+      $$renderer2.push(` `);
+      {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--> <button class="ml-2 rounded-md border border-border-strong bg-surface-2 px-3 py-1 text-xs text-fg transition-colors hover:border-border-focus svelte-v6b4fo" data-testid="playroom-mark-done">`);
+      push_element($$renderer2, "button", 177, 10);
+      $$renderer2.push(`Mark done</button>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(` <footer class="composer-device shrink-0 px-6 pb-6 svelte-v6b4fo">`);
+      push_element($$renderer2, "footer", 187, 4);
+      $$renderer2.push(`<div class="composer__frame relative svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 188, 6);
+      $$renderer2.push(`<div class="composer__surface svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 189, 8);
+      $$renderer2.push(`<div class="composer__editor svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 190, 10);
+      $$renderer2.push(`<div class="composer__screen svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 191, 12);
+      $$renderer2.push(`<textarea rows="2" placeholder="message the clanker…" class="w-full resize-none bg-transparent outline-none svelte-v6b4fo" data-testid="playroom-input" aria-label="Playroom message">`);
+      push_element($$renderer2, "textarea", 192, 14);
+      const $$body = escape_html(input);
+      if ($$body) {
+        $$renderer2.push(`${$$body}`);
+      }
+      $$renderer2.push(`</textarea>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(` <button class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-fg disabled:opacity-40 svelte-v6b4fo"${attr("disabled", !input.trim(), true)} data-testid="playroom-send">`);
+      push_element($$renderer2, "button", 204, 8);
+      Send($$renderer2, { size: 13 });
+      $$renderer2.push(`<!----> Send</button>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</footer>`);
+      pop_element();
+      $$renderer2.push(`</section>`);
+      pop_element();
+      $$renderer2.push(` <aside class="w-[360px] shrink-0 overflow-y-auto border-l border-border bg-surface/30 p-4 svelte-v6b4fo">`);
+      push_element($$renderer2, "aside", 215, 2);
+      $$renderer2.push(`<div class="flex flex-col gap-5 svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 216, 4);
+      $$renderer2.push(`<section class="rounded-lg border border-border bg-surface/50 p-4 svelte-v6b4fo">`);
+      push_element($$renderer2, "section", 217, 6);
+      ThemeControls($$renderer2);
+      $$renderer2.push(`<!----></section>`);
+      pop_element();
+      $$renderer2.push(` <section class="rounded-lg border border-border bg-surface/50 p-4 svelte-v6b4fo">`);
+      push_element($$renderer2, "section", 221, 6);
+      $$renderer2.push(`<h2 class="mb-3 text-sm text-fg svelte-v6b4fo">`);
+      push_element($$renderer2, "h2", 222, 8);
+      $$renderer2.push(`Motion &amp; chassis</h2>`);
+      pop_element();
+      $$renderer2.push(` <div class="flex flex-col gap-3 svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 223, 8);
+      $$renderer2.push(`<label class="flex items-center justify-between gap-3 text-xs text-muted svelte-v6b4fo">`);
+      push_element($$renderer2, "label", 224, 10);
+      $$renderer2.push(`Composer `);
+      Select_1($$renderer2, {
+        class: "rounded-md bg-surface-2",
+        value: theme.composer,
+        onValueChange: (v) => theme.setComposer(v),
+        items: theme.composerOptions.map((o) => ({ value: o.id, label: o.label })),
+        "aria-label": "Composer appearance"
+      });
+      $$renderer2.push(`<!----></label>`);
+      pop_element();
+      $$renderer2.push(` <label class="flex items-center justify-between gap-3 text-xs text-muted svelte-v6b4fo">`);
+      push_element($$renderer2, "label", 234, 10);
+      $$renderer2.push(`Done animation `);
+      Select_1($$renderer2, {
+        class: "rounded-md bg-surface-2",
+        value: doneAnim.current,
+        onValueChange: (v) => doneAnim.set(v),
+        items: [
+          { value: "popSpark", label: "Pop & sparkle" },
+          { value: "stamp", label: "Approval stamp" },
+          { value: "confetti", label: "Confetti" },
+          { value: "twos", label: "Full on-twos" },
+          { value: "spring", label: "Springy ring" }
+        ],
+        "aria-label": "Done animation"
+      });
+      $$renderer2.push(`<!----></label>`);
+      pop_element();
+      $$renderer2.push(` <label class="flex items-center justify-between gap-3 text-xs text-muted svelte-v6b4fo">`);
+      push_element($$renderer2, "label", 250, 10);
+      $$renderer2.push(`Streaming look `);
+      Select_1($$renderer2, {
+        class: "rounded-md bg-surface-2",
+        value: streamReveal.look,
+        onValueChange: (v) => streamReveal.setLook(v),
+        items: STREAM_LOOKS.map((l) => ({ value: l.id, label: l.label })),
+        "aria-label": "Streaming look"
+      });
+      $$renderer2.push(`<!----></label>`);
+      pop_element();
+      $$renderer2.push(` <label class="flex items-center justify-between gap-3 text-xs text-muted svelte-v6b4fo">`);
+      push_element($$renderer2, "label", 260, 10);
+      $$renderer2.push(`Streaming speed `);
+      Select_1($$renderer2, {
+        class: "rounded-md bg-surface-2",
+        value: streamReveal.speed,
+        onValueChange: (v) => streamReveal.setSpeed(v),
+        items: STREAM_SPEEDS.map((s) => ({ value: s.id, label: s.label })),
+        "aria-label": "Streaming speed"
+      });
+      $$renderer2.push(`<!----></label>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</section>`);
+      pop_element();
+      $$renderer2.push(` <section class="rounded-lg border border-border bg-surface/50 p-4 svelte-v6b4fo">`);
+      push_element($$renderer2, "section", 273, 6);
+      $$renderer2.push(`<h2 class="mb-3 text-sm text-fg svelte-v6b4fo">`);
+      push_element($$renderer2, "h2", 274, 8);
+      $$renderer2.push(`Alerts</h2>`);
+      pop_element();
+      $$renderer2.push(` <div class="flex flex-wrap gap-2 svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 275, 8);
+      $$renderer2.push(`<button class="rounded-md border border-border-strong bg-surface px-2.5 py-1 text-xs text-fg hover:border-border-focus svelte-v6b4fo">`);
+      push_element($$renderer2, "button", 276, 10);
+      $$renderer2.push(`Info toast</button>`);
+      pop_element();
+      $$renderer2.push(` <button class="rounded-md border border-warning-border bg-warning-surface px-2.5 py-1 text-xs text-warning hover:opacity-80 svelte-v6b4fo">`);
+      push_element($$renderer2, "button", 277, 10);
+      $$renderer2.push(`Warning toast</button>`);
+      pop_element();
+      $$renderer2.push(` <button class="rounded-md border border-danger-border bg-danger-surface px-2.5 py-1 text-xs text-danger hover:opacity-80 svelte-v6b4fo">`);
+      push_element($$renderer2, "button", 278, 10);
+      $$renderer2.push(`Error toast</button>`);
+      pop_element();
+      $$renderer2.push(` <button class="rounded-md border border-border-strong bg-surface px-2.5 py-1 text-xs text-fg hover:border-border-focus svelte-v6b4fo">`);
+      push_element($$renderer2, "button", 279, 10);
+      $$renderer2.push(`Toast + Undo</button>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(` <div class="mt-3 flex flex-col gap-2 svelte-v6b4fo">`);
+      push_element($$renderer2, "div", 283, 8);
+      $$renderer2.push(`<p class="flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs text-fg svelte-v6b4fo">`);
+      push_element($$renderer2, "p", 284, 10);
+      Info($$renderer2, { class: "size-4 shrink-0 opacity-80" });
+      $$renderer2.push(`<!----> Informational banner.</p>`);
+      pop_element();
+      $$renderer2.push(` <p class="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-surface px-3 py-1.5 text-xs text-warning svelte-v6b4fo">`);
+      push_element($$renderer2, "p", 285, 10);
+      Triangle_alert($$renderer2, { class: "size-4 shrink-0 opacity-80" });
+      $$renderer2.push(`<!----> Warning banner.</p>`);
+      pop_element();
+      $$renderer2.push(` <p class="flex items-center gap-2 rounded-lg border border-danger-border bg-danger-surface px-3 py-1.5 text-xs text-danger svelte-v6b4fo">`);
+      push_element($$renderer2, "p", 286, 10);
+      Circle_x($$renderer2, { class: "size-4 shrink-0 opacity-80" });
+      $$renderer2.push(`<!----> Error banner.</p>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</section>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</aside>`);
+      pop_element();
+      $$renderer2.push(`</main>`);
+      pop_element();
+    },
+    PlayroomView
+  );
+}
+PlayroomView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+TestingView[FILENAME] = "src/desktop-renderer/app/TestingView.svelte";
+function TestingView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { projects, threads, projectId, onSelectThread } = $$props;
+      const project = derived(() => projectId ? projects.find((p) => p.id === projectId) ?? null : null);
+      const toTest = derived(() => threads.filter((t) => t.projectId === projectId && t.toTestAt && !t.archivedAt).sort((a, b) => a.toTestAt < b.toTestAt ? 1 : -1));
+      function parseNote(note) {
+        if (!note) return null;
+        const cells = note.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("|") && l.endsWith("|")).filter((l) => !/^\|[\s|:-]+\|$/.test(l)).map((l) => l.slice(1, -1).split("|").map((c) => c.trim()));
+        const data = cells.filter((c) => c.length >= 2);
+        if (data.length === 0) return { feature: note, test: "" };
+        const [feature, test] = data[data.length - 1];
+        return { feature, test };
+      }
+      const fmt = (iso) => iso ? new Date(iso).toLocaleString(void 0, { dateStyle: "medium", timeStyle: "short" }) : "—";
+      let rejectingId = null;
+      let rejectText = "";
+      $$renderer2.push(`<main class="flex h-full flex-1 flex-col" data-testid="testing-view">`);
+      push_element($$renderer2, "main", 82, 0);
+      $$renderer2.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-6">`);
+      push_element($$renderer2, "header", 83, 2);
+      $$renderer2.push(`<h1 class="text-sm font-medium text-fg-soft">`);
+      push_element($$renderer2, "h1", 84, 4);
+      $$renderer2.push(`Testing`);
+      if (project()) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<span class="text-faint">`);
+        push_element($$renderer2, "span", 85, 26);
+        $$renderer2.push(`· ${escape_html(project().name)}</span>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></h1>`);
+      pop_element();
+      $$renderer2.push(` `);
+      if (toTest().length > 0) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<span class="text-xs text-faint">`);
+        push_element($$renderer2, "span", 88, 6);
+        $$renderer2.push(`${escape_html(toTest().length)} marked for test</span>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></header>`);
+      pop_element();
+      $$renderer2.push(` <div class="flex-1 overflow-y-auto px-6 pb-6">`);
+      push_element($$renderer2, "div", 92, 2);
+      $$renderer2.push(`<div class="mx-auto flex max-w-3xl flex-col gap-3">`);
+      push_element($$renderer2, "div", 93, 4);
+      const each_array = ensure_array_like(toTest());
+      if (each_array.length !== 0) {
+        $$renderer2.push("<!--[-->");
+        for (let $$index = 0, $$length = each_array.length; $$index < $$length; $$index++) {
+          let thread = each_array[$$index];
+          const row = parseNote(thread.toTestNote);
+          $$renderer2.push(`<div class="rounded-lg border border-border bg-surface/50 px-4 py-3" data-testid="testing-card">`);
+          push_element($$renderer2, "div", 96, 8);
+          $$renderer2.push(`<div class="flex items-center justify-between gap-3">`);
+          push_element($$renderer2, "div", 97, 10);
+          $$renderer2.push(`<button class="min-w-0 text-left" title="Open thread">`);
+          push_element($$renderer2, "button", 98, 12);
+          $$renderer2.push(`<span class="block truncate text-sm text-fg hover:text-accent">`);
+          push_element($$renderer2, "span", 103, 14);
+          $$renderer2.push(`${escape_html(thread.title || "Untitled")}</span>`);
+          pop_element();
+          $$renderer2.push(`</button>`);
+          pop_element();
+          $$renderer2.push(` <div class="flex shrink-0 items-center gap-2">`);
+          push_element($$renderer2, "div", 105, 12);
+          $$renderer2.push(`<span class="text-xs text-faint">`);
+          push_element($$renderer2, "span", 106, 14);
+          $$renderer2.push(`${escape_html(fmt(thread.toTestAt))}</span>`);
+          pop_element();
+          $$renderer2.push(` <button class="flex items-center gap-1 rounded-md bg-accent/15 px-2 py-1 text-xs font-medium text-accent hover:bg-accent/25" title="Accept — move to Done" data-testid="testing-accept">`);
+          push_element($$renderer2, "button", 107, 14);
+          Check($$renderer2, { size: 13 });
+          $$renderer2.push(`<!----> Accept</button>`);
+          pop_element();
+          $$renderer2.push(` <button class="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted hover:bg-surface-2 hover:text-danger" title="Reject — send feedback to the thread" data-testid="testing-reject">`);
+          push_element($$renderer2, "button", 113, 14);
+          X($$renderer2, { size: 13 });
+          $$renderer2.push(`<!----> Reject</button>`);
+          pop_element();
+          $$renderer2.push(`</div>`);
+          pop_element();
+          $$renderer2.push(`</div>`);
+          pop_element();
+          $$renderer2.push(` `);
+          if (row) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<div class="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">`);
+            push_element($$renderer2, "div", 122, 12);
+            $$renderer2.push(`<span class="font-medium text-faint">`);
+            push_element($$renderer2, "span", 123, 14);
+            $$renderer2.push(`Feature</span>`);
+            pop_element();
+            $$renderer2.push(` <span class="text-fg-soft">`);
+            push_element($$renderer2, "span", 124, 14);
+            $$renderer2.push(`${escape_html(row.feature)}</span>`);
+            pop_element();
+            $$renderer2.push(` <span class="font-medium text-faint">`);
+            push_element($$renderer2, "span", 125, 14);
+            $$renderer2.push(`Test</span>`);
+            pop_element();
+            $$renderer2.push(` <span class="text-fg-soft">`);
+            push_element($$renderer2, "span", 126, 14);
+            $$renderer2.push(`${escape_html(row.test)}</span>`);
+            pop_element();
+            $$renderer2.push(`</div>`);
+            pop_element();
+          } else {
+            $$renderer2.push("<!--[-1-->");
+            $$renderer2.push(`<p class="mt-2 flex items-center gap-1.5 text-xs text-faint">`);
+            push_element($$renderer2, "p", 129, 12);
+            Eye($$renderer2, { size: 12 });
+            $$renderer2.push(`<!----> Generating runthrough…</p>`);
+            pop_element();
+          }
+          $$renderer2.push(`<!--]--> `);
+          if (rejectingId === thread.id) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<div class="mt-3 flex flex-col gap-2" data-testid="testing-reject-box">`);
+            push_element($$renderer2, "div", 134, 12);
+            $$renderer2.push(`<textarea rows="3" placeholder="What went wrong?" class="w-full resize-none rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg placeholder:text-fainter focus:border-border-focus focus:outline-none">`);
+            push_element($$renderer2, "textarea", 135, 14);
+            const $$body = escape_html(rejectText);
+            if ($$body) {
+              $$renderer2.push(`${$$body}`);
+            }
+            $$renderer2.push(`</textarea>`);
+            pop_element();
+            $$renderer2.push(` <div class="flex justify-end gap-2">`);
+            push_element($$renderer2, "div", 145, 14);
+            $$renderer2.push(`<button class="rounded-md px-2.5 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg">`);
+            push_element($$renderer2, "button", 146, 16);
+            $$renderer2.push(`Cancel</button>`);
+            pop_element();
+            $$renderer2.push(` <button class="rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:opacity-90 disabled:opacity-40"${attr("disabled", !rejectText.trim(), true)} data-testid="testing-reject-send">`);
+            push_element($$renderer2, "button", 150, 16);
+            $$renderer2.push(`Send &amp; reopen</button>`);
+            pop_element();
+            $$renderer2.push(`</div>`);
+            pop_element();
+            $$renderer2.push(`</div>`);
+            pop_element();
+          } else {
+            $$renderer2.push("<!--[-1-->");
+          }
+          $$renderer2.push(`<!--]--></div>`);
+          pop_element();
+        }
+      } else {
+        $$renderer2.push("<!--[!-->");
+        $$renderer2.push(`<p class="mt-8 text-center text-sm text-fainter">`);
+        push_element($$renderer2, "p", 161, 8);
+        $$renderer2.push(`Nothing marked for testing in ${escape_html(project() ? project().name : "this project")}.</p>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</main>`);
+      pop_element();
+    },
+    TestingView
+  );
+}
+TestingView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+class MergeQueueStore {
+  /** Issue number → latest progress payload for the active batch. */
+  byIssue = /* @__PURE__ */ new Map();
+  /** Project id of the running batch; null when idle. */
+  runningFor = null;
+  constructor() {
+    api.on("event:mergeProgress", (p) => {
+      if (p.done) {
+        this.byIssue.set(p.issueNumber, p);
+      } else {
+        this.byIssue.set(p.issueNumber, p);
+      }
+      this.byIssue = new Map(this.byIssue);
+    });
+  }
+  get inProgress() {
+    return this.runningFor !== null;
+  }
+  /** Start a batch merge for the given issues in the chosen order. Returns
+   *  when the whole batch is done (the result is also streamed via events). */
+  async run(projectId, issueNumbers) {
+    this.runningFor = projectId;
+    this.byIssue = /* @__PURE__ */ new Map();
+    try {
+      await api.invoke("workQueue:mergeBatch", projectId, issueNumbers);
+    } finally {
+      this.runningFor = null;
+    }
+  }
+  /** Clear progress state after the UI has consumed it (e.g. on reload). */
+  reset() {
+    this.byIssue = /* @__PURE__ */ new Map();
+  }
+}
+const mergeQueue = new MergeQueueStore();
+Git_merge[FILENAME] = "/Users/admin/Documents/2. coding projects.nosync/peach-pi/node_modules/@lucide/svelte/dist/icons/git-merge.svelte";
+function Git_merge($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { $$slots, $$events, ...props } = $$props;
+      const iconNode = [
+        ["circle", { "cx": "18", "cy": "18", "r": "3" }],
+        ["circle", { "cx": "6", "cy": "6", "r": "3" }],
+        ["path", { "d": "M6 21V9a9 9 0 0 0 9 9" }]
+      ];
+      Icon($$renderer2, spread_props([{ name: "git-merge" }, props, { iconNode }]));
+    },
+    Git_merge
+  );
+}
+Git_merge.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
+WorkQueueView[FILENAME] = "src/desktop-renderer/app/WorkQueueView.svelte";
+function WorkQueueView($$renderer, $$props) {
+  $$renderer.component(
+    ($$renderer2) => {
+      let { projects, projectId } = $$props;
+      const project = derived(() => projectId ? projects.find((p) => p.id === projectId) ?? null : null);
+      let launching = null;
+      let launchingPrd = null;
+      let launchingBreakdown = null;
+      let launchingPrdAgent = null;
+      const busy = derived(() => launchingAll);
+      let launchingAll = false;
+      const allReady = derived(() => (
+        // ── Merge Queue selection mode ────────────────────────────────────
+        // When on, each issue with an open PR shows a checkbox. The bottom action
+        // bar runs `workQueue:mergeBatch` on the selected issues in selection order.
+        // Merge-eligible = has an open PR and isn't done. NOT gated on
+        // `inProgress` (worktree exists): the worktree is exactly what
+        // `workQueue:mergeBatch` needs to rebase/test/merge, so an issue whose
+        // agent finished but left its worktree around is still mergeable.
+        // Local workflow has no PR signal — a ready/not-done issue with a worktree
+        // is mergeable; the handler fails loudly per-item if none exists.
+        // GitHub reports a just-merged issue as open for a beat; defer the reload
+        // so the sidebar badge + Work Queue list reflect the new closed state.
+        // The snapshot event will refresh `project` (and hence `workflow`).
+        // Reload whenever the viewed project changes.
+        (result()?.ok ? result().issues : []).filter((i) => i.status === "ready" && !i.inProgress)
+      ));
+      let closing = null;
+      const busyWithIssue = (n) => launching === n || closing === n;
+      const groupHasReady = (g) => g.issues.some((i) => i.status === "ready" && !i.inProgress);
+      const batchRunning = derived(() => mergeQueue.inProgress);
+      const workflow = derived(() => project()?.mergeWorkflow ?? "pr");
+      const result = derived(() => workQueue.result);
+      const groups = derived(() => result()?.ok ? groupWorkQueue(result().issues) : []);
+      const WQ_FILTER_KEY = "peach-pi.wq.filter";
+      function readFilter() {
+        const v = localStorage.getItem(WQ_FILTER_KEY);
+        return v === "all" || v === "ready" ? v : "open";
+      }
+      let filter = readFilter();
+      const filteredGroups = derived(() => filter === "all" ? groups() : groups().map((g) => ({
+        ...g,
+        issues: g.issues.filter((i) => filter === "open" ? i.status !== "done" : i.status === "ready")
+      })).filter((g) => g.issues.length > 0));
+      $$renderer2.push(`<main class="flex h-full flex-1 flex-col" data-testid="work-queue-view">`);
+      push_element($$renderer2, "main", 236, 0);
+      $$renderer2.push(`<header class="titlebar-drag flex h-12 shrink-0 items-center justify-between px-6">`);
+      push_element($$renderer2, "header", 237, 2);
+      $$renderer2.push(`<h1 class="text-sm font-medium text-fg-soft">`);
+      push_element($$renderer2, "h1", 238, 4);
+      $$renderer2.push(`Work Queue`);
+      if (project()) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<span class="text-faint">`);
+        push_element($$renderer2, "span", 239, 29);
+        $$renderer2.push(`· ${escape_html(project().name)}</span>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></h1>`);
+      pop_element();
+      $$renderer2.push(` <div class="flex items-center gap-2">`);
+      push_element($$renderer2, "div", 241, 4);
+      if (allReady().length > 0) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<button class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-fg hover:bg-surface-2 disabled:opacity-50 titlebar-no-drag"${attr("disabled", busy(), true)} data-testid="start-all-ready-global">`);
+        push_element($$renderer2, "button", 243, 8);
+        Play($$renderer2, { size: 12 });
+        $$renderer2.push(`<!----> ${escape_html(`Start all ready (${allReady().length})`)}</button>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--> <button class="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-fg hover:bg-surface-2 disabled:opacity-50 titlebar-no-drag"${attr("disabled", batchRunning(), true)} data-testid="merge-mode-toggle">`);
+      push_element($$renderer2, "button", 253, 6);
+      Git_merge($$renderer2, { size: 12 });
+      $$renderer2.push(`<!----> ${escape_html("Merge queue")}</button>`);
+      pop_element();
+      $$renderer2.push(` <div class="flex items-center rounded-md border border-border p-0.5 titlebar-no-drag" data-testid="wq-filter-toggle" role="group" aria-label="View filter">`);
+      push_element($$renderer2, "div", 262, 6);
+      $$renderer2.push(`<button${attr_class(`rounded px-1.5 py-0.5 text-xs ${filter === "all" ? "bg-surface-2 text-fg" : "text-faint hover:text-fg"}`)} title="All issues (open + done)">`);
+      push_element($$renderer2, "button", 268, 8);
+      $$renderer2.push(`All</button>`);
+      pop_element();
+      $$renderer2.push(` <button${attr_class(`rounded px-1.5 py-0.5 text-xs ${filter === "open" ? "bg-surface-2 text-fg" : "text-faint hover:text-fg"}`)} title="Open issues only (hide done)">`);
+      push_element($$renderer2, "button", 273, 8);
+      $$renderer2.push(`Open</button>`);
+      pop_element();
+      $$renderer2.push(` <button${attr_class(`rounded px-1.5 py-0.5 text-xs ${filter === "ready" ? "bg-surface-2 text-fg" : "text-faint hover:text-fg"}`)} title="Ready issues only (actionable start list)">`);
+      push_element($$renderer2, "button", 278, 8);
+      $$renderer2.push(`Ready</button>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(` <div class="flex items-center rounded-md border border-border p-0.5 titlebar-no-drag" data-testid="workflow-toggle" role="group" aria-label="Merge workflow">`);
+      push_element($$renderer2, "div", 284, 6);
+      $$renderer2.push(`<button${attr_class(`rounded px-1.5 py-0.5 text-xs ${workflow() === "pr" ? "bg-surface-2 text-fg" : "text-faint hover:text-fg"}`)}${attr("disabled", batchRunning(), true)} title="Open a GitHub PR and squash-merge via gh">`);
+      push_element($$renderer2, "button", 290, 8);
+      $$renderer2.push(`PR</button>`);
+      pop_element();
+      $$renderer2.push(` <button${attr_class(`rounded px-1.5 py-0.5 text-xs ${workflow() === "local" ? "bg-surface-2 text-fg" : "text-faint hover:text-fg"}`)}${attr("disabled", batchRunning(), true)} title="Merge the worktree branch into the default branch locally and push">`);
+      push_element($$renderer2, "button", 296, 8);
+      $$renderer2.push(`Local</button>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(` <button class="text-faint hover:text-fg" data-testid="work-queue-refresh" aria-label="Refresh issues" title="Refresh">`);
+      push_element($$renderer2, "button", 303, 6);
+      Refresh_cw($$renderer2, { size: 14, class: workQueue.loading ? "animate-spin" : "" });
+      $$renderer2.push(`<!----></button>`);
+      pop_element();
+      $$renderer2.push(`</div>`);
+      pop_element();
+      $$renderer2.push(`</header>`);
+      pop_element();
+      $$renderer2.push(` <div class="min-h-0 flex-1 overflow-y-auto px-6 pb-6">`);
+      push_element($$renderer2, "div", 315, 2);
+      {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--> `);
+      if (workQueue.loading && !result()) {
+        $$renderer2.push("<!--[0-->");
+        $$renderer2.push(`<p class="text-sm text-faint">`);
+        push_element($$renderer2, "p", 320, 6);
+        $$renderer2.push(`Loading issues…</p>`);
+        pop_element();
+      } else if (result() && !result().ok) {
+        $$renderer2.push("<!--[1-->");
+        $$renderer2.push(`<p class="text-sm text-faint" data-testid="work-queue-placeholder">`);
+        push_element($$renderer2, "p", 322, 6);
+        if (result().reason === "no-remote") {
+          $$renderer2.push("<!--[0-->");
+          $$renderer2.push(`This project has no <code>`);
+          push_element($$renderer2, "code", 324, 30);
+          $$renderer2.push(`origin</code>`);
+          pop_element();
+          $$renderer2.push(` remote, so there are no tracker issues to show.`);
+        } else if (result().reason === "not-github") {
+          $$renderer2.push("<!--[1-->");
+          $$renderer2.push(`Only GitHub remotes are supported right now.`);
+        } else {
+          $$renderer2.push("<!--[-1-->");
+          $$renderer2.push(`Couldn’t load issues${escape_html(result().message ? `: ${result().message}` : "")}.`);
+        }
+        $$renderer2.push(`<!--]--></p>`);
+        pop_element();
+      } else if (groups().length === 0) {
+        $$renderer2.push("<!--[2-->");
+        $$renderer2.push(`<p class="text-sm text-faint" data-testid="work-queue-empty">`);
+        push_element($$renderer2, "p", 332, 6);
+        $$renderer2.push(`No issues.</p>`);
+        pop_element();
+      } else if (filteredGroups().length === 0) {
+        $$renderer2.push("<!--[3-->");
+        $$renderer2.push(`<p class="text-sm text-faint" data-testid="work-queue-filter-empty">`);
+        push_element($$renderer2, "p", 334, 6);
+        $$renderer2.push(`No ${escape_html(filter === "ready" ? "ready" : "open")} issues.</p>`);
+        pop_element();
+      } else {
+        $$renderer2.push("<!--[-1-->");
+        $$renderer2.push(`<div class="flex flex-col gap-5" data-testid="work-queue-list">`);
+        push_element($$renderer2, "div", 338, 6);
+        $$renderer2.push(`<!--[-->`);
+        const each_array = ensure_array_like(filteredGroups());
+        for (let $$index_1 = 0, $$length = each_array.length; $$index_1 < $$length; $$index_1++) {
+          let group = each_array[$$index_1];
+          $$renderer2.push(`<section data-testid="work-queue-group">`);
+          push_element($$renderer2, "section", 340, 10);
+          $$renderer2.push(`<header class="mb-1.5 flex items-center gap-2">`);
+          push_element($$renderer2, "header", 341, 12);
+          if (group.prd) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<span class="font-mono text-xs text-faint">`);
+            push_element($$renderer2, "span", 343, 16);
+            $$renderer2.push(`#${escape_html(group.prd.number)}</span>`);
+            pop_element();
+            $$renderer2.push(` <h2 class="text-[13px] font-medium text-fg-soft">`);
+            push_element($$renderer2, "h2", 344, 16);
+            $$renderer2.push(`${escape_html(group.prd.title)}</h2>`);
+            pop_element();
+            $$renderer2.push(` <span class="num-badge">`);
+            push_element($$renderer2, "span", 345, 16);
+            $$renderer2.push(`prd</span>`);
+            pop_element();
+            $$renderer2.push(` `);
+            if (group.issues.length === 0) {
+              $$renderer2.push("<!--[0-->");
+              $$renderer2.push(`<button class="ml-auto flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"${attr("disabled", busy(), true)} data-testid="breakdown-prd">`);
+              push_element($$renderer2, "button", 347, 18);
+              Play($$renderer2, { size: 12 });
+              $$renderer2.push(`<!----> ${escape_html(launchingBreakdown === group.prd.number ? "Breaking down…" : "Break down")}</button>`);
+              pop_element();
+              $$renderer2.push(` <button class="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"${attr("disabled", busy(), true)} data-testid="start-prd-agent">`);
+              push_element($$renderer2, "button", 355, 18);
+              Play($$renderer2, { size: 12 });
+              $$renderer2.push(`<!----> ${escape_html(launchingPrdAgent === group.prd.number ? "Starting…" : "Start agent")}</button>`);
+              pop_element();
+            } else {
+              $$renderer2.push("<!--[-1-->");
+            }
+            $$renderer2.push(`<!--]--> `);
+            if (groupHasReady(group)) {
+              $$renderer2.push("<!--[0-->");
+              $$renderer2.push(`<button class="ml-auto flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"${attr("disabled", busy(), true)} data-testid="start-all-ready">`);
+              push_element($$renderer2, "button", 365, 18);
+              Play($$renderer2, { size: 12 });
+              $$renderer2.push(`<!----> ${escape_html(launchingPrd === group.prd.number ? "Starting…" : "Start all ready")}</button>`);
+              pop_element();
+            } else {
+              $$renderer2.push("<!--[-1-->");
+            }
+            $$renderer2.push(`<!--]--> <details class="group relative ml-auto shrink-0">`);
+            push_element($$renderer2, "details", 374, 16);
+            $$renderer2.push(`<summary class="flex size-6 cursor-pointer list-none items-center justify-center rounded-md text-faint hover:bg-surface-2 hover:text-fg" aria-label="PRD actions" data-testid="prd-actions-menu">`);
+            push_element($$renderer2, "summary", 375, 18);
+            $$renderer2.push(`⋯</summary>`);
+            pop_element();
+            $$renderer2.push(` <div class="absolute right-0 top-full z-10 mt-1 w-48 rounded-md border border-border bg-surface-2 py-1 text-xs shadow-lg" data-testid="prd-actions-dropdown">`);
+            push_element($$renderer2, "div", 381, 18);
+            $$renderer2.push(`<button class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"${attr("disabled", busyWithIssue(group.prd.number), true)} data-testid="close-prd-completed">`);
+            push_element($$renderer2, "button", 385, 20);
+            $$renderer2.push(`Mark done (completed)</button>`);
+            pop_element();
+            $$renderer2.push(` <button class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"${attr("disabled", busyWithIssue(group.prd.number), true)} data-testid="close-prd-not-planned">`);
+            push_element($$renderer2, "button", 395, 20);
+            $$renderer2.push(`Close (not planned)</button>`);
+            pop_element();
+            $$renderer2.push(` <button class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"${attr("disabled", busyWithIssue(group.prd.number), true)} data-testid="reopen-prd">`);
+            push_element($$renderer2, "button", 405, 20);
+            $$renderer2.push(`Reopen</button>`);
+            pop_element();
+            $$renderer2.push(`</div>`);
+            pop_element();
+            $$renderer2.push(`</details>`);
+            pop_element();
+          } else {
+            $$renderer2.push("<!--[-1-->");
+            $$renderer2.push(`<h2 class="text-[13px] font-medium text-fg-soft">`);
+            push_element($$renderer2, "h2", 418, 16);
+            $$renderer2.push(`Unparented</h2>`);
+            pop_element();
+          }
+          $$renderer2.push(`<!--]--></header>`);
+          pop_element();
+          $$renderer2.push(` `);
+          if (group.issues.length === 0) {
+            $$renderer2.push("<!--[0-->");
+            $$renderer2.push(`<p class="pl-3 text-xs text-faint">`);
+            push_element($$renderer2, "p", 423, 14);
+            $$renderer2.push(`No open child issues.</p>`);
+            pop_element();
+          } else {
+            $$renderer2.push("<!--[-1-->");
+            $$renderer2.push(`<ul class="flex flex-col gap-1">`);
+            push_element($$renderer2, "ul", 425, 14);
+            $$renderer2.push(`<!--[-->`);
+            const each_array_1 = ensure_array_like(group.issues);
+            for (let $$index = 0, $$length2 = each_array_1.length; $$index < $$length2; $$index++) {
+              let issue = each_array_1[$$index];
+              $$renderer2.push(`<li${attr_class(`flex items-center gap-3 rounded-md border border-border bg-surface px-3 py-2 ${issue.status === "blocked" ? "opacity-50" : ""} ${issue.status === "done" ? "opacity-60" : ""}`)} data-testid="work-queue-item"${attr("data-status", issue.status)}>`);
+              push_element($$renderer2, "li", 427, 18);
+              {
+                $$renderer2.push("<!--[-1-->");
+              }
+              $$renderer2.push(`<!--]--> <span class="shrink-0 font-mono text-xs text-faint">`);
+              push_element($$renderer2, "span", 444, 20);
+              $$renderer2.push(`#${escape_html(issue.number)}</span>`);
+              pop_element();
+              $$renderer2.push(` <a${attr("href", issue.url)} target="_blank" rel="noreferrer" class="min-w-0 flex-1 truncate text-[13px] text-fg hover:underline">`);
+              push_element($$renderer2, "a", 445, 20);
+              $$renderer2.push(`${escape_html(issue.title)}</a>`);
+              pop_element();
+              $$renderer2.push(` `);
+              if (issue.inProgress) {
+                $$renderer2.push("<!--[0-->");
+                $$renderer2.push(`<span class="shrink-0 text-xs text-faint" data-testid="status-in-progress">`);
+                push_element($$renderer2, "span", 453, 22);
+                $$renderer2.push(`in progress</span>`);
+                pop_element();
+              } else if (issue.status === "done") {
+                $$renderer2.push("<!--[1-->");
+                $$renderer2.push(`<span class="shrink-0 text-xs text-faint" data-testid="status-done">`);
+                push_element($$renderer2, "span", 457, 22);
+                $$renderer2.push(`done</span>`);
+                pop_element();
+              } else if (issue.status === "ready") {
+                $$renderer2.push("<!--[2-->");
+                $$renderer2.push(`<button class="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"${attr("disabled", busy(), true)} data-testid="start-agent">`);
+                push_element($$renderer2, "button", 459, 22);
+                Play($$renderer2, { size: 12 });
+                $$renderer2.push(`<!----> ${escape_html(launching === issue.number ? "Starting…" : "Start agent")}</button>`);
+                pop_element();
+              } else if (issue.status === "blocked") {
+                $$renderer2.push("<!--[3-->");
+                $$renderer2.push(`<span class="shrink-0 text-xs text-faint" data-testid="status-blocked">`);
+                push_element($$renderer2, "span", 467, 22);
+                $$renderer2.push(`blocked by ${escape_html(issue.unmetBlockers.map((n) => `#${n}`).join(", "))}</span>`);
+                pop_element();
+              } else {
+                $$renderer2.push("<!--[-1-->");
+              }
+              $$renderer2.push(`<!--]--> `);
+              if (mergeQueue.byIssue.get(issue.number)) {
+                $$renderer2.push("<!--[0-->");
+                const p = mergeQueue.byIssue.get(issue.number);
+                $$renderer2.push(`<span${attr_class(`shrink-0 text-xs ${p.item.ok ? "text-emerald-500" : "text-amber-600"}`)} data-testid="merge-status"${attr("title", !p.item.ok ? p.item.error : void 0)}>`);
+                push_element($$renderer2, "span", 473, 22);
+                if (p.item.ok) {
+                  $$renderer2.push("<!--[0-->");
+                  $$renderer2.push(`merged ✓`);
+                } else if (p.phase === "rebase") {
+                  $$renderer2.push("<!--[1-->");
+                  $$renderer2.push(`${escape_html(!p.item.ok && p.item.error.includes("Rebase conflict") ? "rebase conflict ⚠" : "rebase stopped ⚠")}`);
+                } else if (p.phase === "tests") {
+                  $$renderer2.push("<!--[2-->");
+                  $$renderer2.push(`tests failed ⚠`);
+                } else {
+                  $$renderer2.push("<!--[-1-->");
+                  $$renderer2.push(`merge failed ⚠`);
+                }
+                $$renderer2.push(`<!--]--></span>`);
+                pop_element();
+              } else {
+                $$renderer2.push("<!--[-1-->");
+              }
+              $$renderer2.push(`<!--]--> <details class="group relative shrink-0">`);
+              push_element($$renderer2, "details", 489, 20);
+              $$renderer2.push(`<summary class="flex size-6 cursor-pointer list-none items-center justify-center rounded-md text-faint hover:bg-surface-2 hover:text-fg" aria-label="_issue actions" data-testid="issue-actions-menu">`);
+              push_element($$renderer2, "summary", 490, 22);
+              $$renderer2.push(`⋯</summary>`);
+              pop_element();
+              $$renderer2.push(` <div class="absolute right-0 top-full z-10 mt-1 w-48 rounded-md border border-border bg-surface-2 py-1 text-xs shadow-lg" data-testid="issue-actions-dropdown">`);
+              push_element($$renderer2, "div", 496, 22);
+              $$renderer2.push(`<button class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"${attr("disabled", busyWithIssue(issue.number), true)} data-testid="close-completed">`);
+              push_element($$renderer2, "button", 500, 24);
+              $$renderer2.push(`Mark done (completed)</button>`);
+              pop_element();
+              $$renderer2.push(` <button class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"${attr("disabled", busyWithIssue(issue.number), true)} data-testid="close-not-planned">`);
+              push_element($$renderer2, "button", 510, 24);
+              $$renderer2.push(`Close (not planned)</button>`);
+              pop_element();
+              $$renderer2.push(` <button class="block w-full px-3 py-1.5 text-left text-fg hover:bg-surface"${attr("disabled", busyWithIssue(issue.number), true)} data-testid="reopen">`);
+              push_element($$renderer2, "button", 520, 24);
+              $$renderer2.push(`Reopen</button>`);
+              pop_element();
+              $$renderer2.push(`</div>`);
+              pop_element();
+              $$renderer2.push(`</details>`);
+              pop_element();
+              $$renderer2.push(`</li>`);
+              pop_element();
+            }
+            $$renderer2.push(`<!--]--></ul>`);
+            pop_element();
+          }
+          $$renderer2.push(`<!--]--></section>`);
+          pop_element();
+        }
+        $$renderer2.push(`<!--]--></div>`);
+        pop_element();
+      }
+      $$renderer2.push(`<!--]--> `);
+      {
+        $$renderer2.push("<!--[-1-->");
+      }
+      $$renderer2.push(`<!--]--></div>`);
+      pop_element();
+      $$renderer2.push(`</main>`);
+      pop_element();
+    },
+    WorkQueueView
+  );
+}
+WorkQueueView.render = function() {
+  throw new Error("Component.render(...) is no longer valid in Svelte 5. See https://svelte.dev/docs/svelte/v5-migration-guide#Components-are-no-longer-classes for more information");
+};
 _page[FILENAME] = "src/routes/+page.svelte";
 function _page($$renderer, $$props) {
   $$renderer.component(
@@ -18261,8 +27900,13 @@ function _page($$renderer, $$props) {
       let selectedThreadId = derived(() => snapshot.current?.ui.selectedThreadId ?? null);
       let selectedThread = derived(() => snapshot.current?.threads.find((t) => t.id === selectedThreadId()) ?? null);
       let canPrompt = derived(() => !!selectedThreadId() && selectedThread()?.status === "idle" && transcripts.itemsFor(selectedThreadId()).length === 0);
+      let view = "thread";
+      function openView(v) {
+        view = v;
+      }
       function selectThread(id2) {
         void api.invoke("app:setSelectedThread", id2);
+        view = "thread";
         if (snapshot.current) {
           snapshot.current = {
             ...snapshot.current,
@@ -18275,49 +27919,55 @@ function _page($$renderer, $$props) {
           $$renderer4.push(`<title>Peach Pi — live demo</title>`);
         });
         $$renderer3.push(`<meta name="description" content="The Peach Pi agent UI running in your browser. A canned replay shows how assistant streaming, tool calls, and reasoning feel."/>`);
-        push_element($$renderer3, "meta", 51, 2);
+        push_element($$renderer3, "meta", 70, 2);
         pop_element();
       });
       $$renderer2.push(`<div class="demo-shell svelte-1uha8ag">`);
-      push_element($$renderer2, "div", 57, 0);
-      $$renderer2.push(`<div class="laptop svelte-1uha8ag">`);
-      push_element($$renderer2, "div", 59, 2);
-      $$renderer2.push(`<div class="laptop__lid svelte-1uha8ag">`);
-      push_element($$renderer2, "div", 60, 4);
-      $$renderer2.push(`<div class="laptop__notch svelte-1uha8ag">`);
-      push_element($$renderer2, "div", 61, 6);
-      $$renderer2.push(`<span class="svelte-1uha8ag">`);
-      push_element($$renderer2, "span", 61, 33);
+      push_element($$renderer2, "div", 76, 0);
+      $$renderer2.push(`<div class="window svelte-1uha8ag">`);
+      push_element($$renderer2, "div", 78, 2);
+      $$renderer2.push(`<div class="window__bar svelte-1uha8ag">`);
+      push_element($$renderer2, "div", 79, 4);
+      $$renderer2.push(`<span class="traffic traffic--close svelte-1uha8ag">`);
+      push_element($$renderer2, "span", 80, 6);
       $$renderer2.push(`</span>`);
+      pop_element();
+      $$renderer2.push(` <span class="traffic traffic--min svelte-1uha8ag">`);
+      push_element($$renderer2, "span", 81, 6);
+      $$renderer2.push(`</span>`);
+      pop_element();
+      $$renderer2.push(` <span class="traffic traffic--max svelte-1uha8ag">`);
+      push_element($$renderer2, "span", 82, 6);
+      $$renderer2.push(`</span>`);
+      pop_element();
+      $$renderer2.push(` <span class="window__title svelte-1uha8ag">`);
+      push_element($$renderer2, "span", 83, 6);
+      $$renderer2.push(`peach-pi</span>`);
       pop_element();
       $$renderer2.push(`</div>`);
       pop_element();
-      $$renderer2.push(` <div class="laptop__bar svelte-1uha8ag">`);
-      push_element($$renderer2, "div", 62, 6);
-      $$renderer2.push(`<span class="light light--close svelte-1uha8ag">`);
-      push_element($$renderer2, "span", 63, 8);
-      $$renderer2.push(`</span>`);
-      pop_element();
-      $$renderer2.push(` <span class="light light--min svelte-1uha8ag">`);
-      push_element($$renderer2, "span", 64, 8);
-      $$renderer2.push(`</span>`);
-      pop_element();
-      $$renderer2.push(` <span class="light light--max svelte-1uha8ag">`);
-      push_element($$renderer2, "span", 65, 8);
-      $$renderer2.push(`</span>`);
-      pop_element();
-      $$renderer2.push(` <span class="laptop__bar-title svelte-1uha8ag">`);
-      push_element($$renderer2, "span", 66, 8);
-      $$renderer2.push(`peach-pi — demo</span>`);
-      pop_element();
-      $$renderer2.push(`</div>`);
-      pop_element();
-      $$renderer2.push(` <div class="laptop__screen svelte-1uha8ag">`);
-      push_element($$renderer2, "div", 69, 6);
+      $$renderer2.push(` <div class="window__screen svelte-1uha8ag">`);
+      push_element($$renderer2, "div", 86, 4);
       if (booted() && snapshot.current) {
+        let failed = function($$renderer3, error) {
+          validate_snippet_args($$renderer3);
+          $$renderer3.push(`<div class="view-error svelte-1uha8ag">`);
+          push_element($$renderer3, "div", 116, 16);
+          $$renderer3.push(`<strong class="svelte-1uha8ag">`);
+          push_element($$renderer3, "strong", 117, 18);
+          $$renderer3.push(`This panel isn't interactive in the demo.</strong>`);
+          pop_element();
+          $$renderer3.push(` <span>`);
+          push_element($$renderer3, "span", 118, 18);
+          $$renderer3.push(`${escape_html(error instanceof Error ? error.message : String(error))}</span>`);
+          pop_element();
+          $$renderer3.push(`</div>`);
+          pop_element();
+        };
         $$renderer2.push("<!--[0-->");
+        prevent_snippet_stringification(failed);
         $$renderer2.push(`<div class="app-shell sidebar-device svelte-1uha8ag">`);
-        push_element($$renderer2, "div", 71, 10);
+        push_element($$renderer2, "div", 88, 8);
         Sidebar($$renderer2, {
           width: snapshot.current.ui.sidebarWidth,
           projects: snapshot.current.projects,
@@ -18326,16 +27976,13 @@ function _page($$renderer, $$props) {
           automationCount: snapshot.current.automations.length,
           collapsedProjects: snapshot.current.ui.collapsedProjects,
           selectedThreadId: selectedThreadId(),
-          activeView: "thread",
+          activeView: view,
           onSelect: selectThread,
           onNewChat: () => {
           },
-          onOpenView: () => {
-          },
-          onOpenTesting: () => {
-          },
-          onOpenWorkQueue: () => {
-          },
+          onOpenView: openView,
+          onOpenTesting: () => openView("testing"),
+          onOpenWorkQueue: () => openView("work-queue"),
           onNewThread: () => {
           },
           onNewWorktree: () => {
@@ -18352,36 +27999,91 @@ function _page($$renderer, $$props) {
           remoteFirst: false
         });
         $$renderer2.push(`<!----> <div class="app-shell__content svelte-1uha8ag">`);
-        push_element($$renderer2, "div", 96, 12);
-        if (selectedThread()) {
-          $$renderer2.push("<!--[0-->");
-          ThreadView($$renderer2, {
-            thread: selectedThread(),
-            onSelectThread: selectThread,
-            onSetEnvironment: () => {
-            },
-            onNewThread: () => {
-            },
-            onCloneThread: () => {
-            },
-            onForkThread: () => {
+        push_element($$renderer2, "div", 113, 10);
+        $$renderer2.boundary({ failed }, ($$renderer3) => {
+          $$renderer3.push(`<!--[-->`);
+          {
+            if (view === "settings") {
+              $$renderer3.push("<!--[0-->");
+              SettingsView($$renderer3, { initialQuery: "", onOpenPlayroom: () => openView("playroom") });
+            } else if (view === "skills") {
+              $$renderer3.push("<!--[1-->");
+              SkillsView($$renderer3, {
+                projects: snapshot.current.projects,
+                projectId: selectedThread()?.projectId ?? null
+              });
+            } else if (view === "extensions") {
+              $$renderer3.push("<!--[2-->");
+              ExtensionsView($$renderer3, {
+                projects: snapshot.current.projects,
+                projectId: selectedThread()?.projectId ?? null
+              });
+            } else if (view === "automations") {
+              $$renderer3.push("<!--[3-->");
+              AutomationsView($$renderer3, {
+                projects: snapshot.current.projects,
+                automations: snapshot.current.automations,
+                onSelectThread: selectThread
+              });
+            } else if (view === "connections") {
+              $$renderer3.push("<!--[4-->");
+              ConnectorsView($$renderer3);
+            } else if (view === "bws") {
+              $$renderer3.push("<!--[5-->");
+              BwsView($$renderer3);
+            } else if (view === "remote") {
+              $$renderer3.push("<!--[6-->");
+              RemoteView($$renderer3);
+            } else if (view === "playroom") {
+              $$renderer3.push("<!--[7-->");
+              PlayroomView($$renderer3);
+            } else if (view === "testing") {
+              $$renderer3.push("<!--[8-->");
+              TestingView($$renderer3, {
+                projects: snapshot.current.projects,
+                threads: snapshot.current.threads,
+                projectId: selectedThread()?.projectId ?? null,
+                onSelectThread: selectThread
+              });
+            } else if (view === "work-queue") {
+              $$renderer3.push("<!--[9-->");
+              WorkQueueView($$renderer3, {
+                projects: snapshot.current.projects,
+                projectId: selectedThread()?.projectId ?? null
+              });
+            } else if (selectedThread()) {
+              $$renderer3.push("<!--[10-->");
+              ThreadView($$renderer3, {
+                thread: selectedThread(),
+                onSelectThread: selectThread,
+                onSetEnvironment: () => {
+                },
+                onNewThread: () => {
+                },
+                onCloneThread: () => {
+                },
+                onForkThread: () => {
+                }
+              });
+            } else {
+              $$renderer3.push("<!--[-1-->");
+              $$renderer3.push(`<div class="empty-state svelte-1uha8ag">`);
+              push_element($$renderer3, "div", 162, 16);
+              $$renderer3.push(`Select a thread to start.</div>`);
+              pop_element();
             }
-          });
-        } else {
-          $$renderer2.push("<!--[-1-->");
-          $$renderer2.push(`<div class="empty-state svelte-1uha8ag">`);
-          push_element($$renderer2, "div", 100, 16);
-          $$renderer2.push(`Select a thread to start.</div>`);
-          pop_element();
-        }
-        $$renderer2.push(`<!--]--></div>`);
+            $$renderer3.push(`<!--]-->`);
+          }
+          $$renderer3.push(`<!--]-->`);
+        });
+        $$renderer2.push(`</div>`);
         pop_element();
         $$renderer2.push(`</div>`);
         pop_element();
       } else {
         $$renderer2.push("<!--[-1-->");
         $$renderer2.push(`<div class="booting svelte-1uha8ag">`);
-        push_element($$renderer2, "div", 105, 10);
+        push_element($$renderer2, "div", 168, 8);
         $$renderer2.push(`Booting Peach Pi…</div>`);
         pop_element();
       }
@@ -18389,28 +28091,22 @@ function _page($$renderer, $$props) {
       pop_element();
       $$renderer2.push(`</div>`);
       pop_element();
-      $$renderer2.push(` <div class="laptop__base svelte-1uha8ag">`);
-      push_element($$renderer2, "div", 109, 4);
-      $$renderer2.push(`</div>`);
-      pop_element();
-      $$renderer2.push(`</div>`);
-      pop_element();
       $$renderer2.push(` `);
       if (canPrompt()) {
         $$renderer2.push("<!--[0-->");
         $$renderer2.push(`<button class="try-cta svelte-1uha8ag" type="button">`);
-        push_element($$renderer2, "button", 113, 4);
+        push_element($$renderer2, "button", 174, 4);
         Arrow_down_to_dot($$renderer2, { size: 14 });
         $$renderer2.push(`<!----> <span class="try-cta__label svelte-1uha8ag">`);
-        push_element($$renderer2, "span", 115, 6);
+        push_element($$renderer2, "span", 176, 6);
         $$renderer2.push(`Try the canned prompt:</span>`);
         pop_element();
         $$renderer2.push(` <span class="try-cta__prompt svelte-1uha8ag">`);
-        push_element($$renderer2, "span", 116, 6);
+        push_element($$renderer2, "span", 177, 6);
         $$renderer2.push(`"Can you add input validation to the login form?"</span>`);
         pop_element();
         $$renderer2.push(` <span class="try-cta__arrow svelte-1uha8ag">`);
-        push_element($$renderer2, "span", 117, 6);
+        push_element($$renderer2, "span", 178, 6);
         $$renderer2.push(`→</span>`);
         pop_element();
         $$renderer2.push(`</button>`);
@@ -18419,19 +28115,19 @@ function _page($$renderer, $$props) {
         $$renderer2.push("<!--[-1-->");
       }
       $$renderer2.push(`<!--]--> <div class="demo-footer svelte-1uha8ag">`);
-      push_element($$renderer2, "div", 121, 2);
+      push_element($$renderer2, "div", 182, 2);
       $$renderer2.push(`<a class="demo-link svelte-1uha8ag" href="https://peachpi.vercel.app/" target="_blank" rel="noopener">`);
-      push_element($$renderer2, "a", 122, 4);
+      push_element($$renderer2, "a", 183, 4);
       $$renderer2.push(`↧ Download for macOS</a>`);
       pop_element();
       $$renderer2.push(` <a class="demo-link svelte-1uha8ag" href="https://github.com/earendil-works/pi-coding-agent" target="_blank" rel="noopener">`);
-      push_element($$renderer2, "a", 125, 4);
+      push_element($$renderer2, "a", 186, 4);
       $$renderer2.push(`⟨/⟩ pi agent on GitHub</a>`);
       pop_element();
       $$renderer2.push(`</div>`);
       pop_element();
       $$renderer2.push(` <p class="demo-disclaimer svelte-1uha8ag">`);
-      push_element($$renderer2, "p", 129, 2);
+      push_element($$renderer2, "p", 190, 2);
       $$renderer2.push(`Canned replay only — no model is invoked. Assistant tokens, tool calls, and reasoning shown here were scripted for demo purposes.</p>`);
       pop_element();
       $$renderer2.push(`</div>`);

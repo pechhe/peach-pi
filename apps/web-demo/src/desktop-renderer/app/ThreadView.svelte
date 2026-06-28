@@ -997,13 +997,15 @@
             <div class="mt-1 flex flex-col gap-1 border-l-2 border-border pl-1.5">
               {#each row.items as it (it.id)}
                 {#if it.kind === "assistant"}
+                  {@const itStreaming = it.streaming && thread.status === "running"}
+                  {@const itInThinking = itStreaming && !!it.thinking && !it.text}
                   <div class="item-enter assistant-message group/assistant text-[13.5px] leading-relaxed text-fg">
                     {#if it.thinking}
-                      <details class="collapse-anim group mb-1 text-xs text-faint">
+                      <details class="collapse-anim group mb-1 text-xs text-faint" open={itStreaming && !it.text}>
                         <summary class="cursor-pointer rounded-md py-0.5 transition-colors select-none hover:text-fg-soft">
                           <span class="mr-1 inline-block transition-transform group-open:rotate-90">›</span>Thinking
                         </summary>
-                        <ThinkingBlock text={it.thinking} streaming={false} revealKey={`${it.id}:thinking`} />
+                        <ThinkingBlock text={it.thinking} streaming={itStreaming} cursor={itInThinking} revealKey={`${it.id}:thinking`} />
                       </details>
                     {/if}
                   </div>

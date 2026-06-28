@@ -129,6 +129,56 @@ const seedTranscripts = {
     }
   ]
 };
+const MODELS = [
+  {
+    provider: "anthropic",
+    id: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
+    thinking: ["off", "minimal", "low", "medium", "high", "xhigh"]
+  },
+  {
+    provider: "anthropic",
+    id: "claude-sonnet-4-8",
+    name: "Claude Sonnet 4.8",
+    thinking: ["off", "minimal", "low", "medium", "high"]
+  },
+  {
+    provider: "openai",
+    id: "gpt-5.6",
+    name: "GPT-5.6",
+    thinking: ["off", "low", "medium", "high"]
+  },
+  {
+    provider: "openai",
+    id: "gpt-5.6-mini",
+    name: "GPT-5.6 mini",
+    thinking: ["off", "medium"]
+  },
+  {
+    provider: "xiaomi",
+    id: "glm-5.2",
+    name: "GLM 5.2",
+    thinking: ["off", "medium", "high"]
+  },
+  {
+    provider: "google",
+    id: "gemini-3-pro",
+    name: "Gemini 3 Pro",
+    thinking: ["off", "low", "medium", "high"]
+  }
+];
+const DEFAULT_MODEL = MODELS[0];
+function buildMeta(threadId, model = DEFAULT_MODEL, level = "medium") {
+  return {
+    threadId,
+    model: { provider: model.provider, id: model.id, name: model.name },
+    thinkingLevel: level,
+    availableThinkingLevels: [...model.thinking],
+    contextTokens: 18420,
+    contextWindow: 2e5,
+    contextPercent: 9.21
+  };
+}
 class MockPeachPi {
   listeners = /* @__PURE__ */ new Map();
   transcripts = new Map(
@@ -136,6 +186,11 @@ class MockPeachPi {
   );
   snapshot = structuredClone(mockSnapshot);
   runningReplays = /* @__PURE__ */ new Set();
+  /** Per-thread session meta (model + reasoning level). Seeded for every
+   *  mock thread so the Composer's ModelSelector + ReasoningDial render. */
+  metas = new Map(
+    mockThreads.map((t) => [t.id, buildMeta(t.id)])
+  );
   /** Broadcast an event to all subscribers of `channel`. */
   dispatch(channel, payload) {
     const set = this.listeners.get(channel);
@@ -287,6 +342,133 @@ Want me to also add the same validation rule to the sign-up flow, or keep this s
       }
       case "threads:abort":
         return Promise.resolve();
+      case "threads:getMeta": {
+        const threadId = args[0];
+        return Promise.resolve(this.metas.get(threadId) ?? buildMeta(threadId));
+      }
+      case "threads:listModels":
+      case "threads:listAllModels":
+        return Promise.resolve(MODELS.map(({ thinking: _t, ...m }) => m));
+      case "threads:setModel": {
+        const threadId = args[0];
+        const provider = args[1];
+        const id = args[2];
+        const picked = MODELS.find((m) => m.provider === provider && m.id === id) ?? DEFAULT_MODEL;
+        const supported = picked.thinking.includes("medium") ? "medium" : picked.thinking[picked.thinking.length - 1];
+        const next = buildMeta(threadId, picked, supported);
+        this.metas.set(threadId, next);
+        this.dispatch("event:sessionMeta", next);
+        return Promise.resolve(next);
+      }
+      case "threads:setThinking": {
+        const threadId = args[0];
+        const level = args[1];
+        const cur = this.metas.get(threadId) ?? buildMeta(threadId);
+        const next = { ...cur, thinkingLevel: level };
+        this.metas.set(threadId, next);
+        this.dispatch("event:sessionMeta", next);
+        return Promise.resolve(next);
+      }
+      case "threads:setModelScoped":
+        return Promise.resolve(MODELS.map(({ thinking: _t, ...m }) => m));
+      // ─── BWS / Secrets Manager ────────────────────────────────────────────
+      // Return a not-configured status so BwsView renders its "enter token"
+      // empty state instead of throwing on `status.error`.
+      case "bws:status":
+        return Promise.resolve({
+          installed: true,
+          version: "2.0.0",
+          hasToken: false,
+          tokenSource: null,
+          authenticated: false,
+          projectId: null,
+          project: null,
+          projects: [],
+          error: null
+        });
+      case "bws:listSecrets":
+        return Promise.resolve([]);
+      case "bws:setAccessToken":
+      case "bws:clearAuth":
+      case "bws:setProject":
+        return Promise.resolve({
+          installed: true,
+          version: "2.0.0",
+          hasToken: false,
+          tokenSource: null,
+          authenticated: false,
+          projectId: null,
+          project: null,
+          projects: [],
+          error: null
+        });
+      case "bws:install":
+        return Promise.resolve({ ok: true });
+      case "bws:createSecret":
+      case "bws:editSecret":
+      case "bws:deleteSecret":
+        return Promise.resolve(void 0);
+      // ─── Remote ───────────────────────────────────────────────────────────
+      case "remote:hostStatus":
+        return Promise.resolve({ enabled: false, serveAll: false, servedProjects: [], token: null });
+      case "remote:listHosts":
+        return Promise.resolve([]);
+      case "remote:connectInfo":
+        return Promise.resolve(null);
+      case "remote:listTailnetPeers":
+        return Promise.resolve([]);
+      case "remote:setHostEnabled":
+      case "remote:setProjectServed":
+      case "remote:setServeAll":
+      case "remote:regenerateToken":
+        return Promise.resolve({ enabled: false, serveAll: false, servedProjects: [], token: null });
+      case "remote:addHost":
+      case "remote:abort":
+      case "remote:attach":
+        return Promise.resolve(void 0);
+      // ─── Connectors ──────────────────────────────────────────────────────
+      case "connectors:list":
+      case "connectors:catalogue":
+      case "customConnections:list":
+      case "mcp:list":
+        return Promise.resolve([]);
+      // ─── App-level channels used by SettingsView onMount + prefs stores ────
+      case "app:ping":
+        return Promise.resolve({ version: "0.1.0", healthy: true });
+      case "app:listModels":
+        return Promise.resolve(MODELS.map(({ thinking: _t, ...m }) => m));
+      case "app:getUtilityModel":
+        return Promise.resolve(null);
+      case "app:getCavemanState":
+        return Promise.resolve({ enabled: false, level: "medium" });
+      case "app:getVisionProxyConfig":
+        return Promise.resolve({ mode: "off", provider: "anthropic", modelId: "claude-sonnet-4-5", installed: false });
+      case "app:getVisionProxyInstallState":
+        return Promise.resolve({ installed: false });
+      case "agentBrowser:state":
+        return Promise.resolve({ installed: false });
+      case "cuaDriver:status":
+        return Promise.resolve({ running: false, available: false });
+      case "hud:setAutoReveal":
+      case "app:updateExtensions":
+      case "app:setUtilityModel":
+        return Promise.resolve(void 0);
+      // ─── Resources (skills + extensions + prompts inspection) ──────────────
+      // Views (SkillsView, ExtensionsView) read `.skills`/`.extensions` off
+      // the result; return empty arrays so they render their "none found" state.
+      case "resources:inspect":
+      case "resources:inspectSlotCommand":
+        return Promise.resolve({ skills: [], extensions: [], prompts: [] });
+      // ─── Skills / Extensions / Automations mutations ─────────────────────
+      case "skills:save":
+      case "skills:delete":
+      case "skills:setInvocation":
+      case "extensions:setEnabled":
+      case "extensions:remove":
+      case "extensions:deleteLocal":
+        return Promise.resolve(void 0);
+      case "automations:runs":
+        return Promise.resolve([]);
       case "ui:setSidebarWidth":
       case "ui:setSidebarCollapsed":
       case "app:setSelectedThread":
@@ -307,11 +489,7 @@ Want me to also add the same validation rule to the sign-up flow, or keep this s
       case "projects:reorder":
       case "worktrees:archive":
       case "worktrees:create":
-      case "remote:abort":
       case "remote:message":
-      case "remote:steer":
-      case "remote:attach":
-      case "connectors:list":
         return Promise.resolve(void 0);
       default:
         return Promise.resolve(void 0);

@@ -1,11 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { AppView } from "@peach-pi/shared-types";
   import { snapshot } from "../desktop-renderer/stores/snapshot.svelte";
   import { transcripts } from "../desktop-renderer/stores/transcripts.svelte";
   import { drafts } from "../desktop-renderer/stores/composer.svelte";
   import { api } from "../desktop-renderer/lib/ipc";
   import Sidebar from "../desktop-renderer/app/Sidebar.svelte";
   import ThreadView from "../desktop-renderer/app/ThreadView.svelte";
+  import AutomationsView from "../desktop-renderer/app/AutomationsView.svelte";
+  import SkillsView from "../desktop-renderer/app/SkillsView.svelte";
+  import ExtensionsView from "../desktop-renderer/app/ExtensionsView.svelte";
+  import SettingsView from "../desktop-renderer/app/SettingsView.svelte";
+  import ConnectorsView from "../desktop-renderer/app/ConnectorsView.svelte";
+  import BwsView from "../desktop-renderer/app/BwsView.svelte";
+  import RemoteView from "../desktop-renderer/app/RemoteView.svelte";
+  import PlayroomView from "../desktop-renderer/app/PlayroomView.svelte";
+  import TestingView from "../desktop-renderer/app/TestingView.svelte";
+  import WorkQueueView from "../desktop-renderer/app/WorkQueueView.svelte";
   import { triggerDemoPrompt } from "../lib/mock-peach-pi";
   import ArrowDownToDot from "@lucide/svelte/icons/arrow-down-to-dot";
 
@@ -28,6 +39,13 @@
       transcripts.itemsFor(selectedThreadId).length === 0,
   );
 
+  // Active view: thread (default), or one of the sidebar destinations.
+  // Lifted out of App.svelte's view dispatcher so all sidebar pages render.
+  let view = $state<AppView>("thread");
+  function openView(v: AppView): void {
+    view = v;
+  }
+
   function tryPrompt(): void {
     if (!selectedThreadId) return;
     triggerDemoPrompt(selectedThreadId, "Can you add input validation to the login form?");
@@ -35,8 +53,9 @@
 
   function selectThread(id: string): void {
     void api.invoke("app:setSelectedThread" as never, id);
-    // Optimistic: flip the UI's selectedThreadId locally too so the click
-    // feels snappy (the mock doesn't emit a new snapshot for this channel).
+    // Switch back to the thread view + flip selectedThreadId locally so the
+    // click feels snappy (the mock doesn't emit a new snapshot for this).
+    view = "thread";
     if (snapshot.current) {
       snapshot.current = {
         ...snapshot.current,
@@ -55,58 +74,100 @@
 </svelte:head>
 
 <div class="demo-shell">
-  <!-- Laptop-cased app viewport -->
-  <div class="laptop">
-    <div class="laptop__lid">
-      <div class="laptop__notch"><span></span></div>
-      <div class="laptop__bar">
-        <span class="light light--close"></span>
-        <span class="light light--min"></span>
-        <span class="light light--max"></span>
-        <span class="laptop__bar-title">peach-pi — demo</span>
-      </div>
+  <!-- Modern macOS-style app window (no skeuomorphic laptop). -->
+  <div class="window">
+    <div class="window__bar">
+      <span class="traffic traffic--close"></span>
+      <span class="traffic traffic--min"></span>
+      <span class="traffic traffic--max"></span>
+      <span class="window__title">peach-pi</span>
+    </div>
 
-      <div class="laptop__screen">
-        {#if booted && snapshot.current}
-          <div class="app-shell sidebar-device">
-            <Sidebar
-              width={snapshot.current.ui.sidebarWidth}
-              projects={snapshot.current.projects}
-              worktrees={snapshot.current.worktrees}
-              threads={snapshot.current.threads}
-              automationCount={snapshot.current.automations.length}
-              collapsedProjects={snapshot.current.ui.collapsedProjects}
-              {selectedThreadId}
-              activeView="thread"
-              onSelect={selectThread}
-              onNewChat={() => {}}
-              onOpenView={() => {}}
-              onOpenTesting={() => {}}
-              onOpenWorkQueue={() => {}}
-              onNewThread={() => {}}
-              onNewWorktree={() => {}}
-              onOpenSearch={() => {}}
-              onReloadAll={() => void api.invoke("threads:reloadAll" as never)}
-              onGoBack={() => {}}
-              onGoForward={() => {}}
-              canGoBack={false}
-              canGoForward={false}
-              remoteFirst={false}
-            />
-            <div class="app-shell__content">
-              {#if selectedThread}
+    <div class="window__screen">
+      {#if booted && snapshot.current}
+        <div class="app-shell sidebar-device">
+          <Sidebar
+            width={snapshot.current.ui.sidebarWidth}
+            projects={snapshot.current.projects}
+            worktrees={snapshot.current.worktrees}
+            threads={snapshot.current.threads}
+            automationCount={snapshot.current.automations.length}
+            collapsedProjects={snapshot.current.ui.collapsedProjects}
+            {selectedThreadId}
+            activeView={view}
+            onSelect={selectThread}
+            onNewChat={() => {}}
+            onOpenView={openView}
+            onOpenTesting={() => openView("testing")}
+            onOpenWorkQueue={() => openView("work-queue")}
+            onNewThread={() => {}}
+            onNewWorktree={() => {}}
+            onOpenSearch={() => {}}
+            onReloadAll={() => void api.invoke("threads:reloadAll" as never)}
+            onGoBack={() => {}}
+            onGoForward={() => {}}
+            canGoBack={false}
+            canGoForward={false}
+            remoteFirst={false}
+          />
+          <div class="app-shell__content">
+            <svelte:boundary>
+              {#snippet failed(error)}
+                <div class="view-error">
+                  <strong>This panel isn't interactive in the demo.</strong>
+                  <span>{error instanceof Error ? error.message : String(error)}</span>
+                </div>
+              {/snippet}
+              {#if view === "settings"}
+                <SettingsView initialQuery="" onOpenPlayroom={() => openView("playroom")} />
+              {:else if view === "skills"}
+                <SkillsView
+                  projects={snapshot.current.projects}
+                  projectId={selectedThread?.projectId ?? null}
+                />
+              {:else if view === "extensions"}
+                <ExtensionsView
+                  projects={snapshot.current.projects}
+                  projectId={selectedThread?.projectId ?? null}
+                />
+              {:else if view === "automations"}
+                <AutomationsView
+                  projects={snapshot.current.projects}
+                  automations={snapshot.current.automations}
+                  onSelectThread={selectThread}
+                />
+              {:else if view === "connections"}
+                <ConnectorsView />
+              {:else if view === "bws"}
+                <BwsView />
+              {:else if view === "remote"}
+                <RemoteView />
+              {:else if view === "playroom"}
+                <PlayroomView />
+              {:else if view === "testing"}
+                <TestingView
+                  projects={snapshot.current.projects}
+                  threads={snapshot.current.threads}
+                  projectId={selectedThread?.projectId ?? null}
+                  onSelectThread={selectThread}
+                />
+              {:else if view === "work-queue"}
+                <WorkQueueView
+                  projects={snapshot.current.projects}
+                  projectId={selectedThread?.projectId ?? null}
+                />
+              {:else if selectedThread}
                 <ThreadView thread={selectedThread} onSelectThread={selectThread} onSetEnvironment={() => {}} onNewThread={() => {}} onCloneThread={() => {}} onForkThread={() => {}} />
               {:else}
                 <div class="empty-state">Select a thread to start.</div>
               {/if}
-            </div>
+            </svelte:boundary>
           </div>
-        {:else}
-          <div class="booting">Booting Peach Pi…</div>
-        {/if}
-      </div>
+        </div>
+      {:else}
+        <div class="booting">Booting Peach Pi…</div>
+      {/if}
     </div>
-    <div class="laptop__base"></div>
   </div>
 
   {#if canPrompt}
@@ -138,62 +199,56 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 2.5rem 1rem 2rem;
+    padding: 2rem 1.5rem 2rem;
     gap: 1.25rem;
     background:
-      radial-gradient(circle at 30% 0%, #1c1c20, transparent 50%),
-      var(--color-bg, #101012);
+      radial-gradient(ellipse at 35% 10%, #1f1f24 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 90%, #16161a 0%, transparent 50%),
+      #0a0a0c;
   }
 
-  .laptop {
+  /* ─── Modern macOS-style app window ─────────────────────────────── */
+  .window {
     width: 100%;
     max-width: 1180px;
-  }
-  .laptop__lid {
-    border-radius: 12px;
-    border: 1px solid #2a2a2e;
-    background: #0c0c0e;
+    border-radius: 14px;
     overflow: hidden;
+    background: var(--color-bg, #101012);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     box-shadow:
-      0 30px 60px rgba(0, 0, 0, 0.55),
-      0 8px 20px rgba(0, 0, 0, 0.5);
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 30px 80px -20px rgba(0, 0, 0, 0.7),
+      0 12px 30px -10px rgba(0, 0, 0, 0.5);
   }
-  .laptop__notch {
-    height: 6px;
-    display: flex;
-    justify-content: center;
-    align-items: flex-end;
-    padding-bottom: 2px;
-    background: #0c0c0e;
-  }
-  .laptop__notch span {
-    width: 48px;
-    height: 2px;
-    border-radius: 999px;
-    background: #1a1a1d;
-  }
-  .laptop__bar {
-    height: 32px;
+  .window__bar {
+    height: 38px;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 12px;
+    padding: 0 14px;
     border-bottom: 1px solid var(--color-border, #27272a);
-    background: var(--color-sidebar, #161618);
+    background: linear-gradient(180deg, #1c1c20 0%, #161618 100%);
+    user-select: none;
   }
-  .light { width: 12px; height: 12px; border-radius: 50%; }
-  .light--close { background: #ff5f57; }
-  .light--min { background: #febc2e; }
-  .light--max { background: #28c840; }
-  .laptop__bar-title {
-    margin-left: 12px;
+  .traffic {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.25);
+  }
+  .traffic--close { background: #ff5f57; }
+  .traffic--min { background: #febc2e; }
+  .traffic--max { background: #28c840; }
+  .window__title {
+    margin-left: 10px;
     font-family: var(--font-mono, ui-monospace);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--color-faint, #71717a);
+    letter-spacing: 0.02em;
   }
-
-  .laptop__screen {
-    height: 640px;
+  .window__screen {
+    height: 680px;
     background: var(--color-bg, #101012);
   }
 
@@ -208,7 +263,7 @@
     display: flex;
     flex-direction: column;
     margin: 8px 8px 8px 0;
-    border-radius: 16px;
+    border-radius: 10px;
     overflow: hidden;
     background: var(--color-surface, #18181b);
     box-shadow:
@@ -225,15 +280,19 @@
     font-size: 14px;
   }
 
-  .laptop__base {
-    margin: 0 -1%;
-    width: 102%;
-    height: 12px;
-    border-radius: 0 0 12px 12px;
-    background: #161618;
-    border: 1px solid #2a2a2e;
-    border-top: none;
+  .view-error {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    color: var(--color-faint, #71717a);
+    font-size: 14px;
   }
+  .view-error strong { color: var(--color-fg-soft, #d4d4d8); }
 
   .try-cta {
     display: inline-flex;

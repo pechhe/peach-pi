@@ -1,9 +1,12 @@
 import type {
   AppSnapshot,
+  ModelInfo,
   PeachPiApi,
   Project,
+  SessionMeta,
   Thread,
   ThreadStatus,
+  ThinkingLevel,
   TranscriptDelta,
   TranscriptItem,
   TranscriptOp,
@@ -136,6 +139,66 @@ const seedTranscripts: Record<string, TranscriptItem[]> = {
   ],
 };
 
+// ─── Mock model catalog & per-thread session meta ─────────────────────────
+// A curated slice of what a real Peach Pi install would surface. Each model
+// advertises its own set of available reasoning levels; the Composer's
+// `ReasoningDial` only renders when `availableThinkingLevels.length >= 1`,
+// so non-empty arrays here are what makes the dial show up.
+const MODELS: (ModelInfo & { thinking: ThinkingLevel[] })[] = [
+  {
+    provider: "anthropic",
+    id: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
+    thinking: ["off", "minimal", "low", "medium", "high", "xhigh"],
+  },
+  {
+    provider: "anthropic",
+    id: "claude-sonnet-4-8",
+    name: "Claude Sonnet 4.8",
+    thinking: ["off", "minimal", "low", "medium", "high"],
+  },
+  {
+    provider: "openai",
+    id: "gpt-5.6",
+    name: "GPT-5.6",
+    thinking: ["off", "low", "medium", "high"],
+  },
+  {
+    provider: "openai",
+    id: "gpt-5.6-mini",
+    name: "GPT-5.6 mini",
+    thinking: ["off", "medium"],
+  },
+  {
+    provider: "xiaomi",
+    id: "glm-5.2",
+    name: "GLM 5.2",
+    thinking: ["off", "medium", "high"],
+  },
+  {
+    provider: "google",
+    id: "gemini-3-pro",
+    name: "Gemini 3 Pro",
+    thinking: ["off", "low", "medium", "high"],
+  },
+];
+
+const DEFAULT_MODEL = MODELS[0]!; // Claude Opus 4.8 — shows the full dial.
+
+/** Per-thread session meta. Defaults each thread to the default model at
+ *  medium reasoning so the dial visibly sits above zero. */
+function buildMeta(threadId: string, model = DEFAULT_MODEL, level: ThinkingLevel = "medium"): SessionMeta {
+  return {
+    threadId,
+    model: { provider: model.provider, id: model.id, name: model.name },
+    thinkingLevel: level,
+    availableThinkingLevels: [...model.thinking],
+    contextTokens: 18420,
+    contextWindow: 200000,
+    contextPercent: 9.21,
+  };
+}
+
 // ─── Mock bridge ──────────────────────────────────────────────────────────
 
 class MockPeachPi {
@@ -145,6 +208,11 @@ class MockPeachPi {
   );
   private snapshot: AppSnapshot = structuredClone(mockSnapshot);
   private runningReplays = new Set<string>();
+  /** Per-thread session meta (model + reasoning level). Seeded for every
+   *  mock thread so the Composer's ModelSelector + ReasoningDial render. */
+  private metas = new Map<string, SessionMeta>(
+    mockThreads.map((t) => [t.id, buildMeta(t.id)]),
+  );
 
   /** Broadcast an event to all subscribers of `channel`. */
   dispatch(channel: string, payload: unknown): void {
@@ -327,6 +395,131 @@ Want me to also add the same validation rule to the sign-up flow, or keep this s
       case "threads:abort":
         // We don't model cancelling mid-replay; the demo replays run to completion.
         return Promise.resolve();
+      case "threads:getMeta": {
+        const threadId = args[0] as string;
+        return Promise.resolve(this.metas.get(threadId) ?? buildMeta(threadId));
+      }
+      case "threads:listModels":
+      case "threads:listAllModels":
+        // Return the same curated catalog for both the scoped list and the
+        // "all auth'd models" view — keeps the demo selector populated.
+        return Promise.resolve(MODELS.map(({ thinking: _t, ...m }) => m));
+      case "threads:setModel": {
+        const threadId = args[0] as string;
+        const provider = args[1] as string;
+        const id = args[2] as string;
+        const picked = MODELS.find((m) => m.provider === provider && m.id === id) ?? DEFAULT_MODEL;
+        // Reset reasoning to a level the new model supports (max of its range,
+        // clamped to medium so the dial sits mid-track).
+        const supported = picked.thinking.includes("medium") ? "medium" : picked.thinking[picked.thinking.length - 1]!;
+        const next = buildMeta(threadId, picked, supported);
+        this.metas.set(threadId, next);
+        this.dispatch("event:sessionMeta", next);
+        return Promise.resolve(next);
+      }
+      case "threads:setThinking": {
+        const threadId = args[0] as string;
+        const level = args[1] as ThinkingLevel;
+        const cur = this.metas.get(threadId) ?? buildMeta(threadId);
+        const next: SessionMeta = { ...cur, thinkingLevel: level };
+        this.metas.set(threadId, next);
+        this.dispatch("event:sessionMeta", next);
+        return Promise.resolve(next);
+      }
+      case "threads:setModelScoped":
+        // Scope toggling isn't modelled; just re-return the catalog.
+        return Promise.resolve(MODELS.map(({ thinking: _t, ...m }) => m));
+      // ─── BWS / Secrets Manager ────────────────────────────────────────────
+      // Return a not-configured status so BwsView renders its "enter token"
+      // empty state instead of throwing on `status.error`.
+      case "bws:status":
+        return Promise.resolve({
+          installed: true,
+          version: "2.0.0",
+          hasToken: false,
+          tokenSource: null,
+          authenticated: false,
+          projectId: null,
+          project: null,
+          projects: [],
+          error: null,
+        });
+      case "bws:listSecrets":
+        return Promise.resolve([]);
+      case "bws:setAccessToken":
+      case "bws:clearAuth":
+      case "bws:setProject":
+        return Promise.resolve({
+          installed: true, version: "2.0.0", hasToken: false, tokenSource: null,
+          authenticated: false, projectId: null, project: null, projects: [], error: null,
+        });
+      case "bws:install":
+        return Promise.resolve({ ok: true });
+      case "bws:createSecret":
+      case "bws:editSecret":
+      case "bws:deleteSecret":
+        return Promise.resolve(undefined);
+      // ─── Remote ───────────────────────────────────────────────────────────
+      case "remote:hostStatus":
+        return Promise.resolve({ enabled: false, serveAll: false, servedProjects: [], token: null });
+      case "remote:listHosts":
+        return Promise.resolve([]);
+      case "remote:connectInfo":
+        return Promise.resolve(null);
+      case "remote:listTailnetPeers":
+        return Promise.resolve([]);
+      case "remote:setHostEnabled":
+      case "remote:setProjectServed":
+      case "remote:setServeAll":
+      case "remote:regenerateToken":
+        return Promise.resolve({ enabled: false, serveAll: false, servedProjects: [], token: null });
+      case "remote:addHost":
+      case "remote:abort":
+      case "remote:attach":
+        return Promise.resolve(undefined);
+      // ─── Connectors ──────────────────────────────────────────────────────
+      case "connectors:list":
+      case "connectors:catalogue":
+      case "customConnections:list":
+      case "mcp:list":
+        return Promise.resolve([]);
+      // ─── App-level channels used by SettingsView onMount + prefs stores ────
+      case "app:ping":
+        return Promise.resolve({ version: "0.1.0", healthy: true });
+      case "app:listModels":
+        return Promise.resolve(MODELS.map(({ thinking: _t, ...m }) => m));
+      case "app:getUtilityModel":
+        return Promise.resolve(null);
+      case "app:getCavemanState":
+        return Promise.resolve({ enabled: false, level: "medium" });
+      case "app:getVisionProxyConfig":
+        return Promise.resolve({ mode: "off", provider: "anthropic", modelId: "claude-sonnet-4-5", installed: false });
+      case "app:getVisionProxyInstallState":
+        return Promise.resolve({ installed: false });
+      case "agentBrowser:state":
+        return Promise.resolve({ installed: false });
+      case "cuaDriver:status":
+        return Promise.resolve({ running: false, available: false });
+      case "hud:setAutoReveal":
+      case "app:updateExtensions":
+      case "app:setUtilityModel":
+        return Promise.resolve(undefined);
+      // ─── Resources (skills + extensions + prompts inspection) ──────────────
+      // Views (SkillsView, ExtensionsView) read `.skills`/`.extensions` off
+      // the result; return empty arrays so they render their "none found" state.
+      case "resources:inspect":
+      case "resources:inspectSlotCommand":
+        return Promise.resolve({ skills: [], extensions: [], prompts: [] });
+      // ─── Skills / Extensions / Automations mutations ─────────────────────
+      case "skills:save":
+      case "skills:delete":
+      case "skills:setInvocation":
+      case "extensions:setEnabled":
+      case "extensions:remove":
+      case "extensions:deleteLocal":
+        return Promise.resolve(undefined);
+      case "automations:runs":
+        return Promise.resolve([]);
       case "ui:setSidebarWidth":
       case "ui:setSidebarCollapsed":
       case "app:setSelectedThread":
@@ -347,11 +540,7 @@ Want me to also add the same validation rule to the sign-up flow, or keep this s
       case "projects:reorder":
       case "worktrees:archive":
       case "worktrees:create":
-      case "remote:abort":
       case "remote:message":
-      case "remote:steer":
-      case "remote:attach":
-      case "connectors:list":
         return Promise.resolve(undefined);
       default:
         // Unknown channel — resolve to undefined so the renderer never throws

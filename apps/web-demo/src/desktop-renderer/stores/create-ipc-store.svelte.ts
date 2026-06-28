@@ -40,7 +40,11 @@ export function createIpcStore<
   const load = async (force = false): Promise<void> => {
     if (!force && loaded) return;
     loaded = true;
-    value = (await api.invoke(opts.loadChannel as NoArgInvokeChannel)) as InvokeResult<LoadCh>;
+    const next = (await api.invoke(opts.loadChannel as NoArgInvokeChannel)) as InvokeResult<LoadCh>;
+    // Demo guard: if the IPC channel returns nothing (e.g. the web demo's mock
+    // doesn't implement it), keep the seeded default instead of clobbering
+    // `value` with `undefined` and breaking every `store.state.<field>` read.
+    if (next !== undefined) value = next;
   };
 
   const set = async (...args: InvokeArgs<SetCh>): Promise<void> => {
