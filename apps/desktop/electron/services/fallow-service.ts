@@ -106,13 +106,33 @@ export class FallowService {
         json: null,
       };
     }
-    let out: string;
+    // fallow exits 0 (no issues) or 1 (issues found) — both are a successful
+    // scan. We parse stdout regardless of exit code and only treat a missing
+    // JSON blob or a code >=2 as a real failure.
+    let out = "";
+    let stderr = "";
+    let code = 0;
     try {
-      out = await runCmd(st.binPath, ["dead-code", "--format", "json"], root);
+      ({ out, stderr, code } = await runCmdCapture(
+        st.binPath,
+        ["dead-code", "--format", "json"],
+        root,
+      ));
     } catch (err) {
       return {
         ok: false,
         error: String(err),
+        ranAt: new Date().toISOString(),
+        counts: emptyCounts(),
+        json: null,
+      };
+    }
+    const start = out.indexOf("{");
+    const end = out.lastIndexOf("}");
+    if (code >= 2 || start === -1 || end === -1 || end < start) {
+      return {
+        ok: false,
+        error: stderr.trim() || `fallow exited ${code} with no JSON output`,
         ranAt: new Date().toISOString(),
         counts: emptyCounts(),
         json: null,
@@ -153,6 +173,24 @@ function installCmd(pm: PackageManager): { bin: string; args: string[] } {
     case "bun":
       return { bin: "bun", args: ["add", "-d", "fallow"] };
   }
+}
+
+/** Run a command and capture stdout/stderr + exit code. Never rejects on
+ *  non-zero exit (callers inspect `code`). Only rejects on spawn failure. */
+function runCmdCapture(
+  bin: string,
+  args: string[],
+  cwd: string,
+): Promise<{ out: string; stderr: string; code: number }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (out += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ out, stderr, code: code ?? 0 }));
+  });
 }
 
 /** Run a command and capture stdout. Rejects on non-zero exit. */
