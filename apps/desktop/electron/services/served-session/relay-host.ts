@@ -146,12 +146,19 @@ export interface RelayActions {
   gitMerge: (threadId: ThreadId) => Promise<GitMergeResult>;
 }
 
-/** Read a client's identity from `X-Pi-Client-Id` / `X-Pi-Client-Name`. */
-function readClient(req: IncomingMessage): ClientIdentity | null {
-  const id = req.headers["x-pi-client-id"];
-  const name = req.headers["x-pi-client-name"];
-  if (typeof id !== "string" || !id) return null;
-  return { id, name: typeof name === "string" ? name : "client" };
+/** Read a client's identity from `X-Pi-Client-Id` / `X-Pi-Client-Name`, with
+ *  `?clientId=`/`?clientName=` query fallback for browser EventSource (which
+ *  cannot set headers) — same pattern the token rides the query string. */
+function readClient(req: IncomingMessage, url: URL): ClientIdentity | null {
+  const id =
+    (typeof req.headers["x-pi-client-id"] === "string" && req.headers["x-pi-client-id"]) ||
+    url.searchParams.get("clientId");
+  if (!id) return null;
+  const name =
+    (typeof req.headers["x-pi-client-name"] === "string" && req.headers["x-pi-client-name"]) ||
+    url.searchParams.get("clientName") ||
+    "client";
+  return { id, name };
 }
 
 export class RemoteHostService {
@@ -466,7 +473,7 @@ export class RemoteHostService {
 
     // Auto-acquire the steering lease on attach (force-take; ADR-0011) so the
     // client opening the thread is the controller. Released on tap close.
-    const client = readClient(req);
+    const client = readClient(req, url);
     if (client) this.leases.acquire(threadId, client, true);
 
     res.writeHead(200, {
@@ -594,7 +601,7 @@ export class RemoteHostService {
     if (!this.isServedThread(threadId))
       return this.send(res, 404, { error: "thread's project is not served" });
     const rest = seg.slice(2).join("/");
-    const client = readClient(req);
+    const client = readClient(req, url);
 
     switch (rest) {
       case "control": {

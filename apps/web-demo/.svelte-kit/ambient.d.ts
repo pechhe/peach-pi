@@ -73,6 +73,7 @@ declare module '$env/static/private' {
 	export const npm_package_json: string;
 	export const LaunchInstanceID: string;
 	export const GHOSTTY_SHELL_FEATURES: string;
+	export const DEV_TAP: string;
 	export const __CFBundleIdentifier: string;
 	export const npm_command: string;
 	export const PWD: string;
@@ -228,6 +229,7 @@ declare module '$env/dynamic/private' {
 		npm_package_json: string;
 		LaunchInstanceID: string;
 		GHOSTTY_SHELL_FEATURES: string;
+		DEV_TAP: string;
 		__CFBundleIdentifier: string;
 		npm_command: string;
 		PWD: string;

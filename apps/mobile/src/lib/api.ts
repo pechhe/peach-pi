@@ -59,6 +59,8 @@ async function post<T>(m: Master, path: string, body?: unknown): Promise<T> {
     headers: {
       Authorization: `Bearer ${m.token}`,
       "Content-Type": "application/json",
+      "X-Pi-Client-Id": m.id,
+      "X-Pi-Client-Name": m.name,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -215,6 +217,8 @@ export class TapClient {
     const u = new URL(`${baseUrl(this.master)}/tap`);
     u.searchParams.set("threadId", this.threadId);
     u.searchParams.set("token", this.master.token);
+    u.searchParams.set("clientId", this.master.id);
+    u.searchParams.set("clientName", this.master.name);
     if (this.lastSeq > 0) u.searchParams.set("lastSeq", String(this.lastSeq));
 
     const es = new EventSource(u.toString());
