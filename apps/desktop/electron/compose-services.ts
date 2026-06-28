@@ -281,8 +281,19 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
       }
       return out;
     },
+    models: async () => {
+      const { listScopedModels } = await import("@peach-pi/pi-client");
+      return listScopedModels();
+    },
+    meta: (threadId) => threadService.getMeta(threadId),
     actions: {
-      message: (threadId, text) => threadService.prompt(threadId, text),
+      message: async (threadId, text, opts) => {
+        // Apply the mobile composer's per-send override before the prompt so
+        //  it takes effect for THIS turn (mobile composer, ADR-0011).
+        if (opts?.model) await threadService.setModel(threadId, opts.model.provider, opts.model.id);
+        if (opts?.thinking) await threadService.setThinking(threadId, opts.thinking);
+        await threadService.prompt(threadId, text);
+      },
       steer: (threadId, text) => threadService.steer(threadId, text),
       abort: (threadId) => threadService.abort(threadId),
       archiveThread: (threadId) => {

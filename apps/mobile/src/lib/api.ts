@@ -2,9 +2,13 @@ import type {
   GitCommitPushResult,
   GitMergeResult,
   GitPrResult,
+  ModelInfo,
   RemoteProjectInfo,
   RemoteSessionInfo,
   RemoteTapFrame,
+  ScopedModel,
+  SessionMeta,
+  ThinkingLevel,
 } from "@peach-pi/shared-types";
 import type { Master } from "./store.svelte.ts";
 
@@ -88,13 +92,30 @@ export function listSessions(m: Master): Promise<RemoteSessionInfo[]> {
   return get<RemoteSessionInfo[]>(m, "/sessions");
 }
 
+/** The master's auth-configured models, for the composer's model picker. */
+export function listModels(m: Master): Promise<ScopedModel[]> {
+  return get<ScopedModel[]>(m, "/models");
+}
+
+/** Live session meta (current model + thinking + context) for a thread. */
+export function getSessionMeta(m: Master, threadId: string): Promise<SessionMeta> {
+  return get<SessionMeta>(m, `/sessions/${threadId}/meta`);
+}
+
 export function listProjects(m: Master): Promise<RemoteProjectInfo[]> {
   return get<RemoteProjectInfo[]>(m, "/projects");
 }
 
-/** Send text: prompt when idle, follow-up queue while running (master decides). */
-export function sendMessage(m: Master, threadId: string, text: string): Promise<void> {
-  return post(m, `/sessions/${threadId}/message`, { text });
+/** Send text: prompt when idle, follow-up queue while running (master decides).
+ *  `opts` lets the mobile composer override the session's model/thinking for
+ *  this message (applied before the prompt on the master). */
+export function sendMessage(
+  m: Master,
+  threadId: string,
+  text: string,
+  opts?: { model?: ModelInfo; thinking?: ThinkingLevel },
+): Promise<void> {
+  return post(m, `/sessions/${threadId}/message`, { text, ...opts });
 }
 
 export function steerMessage(m: Master, threadId: string, text: string): Promise<void> {

@@ -12,6 +12,7 @@ import type {
   GitCommitPushResult,
   GitMergeResult,
   GitPrResult,
+  ModelInfo,
   ProjectId,
   RemoteHostConfig,
   PiConfigPayload,
@@ -20,14 +21,27 @@ import type {
   RemoteSessionInfo,
   RemoteSettingsSnapshot,
   RemoteTapFrame,
+  ScopedModel,
+  SessionMeta,
   ThreadId,
   ThreadStatus,
+  ThinkingLevel,
   TranscriptDelta,
   TranscriptSnapshot,
 } from "@peach-pi/shared-types";
 import { resolveBindAddress, isValidToken, type IfaceAddress } from "./tailnet-bind.ts";
 import { checkpointTip } from "./checkpoint.ts";
 import { readJsonBody } from "./http-shared.ts";
+
+/** Valid ThinkingLevel values, for validating the optional `message` override. */
+const ThinkingLevels = new Set<ThinkingLevel>([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
 import { originUrl } from "@peach-pi/remote-handoff";
 // ADR-0011: the steering lease lives behind the movable-execution seam. The
 // relay imports it (concept-B state physically lives in concept-B's directory
@@ -64,9 +78,11 @@ const CORS_HEADERS = {
  *   GET  /sessions                   → RemoteSessionInfo[]
  *   GET  /projects                   → RemoteProjectInfo[]
  *   GET  /tap?threadId=&lastSeq=     → SSE stream of RemoteTapFrame
+ *   GET  /models                     → ScopedModel[] (mobile composer picker)
+ *   GET  /sessions/:id/meta           → SessionMeta (current model + thinking)
  *
  * Write path (ADR-0010, token-gated, same boundary as reads):
- *   POST /sessions/:id/message  { text }  → prompt (idle) | follow-up (running)
+ *   POST /sessions/:id/message  { text, model?, thinking? }  → prompt | follow-up
  *   POST /sessions/:id/steer    { text }  → immediate steer
  *   POST /sessions/:id/abort              → stop the running turn
  *   POST /sessions/:id/queue/delete { kind, index }
@@ -104,6 +120,12 @@ export interface RelayDeps {
   settings: () => Promise<RemoteSettingsSnapshot>;
   /** Allowlisted pi-config files, ported wholesale on connect (ADR-0011). */
   piConfig: () => Promise<PiConfigPayload>;
+  /** Auth-configured models (the master's scoped catalog) for the mobile
+   *  composer's model picker (ADR-0011 mobile composer). */
+  models: () => Promise<ScopedModel[]>;
+  /** Live session meta (current model + thinking + context) for a thread,
+   *  surfaced so the mobile composer can reflect the master's current state. */
+  meta: (threadId: ThreadId) => Promise<SessionMeta>;
   /** Write-path verbs (ADR-0010). Thin forwarders to thread/git services. */
   actions: RelayActions;
   /** Override interface lookup for tests. */
@@ -114,8 +136,14 @@ export interface RelayDeps {
  *  forwards to the same thread-service / git-service the desktop renderer uses.
  *  Each returns a JSON-serialisable result the phone renders. */
 export interface RelayActions {
-  /** Send text: prompt when idle, queue a follow-up while running. */
-  message: (threadId: ThreadId, text: string) => Promise<void>;
+  /** Send text: prompt when idle, queue a follow-up while running. `opts`
+   *  lets a remote composer override the session's model/thinking for the
+   *  next prompt (mobile composer, ADR-0011); omitted = keep session state. */
+  message: (
+    threadId: ThreadId,
+    text: string,
+    opts?: { model?: ModelInfo; thinking?: ThinkingLevel },
+  ) => Promise<void>;
   /** Immediate steer of a running turn. */
   steer: (threadId: ThreadId, text: string) => Promise<void>;
   /** Stop the running turn. */
@@ -446,6 +474,23 @@ export class RemoteHostService {
         return this.send(res, 200, await this.deps.piConfig());
       }
 
+      // Mobile composer catalog (ADR-0011): the master's auth-configured models
+      // so the phone can pick model + reasoning like the Codex mobile app.
+      if (req.method === "GET" && url.pathname === "/models") {
+        return this.send(res, 200, await this.deps.models());
+      }
+
+      // Live session meta (model/thinking/context) for a thread, so the
+      // composer can reflect the master's current selection.
+      if (req.method === "GET" && /^\/sessions\/[^/]+\/meta$/.test(url.pathname)) {
+        const seg = url.pathname.split("/").filter(Boolean);
+        const threadId = seg[1] as ThreadId;
+        if (!this.isServedThread(threadId))
+          return this.send(res, 404, { error: "thread's project is not served" });
+        if (!this.checkAuth(req, url)) return this.send(res, 401, { error: "unauthorized" });
+        return this.send(res, 200, await this.deps.meta(threadId));
+      }
+
       if (req.method === "GET" && url.pathname === "/tap") {
         return this.handleTap(req, res, url);
       }
@@ -669,7 +714,17 @@ export class RemoteHostService {
         if (!text) return this.send(res, 400, { error: "text required" });
         const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
-        await a.message(threadId, text);
+        // Optional per-send override (mobile composer, ADR-0011). Only forward
+        //  a well-shaped ModelInfo/ThinkingLevel; ignore junk rather than 400 —
+        //  a stale client shouldn't lose its message.
+        const opts: { model?: ModelInfo; thinking?: ThinkingLevel } = {};
+        const m = body.model;
+        if (m && typeof m === "object" && typeof m.provider === "string" && typeof m.id === "string" && typeof m.name === "string") {
+          opts.model = { provider: m.provider, id: m.id, name: m.name };
+        }
+        const t = body.thinking;
+        if (typeof t === "string" && ThinkingLevels.has(t)) opts.thinking = t as ThinkingLevel;
+        await a.message(threadId, text, Object.keys(opts).length ? opts : undefined);
         return this.send(res, 200, { ok: true });
       }
       case "steer": {

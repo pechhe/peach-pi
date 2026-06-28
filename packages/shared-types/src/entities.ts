@@ -1475,7 +1475,13 @@ export interface IfaceAddress {
  *  Paths use `:threadId` for the per-session routes; the implementation builds
  *  the real path with `encodeURIComponent(threadId)`. */
 export interface ServedSessionRoutes {
-  message: { path: "/sessions/:threadId/message"; body: { text: string } };
+  /** Optional per-send model/thinking override. When present the master applies
+   *  `setModel`/`setThinking` before the prompt, so the mobile composer can pick
+   *  model + reasoning like the Codex mobile app (ADR-0011 mobile composer). */
+  message: {
+    path: "/sessions/:threadId/message";
+    body: { text: string; model?: ModelInfo; thinking?: ThinkingLevel };
+  };
   steer: { path: "/sessions/:threadId/steer"; body: { text: string } };
   abort: { path: "/sessions/:threadId/abort"; body: Record<string, never> };
   /** Take (default force) or release the steering lease (ADR-0011). */

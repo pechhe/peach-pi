@@ -25,6 +25,8 @@ function deps(threads: { id: ThreadId; projectId: ProjectId | null }[]): RelayDe
     projects: () => [],
     settings: async () => ({ piSettings: {} as never, autoCompact: { percent: 80, tokens: null }, utilityModel: null }),
     piConfig: async () => ({}),
+    models: async () => [],
+    meta: async () => ({ threadId: "t1" as ThreadId, model: null, thinkingLevel: "off", availableThinkingLevels: ["off"], contextTokens: null, contextWindow: null, contextPercent: null }),
     actions: {
       message: async () => {},
       steer: async () => {},

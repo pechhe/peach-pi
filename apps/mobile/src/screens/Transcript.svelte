@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
   import { applyTranscriptOps, type TranscriptItem } from "@peach-pi/shared-types";
   import { store } from "../lib/store.svelte.ts";
-  import { TapClient, type TapStatus } from "../lib/api.ts";
+  import { TapClient, type TapStatus, listModels, getSessionMeta } from "../lib/api.ts";
+  import type { ScopedModel, SessionMeta } from "@peach-pi/shared-types";
   import Icon from "../components/Icon.svelte";
   import TranscriptItemView from "../components/TranscriptItem.svelte";
   import Composer from "../components/Composer.svelte";
@@ -21,6 +22,9 @@
   // Live run/queue state (ADR-0010) folded from the tap, driving the composer.
   let running = $state(false);
   let followUp = $state<string[]>([]);
+  // Model catalog + live session meta, for the composer's model/reasoning picker.
+  let models = $state<ScopedModel[]>([]);
+  let meta = $state<SessionMeta | null>(null);
   let showGit = $state(false);
   let toast = $state<{ msg: string; kind: "ok" | "err" } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -74,6 +78,19 @@
       onStatus: (s) => (status = s),
     });
     client.start();
+    // Best-effort catalog + live meta fetch; failures surface nowhere (the
+    // composer falls back to the session default).
+    void listModels(master).then((m) => (models = m)).catch(() => {});
+    void refreshMeta();
+  }
+
+  async function refreshMeta(): Promise<void> {
+    if (!master) return;
+    try {
+      meta = await getSessionMeta(master, threadId);
+    } catch {
+      // Master offline / meta unavailable — composer uses defaults.
+    }
   }
 
   async function copySha(): Promise<void> {
@@ -92,6 +109,7 @@
       client?.close(); // iOS suspends the stream anyway; drop it cleanly
     } else if (status.kind !== "ended") {
       connect(); // resume from the persisted watermark
+      void refreshMeta();
     }
   }
 
@@ -106,6 +124,13 @@
 
   const reconnecting = $derived(status.kind === "reconnecting");
   const ended = $derived(status.kind === "ended");
+
+  // Reflect status flips back into a meta refresh so the pill stays in sync
+  // when a run completes (the master's thinking/model may have changed).
+  $effect(() => {
+    void running;
+    void refreshMeta();
+  });
 </script>
 
 <header class="border-b border-border px-4 pt-1.5 pb-2.5">
@@ -208,7 +233,17 @@
 {/if}
 
 {#if master && !ended}
-  <Composer {master} {threadId} {running} {followUp} onError={(m) => flash(m, "err")} />
+  <Composer
+    {master}
+    {threadId}
+    {running}
+    {followUp}
+    {models}
+    sessionModel={meta?.model ?? null}
+    sessionThinking={meta?.thinkingLevel ?? "off"}
+    availableThinking={meta?.availableThinkingLevels ?? ["off"]}
+    onError={(m) => flash(m, "err")}
+  />
 {/if}
 
 {#if showGit && master}

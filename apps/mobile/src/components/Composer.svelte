@@ -1,19 +1,29 @@
 <script lang="ts">
   import { sendMessage, steerMessage, abortRun, deleteQueued } from "../lib/api.ts";
+  import type { ModelInfo, ScopedModel, ThinkingLevel } from "@peach-pi/shared-types";
   import type { Master } from "../lib/store.svelte.ts";
   import Icon from "./Icon.svelte";
+  import ModelPicker from "./ModelPicker.svelte";
 
   let {
     master,
     threadId,
     running,
     followUp,
+    models,
+    sessionModel,
+    sessionThinking,
+    availableThinking,
     onError,
   }: {
     master: Master;
     threadId: string;
     running: boolean;
     followUp: string[];
+    models: ScopedModel[];
+    sessionModel: ModelInfo | null;
+    sessionThinking: ThinkingLevel;
+    availableThinking: ThinkingLevel[];
     onError: (msg: string) => void;
   } = $props();
 
@@ -22,6 +32,25 @@
   // Steer = inject into the running turn now, vs. the default queue-as-follow-up.
   let steer = $state(false);
   let ta = $state<HTMLTextAreaElement | null>(null);
+
+  // Composer-local override state (null = use the master's session default).
+  // Persists until send (override applies to that message) or reset button.
+  let overrideModel = $state<ModelInfo | null>(null);
+  let overrideThinking = $state<ThinkingLevel | null>(null);
+  let showPicker = $state(false);
+
+  const THINKING_LABEL: Record<ThinkingLevel, string> = {
+    off: "Off",
+    minimal: "Min",
+    low: "Low",
+    medium: "Med",
+    high: "High",
+    xhigh: "Max",
+  };
+
+  const activeModel = $derived(overrideModel ?? sessionModel);
+  const activeThinking = $derived(overrideThinking ?? sessionThinking);
+  const pillLabel = $derived(activeModel?.name || activeModel?.id || "default");
 
   const hasText = $derived(text.trim().length > 0);
   // Empty + running → the button stops the run (mirrors the desktop send-dial).
@@ -40,7 +69,16 @@
     sending = true;
     try {
       if (steer && running) await steerMessage(master, threadId, body);
-      else await sendMessage(master, threadId, body);
+      else {
+        // Only forward an override when the user set one this turn.
+        const opts: { model?: ModelInfo; thinking?: ThinkingLevel } = {};
+        if (overrideModel) opts.model = overrideModel;
+        if (overrideThinking) opts.thinking = overrideThinking;
+        await sendMessage(master, threadId, body, Object.keys(opts).length ? opts : undefined);
+        // Override applied on the master; subsequent turns use the session default.
+        overrideModel = null;
+        overrideThinking = null;
+      }
       text = "";
       queueMicrotask(grow);
     } catch (e) {
@@ -96,6 +134,27 @@
     </div>
   {/if}
 
+  <div class="flex items-center gap-1.5 pb-1.5">
+    <button
+      class="flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-faint transition-colors hover:bg-surface-2"
+      onclick={() => (showPicker = true)}
+      aria-label="Model & reasoning"
+      title="Model & reasoning"
+    >
+      <span class="max-w-[42vw] truncate text-fg">{pillLabel}</span>
+      <span class="text-fainter">·</span>
+      <span class="uppercase tracking-wide text-faint">{THINKING_LABEL[activeThinking]}</span>
+      <span class="text-fainter"><Icon name="chevron-down" size={11} sw={2} /></span>
+    </button>
+    {#if overrideModel || overrideThinking}
+      <button
+        class="shrink-0 rounded-full border border-border bg-surface px-2 py-1 text-[11px] text-faint"
+        onclick={() => { overrideModel = null; overrideThinking = null; }}
+        title="Reset to session default"
+      >reset</button>
+    {/if}
+  </div>
+
   <div class="flex items-end gap-2">
     <div class="flex min-w-0 flex-1 items-end rounded-[20px] border border-border bg-surface px-3.5 py-2">
       <textarea
@@ -142,3 +201,15 @@
     </button>
   </div>
 </div>
+
+{#if showPicker}
+  <ModelPicker
+    {models}
+    selected={activeModel}
+    thinking={activeThinking}
+    availableThinking={availableThinking}
+    onSelectModel={(m) => { overrideModel = m; showPicker = false; }}
+    onSetThinking={(t) => { overrideThinking = t; }}
+    onClose={() => (showPicker = false)}
+  />
+{/if}
