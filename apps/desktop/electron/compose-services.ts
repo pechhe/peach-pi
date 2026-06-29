@@ -1,4 +1,4 @@
-import { BrowserWindow, Notification } from "electron";
+import { app, BrowserWindow, Notification } from "electron";
 import { homedir } from "node:os";
 import path from "node:path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
@@ -437,6 +437,14 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     customConnectionService,
   );
   const mcpService = new McpService();
+  // Register the bundled Executor CLI as an MCP server. Absolute path: a
+  // Finder-launched app has no shell PATH, so a bare `executor` won't resolve.
+  // `executor mcp` attaches to an existing local daemon or elects a new owner
+  // over the default ~/.executor data dir, so existing connections appear.
+  const executorBin = app.isPackaged
+    ? path.join(process.resourcesPath, "executor", "executor")
+    : path.join(app.getAppPath(), "build", "executor", "executor");
+  void mcpService.ensureExecutorServer(executorBin);
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
   const usageService = new UsageService(emit);

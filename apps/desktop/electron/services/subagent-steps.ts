@@ -84,6 +84,13 @@ function clip(s: string, n = 160): string {
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
 
+/** Generic "thinking"/"working" filler the model emits between real
+ *  messages. We drop it as a step so the current task line holds the last
+ *  real narration (the spinner already shows the agent is mid-thought). */
+function isPlaceholderNarration(text: string): boolean {
+  return /^(?:thinking|working|let me think|reasoning|one moment|hmm)[\s.…]*$/i.test(text.trim());
+}
+
 /** Compact a tool's arguments into a one-line summary. Mirrors the
  *  recorder's `summarizeArgs` for the tool families subagents use most. */
 function summarizeArgs(toolName: string | undefined, args: unknown): string {
@@ -197,15 +204,18 @@ export function readSubagentSteps(sessionFile: string | undefined): SubagentStep
         : Date.now();
 
     if (msg.role === "assistant") {
-      // Narration: join all text blocks into one step.
+      // Narration: join all text blocks into one step. Skip pure
+      // "thinking"/"working" placeholders so the last real message persists
+      // (the spinner already conveys that the agent is mid-thought).
       const texts = textBlocks(msg.content).map((b) => b.text.trim()).filter(Boolean);
-      if (texts.length) {
+      const joined = texts.join("\n").trim();
+      if (joined && !isPlaceholderNarration(joined)) {
         steps.push({
           id: `step-${i}-text`,
           tone: "done",
           kind: "narration",
-          title: clip(texts.join("\n")),
-          fullTitle: texts.join("\n").trim(),
+          title: clip(joined),
+          fullTitle: joined,
           at: relAt(ts),
         });
       }

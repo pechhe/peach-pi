@@ -137,6 +137,11 @@
   const currentSub = $derived(
     live_ && liveTool && liveTool !== currentTitle ? liveTool : undefined,
   );
+  // Only show the current-task row when it carries real content. A bare
+  // "Working…"/"Spawned" placeholder (no narration, no live tool) is noise.
+  const hasCurrent = $derived(
+    Boolean((lastNarration?.title ?? headNode?.title)?.trim() || liveTool),
+  );
 
   async function refreshSteps(): Promise<void> {
     if (!sessionFile) return;
@@ -190,6 +195,7 @@
   <!-- Current task: flips through what the agent is doing as the head
        node changes. Collapsed by default (the full journey hides behind
        the chevron), so this is the single live line the user sees. -->
+  {#if hasCurrent}
   <div class="agent-entity__current" data-tone={currentTone}>
     <span class="agent-entity__current-marker agent-entity__marker--{currentTone}" aria-hidden="true">
       {#if currentTone === "active"}
@@ -203,16 +209,18 @@
       {/if}
     </span>
     <div class="agent-entity__current-body">
-      {#key currentTitle}
-        <p
-          class="agent-entity__current-title"
-          title={lastNarration?.fullTitle ?? headNode?.fullTitle ?? currentTitle}
-          in:fly={{ duration: 280, y: -6, opacity: 0, easing: cubicOut }}
-          out:fly={{ duration: 280, y: 6, opacity: 0, easing: cubicInOut }}
-        >{currentTitle}</p>
-      {/key}
+      <div class="agent-entity__flip">
+        {#key currentTitle}
+          <p
+            class="agent-entity__current-title"
+            title={lastNarration?.fullTitle ?? headNode?.fullTitle ?? currentTitle}
+            in:fly={{ duration: 280, y: -6, opacity: 0, easing: cubicOut }}
+            out:fly={{ duration: 280, y: 6, opacity: 0, easing: cubicInOut }}
+          >{currentTitle}</p>
+        {/key}
+      </div>
       {#if currentSub}
-        <div class="agent-entity__current-sub-wrap">
+        <div class="agent-entity__flip">
           {#key currentSub}
             <p
               class="agent-entity__current-sub"
@@ -235,6 +243,7 @@
       </button>
     {/if}
   </div>
+  {/if}
 
   {#if !collapsed}
     <ol class="agent-entity__journey" transition:slide={{ duration: 260, easing: cubicInOut }}>
@@ -554,12 +563,17 @@
   }
   .agent-entity__current[data-tone="active"] .agent-entity__current-title { color: var(--ae-accent); }
   .agent-entity__current[data-tone="blocked"] .agent-entity__current-title { color: #c2691a; }
-  .agent-entity__current-sub-wrap {
-    position: relative;
-    min-height: calc(1.4 * 10.5px);
-    margin-top: 1px;
+  /* Overlap the outgoing + incoming keyed lines in a single grid cell so
+     they crossfade in place instead of stacking (which expands/retracts
+     the card height during the flip). */
+  .agent-entity__flip {
+    display: grid;
+  }
+  .agent-entity__flip > * {
+    grid-area: 1 / 1;
   }
   .agent-entity__current-sub {
+    margin-top: 1px;
     margin: 0;
     font-size: 10.5px;
     line-height: 1.4;
