@@ -184,12 +184,12 @@
 <div
   bind:this={scroller}
   onscroll={onScroll}
-  class="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-4 pt-4 pb-6 transition-opacity {reconnecting
+  class="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 pt-4 pb-6 transition-opacity {reconnecting
     ? 'opacity-50'
     : ''}"
 >
   {#each items as item, i (item.id)}
-    <div class="pp-item-in flex flex-col gap-3.5">
+    <div class="pp-item-in flex flex-col gap-2.5">
       <TranscriptItemView {item} />
     </div>
     {#each checkpoints.filter((c) => c.after === i + 1) as c (c.sha + i)}
