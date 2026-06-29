@@ -350,12 +350,39 @@
     return () => io?.disconnect();
   });
 
+  // Snappy-but-smooth custom scroll. The native `behavior: "smooth"` easing is
+  // lethargic; this runs a short ease-out (~220ms) so clicks feel immediate.
+  let scrollAnim = $state<number | null>(null);
   function scrollToSection(id: string) {
+    const root = scrollEl;
     const el = sectionEls.get(id);
-    if (!el) return;
+    if (!root || !el) return;
     activeId = id;
     programmaticScroll = true;
-    el.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (scrollAnim != null) cancelAnimationFrame(scrollAnim);
+    const target = el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+    const start = root.scrollTop;
+    const distance = target - start;
+    if (Math.abs(distance) < 1) {
+      programmaticScroll = false;
+      pickActive();
+      return;
+    }
+    const duration = Math.min(260, 120 + Math.abs(distance) * 0.35);
+    let startTime = 0;
+    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+    const step = (now: number) => {
+      if (!startTime) startTime = now;
+      const t = Math.min(1, (now - startTime) / duration);
+      root.scrollTop = start + distance * easeOut(t);
+      if (t < 1) scrollAnim = requestAnimationFrame(step);
+      else {
+        scrollAnim = null;
+        programmaticScroll = false;
+        pickActive();
+      }
+    };
+    scrollAnim = requestAnimationFrame(step);
   }
 
   let muted = $state(soundsMuted());

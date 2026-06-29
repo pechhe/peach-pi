@@ -44,25 +44,25 @@
     <div class="text-[12px] text-danger">{item.error}</div>
   {/if}
 {:else if item.kind === "tool"}
-  <div class="overflow-hidden rounded-[10px] border border-border">
-    <button class="flex w-full items-center gap-2 bg-surface-2/60 px-3 py-2.5 text-left text-[13px]" onclick={() => (showTool = !showTool)}>
+  <div class="overflow-hidden rounded-lg border border-border/70">
+    <button class="flex w-full items-center gap-1.5 bg-surface-2/40 px-2.5 py-1.5 text-left text-[12px]" onclick={() => (showTool = !showTool)}>
       <span class="shrink-0 {item.status === 'error' ? 'text-danger' : 'text-success'}">
         {#if item.status === "running"}
-          <SquareSpinner size={13} dotSize={2} />
+          <SquareSpinner size={11} dotSize={2} />
         {:else if item.status === "error"}
-          <Icon name="alert-circle" size={13} sw={1.6} />
+          <Icon name="alert-circle" size={11} sw={1.6} />
         {:else}
-          <Icon name="check" size={13} />
+          <Icon name="check" size={11} />
         {/if}
       </span>
-      <span class="font-mono text-accent">{item.toolName}</span>
-      <span class="flex-1 truncate font-mono text-faint">{item.argsSummary}</span>
+      <span class="shrink-0 font-mono font-medium text-accent">{item.toolName}</span>
+      <span class="flex-1 truncate font-mono text-fainter">{item.argsSummary}</span>
       <span class="shrink-0 text-fainter transition-transform" style="transform: rotate({showTool ? 90 : 0}deg)">
-        <Icon name="chevron-right" size={12} sw={2} />
+        <Icon name="chevron-right" size={11} sw={2} />
       </span>
     </button>
     {#if showTool && item.output}
-      <pre class="overflow-x-auto border-t border-border bg-surface px-3 py-2.5 font-mono text-[11.5px] leading-[1.6] text-fg-soft">{item.output}</pre>
+      <pre class="overflow-x-auto border-t border-border bg-surface px-2.5 py-2 font-mono text-[11px] leading-[1.55] text-fg-soft">{item.output}</pre>
     {/if}
   </div>
 {:else if item.kind === "subagent"}
