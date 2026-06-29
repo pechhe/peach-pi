@@ -509,14 +509,28 @@
     padding: 9px 12px;
     border-radius: 11px;
   }
+  /* Desktop uses display:contents so the footer lays out its tools directly.
+     On the phone we want controls to be a real flex row holding slider + dial,
+     with the send dial pulled out to the actions cluster on the right edge. */
+  .composer-device .composer__controls,
+  .composer-device .composer__actions {
+    display: flex;
+    align-items: center;
+  }
   .composer-device .composer__controls {
     min-width: 0;
     flex: 1 1 auto;
+    gap: 6px;
+  }
+  .composer-device .composer__actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
   /* Two-row chassis like desktop: screen, then a single controls row. The
-     controls never wrap — the slider flexes to fill, the dial/send/disks are
-     fixed compact widths. (The earlier wrap put the slider on its own line,
-     which read as three rows.) */
+     controls never wrap — the slider flexes to fill, the dial/send are fixed
+     compact widths. */
   .composer-device .composer__key-mount {
     flex: 1 1 0;
     min-width: 0;
