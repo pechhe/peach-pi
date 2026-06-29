@@ -527,28 +527,51 @@
     margin-inline: 0;
     zoom: 1;
   }
+  /* The desktop chassis renders its parts at full pixel size under zoom:0.78.
+     The phone runs zoom:1 at full width, so the dial/send/slider come out
+     ~30% too large. Shrink the individual parts (not the whole frame, which
+     would leave a gutter) to bring the chassis to a phone-native height. */
+  .composer-device .composer__surface {
+    padding: 9px 9px 8px;
+    border-radius: 13px;
+  }
+  .composer-device .composer__screen {
+    min-height: 64px;
+    padding: 11px 13px;
+    border-radius: 12px;
+  }
+  .composer-device .reasoning-dial {
+    --dial-size: 50px;
+  }
+  .composer-device .send-dial,
+  .composer-device .send-dial--stop {
+    width: 46px;
+    min-width: 46px;
+    height: 46px;
+    margin-left: 8px;
+  }
   /* The slider badge is 360px on desktop. On the phone we let it flex down and
      hide the inactive slot tick labels under narrow widths. */
   .composer-device .model-selector__badge--slider,
   :root[data-composer="dark"].composer-device .model-selector__badge--slider {
     width: 100%;
     min-width: 0;
-    max-width: 320px;
-    height: 80px;
+    max-width: 300px;
+    height: 62px;
   }
   .composer-device .composer__footer-row {
     /* Wrap the controls below the editor screen on narrow phones; the slider
        + dial take the first row, the overflow/send take the second. */
     flex-wrap: wrap;
-    gap: 8px 10px;
+    gap: 6px 8px;
     justify-content: flex-start;
   }
   .composer-device .composer__overflow {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     border-radius: 999px;
     border: 0;
     color: var(--crt-ink-muted, var(--muted));

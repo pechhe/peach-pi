@@ -294,6 +294,39 @@
     };
   }
 
+  // Pick the topmost visible section in NAV order as the active one.
+  function pickActive() {
+    const root = scrollEl;
+    if (!root) return;
+    let best: { id: string; top: number } | null = null;
+    for (const it of NAV_ITEMS) {
+      const el = sectionEls.get(it.id);
+      if (!el || !hit(it.id)) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < 0) continue; // scrolled past
+      if (rect.top > root.clientHeight + 4) continue; // below viewport
+      if (best === null || rect.top < best.top) best = { id: it.id, top: rect.top };
+    }
+    if (best) activeId = best.id;
+    else if (!activeId && NAV_ITEMS[0]) activeId = NAV_ITEMS[0].id;
+  }
+
+  // Suppress scrollspy overwrites while a click-driven smooth scroll is in flight;
+  // the IntersectionObserver fires at intermediate positions and would otherwise
+  // snap activeId to the section above the target before it reaches the top.
+  let programmaticScroll = $state(false);
+
+  $effect(() => {
+    const root = scrollEl;
+    if (!root) return;
+    const onScrollEnd = () => {
+      programmaticScroll = false;
+      pickActive();
+    };
+    root.addEventListener("scrollend", onScrollEnd);
+    return () => root.removeEventListener("scrollend", onScrollEnd);
+  });
+
   // Re-observe rendered sections whenever the search filter changes which are present.
   $effect(() => {
     // depends on which sections are rendered (driven by the query) + the scroll root.
@@ -304,18 +337,8 @@
     if (!root) return;
     io = new IntersectionObserver(
       () => {
-        // pick the topmost visible section in NAV order
-        let best: { id: string; top: number } | null = null;
-        for (const it of NAV_ITEMS) {
-          const el = sectionEls.get(it.id);
-          if (!el || !hit(it.id)) continue;
-          const rect = el.getBoundingClientRect();
-          if (rect.bottom < 0) continue; // scrolled past
-          if (rect.top > root.clientHeight + 4) continue; // below viewport
-          if (best === null || rect.top < best.top) best = { id: it.id, top: rect.top };
-        }
-        if (best) activeId = best.id;
-        else if (!activeId && NAV_ITEMS[0]) activeId = NAV_ITEMS[0].id;
+        if (programmaticScroll) return;
+        pickActive();
       },
       { root, rootMargin: "0px 0px -60% 0px", threshold: [0, 0.2, 0.6, 1] },
     );
@@ -331,6 +354,7 @@
     const el = sectionEls.get(id);
     if (!el) return;
     activeId = id;
+    programmaticScroll = true;
     el.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 

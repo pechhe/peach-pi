@@ -51,6 +51,7 @@ declare module '$env/static/private' {
 	export const POSTHOG_PERSONAL_API_KEY: string;
 	export const TERM: string;
 	export const TMPDIR: string;
+	export const npm_config_if_present: string;
 	export const npm_config_npm_globalconfig: string;
 	export const TERM_PROGRAM_VERSION: string;
 	export const BWS_ACCESS_TOKEN: string;
@@ -204,6 +205,7 @@ declare module '$env/dynamic/private' {
 		POSTHOG_PERSONAL_API_KEY: string;
 		TERM: string;
 		TMPDIR: string;
+		npm_config_if_present: string;
 		npm_config_npm_globalconfig: string;
 		TERM_PROGRAM_VERSION: string;
 		BWS_ACCESS_TOKEN: string;
