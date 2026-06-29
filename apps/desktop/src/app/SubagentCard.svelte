@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Component } from "svelte";
-  import { fly } from "svelte/transition";
+  import { fly, slide } from "svelte/transition";
   import { cubicOut, cubicInOut } from "svelte/easing";
 
   // Step entrance: collapse height + fade together so the card grows smoothly
@@ -23,6 +23,7 @@
   import Telescope from "@lucide/svelte/icons/telescope";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import X from "@lucide/svelte/icons/x";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import FileText from "@lucide/svelte/icons/file-text";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import InstructionsDialog from "./InstructionsDialog.svelte";
@@ -83,6 +84,19 @@
   const stats = $derived(live_ ? (live?.stats ?? []) : []);
   const latest = $derived(entity.events[entity.events.length - 1]!);
   const task = $derived(latest.task ?? entity.events[0]!.task);
+
+  // Collapsed by default: the journey (all steps) is hidden until the user
+  // expands the card with the chevron. Only the current (head) task shows.
+  let collapsed = $state(true);
+  const headNode = $derived(nodes[nodes.length - 1]);
+  const currentTone = $derived(headNode?.tone ?? "done");
+  const currentTitle = $derived(
+    headNode && headNode.title.trim() !== ""
+      ? headNode.title
+      : live_
+        ? "Working…"
+        : "Spawned",
+  );
 </script>
 
 <article class="agent-entity" data-agent-kind={kindInfo.kind} style="--ae-accent: {kindInfo.accent}" data-testid="subagent-card">
@@ -110,8 +124,47 @@
     {/if}
   </header>
 
-  <ol class="agent-entity__journey">
-    {#each nodes as node (node.id)}
+  <!-- Current task: flips through what the agent is doing as the head
+       node changes. Collapsed by default (the full journey hides behind
+       the chevron), so this is the single live line the user sees. -->
+  <div class="agent-entity__current" data-tone={currentTone}>
+    <span class="agent-entity__current-marker agent-entity__marker--{currentTone}" aria-hidden="true">
+      {#if currentTone === "active"}
+        <BrailleSpinner class="agent-entity__node-spinner" shape="triangle" />
+      {:else if currentTone === "pending"}
+        <span class="agent-entity__shimmer-dot" aria-hidden="true"></span>
+      {:else if currentTone === "failed" || currentTone === "cancelled"}
+        <X size={11} />
+      {:else if currentTone === "blocked"}
+        <span class="agent-entity__node-bang" aria-hidden="true">!</span>
+      {/if}
+    </span>
+    <div class="agent-entity__current-body">
+      {#key currentTitle}
+        <p
+          class="agent-entity__current-title"
+          title={headNode?.fullTitle ?? currentTitle}
+          in:fly={{ duration: 280, y: -6, opacity: 0, easing: cubicOut }}
+          out:fly={{ duration: 280, y: 6, opacity: 0, easing: cubicInOut }}
+        >{currentTitle}</p>
+      {/key}
+    </div>
+    {#if nodes.length > 0}
+      <button
+        class="agent-entity__action agent-entity__action--expand"
+        type="button"
+        aria-expanded={!collapsed}
+        title={collapsed ? "Show steps" : "Hide steps"}
+        onclick={() => (collapsed = !collapsed)}
+      >
+        <ChevronDown size={14} class="agent-entity__chevron {!collapsed ? 'open' : ''}" />
+      </button>
+    {/if}
+  </div>
+
+  {#if !collapsed}
+    <ol class="agent-entity__journey" transition:slide={{ duration: 260, easing: cubicInOut }}>
+      {#each nodes as node (node.id)}
       {#key node.id}
       <li
         class="agent-entity__node agent-entity__node--{node.tone}"
@@ -143,7 +196,8 @@
       </li>
       {/key}
     {/each}
-  </ol>
+    </ol>
+  {/if}
 
   {#if showInstructions && task}
     <InstructionsDialog
@@ -382,4 +436,59 @@
     transition: background 0.15s ease;
   }
   .agent-entity__action:hover { background: color-mix(in srgb, var(--ae-accent) 12%, transparent); }
+
+  /* ── Current task line (collapsed default) ── */
+  .agent-entity__current {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    column-gap: 9px;
+    align-items: center;
+    min-height: 22px;
+  }
+  .agent-entity__current-marker {
+    grid-column: 1;
+    justify-self: center;
+    align-self: center;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--color-muted);
+    transition: color 0.2s ease;
+  }
+  .agent-entity__current[data-tone="active"] .agent-entity__current-marker { color: var(--ae-accent); }
+  .agent-entity__current[data-tone="pending"] .agent-entity__current-marker { color: var(--ae-accent); }
+  .agent-entity__current[data-tone="blocked"] .agent-entity__current-marker { color: #f08c2e; }
+  .agent-entity__current[data-tone="failed"] .agent-entity__current-marker,
+  .agent-entity__current[data-tone="cancelled"] .agent-entity__current-marker { color: var(--color-danger); }
+  .agent-entity__current-body {
+    grid-column: 2;
+    position: relative;
+    min-width: 0;
+  }
+  .agent-entity__current-title {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--color-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .agent-entity__current[data-tone="active"] .agent-entity__current-title { color: var(--ae-accent); }
+  .agent-entity__current[data-tone="blocked"] .agent-entity__current-title { color: #c2691a; }
+  .agent-entity__action--expand {
+    grid-column: 3;
+    margin-left: 0;
+    border: none;
+    padding: 4px;
+    border-radius: 6px;
+  }
+  .agent-entity__chevron {
+    transition: transform 0.25s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .agent-entity__chevron.open { transform: rotate(180deg); }
 </style>

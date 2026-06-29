@@ -3,6 +3,7 @@ import type {
   GitMergeResult,
   GitPrResult,
   ModelInfo,
+  ImagePayload,
   RemoteProjectInfo,
   RemoteSessionInfo,
   RemoteTapFrame,
@@ -113,7 +114,7 @@ export function sendMessage(
   m: Master,
   threadId: string,
   text: string,
-  opts?: { model?: ModelInfo; thinking?: ThinkingLevel },
+  opts?: { model?: ModelInfo; thinking?: ThinkingLevel; images?: ImagePayload[] },
 ): Promise<void> {
   return post(m, `/sessions/${threadId}/message`, { text, ...opts });
 }

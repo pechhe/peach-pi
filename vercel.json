@@ -1,6 +1,6 @@
 {
   "buildCommand": "pnpm --filter @peach-pi/mobile build",
   "outputDirectory": "apps/mobile/dist",
-  "installCommand": "pnpm install",
+  "installCommand": "pnpm install --filter @peach-pi/mobile... --frozen-lockfile",
   "framework": null
 }

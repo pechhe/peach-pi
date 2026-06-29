@@ -86,42 +86,9 @@
 
   <AutomationDialog bind:open={dialogOpen} {projects} automation={editing} />
 
-  <!-- Toolbar: filter tabs + search -->
-  <div class="flex items-center gap-2 px-6 pb-3">
-    <div class="flex items-center gap-1">
-      {#each tabs as t (t.id)}
-        <button
-          class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors {tab ===
-          t.id
-            ? "bg-primary text-primary-fg"
-            : "text-muted hover:bg-surface-2 hover:text-fg"}"
-          onclick={() => (tab = t.id)}>
-          {t.label}
-          <span
-            class="inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] {tab ===
-            t.id
-              ? "bg-primary-fg/20 text-primary-fg"
-              : "bg-surface-2 text-faint"}">{counts[t.id]}</span
-          >
-        </button>
-      {/each}
-    </div>
-    <div class="relative ml-auto w-64">
-      <Search
-        size={14}
-        class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint"
-      />
-      <input
-        type="text"
-        placeholder="Search automations..."
-        bind:value={query}
-        class="w-full rounded-lg border border-border bg-surface/50 py-1.5 pl-8 pr-3 text-xs text-fg placeholder:text-fainter focus:border-primary focus:outline-none" />
-    </div>
-  </div>
-
   <div class="flex-1 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex max-w-2xl flex-col gap-2.5">
-      {#each filtered as auto (auto.id)}
+      {#each automations as auto (auto.id)}
         <div
           class="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:border-border-strong">
           <Switch
@@ -234,9 +201,7 @@
         {/if}
       {:else}
         <p class="mt-8 text-center text-sm text-fainter">
-          {query || tab !== "all"
-            ? "No automations match these filters."
-            : "No automations. Schedule a recurring prompt — it fires into a fresh thread."}
+          No automations. Schedule a recurring prompt — it fires into a fresh thread.
         </p>
       {/each}
     </div>

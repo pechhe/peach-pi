@@ -1,6 +1,6 @@
 <script lang="ts">
   import { sendMessage, steerMessage, abortRun, deleteQueued } from "../lib/api.ts";
-  import type { ModelInfo, ScopedModel, ThinkingLevel, SessionMeta } from "@peach-pi/shared-types";
+  import type { ModelInfo, ImagePayload, ScopedModel, ThinkingLevel, SessionMeta } from "@peach-pi/shared-types";
   import type { Master } from "../lib/store.svelte.ts";
   import Icon from "./Icon.svelte";
   import ModelPicker from "./ModelPicker.svelte";
@@ -43,6 +43,18 @@
   let showPicker = $state(false);
   // Overflow menu: steer toggle, reset-override, full model & reasoning sheet.
   let showOverflow = $state(false);
+
+  // Image attachments pasted/dropped into the composer (ADR-0011). Mirrors
+  //  the desktop's ComposerImageAttachment but in-memory + sent as
+  //  ImagePayload alongside the text. Steer turns never carry images.
+  type DraftImage = { id: string; name: string; mimeType: string; data: string; url: string };
+  let images = $state<DraftImage[]>([]);
+  let fileInput = $state<HTMLInputElement | null>(null);
+
+  const SUPPORTED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+  const MAX_IMAGES = 8;
+  // ~10MB base64 cap per image — bounded relay body.
+  const MAX_IMAGE_BASE64 = 14_000_000;
 
   const activeModel = $derived(overrideModel ?? sessionModel);
   const activeThinking = $derived(overrideThinking ?? sessionThinking);
@@ -105,16 +117,22 @@
     if (!body || sending) return;
     sending = true;
     try {
-      if (steer && running) await steerMessage(master, threadId, body);
-      else {
+      if (steer && running) {
+        await steerMessage(master, threadId, body);
+      } else {
         // Only forward an override when the user set one this turn.
-        const opts: { model?: ModelInfo; thinking?: ThinkingLevel } = {};
+        const opts: { model?: ModelInfo; thinking?: ThinkingLevel; images?: ImagePayload[] } = {};
         if (overrideModel) opts.model = overrideModel;
         if (overrideThinking) opts.thinking = overrideThinking;
+        if (images.length) {
+          opts.images = images.map((i) => ({ mimeType: i.mimeType, data: i.data }));
+        }
         await sendMessage(master, threadId, body, Object.keys(opts).length ? opts : undefined);
         // Override applied on the master; subsequent turns use the session default.
         overrideModel = null;
         overrideThinking = null;
+        for (const i of images) URL.revokeObjectURL(i.url);
+        images = [];
       }
       text = "";
       steer = false;
@@ -156,6 +174,82 @@
       e.preventDefault();
       void submit();
     }
+  }
+
+  // ── Image attachments ───────────────────────────────────────────────
+  // PWA paste/drop: read image File blobs into base64 ImagePayload chunks
+  // (mirrors the desktop composer-attachments path, but browser-only — no
+  // main-process file reader needed). Steer turns are text-only; images are
+  // dropped when the user flips a turn into a steer.
+  function isImageFile(file: File): boolean {
+    return SUPPORTED_IMAGE_MIME.has(file.type) || SUPPORTED_IMAGE_MIME.has(`image/${file.name.split(".").pop()?.toLowerCase()}`);
+  }
+
+  async function addFiles(files: File[]): Promise<void> {
+    const imgs = files.filter(isImageFile);
+    for (const file of imgs) {
+      if (images.length >= MAX_IMAGES) {
+        onError(`Max ${MAX_IMAGES} images per message`);
+        break;
+      }
+      const read = await readImageFile(file);
+      if (read) images = [...images, read];
+    }
+  }
+
+  function readImageFile(file: File): Promise<DraftImage | null> {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const comma = dataUrl.indexOf(",");
+        if (comma < 0) return resolve(null);
+        const data = dataUrl.slice(comma + 1);
+        if (data.length > MAX_IMAGE_BASE64) {
+          onError(`"${file.name}" too large (max ~10MB)`);
+          return resolve(null);
+        }
+        const mimeType = file.type || "image/png";
+        resolve({
+          id: crypto.randomUUID(),
+          name: file.name || "pasted-image.png",
+          mimeType: SUPPORTED_IMAGE_MIME.has(file.type) ? mimeType : "image/png",
+          data,
+          url: dataUrl,
+        });
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function removeImage(id: string): void {
+    const img = images.find((i) => i.id === id);
+    if (img) URL.revokeObjectURL(img.url);
+    images = images.filter((i) => i.id !== id);
+  }
+
+  function onPaste(e: ClipboardEvent): void {
+    const cd = e.clipboardData;
+    if (!cd) return;
+    const files: File[] = [];
+    for (const item of Array.from(cd.items ?? [])) {
+      if (item.kind === "file") {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length) {
+      e.preventDefault();
+      void addFiles(files);
+    }
+  }
+
+  function onFileInput(e: Event): void {
+    const input = e.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    void addFiles(files);
+    input.value = "";
   }
 
   const fmtTokens = (n: number | null | undefined): string => {
@@ -204,12 +298,30 @@
             bind:value={text}
             oninput={grow}
             onkeydown={onKeydown}
+            onpaste={onPaste}
             rows="1"
             placeholder={running
               ? (steer ? "steer the running turn…" : "queue a follow-up…")
-              : "message the clanker"}
+              : "message the clunker"}
             class="max-h-40 min-h-[22px] w-full resize-none bg-transparent text-[15px] leading-[1.4] text-fg outline-none placeholder:text-fainter"
           ></textarea>
+
+          {#if images.length > 0}
+            <div class="composer__images">
+              {#each images as img (img.id)}
+                <div class="composer__image-chip">
+                  <img src={img.url} alt={img.name} />
+                  <button
+                    class="composer__image-remove"
+                    onclick={() => removeImage(img.id)}
+                    aria-label={`Remove ${img.name}`}
+                  >
+                    <Icon name="x" size={10} sw={3} />
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
 
           {#if meta?.contextPercent != null}
             <div class="composer__context">
@@ -287,6 +399,28 @@
 
           <button
             class="composer__overflow"
+            onclick={() => fileInput?.click()}
+            aria-label="Attach image"
+            title="Attach image"
+            disabled={steer && running}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="m21 15-3.5-3.5L7 22" />
+            </svg>
+          </button>
+          <input
+            bind:this={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            onchange={onFileInput}
+            class="hidden"
+          />
+
+          <button
+            class="composer__overflow"
             onclick={() => (showOverflow = !showOverflow)}
             aria-label="More composer options"
             aria-expanded={showOverflow}
@@ -332,7 +466,14 @@
         {#if running && hasText}
           <button
             class="composer__overflow-item {steer ? 'is-on' : ''}"
-            onclick={() => (steer = !steer)}
+            onclick={() => {
+              const next = !steer;
+              if (next && images.length) {
+                for (const i of images) URL.revokeObjectURL(i.url);
+                images = [];
+              }
+              steer = next;
+            }}
             aria-pressed={steer}
           >
             <Icon name="send" size={15} sw={2} />
@@ -460,5 +601,43 @@
   }
   .composer__overflow-item:hover {
     background: var(--color-surface);
+  }
+  .composer__images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 0 6px;
+  }
+  .composer__image-chip {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 7px;
+    overflow: hidden;
+    border: 1px solid oklch(0.78 0.015 90 / 0.55);
+    box-shadow: 0 1px 3px oklch(0.42 0.004 250 / 0.3);
+  }
+  .composer__image-chip img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .composer__image-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: 0;
+    border-radius: 999px;
+    color: white;
+    background: oklch(0.2 0.005 250 / 0.78);
+   cursor: pointer;
+  }
+  .composer__image-remove:hover {
+    background: oklch(0.5 0.18 28 / 0.9);
   }
 </style>

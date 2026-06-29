@@ -292,7 +292,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
         //  it takes effect for THIS turn (mobile composer, ADR-0011).
         if (opts?.model) await threadService.setModel(threadId, opts.model.provider, opts.model.id);
         if (opts?.thinking) await threadService.setThinking(threadId, opts.thinking);
-        await threadService.prompt(threadId, text);
+        await threadService.prompt(threadId, text, opts?.images ?? []);
       },
       steer: (threadId, text) => threadService.steer(threadId, text),
       abort: (threadId) => threadService.abort(threadId),

@@ -12,6 +12,7 @@ import type {
   GitCommitPushResult,
   GitMergeResult,
   GitPrResult,
+  ImagePayload,
   ModelInfo,
   ProjectId,
   RemoteHostConfig,
@@ -42,6 +43,14 @@ const ThinkingLevels = new Set<ThinkingLevel>([
   "medium",
   "high",
   "xhigh",
+]);
+
+/** Image MIME types the mobile composer may attach to a message (ADR-0011). */
+const SUPPORTED_IMAGE_MIME = new Set<string>([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
 ]);
 import { originUrl } from "@peach-pi/remote-handoff";
 // ADR-0011: the steering lease lives behind the movable-execution seam. The
@@ -143,7 +152,7 @@ export interface RelayActions {
   message: (
     threadId: ThreadId,
     text: string,
-    opts?: { model?: ModelInfo; thinking?: ThinkingLevel },
+    opts?: { model?: ModelInfo; thinking?: ThinkingLevel; images?: ImagePayload[] },
   ) => Promise<void>;
   /** Immediate steer of a running turn. */
   steer: (threadId: ThreadId, text: string) => Promise<void>;
@@ -818,13 +827,29 @@ export class RemoteHostService {
         // Optional per-send override (mobile composer, ADR-0011). Only forward
         //  a well-shaped ModelInfo/ThinkingLevel; ignore junk rather than 400 —
         //  a stale client shouldn't lose its message.
-        const opts: { model?: ModelInfo; thinking?: ThinkingLevel } = {};
+        const opts: { model?: ModelInfo; thinking?: ThinkingLevel; images?: ImagePayload[] } = {};
         const m = body.model;
         if (m && typeof m === "object" && typeof m.provider === "string" && typeof m.id === "string" && typeof m.name === "string") {
           opts.model = { provider: m.provider, id: m.id, name: m.name };
         }
         const t = body.thinking;
         if (typeof t === "string" && ThinkingLevels.has(t)) opts.thinking = t as ThinkingLevel;
+        // Images pasted/dropped in the mobile composer (ADR-0011). Validate
+        //  shape + cap count/size so a hostile client can't exhaust memory;
+        //  malformed entries are dropped, not 400'd.
+        const imgs = Array.isArray(body.images) ? body.images : [];
+        const images: ImagePayload[] = [];
+        for (const img of imgs) {
+          if (images.length >= 8) break;
+          if (!img || typeof img !== "object") continue;
+          const mimeType = typeof img.mimeType === "string" ? img.mimeType : "";
+          const data = typeof img.data === "string" ? img.data : "";
+          if (!SUPPORTED_IMAGE_MIME.has(mimeType)) continue;
+          // ~10MB base64 cap per image — keeps the relay body bounded.
+          if (data.length > 14_000_000) continue;
+          images.push({ mimeType, data });
+        }
+        if (images.length) opts.images = images;
         await a.message(threadId, text, Object.keys(opts).length ? opts : undefined);
         return this.send(res, 200, { ok: true });
       }
