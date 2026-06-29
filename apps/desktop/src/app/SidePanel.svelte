@@ -50,6 +50,12 @@
     }
   }
 
+  // Focus the input as soon as the panel mounts so the user can type
+  // immediately. rAF waits for the fly-in transition to attach the node.
+  function focusOnMount(node: HTMLTextAreaElement) {
+    requestAnimationFrame(() => node.focus());
+  }
+
   async function onPickModel(e: Event) {
     const value = (e.currentTarget as HTMLSelectElement).value;
     const model = models.find((m) => `${m.provider}/${m.id}` === value) ?? null;
@@ -201,6 +207,7 @@
           bind:value={sideChat.draft}
           onkeydown={onKeydown}
           rows="1"
+          use:focusOnMount
           placeholder="Ask a side question…"
           class="max-h-32 flex-1 resize-none self-center bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
         ></textarea>

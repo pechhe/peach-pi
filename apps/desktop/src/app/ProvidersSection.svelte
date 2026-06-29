@@ -86,28 +86,30 @@
     <div class="rounded-md border border-border bg-surface-2/40 px-3 py-2" data-testid="provider-row" data-provider={p.id}>
       <div class="flex items-center gap-2">
         <span class="truncate text-xs font-medium text-fg">{p.name}</span>
-        <span class="flex items-center gap-0.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-emerald-400">
-          <Check size={9} /> {sourceLabel(p)}
-        </span>
 
-        <div class="relative ml-auto">
-          <button
-            class="rounded p-1 text-fainter hover:bg-bg hover:text-fg"
-            onclick={() => (menuOpen = menuOpen === p.id ? null : p.id)}
-            aria-label="Actions"
-            data-testid="provider-menu"
-          ><MoreHorizontal size={14} /></button>
-          {#if menuOpen === p.id}
-            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <div class="fixed inset-0 z-40" onclick={() => (menuOpen = null)}></div>
-            <div class="absolute right-0 top-full z-50 mt-1 w-36 overflow-hidden rounded-md border border-border-strong bg-surface shadow-lg">
-              {#if p.oauth}
-                <button class="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-surface-2" onclick={() => startOAuth(p)}>Re-sign in</button>
-              {/if}
-              <button class="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-surface-2" onclick={() => toggleKeyForm(p.id)}>Edit API key</button>
-              <button class="block w-full px-3 py-1.5 text-left text-xs text-red-400 hover:bg-surface-2" onclick={() => { menuOpen = null; void providers.logout(p.id); }}>Remove</button>
-            </div>
-          {/if}
+        <div class="ml-auto flex items-center gap-2">
+          <span class="flex items-center gap-0.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-emerald-400">
+            <Check size={9} /> {sourceLabel(p)}
+          </span>
+          <div class="relative">
+            <button
+              class="rounded p-1 text-fainter hover:bg-bg hover:text-fg"
+              onclick={() => (menuOpen = menuOpen === p.id ? null : p.id)}
+              aria-label="Actions"
+              data-testid="provider-menu"
+            ><MoreHorizontal size={14} /></button>
+            {#if menuOpen === p.id}
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <div class="fixed inset-0 z-40" onclick={() => (menuOpen = null)}></div>
+              <div class="absolute right-0 top-full z-50 mt-1 w-36 overflow-hidden rounded-md border border-border-strong bg-surface shadow-lg">
+                {#if p.oauth}
+                  <button class="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-surface-2" onclick={() => startOAuth(p)}>Re-sign in</button>
+                {/if}
+                <button class="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-surface-2" onclick={() => toggleKeyForm(p.id)}>Edit API key</button>
+                <button class="block w-full px-3 py-1.5 text-left text-xs text-red-400 hover:bg-surface-2" onclick={() => { menuOpen = null; void providers.logout(p.id); }}>Remove</button>
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
 
