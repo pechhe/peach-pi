@@ -5,6 +5,7 @@
   import Icon from "./Icon.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import ReasoningDial from "./ReasoningDial.svelte";
+  import { haptic } from "../lib/haptic.ts";
 
   let {
     master,
@@ -122,13 +123,18 @@
   }
 
   function pickSlot(m: ScopedModel): void {
+    // Only tick when the selection actually crosses into a new slot, so a
+    // drag across the track feels like detents rather than a buzz.
+    if (overrideModel?.provider === m.provider && overrideModel?.id === m.id) return;
     overrideModel = { provider: m.provider, id: m.id, name: m.name };
+    haptic(6);
   }
 
   async function submit(): Promise<void> {
     if (isStop) return void stop();
     const body = text.trim();
     if (!body || sending) return;
+    haptic(12);
     sending = true;
     try {
       if (steer && running) {
@@ -159,6 +165,7 @@
   }
 
   async function stop(): Promise<void> {
+    haptic(12);
     try {
       await abortRun(master, threadId);
     } catch (e) {
@@ -179,6 +186,7 @@
     const current = overrideThinking ?? sessionThinking ?? "off";
     const idx = order.indexOf(current);
     overrideThinking = order[(idx + 1) % order.length] ?? "off";
+    haptic(6);
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -565,15 +573,26 @@
     min-width: 0;
     flex: 1 1 auto;
   }
+  /* Two-row chassis like desktop: screen, then a single controls row. The
+     controls never wrap — the slider flexes to fill, the dial/send/disks are
+     fixed compact widths. (The earlier wrap put the slider on its own line,
+     which read as three rows.) */
+  .composer-device .composer__key-mount {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+  }
   .composer-device .reasoning-dial {
-    --dial-size: 44px;
+    --dial-size: 36px;
+    flex: 0 0 auto;
   }
   .composer-device .send-dial,
   .composer-device .send-dial--stop {
-    width: 42px;
-    min-width: 42px;
-    height: 42px;
-    margin-left: 6px;
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    margin-left: 4px;
+    flex: 0 0 auto;
   }
   /* The slider badge is 360px on desktop with fixed-px thumb/tick geometry
      (52px + pos*128px) that overflows a phone. Let it flex full width and
@@ -584,7 +603,17 @@
     width: 100%;
     min-width: 0;
     max-width: 100%;
-    height: 58px;
+    height: 56px;
+  }
+  /* Keep the three model captions from colliding when the slider is narrow:
+     each is capped to a third of the track and anchored to its tick. */
+  .composer-device .model-selector__badge--slider .model-selector__slider-label--slot {
+    width: 34%;
+    max-width: 34%;
+  }
+  .composer-device .model-selector__badge--slider .model-selector__slider-label--slot-2 {
+    left: auto;
+    right: 0;
   }
   .composer-device .model-selector__slider {
     pointer-events: auto;
@@ -608,18 +637,19 @@
     right: 0;
   }
   .composer-device .composer__footer-row {
-    /* Wrap the controls below the editor screen on narrow phones; the slider
-       + dial take the first row, the overflow/send take the second. */
-    flex-wrap: wrap;
-    gap: 6px 8px;
+    flex-wrap: nowrap;
+    gap: 4px;
     justify-content: flex-start;
+    min-height: 0;
+    padding: 8px 8px 2px;
   }
   .composer-device .composer__overflow {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
     border-radius: 999px;
     border: 0;
     color: var(--crt-ink-muted, var(--muted));
