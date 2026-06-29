@@ -20,6 +20,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
   import ConnectorIcon from "./ConnectorIcon.svelte";
+  import ExecutorConnections from "./ExecutorConnections.svelte";
 
   // Master-detail over the Composio catalogue. Left: connectors grouped by
   // connection state. Right: the selected toolkit's metadata + tool list.
@@ -39,7 +40,7 @@
   let selectedSlug = $state<string | null>(null);
 
   // What the detail pane shows. Custom connections are local (non-Composio).
-  let mode = $state<"none" | "toolkit" | "custom" | "custom-new" | "mcp" | "cli">("none");
+  let mode = $state<"none" | "toolkit" | "custom" | "custom-new" | "mcp" | "cli" | "executor">("none");
   let customConnections = $state<CustomConnection[]>([]);
   let selectedCustom = $state<CustomConnection | null>(null);
   // New-custom form.
@@ -291,6 +292,13 @@
     selectedCustom = null;
   }
 
+  function selectExecutor() {
+    resetSetup();
+    mode = "executor";
+    selectedSlug = null;
+    selectedCustom = null;
+  }
+
   function selectCli() {
     resetSetup();
     mode = "cli";
@@ -508,6 +516,13 @@
           <span class="flex-1 truncate text-sm text-fg">{c.name}</span>
         </button>
       {/each}
+
+      <button
+        class="w-full px-2 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-wider text-fainter transition-colors hover:text-fg"
+        class:text-fg={mode === "executor"}
+        onclick={selectExecutor}
+        data-testid="sidebar-executor-header"
+      >Executor</button>
 
       <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">MCP servers</p>
       {#if mcpServers.length > 0}
@@ -896,6 +911,8 @@
           <p class="mt-3 text-sm text-fainter">No tools listed for this app.</p>
         {/if}
       </div>
+    {:else if mode === "executor"}
+      <ExecutorConnections />
     {:else if mode === "mcp"}
       <div class="mx-auto w-full max-w-3xl px-8 py-6">
         <div class="flex items-start gap-3">

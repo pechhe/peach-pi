@@ -1246,6 +1246,48 @@ export interface McpServer {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Executor — local-first MCP proxy (bundled CLI). Integrations are catalogue
+// entries; connections are credentialed instances (many per integration).
+// Secrets live inside Executor and never reach the renderer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** An Executor integration: a service whose tools become available once a
+ *  connection is made. The catalogue entry, not a credentialed instance. */
+export interface ExecIntegration {
+  /** Stable id, e.g. "github", "notion_mcp". */
+  slug: string;
+  /** Human-readable label/description. */
+  description: string;
+  /** Origin: "built-in" | "mcp" | "openapi" | "graphql" | … */
+  kind: string;
+  /** False for built-ins that can't be removed. */
+  canRemove: boolean;
+  /** Whether the integration's tools can be re-indexed. */
+  canRefresh: boolean;
+}
+
+/** A credentialed connection to an Executor integration. Only non-secret
+ *  metadata; the credential stays in Executor. */
+export interface ExecConnection {
+  /** Scope owner. Local desktop connections are "user". */
+  owner: "org" | "user";
+  /** Connection name (unique within owner+integration). */
+  name: string;
+  /** The integration slug this connects to. */
+  integration: string;
+  /** Upstream provider id. */
+  provider: string;
+  /** Optional user-facing label (e.g. the account). */
+  identityLabel: string | null;
+  /** Optional description. */
+  description: string | null;
+  /** Credential expiry (epoch ms), or null if it doesn't expire. */
+  expiresAt: number | null;
+  /** True when backed by an OAuth client rather than an API key. */
+  isOAuth: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BWS — Bitwarden Secrets Manager CLI
 // ─────────────────────────────────────────────────────────────────────────────
 

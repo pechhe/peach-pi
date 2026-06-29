@@ -107,6 +107,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     customConnectionService,
     connectionSetupService,
     mcpService,
+    executorService,
     cuaDriverService,
     agentBrowserService,
     usageService,
@@ -181,6 +182,15 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "extensions:setEnabled": piUpdateService.setEnabledExtension.bind(piUpdateService),
       "mcp:setEnabled": mcpService.setEnabled.bind(mcpService),
       "mcp:list": mcpService.list.bind(mcpService),
+      "executor:integrations": executorService.integrations.bind(executorService),
+      "executor:connections": executorService.connections.bind(executorService),
+      "executor:addConnection": async (integration) => {
+        const r = await executorService.addConnection(integration);
+        void shell.openExternal(r.url);
+        return r;
+      },
+      "executor:removeConnection": executorService.removeConnection.bind(executorService),
+      "executor:addOpenApi": executorService.addOpenApi.bind(executorService),
       "connectors:catalogue": connectorService.catalogue.bind(connectorService),
       "connectors:toolkit": connectorService.toolkit.bind(connectorService),
       "connectors:list": connectorService.list.bind(connectorService),

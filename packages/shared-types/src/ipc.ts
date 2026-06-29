@@ -36,6 +36,8 @@ import type {
   MergeProgressPayload,
   WorkQueueOpenCountResult,
   CustomConnection,
+  ExecConnection,
+  ExecIntegration,
   CustomConnectionInput,
   ProposedConnectionConfig,
   ConnSetupDeltaPayload,
@@ -784,6 +786,38 @@ export const ipcContracts = {
   /** List configured MCP servers with cached tool counts. */
   "mcp:list": invoke<[], McpServer[]>(),
 
+  // Executor (local-first MCP proxy; bundled CLI talks to a local daemon that
+  // owns ~/.executor). Integrations are catalogue entries, connections are
+  // credentialed instances (many per integration). Secrets stay in Executor
+  // and never reach the renderer: adding a connection returns a local web-UI
+  // URL where the user enters the credential.
+  /** List integrations in the Executor catalogue. */
+  "executor:integrations": invoke<[], ExecIntegration[]>(),
+  /** List saved connections (non-secret metadata). */
+  "executor:connections": invoke<[], ExecConnection[]>(),
+  /** Begin adding a connection to an integration. Opens the Executor web-UI
+   *  Add-account flow (via shell.openExternal) and returns its URL +
+   *  instructions; the user enters the secret there, not in peach-pi. */
+  "executor:addConnection": invoke<[integration: string], { url: string; instructions: string }>(
+    (s) => requireNonEmptyString(s, "integration"),
+  ),
+  /** Remove a saved connection. */
+  "executor:removeConnection": invoke<
+    [owner: "org" | "user", integration: string, name: string],
+    void
+  >((_o, i, n) => {
+    requireNonEmptyString(i, "integration");
+    requireNonEmptyString(n, "name");
+  }),
+  /** Add an OpenAPI integration to the catalogue from a spec URL. */
+  "executor:addOpenApi": invoke<
+    [url: string, slug: string],
+    { slug: string; toolCount: number }
+  >((u, s) => {
+    requireNonEmptyString(u, "url");
+    requireNonEmptyString(s, "slug");
+  }),
+
   // Agent Browser (native web computer-use tool; see ADR-0008). The
   // pi-agent-browser-native package exposes the native `agent_browser` tool,
   // replacing brittle `agent-browser` shell commands. peach-pi ensures it is
@@ -1053,6 +1087,10 @@ export const ipcContracts = {
   /** A connector's status changed (connected/revoked/refreshed). Renderer
    *  re-lists via `connectors:list`. */
   "event:connectorsChanged": event<void>(),
+
+  /** An Executor integration or connection changed. Renderer re-lists via
+   *  `executor:integrations` / `executor:connections`. */
+  "event:executorChanged": event<void>(),
   "event:terminalData": event<{ threadId: ThreadId; data: string }>(),
   "event:terminalExit": event<{ threadId: ThreadId; exitCode: number }>(),
   /** A render frame from an extension's `custom()` TUI, for the xterm overlay. */

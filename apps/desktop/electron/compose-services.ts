@@ -30,6 +30,7 @@ import { CliService } from "./services/cli-service.ts";
 import { CustomConnectionService } from "./services/custom-connection-service.ts";
 import { ConnectionSetupService } from "./services/connection-setup-service.ts";
 import { McpService } from "./services/mcp-service.ts";
+import { ExecutorService } from "./services/executor-service.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
 import { UsageService } from "./services/usage/usage-service.ts";
@@ -105,6 +106,7 @@ export interface ServiceComposition {
   customConnectionService: CustomConnectionService;
   connectionSetupService: ConnectionSetupService;
   mcpService: McpService;
+  executorService: ExecutorService;
   cuaDriverService: CuaDriverService;
   agentBrowserService: AgentBrowserService;
   usageService: UsageService;
@@ -446,6 +448,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     ? path.join(process.resourcesPath, "executor", "executor")
     : path.join(app.getAppPath(), "build", "executor", "executor");
   void mcpService.ensureExecutorServer(executorBin);
+  const executorService = new ExecutorService(executorBin, emit);
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
   const usageService = new UsageService(emit);
@@ -489,6 +492,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     customConnectionService,
     connectionSetupService,
     mcpService,
+    executorService,
     cuaDriverService,
     agentBrowserService,
     usageService,
