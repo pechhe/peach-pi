@@ -21,6 +21,40 @@ export interface SubagentRow {
   summary?: string;
   status: SubagentStatus;
   elapsed?: number;
+  /** Path to the child agent's `.jsonl` session file, when the
+   *  pi-subagents extension exposes it in the tool result `details`. The
+   *  renderer polls it to build a rich step-by-step journey (real tool
+   *  names + args + narration) instead of the single live-widget line. */
+  sessionFile?: string;
+}
+
+/** Tone of a journey step rendered in the subagent card. Mirrors the
+ *  renderer-local `NodeTone` from journey.svelte.ts so session-file-derived
+ *  steps can reuse the same node markup. */
+export type SubagentStepTone =
+  | "done"
+  | "active"
+  | "blocked"
+  | "failed"
+  | "cancelled"
+  | "pending";
+
+/** Whether a step is agent narration or a tool call — lets the renderer pick
+ *  the last narration as the current task line. */
+export type SubagentStepKind = "narration" | "tool";
+
+/** One step in a subagent's journey, derived from its session `.jsonl`.
+ *  Structurally compatible with the renderer's `TimelineNode` so the expanded
+ *  journey reuses existing node markup. */
+export interface SubagentStep {
+  id: string;
+  tone: SubagentStepTone;
+  kind: SubagentStepKind;
+  title: string;
+  fullTitle?: string;
+  subtitle?: string;
+  /** Relative time label, e.g. "3m". */
+  at: string;
 }
 
 export type TranscriptItem =

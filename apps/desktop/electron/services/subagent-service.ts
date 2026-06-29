@@ -1,9 +1,10 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { SubagentAgentInfo, SubagentAgentPatch } from "@peach-pi/shared-types";
+import type { SubagentAgentInfo, SubagentAgentPatch, SubagentStep } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo } from "../persistence/repositories.ts";
+import { readSubagentSteps } from "./subagent-steps.ts";
 
 /**
  * Makes the pi-subagents extension work inside the GUI.
@@ -199,5 +200,14 @@ export class SubagentService {
       ? "global"
       : "project";
     return writeAgentPatch(filePath, patch, scope);
+  }
+
+  /** Read a subagent's session `.jsonl` as journey steps (real tool names +
+   *  args + narration). The renderer polls this while a card is live to
+   *  build a rich journey instead of the single live-widget activity line.
+   *  Never throws on read/parse failures — returns `[]` so the renderer can
+   *  fall back to the widget-derived journey. */
+  readSteps(sessionFile: string): SubagentStep[] {
+    return readSubagentSteps(sessionFile);
   }
 }

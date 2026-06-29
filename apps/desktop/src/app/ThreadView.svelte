@@ -891,6 +891,14 @@
     if (!scrolledUp) glideToBottom();
   });
 
+  // The user just sent a message (slider/steer-aside both mark via sendAnim).
+  // Even if they scrolled up to read history, sending means "I'm done looking,
+  // bring me to the bottom" — force a smooth glide down on every send tick.
+  $effect(() => {
+    void sendAnim.sentTick(thread.id);
+    scrollToBottom();
+  });
+
   // Keep the bottom pinned whenever content height changes (streaming text,
   // tool output, the working indicator) or the scroll area itself resizes
   // (e.g. the composer grows after attaching an image). The transcript's

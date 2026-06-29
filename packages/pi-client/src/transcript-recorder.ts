@@ -191,6 +191,7 @@ interface SubagentDetails {
   elapsed?: number;
   exitCode?: number;
   errorMessage?: string;
+  sessionFile?: string;
   children?: SubagentDetails[];
 }
 
@@ -237,6 +238,7 @@ function rowFrom(
     summary: details?.summary ?? details?.errorMessage,
     status: normaliseStatus(details?.status, details?.exitCode, details?.errorMessage),
     elapsed: details?.elapsed,
+    sessionFile: details?.sessionFile,
   };
 }
 

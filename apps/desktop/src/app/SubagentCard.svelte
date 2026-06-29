@@ -28,6 +28,8 @@
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import InstructionsDialog from "./InstructionsDialog.svelte";
   import type { FleetAgent } from "../lib/subagent/fleet";
+  import { api } from "../lib/ipc";
+  import type { SubagentStep } from "@peach-pi/shared-types";
   import {
     activityLog,
     buildNodes,
@@ -66,9 +68,6 @@
   $effect(() => {
     if (live_ && live?.activity) activityLog.record(entity.name, live.activity);
   });
-  const nodes = $derived(
-    buildNodes(entity, activityLog.logFor(entity.name), live_, live?.activity),
-  );
   const state = $derived(headState(entity, live_));
   const stateLabel = $derived(
     state === "running"
@@ -85,9 +84,26 @@
   const latest = $derived(entity.events[entity.events.length - 1]!);
   const task = $derived(latest.task ?? entity.events[0]!.task);
 
+  // Rich journey from the subagent's own session `.jsonl`: real tool names +
+  // args + narration. We poll the file while the agent is live (and once
+  // on death) because the child writes asynchronously. Falls back to the
+  // widget-derived `nodes` below when there's no session file (or polling
+  // hasn't yielded steps yet).
+  const sessionFile = $derived(latest.sessionFile);
+  let steps: SubagentStep[] = $state([]);
+  let pollHandle: ReturnType<typeof setInterval> | undefined;
+
   // Collapsed by default: the journey is hidden until the user expands the
   // card with the chevron. Only the current task line shows.
   let collapsed = $state(true);
+  // Prefer the rich session-file journey; fall back to the widget-derived
+  // nodes when no session file is available. `SubagentStep` is structurally
+  // compatible with `TimelineNode` (extra `kind` is harmless here).
+  const nodes = $derived(
+    steps.length > 0
+      ? steps
+      : buildNodes(entity, activityLog.logFor(entity.name), live_, live?.activity),
+  );
   const headNode = $derived(nodes[nodes.length - 1]);
   // Live tool activity verbatim ("running command", "cymbal_outline…"),
   // cleaned. The pi-subagents widget only exposes this single line.
@@ -97,22 +113,53 @@
     if (!raw || /^(?:thinking|working)/i.test(raw)) return undefined;
     return raw.replace(/\s+/g, " ").replace(/[….\s]+$/u, "");
   });
-  // Current task line. Prefer the agent's last narration (the folded journey
-  // head title — tool churn is folded into subtitles, so this is the last
-  // meaningful sentence). If the agent has only run tools and never narrated,
-  // fall back to the live tool activity rather than a dead "Working…".
+  // Current task line. Prefer the agent's last narration — for session-file
+  // steps that's the last `kind: narration` step (stable while tools run
+  // beneath it); for the widget fallback it's the folded head title. If the
+  // agent has only run tools and never narrated, show the live tool activity
+  // rather than a dead "Working…".
+  const lastNarration = $derived.by(() => {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const s = steps[i]!;
+      if (s.kind === "narration" && s.title.trim()) return s;
+    }
+    return undefined;
+  });
   const currentTone = $derived(live_ ? "active" : (headNode?.tone ?? "done"));
   const currentTitle = $derived.by(() => {
-    const narration = headNode?.title?.trim();
+    const narration = (lastNarration?.title ?? headNode?.title)?.trim();
     if (narration) return narration;
     if (liveTool) return liveTool;
     return live_ ? "Working…" : "Spawned";
   });
-  // Dim sub-status: the live tool, shown under the narration when it differs
-  // (mirrors the TUI's two-line title + activity layout).
+  // Dim sub-status: the live tool activity, shown under the narration when
+  // it differs (mirrors the TUI's two-line title + activity layout).
   const currentSub = $derived(
     live_ && liveTool && liveTool !== currentTitle ? liveTool : undefined,
   );
+
+  async function refreshSteps(): Promise<void> {
+    if (!sessionFile) return;
+    try {
+      steps = await api.invoke("subagents:readSteps", sessionFile);
+    } catch {
+      // Unreadable/missing: leave prior `steps` until the file appears.
+    }
+  }
+  $effect(() => {
+    sessionFile; // track
+    const liveNow = live_;
+    void refreshSteps();
+    if (liveNow) {
+      pollHandle = setInterval(refreshSteps, 1500);
+      return () => {
+        if (pollHandle) clearInterval(pollHandle);
+        pollHandle = undefined;
+      };
+    }
+    // Terminal: one final read captures the last tool result, then stop.
+    void refreshSteps();
+  });
 </script>
 
 <article class="agent-entity" data-agent-kind={kindInfo.kind} style="--ae-accent: {kindInfo.accent}" data-testid="subagent-card">
@@ -159,7 +206,7 @@
       {#key currentTitle}
         <p
           class="agent-entity__current-title"
-          title={headNode?.fullTitle ?? currentTitle}
+          title={lastNarration?.fullTitle ?? headNode?.fullTitle ?? currentTitle}
           in:fly={{ duration: 280, y: -6, opacity: 0, easing: cubicOut }}
           out:fly={{ duration: 280, y: 6, opacity: 0, easing: cubicInOut }}
         >{currentTitle}</p>
