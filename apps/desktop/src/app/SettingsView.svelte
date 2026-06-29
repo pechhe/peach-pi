@@ -305,7 +305,9 @@
       const rect = el.getBoundingClientRect();
       if (rect.bottom <= 0) continue; // scrolled past (incl. touching top edge)
       if (rect.top > root.clientHeight + 4) continue; // below viewport
-      if (best === null || rect.top < best.top) best = { id: it.id, top: rect.top };
+      // Prefer the section whose top is nearest the visible top (small negative ok).
+      const score = Math.abs(rect.top);
+      if (best === null || score < best.top) best = { id: it.id, top: score };
     }
     if (best) activeId = best.id;
     else if (!activeId && NAV_ITEMS[0]) activeId = NAV_ITEMS[0].id;
@@ -315,11 +317,16 @@
   // the IntersectionObserver fires at intermediate positions and would otherwise
   // snap activeId to the section above the target before it reaches the top.
   let programmaticScroll = $state(false);
+  let scrollTargetId: string | null = null;
 
   $effect(() => {
     const root = scrollEl;
     if (!root) return;
     const onScrollEnd = () => {
+      if (scrollTargetId) {
+        activeId = scrollTargetId;
+        scrollTargetId = null;
+      }
       programmaticScroll = false;
       pickActive();
     };
@@ -359,6 +366,7 @@
     if (!root || !el) return;
     activeId = id;
     programmaticScroll = true;
+    scrollTargetId = id;
     if (scrollAnim != null) cancelAnimationFrame(scrollAnim);
     const styles = getComputedStyle(root);
     const paddingTop = parseFloat(styles.paddingTop) || 0;
@@ -385,6 +393,16 @@
       }
     };
     scrollAnim = requestAnimationFrame(step);
+    // Fallback: if scrollend doesn't fire (rare), still release the lock.
+    setTimeout(() => {
+      scrollAnim = null;
+      if (programmaticScroll && scrollTargetId) {
+        activeId = scrollTargetId;
+        scrollTargetId = null;
+        programmaticScroll = false;
+        pickActive();
+      }
+    }, duration + 120);
   }
 
   let muted = $state(soundsMuted());
