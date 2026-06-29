@@ -5,6 +5,7 @@
   import Icon from "./Icon.svelte";
   import SquareSpinner from "./SquareSpinner.svelte";
   import TriangleSpinner from "./TriangleSpinner.svelte";
+  import { haptic } from "../lib/haptic.ts";
 
   let { item }: { item: TranscriptItem } = $props();
 
@@ -47,7 +48,7 @@
   <div class="flex flex-col">
     <button
       class="flex w-full items-center gap-2 py-0.5 text-left text-[12px] {item.output ? '' : 'pointer-events-none'}"
-      onclick={() => (showTool = !showTool)}
+      onclick={() => { haptic(6); showTool = !showTool; }}
     >
       <span class="shrink-0 {item.status === 'error' ? 'text-danger' : item.status === 'running' ? 'text-accent' : 'text-fainter'}">
         {#if item.status === "running"}
