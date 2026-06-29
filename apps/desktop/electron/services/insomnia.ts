@@ -11,7 +11,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 const DEFAULT_CAFFEINATE_PATH = "/usr/bin/caffeinate";
 
-export class MacSleepInhibitor {
+class MacSleepInhibitor {
   private readonly platform: NodeJS.Platform;
   private readonly pid: number;
   private readonly caffeinatePath: string;

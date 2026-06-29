@@ -17,11 +17,9 @@
 
   let {
     item = $bindable<CompactionItem | null>(null),
-    threadId,
     onRetry,
   }: {
     item?: CompactionItem | null;
-    threadId: string;
     onRetry?: () => void;
   } = $props();
 

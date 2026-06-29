@@ -4,7 +4,7 @@ export function stylePx(value: number): string {
 	return `${value}px`;
 }
 
-export function styleOpacity(opacity: number): number {
+function styleOpacity(opacity: number): number {
 	return Math.round(opacity * 1e6) / 1e6;
 }
 

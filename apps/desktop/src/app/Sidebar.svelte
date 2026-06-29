@@ -71,7 +71,6 @@
     onOpenTesting,
     onOpenWorkQueue,
     onOpenSearch,
-    onReloadAll,
     onGoBack,
     onGoForward,
     canGoBack = false,
@@ -94,7 +93,6 @@
     onOpenTesting: (projectId: string) => void;
     onOpenWorkQueue: (projectId: string) => void;
     onOpenSearch: () => void;
-    onReloadAll: () => void;
     onGoBack: () => void;
     onGoForward: () => void;
     canGoBack?: boolean;
@@ -440,10 +438,22 @@
     onNewChat();
   }
 
+  let pendingRemoveProject = $state<Project | null>(null);
+  let removeProjectDialogOpen = $state(false);
+  const removeProjectDescription = $derived(
+    pendingRemoveProject
+      ? `Remove project "${pendingRemoveProject.name}" and all its threads? This can't be undone.`
+      : "",
+  );
   function removeProject(project: Project) {
     // projects:remove cascades to all the project's threads (ON DELETE CASCADE).
-    if (!confirm(`Remove project "${project.name}" and all its threads?`)) return;
-    api.invoke("projects:remove", project.id);
+    pendingRemoveProject = project;
+    removeProjectDialogOpen = true;
+  }
+  function confirmRemoveProject() {
+    if (pendingRemoveProject) api.invoke("projects:remove", pendingRemoveProject.id);
+    pendingRemoveProject = null;
+    removeProjectDialogOpen = false;
   }
 
   // Reversible thread actions show an undo toast (inverse IPC channel).
@@ -1194,6 +1204,15 @@
   confirmLabel="Archive"
   destructive
   onConfirm={confirmArchiveWorktree}
+/>
+
+<ConfirmDialog
+  bind:open={removeProjectDialogOpen}
+  title="Remove project"
+  description={removeProjectDescription}
+  confirmLabel="Remove"
+  destructive
+  onConfirm={confirmRemoveProject}
 />
 
 <ConfirmDialog

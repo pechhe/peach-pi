@@ -36,7 +36,7 @@ function createPathWaveResolver(getPathNorm: PathNormGetter): DotAnimationResolv
 
 const PATH_WAVE_RESOLVER = createPathWaveResolver(({ index }) => snakePathNormFromIndex(index));
 
-export function getAnimationResolver(
+function getAnimationResolver(
 	animation: DotMatrixAnimation
 ): DotAnimationResolver | undefined {
 	if (animation === "path-wave") {

@@ -29,29 +29,6 @@ export async function isRepo(cwd: string): Promise<boolean> {
   return gitOk(["rev-parse", "--git-dir"], cwd);
 }
 
-/** Repo top-level for `cwd`; null if not a repo. */
-export async function repoRoot(cwd: string): Promise<string | null> {
-  try {
-    return (await git(["rev-parse", "--show-toplevel"], cwd)).trim();
-  } catch {
-    return null;
-  }
-}
-
-/** Read the origin URL (normalized to https, sans .git), or null. */
-export async function originUrl(cwd: string): Promise<string | null> {
-  try {
-    const remote = (await git(["remote", "get-url", "origin"], cwd)).trim();
-    const ssh = /^git@([^:]+):(.+?)(?:\.git)?$/.exec(remote);
-    if (ssh) return `https://${ssh[1]}/${ssh[2]}`;
-    const https = /^https?:\/\/(?:[^@]+@)?(.+?)(?:\.git)?$/.exec(remote);
-    if (https) return `https://${https[1]}`;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 /** Current branch; null on detached HEAD. */
 export async function currentBranch(cwd: string): Promise<string | null> {
   try {
@@ -227,7 +204,7 @@ export async function createRecoveryBranch(
 }
 
 /** Remove a worktree dir from the repo's worktree registry (best effort). */
-export async function removeWorktree(repoPath: string, dir: string): Promise<void> {
+async function removeWorktree(repoPath: string, dir: string): Promise<void> {
   await git(["worktree", "remove", "--force", "--force", dir], repoPath).catch(() => undefined);
 }
 
@@ -258,7 +235,7 @@ async function safe(args: string[], cwd: string): Promise<string> {
  * in). The MVP handoff uses the real `wipCheckpoint` above; this is the seam
  * for a future "snapshot without pausing" path.
  */
-export async function snapshotTree(cwd: string, message: string): Promise<string | null> {
+async function snapshotTree(cwd: string, message: string): Promise<string | null> {
   if (!(await gitOk(["rev-parse", "--git-dir"], cwd))) return null;
   const indexFile = join(tmpdir(), `peach-handoff-idx-${randomBytes(6).toString("hex")}`);
   const env = { GIT_INDEX_FILE: indexFile };

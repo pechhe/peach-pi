@@ -1,5 +1,5 @@
 export const ROW_COUNTS = [3, 4, 5, 4, 3] as const;
-export const HEX_ROW_PITCH_RATIO = Math.sqrt(3) / 2;
+const HEX_ROW_PITCH_RATIO = Math.sqrt(3) / 2;
 
 export interface HexCellDefinition {
 	id: string;
@@ -21,7 +21,7 @@ export interface HexCellState extends HexCellDefinition {
 
 export type HexTone = "x" | "o";
 
-export function hexPatternIndex(row: number, rowCount: number, col: number): number {
+function hexPatternIndex(row: number, rowCount: number, col: number): number {
 	return row * ROW_COUNTS[2] + Math.floor((ROW_COUNTS[2] - rowCount) / 2) + col;
 }
 
@@ -35,7 +35,7 @@ export const HEX_ROWS: readonly HexCellDefinition[][] = ROW_COUNTS.map((count, r
 	}))
 );
 
-export const HEX_CELLS: readonly HexCellDefinition[] = HEX_ROWS.flat();
+const HEX_CELLS: readonly HexCellDefinition[] = HEX_ROWS.flat();
 
 export function getHexLayout(
 	size: number,

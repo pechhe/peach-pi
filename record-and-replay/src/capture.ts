@@ -6,7 +6,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import {dirname, join} from "node:path";
 import { fileURLToPath } from "node:url";
@@ -147,4 +147,4 @@ export function killCapture(active: ActiveCapture): void {
   }
 }
 
-export { MAX_DURATION_MS, discardRecording, rmSync };
+export { MAX_DURATION_MS } from "./types.ts";

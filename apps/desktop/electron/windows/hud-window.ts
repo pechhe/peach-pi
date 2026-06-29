@@ -15,15 +15,6 @@ export const HUD_COLLAPSED_HEIGHT = 300;
 /** Expanded height: chat panel grows upward above the composer (ADR-0002). */
 export const HUD_EXPANDED_HEIGHT = 660;
 
-/** Default bottom-centre anchor (collapsed) on the primary display's work area. */
-export function defaultHudPosition(): { x: number; y: number } {
-  const { workArea } = screen.getPrimaryDisplay();
-  return {
-    x: Math.round(workArea.x + (workArea.width - HUD_WIDTH) / 2),
-    y: workArea.y + workArea.height - HUD_COLLAPSED_HEIGHT - 40,
-  };
-}
-
 /**
  * Persistent floating HUD window (see CONTEXT.md, ADR-0002). One frameless,
  * transparent, always-on-top window over every Space and fullscreen app. Unlike

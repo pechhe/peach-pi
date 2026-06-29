@@ -34,7 +34,7 @@ export interface ButtonSoundSettings {
   readonly destructive: ButtonClickVariant;
 }
 
-export const DEFAULT_BUTTON_SOUND_SETTINGS: ButtonSoundSettings = {
+const DEFAULT_BUTTON_SOUND_SETTINGS: ButtonSoundSettings = {
   primary: "click",
   navigation: "none",
   toggle: "key",
@@ -42,29 +42,7 @@ export const DEFAULT_BUTTON_SOUND_SETTINGS: ButtonSoundSettings = {
   destructive: "click",
 };
 
-export const BUTTON_CLICK_VARIANTS: readonly ButtonClickVariant[] = ["click", "key", "rotary", "none"];
-
-export const BUTTON_CATEGORY_LABELS: Record<ButtonCategory, string> = {
-  primary: "Primary actions",
-  navigation: "Navigation",
-  toggle: "Toggle buttons",
-  secondary: "Secondary actions",
-  destructive: "Destructive actions",
-};
-
-export const BUTTON_CATEGORY_DESCRIPTIONS: Record<ButtonCategory, string> = {
-  primary: "Submit, send, start thread, confirm",
-  navigation: "Sidebar items, view switching",
-  toggle: "Caveman, composer mode, queue mode",
-  secondary: "Refresh, copy, open folder",
-  destructive: "Delete, remove, cancel",
-};
-
 let currentSettings: ButtonSoundSettings = { ...DEFAULT_BUTTON_SOUND_SETTINGS };
-
-export function getButtonSoundSettings(): ButtonSoundSettings {
-  return { ...currentSettings };
-}
 
 /* ── Audio engine (based on langlink's clickSound.ts) ──────────────────── */
 
@@ -407,7 +385,7 @@ function now(): number {
 }
 
 /** Play a key sound (press/release pair) */
-export function playKey(phase: KeyPhase = "press"): void {
+function playKey(phase: KeyPhase = "press"): void {
   if (soundsMuted()) return;
   if (keyBuffers.length === 0) {
     void loadAll().then(() => {

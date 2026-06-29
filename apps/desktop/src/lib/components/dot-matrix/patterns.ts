@@ -1,32 +1,32 @@
 import { GRID_RANGE, MATRIX_CENTER, MATRIX_SIZE, indexToCoord, rowMajorIndex } from "./geometry.js";
 import type { DotMatrixPattern } from "./types.js";
 
-export const FULL_INDEXES = GRID_RANGE.flatMap((row) =>
+const FULL_INDEXES = GRID_RANGE.flatMap((row) =>
 	GRID_RANGE.map((col) => rowMajorIndex(row, col))
 );
 
-export const DIAMOND_INDEXES = FULL_INDEXES.filter((index) => {
+const DIAMOND_INDEXES = FULL_INDEXES.filter((index) => {
 	const { row, col } = indexToCoord(index);
 	return Math.abs(row - MATRIX_CENTER) + Math.abs(col - MATRIX_CENTER) <= 2;
 });
 
-export const OUTLINE_INDEXES = FULL_INDEXES.filter((index) => {
+const OUTLINE_INDEXES = FULL_INDEXES.filter((index) => {
 	const { row, col } = indexToCoord(index);
 	return row === 0 || row === MATRIX_SIZE - 1 || col === 0 || col === MATRIX_SIZE - 1;
 });
 
-export const CROSS_INDEXES = FULL_INDEXES.filter((index) => {
+const CROSS_INDEXES = FULL_INDEXES.filter((index) => {
 	const { row, col } = indexToCoord(index);
 	return row === MATRIX_CENTER || col === MATRIX_CENTER;
 });
 
-export const RINGS_INDEXES = FULL_INDEXES.filter((index) => {
+const RINGS_INDEXES = FULL_INDEXES.filter((index) => {
 	const { row, col } = indexToCoord(index);
 	const radius = Math.hypot(row - MATRIX_CENTER, col - MATRIX_CENTER);
 	return Math.round(radius) === 1 || Math.round(radius) === 2;
 });
 
-export const ROSE_INDEXES = FULL_INDEXES.filter((index) => {
+const ROSE_INDEXES = FULL_INDEXES.filter((index) => {
 	const { row, col } = indexToCoord(index);
 	const dx = col - MATRIX_CENTER;
 	const dy = row - MATRIX_CENTER;

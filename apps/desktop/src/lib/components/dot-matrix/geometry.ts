@@ -20,36 +20,36 @@ export function indexToCoord(index: number): { row: number; col: number } {
 	};
 }
 
-export function distanceFromCenter(index: number): number {
+function distanceFromCenter(index: number): number {
 	const { row, col } = indexToCoord(index);
 	return Math.hypot(row - MATRIX_CENTER, col - MATRIX_CENTER);
 }
 
-export function rowDistance(index: number): number {
+function rowDistance(index: number): number {
 	const { row } = indexToCoord(index);
 	return Math.abs(row - MATRIX_CENTER);
 }
 
-export function polarAngle(index: number): number {
+function polarAngle(index: number): number {
 	const { row, col } = indexToCoord(index);
 	return Math.atan2(row - MATRIX_CENTER, col - MATRIX_CENTER);
 }
 
-export function normalizedRadius(index: number): number {
+function normalizedRadius(index: number): number {
 	const { row, col } = indexToCoord(index);
 	return Math.hypot(row - MATRIX_CENTER, col - MATRIX_CENTER) / MAX_RADIUS;
 }
 
-export function manhattanDistance(index: number): number {
+function manhattanDistance(index: number): number {
 	const { row, col } = indexToCoord(index);
 	return Math.abs(row - MATRIX_CENTER) + Math.abs(col - MATRIX_CENTER);
 }
 
-export function harmonicPhase(row: number, col: number, a: number, b: number): number {
+function harmonicPhase(row: number, col: number, a: number, b: number): number {
 	return Math.sin((row + 1) * a + (col + 1) * b);
 }
 
-export function lissajousOffset(
+function lissajousOffset(
 	row: number,
 	col: number,
 	amplitude = 2.25
@@ -61,7 +61,7 @@ export function lissajousOffset(
 	return { x, y, phase };
 }
 
-export function spiralOffset(
+function spiralOffset(
 	angle: number,
 	radiusNormalizedValue: number,
 	amplitude = 2.8
@@ -75,7 +75,7 @@ export function spiralOffset(
 	return { x, y, phase };
 }
 
-export function isPrime(value: number): boolean {
+function isPrime(value: number): boolean {
 	if (value <= 1) {
 		return false;
 	}
@@ -131,7 +131,7 @@ export function snakePathNormFromIndex(index: number): number {
 	return SNAKE_ORDER[index]! / (CELL_COUNT - 1);
 }
 
-export function snakePathOrderValue(index: number): number {
+function snakePathOrderValue(index: number): number {
 	return SNAKE_ORDER[index]!;
 }
 
@@ -328,25 +328,25 @@ function buildRowWaveSnakeOrderToIndexMap(): number[] {
 const ROW_WAVE_SNAKE_ORDER: readonly number[] = buildRowWaveSnakeOrderToIndexMap();
 const ROW_WAVE_SNAKE_MAX_ORDER = Math.max(...ROW_WAVE_SNAKE_ORDER);
 
-export function rowWaveOrderValue(index: number): number {
+function rowWaveOrderValue(index: number): number {
 	return ROW_WAVE_SNAKE_ORDER[index]!;
 }
 
-export function rowWaveNormFromIndex(index: number): number {
+function rowWaveNormFromIndex(index: number): number {
 	return ROW_WAVE_SNAKE_MAX_ORDER > 0 ? rowWaveOrderValue(index) / ROW_WAVE_SNAKE_MAX_ORDER : 0;
 }
 
-export function colWaveNormFromIndex(index: number): number {
+function colWaveNormFromIndex(index: number): number {
 	const { col } = indexToCoord(index);
 	return GRID_SIDE > 1 ? col / (GRID_SIDE - 1) : 0;
 }
 
-export function concentricRingNormFromIndex(index: number): number {
+function concentricRingNormFromIndex(index: number): number {
 	const { row, col } = indexToCoord(index);
 	return Math.max(Math.abs(row - GRID_CENTER), Math.abs(col - GRID_CENTER)) / GRID_CENTER;
 }
 
-export function isWithinCircularMask(row: number, col: number): boolean {
+function isWithinCircularMask(row: number, col: number): boolean {
 	return !CORNER_COORDINATES.has(`${row},${col}`);
 }
 

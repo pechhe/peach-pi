@@ -141,16 +141,7 @@ const TOOL_ACTION_WORDS = [
   "listing",
 ];
 
-/** Detect tool-derived "grunt" activity lines the fleet widget rotates
- *  through (e.g. "reading 3 files…", "running command…", "cymbal_search…").
- *  These advance the agent's work but rarely say anything useful as a
- *  standalone timeline step, so the journey folds them in as a subtitle on
- *  the latest narration node instead.
- *
- *  Narration prose (assistant sentences like "Found X. Now let me…") is NOT
- *  matched here — those are the real milestones we keep as nodes. */
-function isToolActivity(raw: string): boolean {
-  const s = raw.replace(/…+$/u, "").trim();
+function isSingleToolActivity(s: string): boolean {
   if (!s) return false;
   const lower = s.toLowerCase();
   for (const word of TOOL_ACTION_WORDS) {
@@ -170,6 +161,27 @@ function isToolActivity(raw: string): boolean {
     return true;
   }
   return false;
+}
+
+/** Detect tool-derived "grunt" activity lines the fleet widget rotates
+ *  through (e.g. "reading 3 files…", "running command…", "cymbal_search…",
+ *  and composites like "cymbal_search 4 files…, running command" where the
+ *  extension joined several pending tools with ", "). These advance the
+ *  agent's work but rarely say anything useful as a standalone timeline
+ *  step, so the journey folds them in as a subtitle on the latest narration
+ *  node instead.
+ *
+ *  Narration prose (assistant sentences like "Found X. Now let me…") is NOT
+ *  matched here — those are the real milestones we keep as nodes. */
+function isToolActivity(raw: string): boolean {
+  const s = raw.replace(/…+$/u, "").trim();
+  if (!s) return false;
+  // Composite (comma-joined) tool activity emitted by the extension when
+  // multiple tools are pending at once. Treat as churn only if EVERY part is
+  // a tool activity on its own.
+  const parts = s.split(/,\s+/);
+  if (parts.length > 1) return parts.every(isSingleToolActivity);
+  return isSingleToolActivity(s);
 }
 
 /** Set or replace the subtitle of the last node. Returns false if there's no
@@ -254,8 +266,13 @@ export function buildNodes(
       // Skip generic placeholders from pi-subagents — they aren't useful steps.
       const raw = u.a.activity;
       if (/^(?:thinking|working)[.……]$/i.test(raw)) continue;
-      // First real activity: swap the shimmer slot into the real title so
-      // the {#key node.id} transition animates "shimmer → first title".
+      // First real activity. If it's tool churn, fold it as a subtitle on
+      // the shimmer slot and keep the shimmer pending — the first *narration*
+      // line is what should become the first real title, not a tool status.
+      if (pendingShimmerIdx >= 0 && isToolActivity(raw)) {
+        attachAsSubtitle(nodes, raw);
+        continue;
+      }
       if (pendingShimmerIdx >= 0) {
         nodes[pendingShimmerIdx] = {
           id: `act-${u.t}`,

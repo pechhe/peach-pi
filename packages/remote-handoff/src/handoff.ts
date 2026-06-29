@@ -21,7 +21,6 @@ import {
   pushBranch,
   worktreeStatus,
   createRecoveryBranch,
-  removeWorktree,
   defaultBranch,
 } from "./git.ts";
 import { startWorker, stopWorker } from "./process.ts";

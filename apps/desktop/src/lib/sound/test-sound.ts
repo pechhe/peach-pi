@@ -43,7 +43,6 @@ const DEFAULT_VARIANT: TestSoundVariant = "testBench";
 
 // Reserved for a future bundled sample (see TODO at top).
 const TEST_SAMPLE_SOURCES: Partial<Record<TestSoundVariant, string>> = {};
-const SAMPLE_IDS = Object.keys(TEST_SAMPLE_SOURCES) as TestSoundVariant[];
 
 function isSampleVariant(variant: TestSoundVariant): boolean {
   return variant in TEST_SAMPLE_SOURCES;
@@ -251,10 +250,4 @@ export function playTestSound(variant?: TestSoundVariant): Promise<void> {
   if (variant) return play(variant);
   const stored = getTestSoundVariant() as TestSoundVariant;
   return play(TEST_SOUND_OPTIONS.some((o) => o.id === stored) ? stored : "testBench");
-}
-
-/** Preload any bundled test samples (reserved for future use). */
-export function preloadTestSamples(): void {
-  if (SAMPLE_IDS.length === 0) return;
-  void loadSamples();
 }

@@ -2,7 +2,7 @@ import type { ProviderUsageSummary } from "@peach-pi/shared-types";
 
 /** Shared between all usage providers + the service. */
 
-export const FETCH_TIMEOUT_MS = 10_000;
+const FETCH_TIMEOUT_MS = 10_000;
 
 /** A resolved credential handed to a provider's fetch logic. The provider
  *  never touches `models.json` / `auth.json` — it consumes this. */

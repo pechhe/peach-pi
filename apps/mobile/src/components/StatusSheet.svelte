@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { snoozeThread, unsnoozeThread, markToTest, unmarkToTest, archiveThread } from "../lib/api.ts";
+  import { takeControl, snoozeThread, unsnoozeThread, markToTest, unmarkToTest, archiveThread } from "../lib/api.ts";
   import type { Master, } from "../lib/store.svelte.ts";
   import type { RemoteSessionInfo } from "@peach-pi/shared-types";
   import Icon from "./Icon.svelte";
@@ -35,6 +35,7 @@
   async function doSnooze(ms: number): Promise<void> {
     busy = "snooze";
     try {
+      await takeControl(master, thread.threadId);
       await snoozeThread(master, thread.threadId, new Date(Date.now() + ms).toISOString());
       onToast("Snoozed", "ok");
       onClose();
@@ -49,6 +50,7 @@
   async function doUnsnooze(): Promise<void> {
     busy = "unsnooze";
     try {
+      await takeControl(master, thread.threadId);
       await unsnoozeThread(master, thread.threadId);
       onToast("Unsnoozed", "ok");
       onClose();
@@ -62,6 +64,7 @@
   async function doMarkToTest(): Promise<void> {
     busy = "markToTest";
     try {
+      await takeControl(master, thread.threadId);
       await markToTest(master, thread.threadId);
       onToast("Marked for testing", "ok");
       onClose();
@@ -75,6 +78,7 @@
   async function doUnmarkToTest(): Promise<void> {
     busy = "unmarkToTest";
     try {
+      await takeControl(master, thread.threadId);
       await unmarkToTest(master, thread.threadId);
       onToast("Removed to-test mark", "ok");
       onClose();
@@ -88,6 +92,7 @@
   async function doArchive(): Promise<void> {
     busy = "archive";
     try {
+      await takeControl(master, thread.threadId);
       await archiveThread(master, thread.threadId);
       onToast("Archived", "ok");
       onClose();

@@ -22,7 +22,6 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type {
   ImportedTheme,
-  ModelInfo,
   ThemeImportInput,
   ThemeImportResult,
 } from "@peach-pi/shared-types";
@@ -228,11 +227,4 @@ export async function importTheme(input: ThemeImportInput): Promise<ThemeImportR
     };
   }
   return { ok: true, theme: parsed };
-}
-
-/** Re-export the model selection so the renderer can preview it in the UI
- *  (e.g. "Using claude-sonnet-4-5"). */
-export async function getImportModel(): Promise<ModelInfo | null> {
-  const config = await readVisionModel();
-  return { provider: config.provider, id: config.id, name: config.id };
 }

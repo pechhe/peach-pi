@@ -1399,7 +1399,6 @@
   />
   <CompactionDialog
     bind:item={compactionDialogItem}
-    threadId={thread.id}
     onRetry={() => api.invoke("threads:retryCompact", thread.id).catch(console.error)}
   />
 </div>

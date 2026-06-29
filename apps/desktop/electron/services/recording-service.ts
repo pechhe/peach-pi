@@ -9,9 +9,8 @@
  * `list_recordings` tools and vice versa.
  */
 
-import { Tray, Menu, nativeImage } from "electron";
+import { Tray, Menu } from "electron";
 import { existsSync } from "node:fs";
-import { basename } from "node:path";
 import { shell } from "electron";
 import type { Emit } from "../ipc/registry.ts";
 import type { RecordingState, RecordingStopResult } from "@peach-pi/shared-types";
@@ -30,7 +29,6 @@ import {
   saveSkill,
   saveRecording,
   loadRecording,
-  skillPath as skillPathFn,
 } from "@peach-pi/record-replay/src/store.ts";
 import { buildDigest, synthesisSystemPrompt } from "@peach-pi/record-replay/src/synthesize.ts";
 import { extractNameFromFrontmatter } from "./recording-util.ts";
@@ -270,5 +268,3 @@ function fmtDur(secs: number): string {
   const s = secs % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
-
-export { basename, nativeImage, skillPathFn };

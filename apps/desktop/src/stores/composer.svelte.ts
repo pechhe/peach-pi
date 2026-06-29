@@ -4,7 +4,7 @@ import type { ComposerMode } from "../lib/composer/mode";
 import type { ComposerAttachment } from "../lib/composer/attachments";
 import { api } from "../lib/ipc";
 
-export interface ComposerDraft {
+interface ComposerDraft {
   text: string;
   attachments: ComposerAttachment[];
   mode: ComposerMode;

@@ -88,7 +88,7 @@ class UsagePrefsStore {
 export const usagePrefs = new UsagePrefsStore();
 
 /** Provider lookup convenience for the sidebar / popover. */
-export function byProvider(
+function byProvider(
   summaries: ProviderUsageSummary[],
   provider: string,
 ): ProviderUsageSummary | undefined {

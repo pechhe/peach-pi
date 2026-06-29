@@ -63,7 +63,7 @@ export interface UseAnimatedToastStackOptions {
  * signature changes (e.g. a duration bump on update), mirroring the React
  * effect that reconciles timers against the current toast set.
  */
-export function useAnimatedToastStack({
+function useAnimatedToastStack({
   initialToasts = [],
   defaultDuration = 4200,
   limit,

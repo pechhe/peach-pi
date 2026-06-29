@@ -49,7 +49,7 @@ export interface DaemonResult {
 }
 
 /** Run `peach daemon <args>` on a peer machine over SSH. */
-export async function sshDaemon(
+async function sshDaemon(
   machine: Machine,
   args: string[],
   timeoutMs = 30_000,

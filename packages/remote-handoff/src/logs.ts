@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /**
@@ -34,14 +34,4 @@ export async function readLog(path: string, lines?: number): Promise<string> {
   // Drop a trailing newline's empty element so tail counts match intuition.
   if (all.length > 0 && all[all.length - 1] === "") all.pop();
   return all.slice(-lines).join("\n");
-}
-
-/** Whether a log file exists (non-throwing). */
-export async function logExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
 }

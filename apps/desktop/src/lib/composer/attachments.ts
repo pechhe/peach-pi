@@ -36,8 +36,8 @@ export type ComposerAttachment =
  * Paste a text blob this big (or this many lines) as an attachment chip instead
  * of dumping raw text into the composer (ChatGPT-style).
  */
-export const PASTE_AS_ATTACHMENT_MIN_CHARS = 2000;
-export const PASTE_AS_ATTACHMENT_MIN_LINES = 15;
+const PASTE_AS_ATTACHMENT_MIN_CHARS = 2000;
+const PASTE_AS_ATTACHMENT_MIN_LINES = 15;
 
 export function shouldPasteAsAttachment(text: string): boolean {
   return (
@@ -58,7 +58,7 @@ function textAttachmentLabel(content: string): string {
   return stripped.length > 40 ? `${stripped.slice(0, 40)}…` : stripped || "Pasted text";
 }
 
-export const SUPPORTED_COMPOSER_IMAGE_TYPES = [
+const SUPPORTED_COMPOSER_IMAGE_TYPES = [
   { extension: "png", mimeType: "image/png" },
   { extension: "jpg", mimeType: "image/jpeg" },
   { extension: "jpeg", mimeType: "image/jpeg" },

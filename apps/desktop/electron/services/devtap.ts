@@ -56,14 +56,14 @@ function findRepoRoot(start: string): string {
 }
 
 /** Absolute path of the JSONL stream. DEVTAP_LOG overrides (used by tests). */
-export function devTapLogPath(): string {
+function devTapLogPath(): string {
   if (process.env.DEVTAP_LOG) return process.env.DEVTAP_LOG;
   if (!cachedRoot) cachedRoot = findRepoRoot(process.cwd());
   return join(cachedRoot, ".pi", "devtap.jsonl");
 }
 
 /** Control-channel directories, alongside the stream (under `.pi/devtap/`). */
-export function devTapDir(): string {
+function devTapDir(): string {
   return join(dirname(devTapLogPath()), "devtap");
 }
 export function devTapRequestsDir(): string {

@@ -12,8 +12,6 @@ import { parseDaemonRunning, parsePermission, parseVersion } from "./cua-driver-
 import { AsyncTtl } from "./ttl-cache.ts";
 import skillBody from "./SKILL_BODY.md?raw";
 
-export { parseDaemonRunning, parsePermission, parseVersion } from "./cua-driver-parse.ts";
-
 const execFileP = promisify(execFile);
 
 /** Where the bundled SKILL.md is installed so the pi agent discovers the CLI. */

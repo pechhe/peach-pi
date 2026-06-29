@@ -80,7 +80,7 @@ function readJson(file: string): Record<string, unknown> | null {
 }
 
 /** Version of the pi SDK the app actually loads (dev: workspace root; packaged: app.asar). */
-export function resolveHostPiVersion(fromDir: string): string | null {
+function resolveHostPiVersion(fromDir: string): string | null {
   const pkg = findUp(fromDir, `node_modules/${SDK_PKG}/package.json`);
   return pkg ? ((readJson(pkg)?.version as string | undefined) ?? null) : null;
 }
@@ -93,7 +93,7 @@ function extensionDir(agentDir: string, id: string): string | null {
 }
 
 /** Discover the SDK version + peer range an installed extension resolved. */
-export function inspectExtension(agentDir: string, id: string): ExtensionFacts {
+function inspectExtension(agentDir: string, id: string): ExtensionFacts {
   const dir = extensionDir(agentDir, id);
   if (!dir) return { id, resolvedSdk: null, peerRange: null };
   const pkg = readJson(path.join(dir, "package.json"));

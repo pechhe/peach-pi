@@ -71,7 +71,6 @@
     onOpenTesting,
     onOpenWorkQueue,
     onOpenSearch,
-    onReloadAll,
     onGoBack,
     onGoForward,
     canGoBack = false,
@@ -94,7 +93,6 @@
     onOpenTesting: (projectId: string) => void;
     onOpenWorkQueue: (projectId: string) => void;
     onOpenSearch: () => void;
-    onReloadAll: () => void;
     onGoBack: () => void;
     onGoForward: () => void;
     canGoBack?: boolean;

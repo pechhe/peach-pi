@@ -103,7 +103,6 @@
             onNewThread={() => {}}
             onNewWorktree={() => {}}
             onOpenSearch={() => {}}
-            onReloadAll={() => void api.invoke("threads:reloadAll" as never)}
             onGoBack={() => {}}
             onGoForward={() => {}}
             canGoBack={false}

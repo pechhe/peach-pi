@@ -22,7 +22,7 @@ import type { Master } from "./store.svelte.ts";
  * - A bare host/IP — plain HTTP on the tailnet with the given port (ADR-0009:
  *   the tailnet is the security boundary, not TLS). Works only when the PWA is
  *   itself served over HTTP. */
-export function baseUrl(m: Master): string {
+function baseUrl(m: Master): string {
   const host = m.host.trim().replace(/\/+$/, "");
   if (/^https?:\/\//i.test(host)) return host;
   return `http://${host}:${m.port}`;
@@ -171,6 +171,14 @@ export function snoozeThread(m: Master, threadId: string, until: string): Promis
 /** Clear a snooze (mirrors threads:unsnooze). */
 export function unsnoozeThread(m: Master, threadId: string): Promise<void> {
   return post(m, `/sessions/${threadId}/unsnooze`);
+}
+
+// Force-take the steering lease (ADR-0011). Guarded write routes
+// (snooze / mark-to-test / archive / message …) reject with 409 when no client
+// holds the thread. The Sessions list doesn't attach an SSE tap, so a StatusSheet
+// action from there would 409 without this pre-step.
+export function takeControl(m: Master, threadId: string): Promise<void> {
+  return post(m, `/sessions/${threadId}/control`, { force: true });
 }
 
 /** Mark a thread for testing, optionally with a note (mirrors threads:markToTest). */

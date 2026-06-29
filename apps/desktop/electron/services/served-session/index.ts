@@ -58,4 +58,4 @@ export {
   createThreadPath,
   createChatPath,
 } from "./routes.ts";
-export { fetchJsonWithTimeout, readJsonBody, DEFAULT_FETCH_TIMEOUT_MS } from "./http-shared.ts";
+export { readJsonBody } from "./http-shared.ts";

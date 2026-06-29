@@ -2,7 +2,7 @@ const SOURCE_BASE_OPACITY = 0.08;
 const SOURCE_MID_OPACITY = 0.34;
 const SOURCE_PEAK_OPACITY = 0.94;
 
-export const DOT_MATRIX_BLOOM_OPACITY_MIN = 0.6;
+const DOT_MATRIX_BLOOM_OPACITY_MIN = 0.6;
 
 function lerp(start: number, end: number, progress: number): number {
 	return start + (end - start) * progress;
@@ -75,7 +75,7 @@ export function remapOpacityToTriplet(
 	return Math.min(1, Math.max(0, lerp(targetPeak, 1, progress)));
 }
 
-export function opacityToBloomLevel(remappedOpacity: number): number {
+function opacityToBloomLevel(remappedOpacity: number): number {
 	return Math.max(
 		0,
 		Math.min(
@@ -85,11 +85,11 @@ export function opacityToBloomLevel(remappedOpacity: number): number {
 	);
 }
 
-export function qualifiesForBloom(remappedOpacity: number): boolean {
+function qualifiesForBloom(remappedOpacity: number): boolean {
 	return remappedOpacity >= DOT_MATRIX_BLOOM_OPACITY_MIN;
 }
 
-export function clampHalo(value: number | undefined): number {
+function clampHalo(value: number | undefined): number {
 	if (value == null || !Number.isFinite(value)) {
 		return 0;
 	}

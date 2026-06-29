@@ -124,7 +124,7 @@ const ENTRIES: LoaderEntry[] = [
 	{ id: "triangle-20", name: "Twin Perimeter", shape: "triangle", component: Triangle20 },
 ];
 
-export const REGISTRY: readonly LoaderEntry[] = ENTRIES;
+const REGISTRY: readonly LoaderEntry[] = ENTRIES;
 
 // Default curated selection per shape (10 each) — visually distinct + legible
 // at small inline sizes. The random picker draws from these unless the user

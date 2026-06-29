@@ -243,7 +243,7 @@
     content: "";
     position: absolute;
     left: 9px;
-    top: 24px;    /* marker bottom (20) + 4px gap */
+    top: 20px;    /* marker bottom (16) + 4px gap */
     bottom: 0;    /* stop at node edge → ~4px gap above next marker */
     width: 2px;
     transform: translateX(-50%) scaleY(0);
@@ -258,7 +258,9 @@
     grid-column: 1;
     justify-self: center;
     align-self: start;
-    margin-top: 1px;
+    /* Inset so the marker's vertical center lands on the first text line's
+       center. First-line box ≈ 16px (11.5px @ 1.4), marker glyph centered in
+       a 16px box; no top nudge so row tops agree across node kinds. */
     z-index: 1;
     display: inline-flex;
     align-items: center;
@@ -309,11 +311,13 @@
 
   .agent-entity__body { grid-column: 2; min-width: 0; }
   /* Shimmer: word "Spawned" rendered as a moving gradient while the agent
-     is alive but hasn't reported its first activity yet. */
+     is alive but hasn't reported its first activity yet. line-height matches
+     node-title's first line (1.4 × 11.5 ≈ 16px) so shimmer row markers align
+     with title row markers. */
   .agent-entity__shimmer {
     font-size: 11.5px;
     font-weight: 600;
-    line-height: 18px;
+    line-height: 1.4;
     background: linear-gradient(
       100deg,
       var(--color-muted) 30%,

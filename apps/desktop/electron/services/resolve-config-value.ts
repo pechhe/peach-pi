@@ -129,7 +129,7 @@ export function resolveConfigValue(config: string | undefined): string | undefin
 /** Async variant: uses `execFile` for `!cmd` values so the main thread isn't
  *  blocked during credential resolution. Env-var / literal paths resolve
  *  synchronously inside the promise. Prefer this from any async context. */
-export async function resolveConfigValueAsync(
+async function resolveConfigValueAsync(
   config: string | undefined,
 ): Promise<string | undefined> {
   if (!config) return undefined;

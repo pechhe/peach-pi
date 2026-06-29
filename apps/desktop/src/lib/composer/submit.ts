@@ -33,7 +33,7 @@ import type { ComposerMode } from "./mode.ts";
 import { buildConnectionsHint, buildSecretsHint } from "./hints.ts";
 import { composeOutgoingPrompt } from "./mode.ts";
 
-export type OutgoingChannel =
+type OutgoingChannel =
   | "threads:prompt"
   | "threads:steer"
   | "remote:message"

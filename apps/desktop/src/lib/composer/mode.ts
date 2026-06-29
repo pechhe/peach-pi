@@ -38,7 +38,7 @@ const PLAN_IDEOLOGY_PROMPTS: Record<PlanModeIdeology, string> = {
   grill: GRILL_PLAN_IDEOLOGY,
 };
 
-export const PLAN_MODE_PROMPT_SEPARATOR = "<!--pi-plan-mode-prompt-->";
+const PLAN_MODE_PROMPT_SEPARATOR = "<!--pi-plan-mode-prompt-->";
 
 /**
  * Build a plan-mode prompt.
@@ -46,7 +46,7 @@ export const PLAN_MODE_PROMPT_SEPARATOR = "<!--pi-plan-mode-prompt-->";
  *   If false, uses a slim reminder — the harness already enforces read-only
  *   via tool restrictions, so we only need to steer behavior, not restate rules.
  */
-export function buildPlanModePrompt(
+function buildPlanModePrompt(
   userPrompt: string,
   ideology: PlanModeIdeology = "default",
   isFirst: boolean = true,
@@ -63,7 +63,7 @@ export function buildPlanModePrompt(
 }
 
 /** Substitute every `{{input}}` token in a sticky wrap template with the raw text. */
-export function applyWrapTemplate(rawText: string, template: string): string {
+function applyWrapTemplate(rawText: string, template: string): string {
   return template.split("{{input}}").join(rawText);
 }
 

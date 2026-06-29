@@ -18,13 +18,13 @@ export function hostLabel(m: Pick<Master, "host" | "port">): string {
   return m.port ? `${host}:${m.port}` : host;
 }
 
-export type Reachability =
+type Reachability =
   | { state: "unknown" }
   | { state: "online"; at: number }
   | { state: "unreachable"; at: number };
 
 /** Where we are in the navigation stack (a tiny hand-rolled router — no deps). */
-export type Route =
+type Route =
   | { name: "masters" }
   | { name: "add-master" }
   | { name: "sessions"; masterId: string }
