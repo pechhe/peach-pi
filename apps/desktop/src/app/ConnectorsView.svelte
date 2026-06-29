@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type {
     Connection,
+    CliStatus,
     CustomConnection,
     ProposedConnectionConfig,
     McpServer,
@@ -13,9 +14,11 @@
   import { playButtonClick } from "../lib/sound/button-click-sound";
   import Search from "@lucide/svelte/icons/search";
   import Server from "@lucide/svelte/icons/server";
+  import Terminal from "@lucide/svelte/icons/terminal";
   import { Switch } from "../components/ui/switch";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import X from "@lucide/svelte/icons/x";
   import ConnectorIcon from "./ConnectorIcon.svelte";
 
   // Master-detail over the Composio catalogue. Left: connectors grouped by
@@ -25,6 +28,10 @@
   let catalogue = $state<ToolkitCatalogEntry[]>([]);
   let mcpServers = $state<McpServer[]>([]);
   let mcpToggling = $state<string | null>(null);
+  let clis = $state<CliStatus[]>([]);
+  let cliBusy = $state<string | null>(null);
+  const visibleClis = $derived(clis.filter((c) => !c.hidden));
+  const hiddenClis = $derived(clis.filter((c) => c.hidden));
   let query = $state("");
   let error = $state("");
 
@@ -32,7 +39,7 @@
   let selectedSlug = $state<string | null>(null);
 
   // What the detail pane shows. Custom connections are local (non-Composio).
-  let mode = $state<"none" | "toolkit" | "custom" | "custom-new" | "mcp">("none");
+  let mode = $state<"none" | "toolkit" | "custom" | "custom-new" | "mcp" | "cli">("none");
   let customConnections = $state<CustomConnection[]>([]);
   let selectedCustom = $state<CustomConnection | null>(null);
   // New-custom form.
@@ -220,6 +227,47 @@
     mcpServers = await api.invoke("mcp:list");
   }
 
+  async function loadClis() {
+    clis = await api.invoke("cli:list");
+  }
+
+  /** Re-probe every CLI (presence + auth) and refresh the list. */
+  async function refreshClis() {
+    if (cliBusy !== null) return;
+    cliBusy = "*";
+    try {
+      clis = await api.invoke("cli:refresh");
+    } finally {
+      cliBusy = null;
+    }
+  }
+
+  /** Launch a CLI's own interactive login flow (opens a Terminal window). */
+  async function loginCli(id: string) {
+    if (cliBusy !== null) return;
+    cliBusy = id;
+    try {
+      await api.invoke("cli:login", id);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      cliBusy = null;
+    }
+  }
+
+  /** Hide a CLI from the list, or restore a hidden one. */
+  async function setCliHidden(id: string, hidden: boolean) {
+    if (cliBusy !== null) return;
+    cliBusy = id;
+    try {
+      clis = await api.invoke("cli:setHidden", id, hidden);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      cliBusy = null;
+    }
+  }
+
   /** Toggle whether an MCP server is in `mcpServers` (enabled) or moved to the
    *  peach-managed stash so pi-mcp-adapter no longer connects to it (disabled).
    *  Applies to new sessions. */
@@ -239,6 +287,13 @@
   function selectMcp() {
     resetSetup();
     mode = "mcp";
+    selectedSlug = null;
+    selectedCustom = null;
+  }
+
+  function selectCli() {
+    resetSetup();
+    mode = "cli";
     selectedSlug = null;
     selectedCustom = null;
   }
@@ -304,6 +359,7 @@
     void loadCatalogue();
     void loadCustom();
     void loadMcp();
+    void loadClis();
     const offs = [
       api.on("event:connectorsChanged", () => {
         void loadConnections();
@@ -311,6 +367,7 @@
         void loadCustom();
         void loadMcp();
       }),
+      api.on("event:clisChanged", () => void loadClis()),
       api.on("event:connSetupDelta", (p) => {
         if (p.sessionId === setupSessionId) setupStream += p.text;
       }),
@@ -475,6 +532,27 @@
           data-testid="sidebar-mcp-empty"
         ><Server size={13} /> No MCP servers configured</button>
       {/if}
+
+      <button
+        class="w-full px-2 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-wider text-fainter transition-colors hover:text-fg"
+        onclick={selectCli}
+        data-testid="sidebar-cli-header"
+      >CLIs</button>
+      {#each visibleClis as c (c.id)}
+        <button
+          class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
+          class:bg-surface={mode === "cli"}
+          onclick={selectCli}
+          data-testid={`sidebar-cli-${c.id}`}
+        >
+          <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Terminal size={12} /></span>
+          <span class="flex-1 truncate text-sm {mode === "cli" ? "text-fg" : "text-muted"}">{c.name}</span>
+          <span
+            class="h-1.5 w-1.5 shrink-0 rounded-full {c.authed ? 'bg-emerald-500' : c.installed ? 'bg-amber-500' : 'bg-fainter'}"
+            title={c.authed ? "Authenticated" : c.installed ? "Installed · not authenticated" : "Not installed"}
+          ></span>
+        </button>
+      {/each}
 
       <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">Not connected</p>
       <button
@@ -871,6 +949,97 @@
             the change to take effect.
           </p>
         {/if}
+      </div>
+    {:else if mode === "cli"}
+      <div class="mx-auto w-full max-w-3xl px-8 py-6">
+        <div class="flex items-start gap-3">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-muted"><Terminal size={16} /></span>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-lg font-semibold text-fg">CLIs</h2>
+            <p class="text-sm text-fainter">
+              Command-line tools the agent uses through its shell. peach-pi detects
+              them and runs each tool's own login flow — auth stays in the CLI's
+              own config, never in peach-pi.
+            </p>
+          </div>
+          <button
+            class="shrink-0 rounded-md border border-border bg-surface px-2.5 py-1 text-xs text-muted transition hover:text-fg disabled:opacity-50"
+            onclick={() => void refreshClis()}
+            disabled={cliBusy !== null}
+            data-testid="cli-recheck"
+          >Re-check</button>
+        </div>
+
+        {#if visibleClis.length > 0}
+          <div class="mt-6 overflow-hidden rounded-xl border border-border bg-surface">
+            {#each visibleClis as c, i (c.id)}
+              <div class="flex items-center gap-2 px-4 py-3" class:border-t={i > 0} class:border-border={i > 0}>
+                <span
+                  class="h-1.5 w-1.5 shrink-0 rounded-full {c.authed ? 'bg-emerald-500' : c.installed ? 'bg-amber-500' : 'bg-fainter'}"
+                ></span>
+                <span class="text-sm font-medium text-fg">{c.name}</span>
+                {#if c.version}
+                  <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-muted">v{c.version}</span>
+                {/if}
+                <span class="text-xs text-fainter">
+                  {c.authed ? "authenticated" : c.installed ? "not authenticated" : "not installed"}
+                </span>
+                <div class="ml-auto flex items-center gap-2">
+                  {#if !c.installed}
+                    <code class="rounded bg-bg px-1.5 py-0.5 text-[11px] text-fainter">{c.installHint}</code>
+                  {:else if !c.authed}
+                    <button
+                      class="rounded-md border border-border bg-bg px-2.5 py-1 text-xs text-fg transition hover:bg-surface disabled:opacity-50"
+                      onclick={() => void loginCli(c.id)}
+                      disabled={cliBusy !== null}
+                      data-testid={`cli-login-${c.id}`}
+                    >Authenticate</button>
+                  {/if}
+                  <a
+                    class="text-[11px] text-muted underline-offset-2 hover:text-fg hover:underline"
+                    href={c.docsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >docs</a>
+                  <button
+                    class="text-fainter transition hover:text-fg disabled:opacity-50"
+                    onclick={() => void setCliHidden(c.id, true)}
+                    disabled={cliBusy !== null}
+                    title="Remove from list"
+                    aria-label={`Remove ${c.name} from list`}
+                    data-testid={`cli-remove-${c.id}`}
+                  ><X size={14} /></button>
+                </div>
+              </div>
+              {#if c.error}
+                <p class="px-4 pb-2 text-[11px] text-amber-400">{c.error}</p>
+              {/if}
+            {/each}
+          </div>
+        {:else}
+          <p class="mt-6 text-sm text-fainter">All CLIs removed. Restore one below.</p>
+        {/if}
+
+        {#if hiddenClis.length > 0}
+          <p class="px-1 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-fainter">Removed</p>
+          <div class="overflow-hidden rounded-xl border border-border bg-surface">
+            {#each hiddenClis as c, i (c.id)}
+              <div class="flex items-center gap-2 px-4 py-2.5" class:border-t={i > 0} class:border-border={i > 0}>
+                <span class="text-sm text-muted">{c.name}</span>
+                <button
+                  class="ml-auto rounded-md border border-border bg-bg px-2.5 py-1 text-xs text-fg transition hover:bg-surface disabled:opacity-50"
+                  onclick={() => void setCliHidden(c.id, false)}
+                  disabled={cliBusy !== null}
+                  data-testid={`cli-restore-${c.id}`}
+                >Restore</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        <p class="mt-4 text-sm text-fg-soft">
+          “Authenticate” opens a Terminal window running the tool's own login
+          flow. After completing it, click Re-check to update the badge.
+        </p>
       </div>
     {/if}
   </section>

@@ -613,7 +613,7 @@
     {/if}
     </div>
     <RecordingBar />
-    <SidePanel />
+    <SidePanel threadId={selectedThreadId} />
     <SearchOverlay
       open={searchOpen}
       onSelect={selectThread}

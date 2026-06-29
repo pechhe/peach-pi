@@ -1,6 +1,11 @@
 {
   "buildCommand": "pnpm --filter @peach-pi/mobile build",
   "outputDirectory": "apps/mobile/dist",
-  "installCommand": "pnpm install --filter @peach-pi/mobile... --frozen-lockfile",
-  "framework": null
+  "installCommand": "sh vercel-install.sh",
+  "framework": null,
+  "git": {
+    "deploymentEnabled": {
+      "wip/*": false
+    }
+  }
 }

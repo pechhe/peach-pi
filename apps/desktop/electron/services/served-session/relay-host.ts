@@ -210,6 +210,12 @@ export class RemoteHostService {
   private bindIp: string | null = null;
   private token = randomBytes(24).toString("hex");
   private enabled = false;
+  /** Persisted user intent: "host serving should be on." Restored by load(),
+   *  set by setHostEnabled(), and auto-resumed on launch so quit→relaunch
+   *  returns straight to serving without a manual re-enable. Distinct from
+   *  `enabled` (live server state) so status() reflects the bound relay, not
+   *  just intent. */
+  private hostEnabled = false;
   /** SSE listeners per thread: late-joiners get a backfill, all get the tail. */
   private listeners = new Map<ThreadId, Set<ServerResponse>>();
   /** Roster SSE listeners (the phone's sessions list). Each gets a full
@@ -263,16 +269,19 @@ export class RemoteHostService {
     };
   }
 
-  /** Load persisted config (token + served-project selection) on boot; does
-   *  not auto-start serving. */
+  /** Load persisted config (token + serving intent + served-project
+   *  selection) on boot; does not auto-start serving — compose-services
+   *  reads hostEnabledIntent() after this resolves to decide that. */
   async load(): Promise<void> {
     try {
       const raw = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as {
         token?: string;
+        enabled?: boolean;
         serveAll?: boolean;
         servedProjects?: string[];
       };
       if (isValidToken(raw.token)) this.token = raw.token;
+      if (typeof raw.enabled === "boolean") this.hostEnabled = raw.enabled;
       if (typeof raw.serveAll === "boolean") this.serveAll = raw.serveAll;
       if (Array.isArray(raw.servedProjects)) {
         this.servedProjects = new Set(raw.servedProjects);
@@ -282,6 +291,12 @@ export class RemoteHostService {
     }
   }
 
+  /** The persisted user intent for serving at boot. compose-services reads
+   *  this after load() to decide whether to auto-resume hosting. */
+  hostEnabledIntent(): boolean {
+    return this.hostEnabled;
+  }
+
   async persist(): Promise<void> {
     await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
     await writeFile(
@@ -289,6 +304,7 @@ export class RemoteHostService {
       JSON.stringify(
         {
           token: this.token,
+          enabled: this.hostEnabled,
           serveAll: this.serveAll,
           servedProjects: [...this.servedProjects],
         },
@@ -905,16 +921,20 @@ export class RemoteHostService {
    *  the service that owns the responsibility). Swallowed Tailscale failures
    *  surface via connectInfo (serveActive=false) rather than throwing. */
   async setHostEnabled(enabled: boolean): Promise<RemoteHostConfig> {
-    if (enabled) await this.start();
-    else await this.stop();
     if (enabled) {
+      await this.start(); // throws if no tailnet — intent stays unchanged.
+      this.hostEnabled = true;
       try {
         const s = await this.status();
         await this.enableServe?.(s.port);
       } catch {
         // Tailscale missing / not logged in — UI shows the QR once Serve comes up.
       }
+    } else {
+      await this.stop();
+      this.hostEnabled = false;
     }
+    void this.persist();
     this.onStatusChange?.();
     return this.status();
   }

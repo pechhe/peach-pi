@@ -503,6 +503,46 @@ export interface ScopedModel {
   scoped: boolean;
 }
 
+/** A model/inference provider pi knows about, with its current auth state.
+ *  Sourced entirely from pi's `AuthStorage` + `ModelRegistry` (see
+ *  `auth-service.ts`) so the list and login mechanics track pi releases
+ *  without app changes. Credential values never cross to the renderer. */
+export interface AuthProviderStatus {
+  /** pi provider id, e.g. "anthropic", "openai-codex". */
+  id: string;
+  /** Human display name from `ModelRegistry.getProviderDisplayName`. */
+  name: string;
+  /** Whether pi offers a `/login` OAuth flow for this provider. */
+  oauth: boolean;
+  /** Any auth (OAuth token, stored key, env var, models.json) is configured. */
+  configured: boolean;
+  /** Where the configured credential resolves from (pi's `AuthStatus.source`). */
+  source?: "stored" | "runtime" | "environment" | "fallback" | "models_json_key" | "models_json_command";
+  /** Human-readable status label from pi's `AuthStatus.label`. */
+  label?: string;
+}
+
+/** A step in pi's OAuth login flow, bridged main → renderer. Mirrors pi's
+ *  `OAuthLoginCallbacks`: variants carrying a `requestId` expect the renderer
+ *  to reply via the `auth:respondLogin` channel (resolving pi's callback
+ *  promise). The app renders these generically, so new provider flows work
+ *  without UI changes. */
+export type AuthLoginEvent =
+  | { kind: "progress"; message: string }
+  | { kind: "auth"; url: string; instructions?: string }
+  | {
+      kind: "deviceCode";
+      userCode: string;
+      verificationUri: string;
+      intervalSeconds?: number;
+      expiresInSeconds?: number;
+    }
+  | { kind: "prompt"; requestId: string; message: string; placeholder?: string; allowEmpty?: boolean }
+  | { kind: "select"; requestId: string; message: string; options: { id: string; label: string }[] }
+  | { kind: "manualCode"; requestId: string }
+  | { kind: "done"; providerId: string }
+  | { kind: "error"; message: string };
+
 /** Raw output of an LLM-driven theme import. The renderer validates every hex
  *  against `HEX_RE` before promoting this to a `SavedTheme`. Any field may be
  *  absent — missing primaries fall back to the base preset's value. */
@@ -1308,6 +1348,38 @@ export interface CuaDriverStatus {
   accessibility: PermissionState;
   /** Screen Recording permission grant (required for window screenshots). */
   screenRecording: PermissionState;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLIs (detected command-line tools, surfaced as a Connections category)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Detection + auth state for one known CLI (e.g. `vercel`, `gh`). The agent
+ *  invokes these through its normal shell tool + per-CLI skills; peach-pi only
+ *  detects presence/auth and runs the CLI's own interactive login flow. Carries
+ *  its own display metadata so the renderer needs no separate descriptor list. */
+export interface CliStatus {
+  /** Stable descriptor id, e.g. "vercel". */
+  id: string;
+  /** Display name, e.g. "Vercel CLI". */
+  name: string;
+  /** Is the binary discoverable on PATH / common install dirs? */
+  installed: boolean;
+  /** Version string from the CLI's `--version`; null when not installed. */
+  version: string | null;
+  /** Whether the CLI's auth-check command reports a logged-in account. */
+  authed: boolean;
+  /** Install hint shown when missing, e.g. "brew install vercel-cli". */
+  installHint: string;
+  /** Docs URL for the row's "docs" link. */
+  docsUrl: string;
+  /** Last probe error (version/auth check), for display. Null when clean. */
+  error: string | null;
+  /** ISO timestamp of the last probe. */
+  lastCheckedAt: string;
+  /** User hid this CLI from the main list (still restorable). Hidden CLIs are
+   *  not probed, so installed/version/authed are not meaningful while hidden. */
+  hidden: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

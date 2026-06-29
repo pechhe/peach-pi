@@ -380,8 +380,9 @@ export class RemoteClientService {
 
   /**
    * Pull a checkpoint branch into an isolated worktree. Matches the session's
-   * origin URL to a local project, fetches `wip/<threadId>` from origin, and
-   * checks it out detached into a fresh worktree under the worktrees dir.
+   * origin URL to a local project, fetches the shared `wip/sync` checkpoint
+   * branch from origin, and checks it out detached into a fresh worktree under
+   * the worktrees dir.
    */
   async pullToTest(hostId: string, threadId: ThreadId): Promise<RemotePullResult> {
     const sessions = await this.listSessions(hostId);

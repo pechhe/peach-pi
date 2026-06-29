@@ -26,12 +26,14 @@ import { setDevTapStateProvider } from "@devtap/electron";
 import { RecordingService } from "./services/recording-service.ts";
 import { ConnectorService } from "./services/connector-service.ts";
 import { BwsService } from "./services/bws-service.ts";
+import { CliService } from "./services/cli-service.ts";
 import { CustomConnectionService } from "./services/custom-connection-service.ts";
 import { ConnectionSetupService } from "./services/connection-setup-service.ts";
 import { McpService } from "./services/mcp-service.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
 import { UsageService } from "./services/usage/usage-service.ts";
+import { AuthService } from "./services/auth-service.ts";
 import { ConnectorResolver } from "./services/connector-resolver.ts";
 import { ensureConnectorExtension } from "./services/connector-extension.ts";
 import { ensurePeachVisionConsentExtension } from "./services/peach-vision-consent-extension.ts";
@@ -98,12 +100,14 @@ export interface ServiceComposition {
   fallowService: FallowService;
   connectorService: ConnectorService;
   bwsService: BwsService;
+  cliService: CliService;
   customConnectionService: CustomConnectionService;
   connectionSetupService: ConnectionSetupService;
   mcpService: McpService;
   cuaDriverService: CuaDriverService;
   agentBrowserService: AgentBrowserService;
   usageService: UsageService;
+  authService: AuthService;
   connectorResolver: ConnectorResolver;
   listTailnetPeersDefault: typeof listTailnetPeersDefault;
   enableServe: typeof enableServe;
@@ -325,7 +329,12 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
       gitMerge: (threadId) => gitService.mergeToLocal(threadId),
     },
   });
-  void remoteHost.load();
+  // Auto-resume serving if the user had it on last run (persisted intent in
+  // peach-remote-host.json). Hooks are set first (synchronously) so
+  // onStatusChange fires during the auto-resumed setHostEnabled(true).
+  void remoteHost.load().then(() => {
+    if (remoteHost.hostEnabledIntent()) void remoteHost.setHostEnabled(true);
+  });
   remoteHost.setHostHooks({
     enableServe,
     onStatusChange: () => emit("event:remoteHostStatus", undefined),
@@ -420,6 +429,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
 
   const connectorService = new ConnectorService(emit);
   const bwsService = new BwsService(emit);
+  const cliService = new CliService(emit);
   const customConnectionService = new CustomConnectionService(emit);
   const connectionSetupService = new ConnectionSetupService(
     emit,
@@ -430,6 +440,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
   const usageService = new UsageService(emit);
+  const authService = new AuthService(emit);
   void cuaDriverService.init();
   void (async () => {
     if (!(await agentBrowserService.state()).installed) {
@@ -464,12 +475,14 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     fallowService,
     connectorService,
     bwsService,
+    cliService,
     customConnectionService,
     connectionSetupService,
     mcpService,
     cuaDriverService,
     agentBrowserService,
     usageService,
+    authService,
     connectorResolver,
     listTailnetPeersDefault,
     enableServe,

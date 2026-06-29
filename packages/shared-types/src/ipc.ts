@@ -8,6 +8,7 @@ import type {
   BwsStatus,
   AgentBrowserState,
   CavemanState,
+  CliStatus,
   CommandInfo,
   CuaDriverStatus,
   Connection,
@@ -52,6 +53,8 @@ import type {
   ImagePayload,
   ModelInfo,
   ScopedModel,
+  AuthProviderStatus,
+  AuthLoginEvent,
   NoticePayload,
   ExtUpdatesAvailable,
   PiHealth,
@@ -153,6 +156,33 @@ export const ipcContracts = {
   "app:getUtilityModel": invoke<[], ModelInfo | null>(),
   /** Persist the "utility" model choice. Pass null to clear (fall back to defaults). */
   "app:setUtilityModel": invoke<[model: ModelInfo | null], ModelInfo | null>(),
+
+  // auth / login (renderer → main). Source of truth is pi's auth.json via the
+  // SDK `AuthStorage`; the renderer never sees credential values. OAuth login
+  // is driven entirely by pi (PKCE/device-code/exchange) — the app only bridges
+  // pi's callbacks to the UI, so new provider flows need no app changes.
+  /** Every provider pi knows about with its current auth state (no secrets). */
+  "auth:listProviders": invoke<[], AuthProviderStatus[]>(),
+  /** Store an API key for a provider in auth.json. Returns the refreshed list. */
+  "auth:loginApiKey": invoke<[providerId: string, key: string], AuthProviderStatus[]>((id, key) => {
+    requireNonEmptyString(id, "providerId");
+    requireNonEmptyString(key, "key");
+  }),
+  /** Begin pi's OAuth `/login` flow. Steps stream via event:authLoginEvent;
+   *  prompts/selects are answered with auth:respondLogin. */
+  "auth:startOAuthLogin": invoke<[providerId: string], void>((id) =>
+    requireNonEmptyString(id, "providerId"),
+  ),
+  /** Answer a pending login prompt/select/manual-code (undefined = cancel). */
+  "auth:respondLogin": invoke<[requestId: string, value: string | undefined], void>((id) =>
+    requireNonEmptyString(id, "requestId"),
+  ),
+  /** Abort the in-flight OAuth login flow. */
+  "auth:cancelOAuthLogin": invoke<[], void>(),
+  /** Clear a provider's stored credentials (OAuth token or API key). */
+  "auth:logout": invoke<[providerId: string], AuthProviderStatus[]>((id) =>
+    requireNonEmptyString(id, "providerId"),
+  ),
   /** This machine's stable remote-client identity, for the control indicator
    *  (ADR-0011). */
   "app:getRemoteClientId": invoke<[], { id: string; name: string }>(),
@@ -792,6 +822,24 @@ export const ipcContracts = {
     requireNonEmptyString(id, "secretId"),
   ),
 
+  // CLIs (detected command-line tools, surfaced as a Connections category).
+  // peach-pi only detects presence + auth and runs each CLI's own interactive
+  // login flow; the agent uses the CLI through its normal shell tool + skills,
+  // so there is no generic `cli_run` channel. Auth lives in the CLI's own
+  // config (e.g. ~/.vercel), never in peach-pi.
+  /** Detection + auth status for every known CLI (cached; cheap re-reads). */
+  "cli:list": invoke<[], CliStatus[]>(),
+  /** Force a fresh probe of every known CLI now; returns the new statuses. */
+  "cli:refresh": invoke<[], CliStatus[]>(),
+  /** Run a CLI's interactive login flow in a Terminal window. Re-probes on
+   *  completion and emits event:clisChanged. */
+  "cli:login": invoke<[id: string], void>((id) => requireNonEmptyString(id, "id")),
+  /** Hide a CLI from the main list, or restore it. Hidden CLIs are not probed.
+   *  Returns the updated statuses. */
+  "cli:setHidden": invoke<[id: string, hidden: boolean], CliStatus[]>((id) =>
+    requireNonEmptyString(id, "id"),
+  ),
+
   // recording (desktop task capture → skill synthesis)
   /** Begin capturing desktop input. `threadId` (optional) ties the recording
    *  to a chat so `recording:stop` can auto-send the synthesis prompt there. */
@@ -973,6 +1021,10 @@ export const ipcContracts = {
   "event:extensionStatus": event<ExtensionStatusPayload>(),
   "event:sideDelta": event<SideDeltaPayload>(),
   "event:sideDone": event<SideDonePayload>(),
+  /** A step in pi's OAuth login flow (URL to open, prompt, progress, done). */
+  "event:authLoginEvent": event<AuthLoginEvent>(),
+  /** Provider auth changed (login/logout) — renderer re-reads via auth:listProviders. */
+  "event:authProvidersChanged": event<void>(),
   /** Connection-setup assistant streaming + activity. */
   "event:connSetupDelta": event<ConnSetupDeltaPayload>(),
   "event:connSetupProbe": event<ConnSetupProbePayload>(),
@@ -997,6 +1049,8 @@ export const ipcContracts = {
   "event:recordingState": event<RecordingState>(),
   /** bws auth/project/secret state changed — renderer re-reads status/secrets. */
   "event:bwsChanged": event<void>(),
+  /** A CLI's install/auth state changed (probe/login) — renderer re-reads via cli:list. */
+  "event:clisChanged": event<void>(),
   /** Skills/extensions/prompts changed on disk (delete/uninstall). Renderer
    *  re-runs `resources:inspect`. */
   "event:resourcesChanged": event<void>(),

@@ -9,6 +9,8 @@
   import History from "@lucide/svelte/icons/history";
   import X from "@lucide/svelte/icons/x";
 
+  let { threadId }: { threadId: string | null } = $props();
+
   let showHistory = $state(false);
 
   // Subdued starter prompts shown in the empty state.
@@ -38,7 +40,11 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      sideChat.close();
+    } else if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void sideChat.submitDraft();
     }
@@ -51,36 +57,21 @@
   }
 </script>
 
-{#if sideChat.open}
+{#if sideChat.open && sideChat.threadId === threadId}
   <aside
     class="btw-panel relative my-2 mr-2 flex w-[23rem] shrink-0 flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
     transition:fly={{ x: 380, duration: 220 }}
+    onkeydown={onKeydown}
+    tabindex="-1"
   >
-    <!-- Header -->
-    <div class="flex items-start gap-2 border-b border-border px-4 py-3">
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <span
-            class="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-accent uppercase"
-          >
-            btw
-          </span>
-          <span class="text-sm font-semibold text-fg">Side conversation</span>
-        </div>
-        <p class="mt-0.5 text-xs text-faint">
-          Context-aware, never added to the main task.
-        </p>
-      </div>
-      <button
-        class="rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
-        onclick={() => sideChat.close()}
-        title="Close"
-        aria-label="Close side conversation"
-      >
-        <X class="size-4" />
-      </button>
-    </div>
-
+    <button
+      class="absolute right-1.5 top-1.5 z-10 rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
+      onclick={() => sideChat.close()}
+      title="Close"
+      aria-label="Close side conversation"
+    >
+      <X class="size-3.5" />
+    </button>
     <!-- Toolbar -->
     <div class="flex items-center gap-2 border-b border-border px-3 py-2">
       <button

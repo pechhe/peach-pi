@@ -50,6 +50,7 @@
   import DotMatrixPlayground from "./DotMatrixPlayground.svelte";
   import ThemeControls from "./ThemeControls.svelte";
   import SubagentsSection from "./SubagentsSection.svelte";
+  import ProvidersSection from "./ProvidersSection.svelte";
   import TopbarSettings from "./TopbarSettings.svelte";
   import Check from "@lucide/svelte/icons/check";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
@@ -73,6 +74,13 @@
   type NavItem = { id: string; label: string; keywords: string };
   type NavGroup = { id: string; label: string; items: NavItem[] };
   const NAV: NavGroup[] = [
+    {
+      id: "account",
+      label: "Account",
+      items: [
+        { id: "providers", label: "Providers & login", keywords: "providers login account sign in oauth subscription api key anthropic claude openai chatgpt codex copilot github auth credentials logout token model provider" },
+      ],
+    },
     {
       id: "appearance",
       label: "Appearance",
@@ -621,6 +629,12 @@
           <p class="text-center text-xs text-fainter" data-testid="settings-search-empty">
             No settings match “{query.trim()}”.
           </p>
+        {/if}
+
+        {#if hit("providers")}
+        <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="providers" use:sectionAction={"providers"}>
+          <ProvidersSection />
+        </section>
         {/if}
 
         {#if hit("playroom")}

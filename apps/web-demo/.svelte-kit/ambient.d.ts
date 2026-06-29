@@ -47,11 +47,10 @@ declare module '$env/static/private' {
 	export const NODE: string;
 	export const TELNYX_API_KEY: string;
 	export const INIT_CWD: string;
-	export const POSTHOG_PERSONAL_API_KEY: string;
 	export const SHELL: string;
+	export const POSTHOG_PERSONAL_API_KEY: string;
 	export const TERM: string;
 	export const TMPDIR: string;
-	export const npm_config_if_present: string;
 	export const npm_config_npm_globalconfig: string;
 	export const TERM_PROGRAM_VERSION: string;
 	export const BWS_ACCESS_TOKEN: string;
@@ -71,7 +70,6 @@ declare module '$env/static/private' {
 	export const npm_config_catalog: string;
 	export const PATH: string;
 	export const npm_package_json: string;
-	export const LaunchInstanceID: string;
 	export const GHOSTTY_SHELL_FEATURES: string;
 	export const DEV_TAP: string;
 	export const __CFBundleIdentifier: string;
@@ -102,7 +100,6 @@ declare module '$env/static/private' {
 	export const BUN_INSTALL: string;
 	export const npm_config_user_agent: string;
 	export const OSLogRateLimit: string;
-	export const SECURITYSESSIONID: string;
 	export const AEROLINK_API_KEY: string;
 	export const npm_node_execpath: string;
 	export const npm_config_prefix: string;
@@ -203,11 +200,10 @@ declare module '$env/dynamic/private' {
 		NODE: string;
 		TELNYX_API_KEY: string;
 		INIT_CWD: string;
-		POSTHOG_PERSONAL_API_KEY: string;
 		SHELL: string;
+		POSTHOG_PERSONAL_API_KEY: string;
 		TERM: string;
 		TMPDIR: string;
-		npm_config_if_present: string;
 		npm_config_npm_globalconfig: string;
 		TERM_PROGRAM_VERSION: string;
 		BWS_ACCESS_TOKEN: string;
@@ -227,7 +223,6 @@ declare module '$env/dynamic/private' {
 		npm_config_catalog: string;
 		PATH: string;
 		npm_package_json: string;
-		LaunchInstanceID: string;
 		GHOSTTY_SHELL_FEATURES: string;
 		DEV_TAP: string;
 		__CFBundleIdentifier: string;
@@ -258,7 +253,6 @@ declare module '$env/dynamic/private' {
 		BUN_INSTALL: string;
 		npm_config_user_agent: string;
 		OSLogRateLimit: string;
-		SECURITYSESSIONID: string;
 		AEROLINK_API_KEY: string;
 		npm_node_execpath: string;
 		npm_config_prefix: string;

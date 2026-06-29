@@ -5,11 +5,14 @@ import { randomUUID } from "node:crypto";
 import type { RemoteCheckpoint } from "@peach-pi/shared-types";
 import { git, gitEnv, gitOk } from "@peach-pi/remote-handoff";
 
-/** Branch namespace for disposable checkpoint branches (ADR-0009). A commit
- *  here is transport, not endorsement — squash/cherry-pick the good parts
- *  later, or delete the branch if the work is wrong. */
-export function checkpointBranch(threadId: string): string {
-  return `wip/${threadId}`;
+/** Single shared branch for disposable checkpoints (ADR-0009). A commit here is
+ *  transport, not endorsement — squash/cherry-pick the good parts later, or
+ *  delete the branch if the work is wrong. One master → one laptop, so all
+ *  sessions snapshot onto this one branch rather than an unbounded set of
+ *  `wip/<threadId>` branches; the threadId still rides along in the
+ *  RemoteCheckpoint metadata, it just no longer namespaces the branch. */
+export function checkpointBranch(_threadId?: string): string {
+  return "wip/sync";
 }
 
 /**
