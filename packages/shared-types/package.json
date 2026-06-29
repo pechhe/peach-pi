@@ -1,7 +1,7 @@
 {
   "name": "@peach-pi/shared-types",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -13,5 +13,12 @@
   },
   "dependencies": {
     "typebox": "1.1.38"
-  }
+  },
+  "repository": "github:pechhe/peach-pi",
+  "homepage": "https://github.com/pechhe/peach-pi",
+  "bugs": {
+    "url": "https://github.com/pechhe/peach-pi/issues"
+  },
+  "author": "pech-pi",
+  "license": "MIT"
 }

@@ -12,7 +12,7 @@ import {
   buildPrdAgentPrompt,
 } from "@peach-pi/shared-types";
 import { registerIpcHandlers } from "./ipc/registry.ts";
-import { emitDevTapEvent } from "./services/devtap.ts";
+import { emitDevTapEvent } from "@devtap/electron";
 import { getConnectInfo } from "./services/served-session/index.ts";
 import {
   getCavemanState,

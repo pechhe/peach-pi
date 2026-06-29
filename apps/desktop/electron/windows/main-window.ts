@@ -1,7 +1,7 @@
 import { BrowserWindow, shell } from "electron";
 import path from "node:path";
 import { TRAFFIC_LIGHTS } from "@peach-pi/shared-types";
-import { attachDevTapToWindow } from "../services/devtap.ts";
+import { attachDevTapToWindow } from "@devtap/electron";
 
 import { isExternalUrl } from "./url-guard";
 

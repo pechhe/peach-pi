@@ -1,6 +1,6 @@
 {
   "name": "peach-pi",
-  "private": true,
+  "private": false,
   "version": "0.1.0",
   "license": "MIT",
   "packageManager": "pnpm@10.33.0",
@@ -24,10 +24,17 @@
     }
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "fallow": "^2.103.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "catalog:"
-  }
+  },
+  "repository": "github:pechhe/peach-pi",
+  "homepage": "https://github.com/pechhe/peach-pi",
+  "bugs": {
+    "url": "https://github.com/pechhe/peach-pi/issues"
+  },
+  "author": "pech-pi"
 }

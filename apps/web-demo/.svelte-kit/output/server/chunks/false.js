@@ -1,4 +1,4 @@
-const DEV = true;
+const DEV = false;
 export {
   DEV as D
 };

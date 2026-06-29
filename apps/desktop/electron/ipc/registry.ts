@@ -8,7 +8,7 @@ import {
   type InvokeResult,
   type TypedEmit,
 } from "@peach-pi/shared-types";
-import { captureError, emitDevTapEvent, isDevTapEnabled } from "../services/devtap.ts";
+import { captureError, emitDevTapEvent, isDevTapEnabled } from "@devtap/electron";
 
 /** The typed signature every invoke handler must satisfy, per channel. */
 export type IpcHandlers = {

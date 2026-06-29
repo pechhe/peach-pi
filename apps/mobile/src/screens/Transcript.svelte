@@ -205,7 +205,10 @@
   {/each}
 
   {#if items.length === 0 && status.kind !== "ended"}
-    <p class="pt-10 text-center text-[13px] text-faint">Waiting for the master…</p>
+    <p class="flex items-center justify-center gap-2 pt-10 text-[13px] text-faint">
+      <span class="pp-spin"><Icon name="spinner" size={13} sw={3} /></span>
+      {status.kind === "connecting" ? "Connecting…" : "Loading transcript…"}
+    </p>
   {/if}
 </div>
 
@@ -239,6 +242,7 @@
     {running}
     {followUp}
     {models}
+    {meta}
     sessionModel={meta?.model ?? null}
     sessionThinking={meta?.thinkingLevel ?? "off"}
     availableThinking={meta?.availableThinkingLevels ?? ["off"]}

@@ -110,7 +110,7 @@ const options = {
     ` + head + '\n    <title>Peach Pi — live demo</title>\n  </head>\n  <body data-sveltekit-preload-data="hover">\n    <div style="display: contents">' + body + "</div>\n  </body>\n</html>\n",
     error
   },
-  version_hash: "1t8cc5b"
+  version_hash: "uthdh"
 };
 async function get_hooks() {
   let handle;

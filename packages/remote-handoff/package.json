@@ -1,7 +1,7 @@
 {
   "name": "@peach-pi/remote-handoff",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "description": "Movable execution: per-thread ownership and safe handoff between machines.",
   "bin": {
@@ -16,5 +16,12 @@
   "devDependencies": {
     "@types/node": "^24.13.1",
     "typescript": "^5.9.3"
-  }
+  },
+  "repository": "github:pechhe/peach-pi",
+  "homepage": "https://github.com/pechhe/peach-pi",
+  "bugs": {
+    "url": "https://github.com/pechhe/peach-pi/issues"
+  },
+  "author": "pech-pi",
+  "license": "MIT"
 }

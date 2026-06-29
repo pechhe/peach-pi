@@ -1,7 +1,7 @@
 {
   "name": "@peach-pi/record-replay",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Record & Replay — capture a recurring desktop task and synthesize a reusable natural-language skill file for the pi agent.",
   "type": "module",
   "license": "MIT",
@@ -33,5 +33,11 @@
   },
   "pi": {
     "note": "This is a standalone stdio MCP server, NOT a pi extension. Register it through pi-mcp-adapter so pi launches it as an MCP tool server. See README.md."
-  }
+  },
+  "repository": "github:pechhe/peach-pi",
+  "homepage": "https://github.com/pechhe/peach-pi",
+  "bugs": {
+    "url": "https://github.com/pechhe/peach-pi/issues"
+  },
+  "author": "pech-pi"
 }

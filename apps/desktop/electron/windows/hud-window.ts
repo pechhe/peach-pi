@@ -1,6 +1,6 @@
 import { BrowserWindow, screen, shell } from "electron";
 import path from "node:path";
-import { attachDevTapToWindow } from "../services/devtap.ts";
+import { attachDevTapToWindow } from "@devtap/electron";
 
 import { isExternalUrl } from "./url-guard";
 

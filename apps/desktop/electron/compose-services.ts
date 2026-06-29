@@ -22,7 +22,7 @@ import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { InsomniaService } from "./services/insomnia.ts";
 import { PiUpdateService } from "./services/pi-update-service.ts";
 import { AutoUpdateService, initMainSentry } from "./services/telemetry-service.ts";
-import { setDevTapStateProvider } from "./services/devtap-control.ts";
+import { setDevTapStateProvider } from "@devtap/electron";
 import { RecordingService } from "./services/recording-service.ts";
 import { ConnectorService } from "./services/connector-service.ts";
 import { BwsService } from "./services/bws-service.ts";

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { RemoteSessionInfo } from "@peach-pi/shared-types";
-  import { store, hostLabel } from "../lib/store.svelte.ts";
+  import { store } from "../lib/store.svelte.ts";
   import { listSessions, RosterTapClient, type TapStatus } from "../lib/api.ts";
   import Icon from "../components/Icon.svelte";
   import HexSpinner from "../components/HexSpinner.svelte";
@@ -109,19 +109,18 @@
     { key: "archived", label: "Archived", icon: "inbox" },
   ];
 
-  function repoName(url: string | null): string | null {
-    if (!url) return null;
-    return url.replace(/\.git$/, "").split(/[/:]/).pop() || null;
-  }
-
-  function statusColor(s: RemoteSessionInfo["status"]): string {
-    return s === "running"
-      ? "text-accent"
-      : s === "completed"
-        ? "text-success"
-        : s === "failed"
-          ? "text-danger"
-          : "text-muted";
+  // Group a lane's threads under their project parent — mirrors the desktop
+  // sidebar's nested project → thread structure. Chats (null project) group
+  // under a synthetic "Threads" bucket so they don't lose their parent row.
+  function groupByProject(list: RemoteSessionInfo[]): { project: string; threads: RemoteSessionInfo[] }[] {
+    const map = new Map<string, RemoteSessionInfo[]>();
+    for (const s of list) {
+      const key = s.projectName ?? "Threads";
+      const arr = map.get(key);
+      if (arr) arr.push(s);
+      else map.set(key, [s]);
+    }
+    return [...map.entries()].map(([project, threads]) => ({ project, threads }));
   }
 
   function openSession(s: RemoteSessionInfo): void {
@@ -134,11 +133,11 @@
   }
 </script>
 
-<header class="px-4 pt-1">
+<header class="px-4 pt-1.5 pb-1">
   <div class="flex items-center py-1">
-    <button class="-ml-1 flex items-center text-accent" onclick={() => store.pop()}>
+    <button class="-ml-1 flex items-center text-accent" onclick={() => store.pop()} aria-label="Back">
       <Icon name="chevron-left" size={20} sw={2.4} />
-      <span class="ml-0.5 text-[15px]">Masters</span>
+      <span class="ml-0.5 text-[15px]">{master?.name ?? "Master"}</span>
     </button>
     <!-- Live roster indicator (replaces the manual refresh button). The list
          now streams via the roster tap; the dot reflects connection state. -->
@@ -160,12 +159,6 @@
     >
       <Icon name="plus" size={20} sw={2.2} />
     </button>
-  </div>
-  <div class="px-1 pt-1 pb-3">
-    <h1 class="text-[24px] font-bold tracking-[-0.02em]">{master?.name ?? "Master"}</h1>
-    <div class="mt-0.5 font-mono text-[12px] text-faint">
-      {master ? hostLabel(master) : ""}{#if sessions.length} · {lanes.active.length} active · {sessions.length} served{/if}
-    </div>
   </div>
 </header>
 
@@ -199,41 +192,51 @@
       </button>
     </div>
   {:else}
-    <!-- Active lane -->
-    <div class="flex flex-col gap-2">
-      {#each lanes.active as s (s.threadId)}
-        <div
-          class="rounded-[14px] border border-border bg-surface p-3.5 text-left {s.status === 'running'
-            ? 'border-accent/30'
-            : ''}"
-        >
-          <button class="flex w-full items-center gap-2.5 text-left" onclick={() => openSession(s)}>
-            {#if s.status === "running"}
-              <span class="shrink-0 text-accent"><HexSpinner size={15} dotSize={2} /></span>
-            {:else if s.status === "completed"}
-              <span class="shrink-0 text-success"><Icon name="check" size={15} /></span>
-            {:else if s.status === "failed"}
-              <span class="shrink-0 text-danger"><Icon name="alert-circle" size={15} sw={1.6} /></span>
-            {:else}
-              <span class="mx-[3px] h-2 w-2 shrink-0 rounded-full bg-fainter"></span>
-            {/if}
-            <span class="flex-1 truncate text-[14px] font-semibold">{s.title || s.threadId}</span>
-          </button>
-          <button class="mt-2 flex w-full items-center gap-2 pl-6 text-left" onclick={() => (statusFor = s)} aria-label="Thread status">
-            <span class="text-[11px] font-medium {statusColor(s.status)}">{s.status}</span>
-            {#if repoName(s.originUrl)}
-              <span class="text-border-strong">·</span>
-              <span class="font-mono text-[11px] text-faint">{repoName(s.originUrl)}</span>
-            {/if}
-            {#if s.lastCheckpointSha}
-              <span class="ml-auto font-mono text-[11px] text-fainter">
-                ckpt {s.lastCheckpointSha.slice(0, 7)}
-              </span>
-            {:else}
-              <span class="ml-auto shrink-0 text-fainter"><Icon name="chevron-right" size={16} sw={2} /></span>
-            {/if}
-          </button>
-        </div>
+    <!-- Active lane: threads grouped under their project parent -->
+    {@const groups = groupByProject(lanes.active)}
+    <div class="flex flex-col gap-4">
+      {#each groups as group (group.project)}
+        <section>
+          <div class="flex items-center gap-1.5 px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">
+            <Icon name="folder" size={11} sw={1.8} />
+            <span class="truncate">{group.project}</span>
+            <span class="text-fainter">{group.threads.length}</span>
+          </div>
+          <div class="flex flex-col gap-1">
+            {#each group.threads as s (s.threadId)}
+              <button
+                class="pp-tap flex w-full items-center gap-2.5 rounded-[11px] border border-border bg-surface px-3 py-2 text-left transition-colors {s.status ===
+                'running'
+                  ? 'border-accent/30'
+                  : ''} active:bg-surface-2"
+                onclick={() => openSession(s)}
+              >
+                {#if s.status === "running"}
+                  <span class="shrink-0 text-accent"><HexSpinner size={15} dotSize={2} /></span>
+                {:else if s.status === "completed"}
+                  <span class="shrink-0 text-success"><Icon name="check" size={15} /></span>
+                {:else if s.status === "failed"}
+                  <span class="shrink-0 text-danger"><Icon name="alert-circle" size={15} sw={1.6} /></span>
+                {:else}
+                  <span class="mx-[3px] h-1.5 w-1.5 shrink-0 rounded-full bg-fainter"></span>
+                {/if}
+                <span class="min-w-0 flex-1 truncate text-[14px] font-semibold">{s.title || s.threadId}</span>
+                {#if s.lastCheckpointSha}
+                  <span class="shrink-0 font-mono text-[10.5px] text-fainter">
+                    {s.lastCheckpointSha.slice(0, 7)}
+                  </span>
+                {/if}
+                <button
+                  class="shrink-0 px-1 text-[10px] text-faint"
+                  onclick={(e) => { e.stopPropagation(); statusFor = s; }}
+                  aria-label="Thread status"
+                >
+                  <span class="capitalize">{s.status}</span>
+                </button>
+              </button>
+            {/each}
+          </div>
+        </section>
       {/each}
     </div>
 
@@ -241,7 +244,8 @@
     {#each LANE_META as meta (meta.key)}
       {#if lanes[meta.key].length > 0}
         {@const open = expanded[meta.key]}
-        <div class="mt-3 border-t border-border pt-2.5">
+        {@const nonActiveGroups = groupByProject(lanes[meta.key])}
+        <div class="mt-4 border-t border-border pt-2.5">
           <button
             class="flex w-full items-center gap-2 px-1 py-1.5 text-[13px] font-semibold text-muted"
             onclick={() => (expanded = { ...expanded, [meta.key]: !open })}
@@ -255,24 +259,37 @@
             </span>
           </button>
           {#if open}
-            <div class="mt-1.5 flex flex-col gap-2 opacity-70">
-              {#each lanes[meta.key] as s (s.threadId)}
-                <div class="rounded-[12px] border border-border bg-surface-2 p-3 text-left">
-                  <button class="flex w-full items-center gap-2 text-left" onclick={() => openSession(s)}>
-                    <span class="flex-1 truncate text-[13.5px] font-semibold">{s.title || s.threadId}</span>
-                  </button>
-                  <button class="mt-1 flex w-full items-center gap-2 text-left" onclick={() => (statusFor = s)} aria-label="Thread status">
-                    <span class="shrink-0 text-fainter">
-                      {#if meta.key === "snoozed" && s.snoozedUntil}
-                        <span class="text-[11px] text-faint">Until {new Date(s.snoozedUntil).toLocaleString()}</span>
-                      {:else if meta.key === "toTest" && s.toTestNote}
-                        <span class="text-[11px] text-faint">{s.toTestNote}</span>
-                      {:else if repoName(s.originUrl)}
-                        <span class="font-mono text-[11px] text-faint">{repoName(s.originUrl)}</span>
-                      {/if}
-                    </span>
-                    <span class="ml-auto shrink-0 text-fainter"><Icon name="chevron-right" size={14} sw={2} /></span>
-                  </button>
+            <div class="mt-1.5 flex flex-col gap-3 opacity-70">
+              {#each nonActiveGroups as group (group.project)}
+                <div>
+                  <div class="flex items-center gap-1.5 px-1 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-faint">
+                    <Icon name="folder" size={10} sw={1.8} />
+                    <span class="truncate">{group.project}</span>
+                  </div>
+                  <div class="flex flex-col gap-1">
+                    {#each group.threads as s (s.threadId)}
+                      <div class="pp-tap flex w-full items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-1.5 text-left active:bg-surface-3"
+                        role="button"
+                        tabindex="0"
+                        onclick={() => openSession(s)}
+                        onkeydown={(e) => e.key === 'Enter' && openSession(s)}
+                      >
+                        <span class="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{s.title || s.threadId}</span>
+                        {#if meta.key === "snoozed" && s.snoozedUntil}
+                          <span class="shrink-0 text-[10.5px] text-faint">Until {new Date(s.snoozedUntil).toLocaleString()}</span>
+                        {:else if meta.key === "toTest" && s.toTestNote}
+                          <span class="shrink-0 truncate max-w-[35%] text-[10.5px] text-faint">{s.toTestNote}</span>
+                        {/if}
+                        <button
+                          class="shrink-0 px-1 text-[10px] text-faint"
+                          onclick={(e) => { e.stopPropagation(); statusFor = s; }}
+                          aria-label="Thread status"
+                        >
+                          <span class="capitalize">{s.status}</span>
+                        </button>
+                      </div>
+                    {/each}
+                  </div>
                 </div>
               {/each}
             </div>

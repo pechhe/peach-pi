@@ -14,9 +14,8 @@
   import MovingHighlight from "./MovingHighlight.svelte";
   import Tooltip from "./Tooltip.svelte";
   import Search from "@lucide/svelte/icons/search";
-  import Eye from "@lucide/svelte/icons/eye";
-  import EyeOff from "@lucide/svelte/icons/eye-off";
   import FlaskConical from "@lucide/svelte/icons/flask-conical";
+  import FlaskConicalOff from "@lucide/svelte/icons/flask-conical-off";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import BellRing from "@lucide/svelte/icons/bell-ring";
   import Plug from "@lucide/svelte/icons/plug";
@@ -685,7 +684,7 @@
           <button
             class="rounded p-1 text-faint hover:text-fg"
             onclick={() => markThreadToTest(thread)}
-          ><Eye size={14} /></button>
+          ><FlaskConical size={14} /></button>
         </Tooltip>
         <Tooltip text="Done">
           <button
@@ -698,7 +697,7 @@
           class="rounded p-1 text-faint hover:text-fg"
           title="Unmark"
           onclick={() => api.invoke("threads:unmarkToTest", thread.id)}
-        ><EyeOff size={14} /></button>
+        ><FlaskConicalOff size={14} /></button>
       {:else}
         <button
           class="rounded p-1 text-faint hover:text-fg"

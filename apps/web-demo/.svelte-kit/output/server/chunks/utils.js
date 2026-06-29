@@ -295,7 +295,7 @@ function split_path(path) {
 function check_prototype_pollution(key) {
   if (key === "__proto__" || key === "constructor" || key === "prototype") {
     throw new Error(
-      `Invalid key "${key}": This key is not allowed to prevent prototype pollution.`
+      `Invalid key "${key}"`
     );
   }
 }
@@ -449,11 +449,6 @@ function create_field_proxy(target, get_input, set_input, get_issues, path = [])
             base_props.type = type === "file multiple" ? "file" : type;
           }
           if (type === "submit" || type === "hidden") {
-            {
-              if (input_value === null || input_value === void 0) {
-                throw new Error(`\`${type}\` inputs must have a value`);
-              }
-            }
             const value = typeof input_value === "boolean" ? input_value ? "on" : "off" : input_value;
             return Object.defineProperties(base_props, {
               value: { value, enumerable: true }
@@ -471,14 +466,6 @@ function create_field_proxy(target, get_input, set_input, get_issues, path = [])
             });
           }
           if (type === "checkbox" || type === "radio") {
-            {
-              if (type === "radio" && !input_value) {
-                throw new Error("Radio inputs must have a value");
-              }
-              if (type === "checkbox" && is_array && !input_value) {
-                throw new Error("Checkbox array inputs must have a value");
-              }
-            }
             if (type === "checkbox" && !is_array) {
               return Object.defineProperties(base_props, {
                 defaultChecked: {
@@ -574,53 +561,8 @@ function build_path_string(path) {
   }
   return result;
 }
-function throw_on_old_property_access(instance) {
-  Object.defineProperty(instance, "field", {
-    value: (name) => {
-      const new_name = name.endsWith("[]") ? name.slice(0, -2) : name;
-      throw new Error(
-        `\`form.field\` has been removed: Instead of \`<input name={form.field('${name}')} />\` do \`<input {...form.fields.${new_name}.as(type)} />\``
-      );
-    }
-  });
-  for (const property of ["input", "issues"]) {
-    Object.defineProperty(instance, property, {
-      get() {
-        const new_name = property === "issues" ? "issues" : "value";
-        return new Proxy(
-          {},
-          {
-            get(_, prop) {
-              const prop_string = typeof prop === "string" ? prop : String(prop);
-              const old = prop_string.includes("[") || prop_string.includes(".") ? `['${prop_string}']` : `.${prop_string}`;
-              const replacement = `.${prop_string}.${new_name}()`;
-              throw new Error(
-                `\`form.${property}\` has been removed: Instead of \`form.${property}${old}\` write \`form.fields${replacement}\``
-              );
-            }
-          }
-        );
-      }
-    });
-  }
-}
-function validate_depends(route_id, dep) {
-  const match = /^(moz-icon|view-source|jar):/.exec(dep);
-  if (match) {
-    console.warn(
-      `${route_id}: Calling \`depends('${dep}')\` will throw an error in Firefox because \`${match[1]}\` is a special URI scheme`
-    );
-  }
-}
 const INVALIDATED_PARAM = "x-sveltekit-invalidated";
 const TRAILING_SLASH_PARAM = "x-sveltekit-trailing-slash";
-function validate_load_response(data, location_description) {
-  if (data != null && Object.getPrototypeOf(data) !== Object.prototype) {
-    throw new Error(
-      `a load function ${location_description} returned ${typeof data !== "object" ? `a ${typeof data}` : data instanceof Response ? "a Response object" : Array.isArray(data) ? "an array" : "a non-plain object"}, but must return a plain object at the top level (i.e. \`return {...}\`)`
-    );
-  }
-}
 function stringify(data, transport) {
   const encoders = Object.fromEntries(Object.entries(transport).map(([k, v]) => [k, v.encode]));
   return devalue.stringify(data, encoders);
@@ -1002,26 +944,7 @@ function format_server_error(status, error, event) {
     return formatted_text;
   }
   return `${formatted_text}
-${clean_up_stack_trace(error)}`;
-}
-let relative = (file) => file;
-{
-  try {
-    const path = await import("node:path");
-    const process = await import("node:process");
-    relative = (file) => path.relative(process.cwd(), file);
-  } catch {
-  }
-}
-function clean_up_stack_trace(error) {
-  const stack_trace = (error.stack?.split("\n") ?? []).map((line) => {
-    return line.replace(/\((.+)(:\d+:\d+)\)$/, (_, file, loc) => `(${relative(file)}${loc})`);
-  });
-  const last_line_from_src_code = stack_trace.findLastIndex((line) => /\(src[\\/]/.test(line));
-  if (last_line_from_src_code === -1) {
-    return error.stack;
-  }
-  return stack_trace.slice(0, last_line_from_src_code + 1).join("\n");
+${error.stack}`;
 }
 function get_node_type(node_id) {
   const parts = node_id?.split("/");
@@ -1029,9 +952,6 @@ function get_node_type(node_id) {
   if (!filename) return "unknown";
   const dot_parts = filename.split(".");
   return dot_parts.slice(0, -1).join(".");
-}
-function count_non_ssi_comments(str) {
-  return (str.match(/<!--(?!#)/g) ?? []).length;
 }
 function create_replacer(transport) {
   const replacer = (thing) => {
@@ -1045,17 +965,13 @@ function create_replacer(transport) {
   return replacer;
 }
 export {
-  split_remote_key as A,
-  count_non_ssi_comments as B,
-  static_error_page as C,
-  redirect_response as D,
+  once as A,
+  has_prerendered_path as B,
+  get_set_cookies as C,
+  handle_fatal_error as D,
   ENDPOINT_METHODS as E,
-  once as F,
-  has_prerendered_path as G,
-  get_set_cookies as H,
+  format_server_error as F,
   INVALIDATED_PARAM as I,
-  handle_fatal_error as J,
-  format_server_error as K,
   MUTATIVE_METHODS as M,
   PAGE_METHODS as P,
   SVELTE_KIT_ASSETS as S,
@@ -1079,11 +995,11 @@ export {
   get_global_name as q,
   serialize_uses as r,
   set_nested_value as s,
-  throw_on_old_property_access as t,
-  clarify_devalue_error as u,
-  get_node_type as v,
-  validate_depends as w,
-  validate_load_response as x,
-  escape_html as y,
-  deserialize_binary_form as z
+  clarify_devalue_error as t,
+  get_node_type as u,
+  escape_html as v,
+  deserialize_binary_form as w,
+  split_remote_key as x,
+  static_error_page as y,
+  redirect_response as z
 };

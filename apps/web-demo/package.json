@@ -1,6 +1,6 @@
 {
   "name": "@peach-pi/web-demo",
-  "private": true,
+  "private": false,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
@@ -35,5 +35,12 @@
     "motion-dom": "12.38.0",
     "motion-utils": "12.39.0",
     "framer-motion": "12.38.0"
-  }
+  },
+  "repository": "github:pechhe/peach-pi",
+  "homepage": "https://github.com/pechhe/peach-pi",
+  "bugs": {
+    "url": "https://github.com/pechhe/peach-pi/issues"
+  },
+  "author": "pech-pi",
+  "license": "MIT"
 }

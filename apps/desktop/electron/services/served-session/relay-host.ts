@@ -314,17 +314,34 @@ export class RemoteHostService {
   /** Toggle the "serve all projects" shortcut. Disabling it re-evaluates
    *  membership and kicks any listener whose thread is no longer served. */
   setServeAll(serveAll: boolean): void {
+    const expanded = serveAll && !this.serveAll;
     this.serveAll = serveAll;
     this.kickUnservedListeners();
+    if (expanded) this.prewarmServed();
   }
 
   /** Add/remove a project from the served set. Kicks listeners on a
    *  just-un-served project's threads. */
   setProjectServed(projectId: ProjectId, served: boolean): void {
-    if (served) this.servedProjects.add(projectId);
-    else {
+    if (served) {
+      this.servedProjects.add(projectId);
+      this.prewarmServed();
+    } else {
       this.servedProjects.delete(projectId);
       this.kickUnservedListeners();
+    }
+  }
+
+  /** Prewarm PiSessions for served threads so a tap connect hits the warm
+   *  fast path instead of cold-starting the pi SDK + JSONL parse inside the
+   *  SSE handler. Fire-and-forget; errors are swallowed — a failed prewarm
+   *  just means the tap path cold-starts as before. No-op for already-warm
+   *  sessions (transcript() is an in-memory flush). */
+  private prewarmServed(): void {
+    for (const t of this.deps.threads()) {
+      if (t.archivedAt) continue;
+      if (!this.isServedThread(t.id)) continue;
+      void this.deps.transcript(t.id).catch(() => {});
     }
   }
 
@@ -363,6 +380,10 @@ export class RemoteHostService {
     });
     // Loopback twin on the same port (best-effort) for Tailscale Serve to proxy.
     await this.startLoopback();
+    // Prewarm PiSessions for served threads so a tap connect hits the warm
+    // fast path instead of cold-starting the pi SDK + JSONL parse inside the
+    // SSE handler (1-3s for moderate threads). Fire-and-forget.
+    this.prewarmServed();
     return this.status();
   }
 

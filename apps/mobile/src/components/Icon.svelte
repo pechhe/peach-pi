@@ -30,7 +30,9 @@
     | "clock"
     | "beaker"
     | "inbox"
-    | "chevron-down";
+    | "chevron-down"
+    | "chevron-up"
+    | "more";
 
   let { name, size = 16, sw = 1.8 }: { name: Name; size?: number; sw?: number } = $props();
 </script>
@@ -64,6 +66,12 @@
     <path d="M5 13l4 4L19 7" stroke-width={sw + 0.6} />
   {:else if name === "chevron-down"}
     <path d="M6 9l6 6 6-6" />
+  {:else if name === "chevron-up"}
+    <path d="M6 15l6-6 6 6" />
+  {:else if name === "more"}
+    <circle cx="6" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="18" cy="12" r="1.6" fill="currentColor" stroke="none" />
   {:else if name === "spinner"}
     <circle cx="12" cy="12" r="9" stroke="color-mix(in srgb, currentColor 22%, transparent)" stroke-width="3" />
     <path d="M12 3a9 9 0 0 1 9 9" stroke-width="3" />

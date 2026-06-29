@@ -175,6 +175,41 @@ test("forwardRoster is a no-op before the server binds", async () => {
   await assert.doesNotReject(() => h.forwardRoster());
 });
 
+// (prewarm: enabling serving fire-and-forgets deps.transcript for each served
+//  thread so a later tap connect hits the warm fast path instead of
+//  cold-starting the pi SDK + JSONL parse inside the SSE handler).
+test("setProjectServed(true) prewarms the transcript for the served thread", async () => {
+  const calls: string[] = [];
+  const h = new RemoteHostService({
+    ...deps([{ id: "t1", projectId: "p1" }, { id: "t2", projectId: "p2" }]),
+    transcript: async (id) => {
+      calls.push(id);
+      return { items: [{ id, kind: "notice", text: "" }], seq: 0 };
+    },
+  });
+  h.setServeAll(false);
+  // Turning on serving for p1 should prewarm only t1 (not unserved t2).
+  h.setProjectServed("p1", true);
+  // prewarm is fire-and-forget; let the microtasks drain.
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(calls, ["t1"]);
+});
+
+test("setServeAll(true) prewarms the transcript for every served thread", async () => {
+  const calls: string[] = [];
+  const h = new RemoteHostService({
+    ...deps([{ id: "t1", projectId: "p1" }, { id: "t2", projectId: "p2" }]),
+    transcript: async (id) => {
+      calls.push(id);
+      return { items: [{ id, kind: "notice", text: "" }], seq: 0 };
+    },
+  });
+  h.setServeAll(false);
+  h.setServeAll(true);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(calls.sort(), ["t1", "t2"]);
+});
+
 test("forwardRoster is a no-op when no roster listeners are attached", async () => {
   const h = new RemoteHostService(
     deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,

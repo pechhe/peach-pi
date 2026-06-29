@@ -1,11 +1,11 @@
 import { app, BrowserWindow, globalShortcut, Tray, nativeImage } from "electron";
 import path from "node:path";
 import { createEmitter } from "./ipc/registry.ts";
-import { emitDevTapEvent, initDevTapMain } from "./services/devtap.ts";
+import { emitDevTapEvent, initDevTapMain } from "@devtap/electron";
 import {
   startDevTapControlChannel,
   stopDevTapControlChannel,
-} from "./services/devtap-control.ts";
+} from "@devtap/electron";
 import { computePiHealth } from "./services/pi-health.ts";
 import { composeServices } from "./compose-services.ts";
 import { registerIpcTable } from "./ipc-table.ts";

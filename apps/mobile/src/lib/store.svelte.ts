@@ -56,17 +56,23 @@ class Store {
   projects = $state<Record<string, RemoteProjectInfo[]>>({});
   /** Navigation stack; last entry is the visible screen. */
   stack = $state<Route[]>([{ name: "masters" }]);
+  /** Last navigation direction — drives forward/backward slide transitions. */
+  dir = $state<"forward" | "backward">("forward");
 
   get route(): Route {
     return this.stack[this.stack.length - 1]!;
   }
 
   push(route: Route): void {
+    this.dir = "forward";
     this.stack = [...this.stack, route];
   }
 
   pop(): void {
-    if (this.stack.length > 1) this.stack = this.stack.slice(0, -1);
+    if (this.stack.length > 1) {
+      this.dir = "backward";
+      this.stack = this.stack.slice(0, -1);
+    }
   }
 
   master(id: string): Master | undefined {

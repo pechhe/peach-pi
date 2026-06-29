@@ -1,0 +1,81 @@
+/* Local overrides applied AFTER the verbatim peche-pi port. */
+
+/* Model slider: sit flush on the chassis like the other controls — drop the
+   raised keycap "socket" panel and its press-on-hover effect. */
+.composer-device .model-selector__badge--slider,
+.composer-device .model-selector__badge--slider:hover:not(:disabled),
+.composer-device .model-selector__badge--slider:active:not(:disabled) {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  filter: none;
+  transform: none;
+}
+
+/* Reasoning dial only turns — it must not press. (Cancels the global
+   button:active scale in app.css.) */
+.composer-device .reasoning-dial:active:not(:disabled) {
+  transform: none;
+}
+
+/* Drop the engraved MODEL and REASONING section labels — not needed.
+   (Specificity matches the source rules so these later overrides win.) */
+.composer-device .model-selector__anchor:first-child::before,
+.composer-device .model-selector__anchor:last-child::before,
+.composer-device .reasoning-dial[data-label]::before {
+  content: none;
+}
+
+/* Keep BUILD / PLAN text near the knob, but clear of the thumb so they
+   don't touch. Thumb near-stop sits ~21px from the button edge; at 8px the
+   label bottom (~15.5px) leaves a ~5px gap. */
+.composer-device .composer-mode__label:first-child {
+  top: 8px;
+}
+.composer-device .composer-mode__label:last-child {
+  bottom: 8px;
+}
+
+/* Model slider layout fix: symmetric mirrored slots, labels centered under
+   each tick, and breathing room so the names clear the tick marks.
+   (.composer-device prefix => higher specificity than the source rules.)
+
+   The thumb/glow/ticks live inside .model-selector__slider, which is inset
+   +16px from the badge, while the labels are children of the badge. So the
+   slider-space detents must be (badge detent - 16) to line up with the
+   badge-space labels. Target detents (badge coords): 44 / 134.667 / 225.333
+   / 316 -- symmetric about the badge centre (180) and inside the track. */
+.composer-device .model-selector__badge--slider {
+  --model-slider-slot-start: 28px; /* 44 (badge) - 16 (slider inset) */
+  --model-slider-slot-step: 90.667px;
+}
+
+.composer-device .model-selector__badge--slider .model-selector__slider-ticks {
+  left: 0;
+  right: 0;
+  top: 46px;
+}
+
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--0 { left: 28px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--1 { left: 118.667px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--2 { left: 209.333px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-tick--3 { left: 300px; }
+
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot,
+.composer-device .model-selector__badge--slider .model-selector__slider-label--menu {
+  top: 22px;
+  height: 58px;
+  padding-top: 40px;
+  width: 80px;
+  max-width: 80px;
+  right: auto;
+  transform: none;
+  text-align: center;
+  justify-content: center;
+}
+
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-0 { left: 4px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-1 { left: 94.667px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-2 { left: 185.333px; }
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-3,
+.composer-device .model-selector__badge--slider .model-selector__slider-label--menu { left: 276px; }
