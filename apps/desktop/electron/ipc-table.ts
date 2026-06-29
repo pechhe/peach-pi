@@ -303,6 +303,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "files:readImage": readImageFile,
       "subagents:listAgents": subagentService.listAgents.bind(subagentService),
       "subagents:updateAgent": subagentService.updateAgent.bind(subagentService),
+      "subagents:readSteps": subagentService.readSteps.bind(subagentService),
       "devtap:projectStatus": devTapInstallService.status.bind(devTapInstallService),
       "fallow:projectStatus": fallowService.status.bind(fallowService),
       "fallow:install": fallowService.install.bind(fallowService),

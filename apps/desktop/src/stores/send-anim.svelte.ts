@@ -10,15 +10,20 @@
  * from a send by transcript shape alone. Only a real send leaves a mark, so
  * history-load never pops.
  *
- * Not reactive on purpose — ThreadView's effect is already re-run by the
- * transcript update that carries the new bubble, and it claims the mark there.
+ * `sentTicks` is a reactive record so the transcript can react to a send
+ * (e.g. jump to the bottom) before the new bubble even lands.
  */
 class SendAnimStore {
   private marks = new Map<string, number>();
+  // Reactive per-thread send counter. Reactive so ThreadView's $effect can
+  // react to a send the instant mark() is called, independent of when the
+  // new transcript item arrives.
+  private sentTicks = $state<Record<string, number>>({});
 
   /** Record that the user just sent a normal message on this thread. */
   mark(threadId: string): void {
     this.marks.set(threadId, Date.now());
+    this.sentTicks[threadId] = (this.sentTicks[threadId] ?? 0) + 1;
   }
 
   /** True (and consumes the mark) if a fresh send mark exists for this thread. */
@@ -27,6 +32,11 @@ class SendAnimStore {
     if (at == null) return false;
     this.marks.delete(threadId);
     return Date.now() - at <= withinMs;
+  }
+
+  /** Reactive tick value for a thread; changes when mark() is called on it. */
+  sentTick(threadId: string): number {
+    return this.sentTicks[threadId] ?? 0;
   }
 }
 

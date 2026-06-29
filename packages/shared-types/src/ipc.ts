@@ -97,7 +97,7 @@ import type {
   ThreadHandoffStatus,
   UpdateStatus,
 } from "./entities.ts";
-import type { RemoteTapFrame, TranscriptDelta, TranscriptSnapshot } from "./transcript.ts";
+import type { RemoteTapFrame, SubagentStep, TranscriptDelta, TranscriptSnapshot } from "./transcript.ts";
 
 /**
  * Typed IPC contract registry (pattern carried over from peche-pi's
@@ -474,6 +474,13 @@ export const ipcContracts = {
     [filePath: string, patch: SubagentAgentPatch],
     SubagentAgentInfo
   >((filePath) => requireNonEmptyString(filePath, "filePath")),
+  // Read a running/completed subagent's session `.jsonl` as journey steps
+  // (real tool names + args + narration). Renderer polls this while the
+  // card is live/expanded to build a rich journey instead of the single
+  // live-widget activity line.
+  "subagents:readSteps": invoke<[sessionFile: string], SubagentStep[]>(
+    (sessionFile) => requireNonEmptyString(sessionFile, "sessionFile"),
+  ),
 
   // git (per-thread working directory)
   // work queue — per-project tracker issues (read-only) for the Work Queue view

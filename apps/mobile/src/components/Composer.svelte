@@ -42,15 +42,12 @@
   let overrideModel = $state<ModelInfo | null>(null);
   let overrideThinking = $state<ThinkingLevel | null>(null);
   let showPicker = $state(false);
-  // Overflow menu: steer toggle, reset-override, full model & reasoning sheet.
-  let showOverflow = $state(false);
 
   // Image attachments pasted/dropped into the composer (ADR-0011). Mirrors
   //  the desktop's ComposerImageAttachment but in-memory + sent as
   //  ImagePayload alongside the text. Steer turns never carry images.
   type DraftImage = { id: string; name: string; mimeType: string; data: string; url: string };
   let images = $state<DraftImage[]>([]);
-  let fileInput = $state<HTMLInputElement | null>(null);
 
   const SUPPORTED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
   const MAX_IMAGES = 8;
@@ -59,7 +56,6 @@
 
   const activeModel = $derived(overrideModel ?? sessionModel);
   const activeThinking = $derived(overrideThinking ?? sessionThinking);
-  const hasOverride = $derived(!!overrideModel || !!overrideThinking);
 
   // Pinned slider slots: STABLE first-three scoped models (catalog order). The
   // thumb slides to whichever slot is active — slots never reorder (that was
@@ -287,13 +283,6 @@
     }
   }
 
-  function onFileInput(e: Event): void {
-    const input = e.target as HTMLInputElement;
-    const files = Array.from(input.files ?? []);
-    void addFiles(files);
-    input.value = "";
-  }
-
   const fmtTokens = (n: number | null | undefined): string => {
     if (n == null) return "—";
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -446,38 +435,6 @@
               onCycle={cycleThinking}
             />
           {/if}
-
-          <button
-            class="composer__overflow"
-            onclick={() => fileInput?.click()}
-            aria-label="Attach image"
-            title="Attach image"
-            disabled={steer && running}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 15V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="m21 15-3.5-3.5L7 22" />
-            </svg>
-          </button>
-          <input
-            bind:this={fileInput}
-            type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            multiple
-            onchange={onFileInput}
-            class="hidden"
-          />
-
-          <button
-            class="composer__overflow"
-            onclick={() => (showOverflow = !showOverflow)}
-            aria-label="More composer options"
-            aria-expanded={showOverflow}
-            title="More"
-          >
-            <Icon name="more" size={20} sw={2.4} />
-          </button>
         </div>
 
         <div class="composer__actions">
@@ -510,45 +467,6 @@
         </div>
       </div>
     </div>
-
-    {#if showOverflow && (running && hasText || hasOverride)}
-      <div class="composer__overflow-menu pp-banner-in">
-        {#if running && hasText}
-          <button
-            class="composer__overflow-item {steer ? 'is-on' : ''}"
-            onclick={() => {
-              const next = !steer;
-              if (next && images.length) {
-                for (const i of images) URL.revokeObjectURL(i.url);
-                images = [];
-              }
-              steer = next;
-            }}
-            aria-pressed={steer}
-          >
-            <Icon name="send" size={15} sw={2} />
-            <span>Steer the running turn</span>
-          </button>
-        {/if}
-        {#if hasOverride}
-          <button
-            class="composer__overflow-item"
-            onclick={() => { overrideModel = null; overrideThinking = null; }}
-            title="Reset to session default"
-          >
-            <Icon name="refresh" size={15} sw={1.8} />
-            <span>Reset model & reasoning</span>
-          </button>
-        {/if}
-        <button
-          class="composer__overflow-item"
-          onclick={() => { showOverflow = false; showPicker = true; }}
-        >
-          <Icon name="chevron-down" size={15} sw={2} />
-          <span>All models & reasoning…</span>
-        </button>
-      </div>
-    {/if}
   </div>
 
   {#if showPicker}
@@ -672,66 +590,6 @@
     justify-content: flex-start;
     min-height: 0;
     padding: 8px 8px 2px;
-  }
-  .composer-device .composer__overflow {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 auto;
-    width: 30px;
-    height: 30px;
-    border-radius: 999px;
-    border: 0;
-    color: var(--crt-ink-muted, var(--muted));
-    background:
-      linear-gradient(180deg, oklch(0.92 0.003 250) 0%, oklch(0.8 0.003 250) 52%, oklch(0.7 0.003 250) 100%);
-    box-shadow:
-      inset 0 1px 0 oklch(1 / 0.85),
-      inset 0 0 0 1px oklch(0.6 0.004 250 / 0.4),
-      0 0 0 1px oklch(0.34 0.004 250 / 0.55),
-      0 2px 4px oklch(0 0 0 / 0.25);
-    cursor: pointer;
-    transition: transform 80ms ease, box-shadow 80ms ease;
-  }
-  .composer-device .composer__overflow:active {
-    transform: translateY(2px);
-    box-shadow:
-      inset 0 2px 4px oklch(0 0 0 / 0.4),
-      inset 0 0 0 1px oklch(0.55 0.004 250 / 0.5);
-  }
-  .composer-device .composer__overflow[aria-expanded="true"] {
-    color: oklch(0.72 0.18 52);
-  }
-  .composer__overflow-menu {
-    margin: 8px 0 2px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 6px;
-    border-radius: 10px;
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
-  }
-  .composer__overflow-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 9px 10px;
-    border: 0;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--color-fg);
-    font-size: 13px;
-    text-align: left;
-    cursor: pointer;
-  }
-  .composer__overflow-item.is-on {
-    background: color-mix(in oklch, var(--color-accent) 14%, transparent);
-    color: var(--color-accent);
-  }
-  .composer__overflow-item:hover {
-    background: var(--color-surface);
   }
   .composer__images {
     display: flex;
