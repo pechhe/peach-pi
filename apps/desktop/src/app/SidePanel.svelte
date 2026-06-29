@@ -77,7 +77,7 @@
 
 {#if sideChat.open && sideChat.threadId === threadId}
   <aside
-    class="relative my-2 mr-2 w-[23rem] shrink-0 overflow-hidden"
+    class="relative my-2 mr-2 w-[23rem] shrink-0 overflow-hidden rounded-[16px]"
     transition:slidePanel
     onkeydown={onKeydown}
     tabindex="-1"
@@ -213,19 +213,20 @@
       {/if}
     </div>
 
-    <!-- Input -->
-    <div class="border-t border-border p-3">
-      <!-- No send button here: the floating BTW cap sits over this slot (it never
-           moves) and acts as send. Reserve room on the right for it. -->
-      <div class="flex items-end rounded-lg border border-border-strong bg-surface py-2 pr-[3.25rem] pl-3">
-        <textarea
-          bind:value={sideChat.draft}
-          onkeydown={onKeydown}
-          rows="1"
-          use:focusOnMount
-          placeholder="Ask a side question…"
-          class="max-h-32 flex-1 resize-none self-center bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
-        ></textarea>
+    <!-- Input — reuses the composer chassis + cream screen for a single-line
+         field. The fixed BTW cap floats over the screen's right edge and acts
+         as the send button (room reserved via padding-right). -->
+    <div class="composer-device border-t border-border p-3">
+      <div class="composer__surface btw-input">
+        <div class="composer__screen btw-input__screen">
+          <textarea
+            bind:value={sideChat.draft}
+            onkeydown={onKeydown}
+            rows="1"
+            use:focusOnMount
+            placeholder="Ask a side question…"
+          ></textarea>
+        </div>
       </div>
     </div>
     </div>

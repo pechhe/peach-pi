@@ -716,6 +716,27 @@
   margin-right: 12px;
 }
 
+/* ---------------- /btw panel input (mini composer) ---------------- */
+/* Reuse the metal chassis + cream screen, shrunk to a single line. The fixed
+   BTW cap floats over the screen's right edge as the send button. Dark mode
+   follows automatically via the shared --crt-/--cream- vars. */
+.composer-device .btw-input {
+  padding: 7px;
+  border-radius: 13px;
+}
+.composer-device .btw-input .composer__screen {
+  min-height: 0;
+  padding: 9px 14px;
+  /* Reserve the right end for the BTW cap that floats over this edge. */
+  padding-right: 3.4rem;
+  border-radius: 9px;
+}
+.composer-device .btw-input .composer__screen textarea {
+  max-height: 120px;
+  min-height: 21px;
+  font-size: 14px;
+}
+
 /* Floating variant: fixed to the viewport's bottom-right so the cap never moves
    when the /btw panel docks in — the panel slides under it and the cap becomes
    the panel's send button in place. */
