@@ -19,6 +19,12 @@ interface MessageLike {
   stopReason?: string;
   errorMessage?: string;
   display?: boolean;
+  // Tool-result messages carry the originating tool call's name/id. Subagent
+  // tool results render as a dedicated `kind:"subagent"` card (via
+  // tool_execution_start/end), so their toolResult message is dropped here to
+  // avoid a redundant generic tool row showing the steer preamble.
+  toolName?: string;
+  toolCallId?: string;
 }
 
 /** Structural subset of pi's `SessionEntry` read by `loadFromEntries`. The
@@ -306,7 +312,10 @@ export class TranscriptRecorder {
     this.activeAssistantId = null;
     this.activeCompactionIds = [];
     this.retryId = null;
-    for (const m of messages) this.upsert(this.messageToItem(m, false));
+    for (const m of messages) {
+      const item = this.messageToItem(m, false);
+      if (item) this.upsert(item);
+    }
     return [{ op: "reset", items: this.items }];
   }
 
@@ -370,6 +379,7 @@ export class TranscriptRecorder {
         // that here so they don't surface as notices on the live path.
         if (event.message.role === "custom" && event.message.display === false) return [];
         const item = this.messageToItem(event.message, true);
+        if (!item) return [];
         const ops: TranscriptOp[] = [];
         // The real user `message_start` fires after `before_agent_start`.
         // Replace our optimistic pending-user/item and the vision-proxy card.
@@ -613,7 +623,11 @@ export class TranscriptRecorder {
     }
   }
 
-  private messageToItem(m: MessageLike, streaming: boolean): TranscriptItem {
+  private messageToItem(m: MessageLike, streaming: boolean): TranscriptItem | undefined {
+    // Drop subagent tool results: the launch is already surfaced as a
+    // `kind:"subagent"` card. Rendering the toolResult too would duplicate
+    // the launch and dump the "launched async with id…" steer preamble.
+    if (m.role === "toolResult" && isSubagentTool(m.toolName)) return undefined;
     const id = this.nextId(m.role === "user" ? "u" : m.role === "assistant" ? "a" : "n");
     if (m.role === "user") {
       const images = blocksToImages(m.content);

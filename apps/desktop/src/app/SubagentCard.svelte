@@ -86,17 +86,25 @@
   const task = $derived(latest.task ?? entity.events[0]!.task);
 
   // Collapsed by default: the journey (all steps) is hidden until the user
-  // expands the card with the chevron. Only the current (head) task shows.
+  // expands the card with the chevron. Only the current task line shows.
   let collapsed = $state(true);
-  const headNode = $derived(nodes[nodes.length - 1]);
-  const currentTone = $derived(headNode?.tone ?? "done");
-  const currentTitle = $derived(
-    headNode && headNode.title.trim() !== ""
-      ? headNode.title
-      : live_
-        ? "Working…"
-        : "Spawned",
+  // Expanded journey shows every step incl. tool activity (verbose).
+  const fullNodes = $derived(
+    buildNodes(entity, activityLog.logFor(entity.name), live_, live?.activity, true),
   );
+  const headNode = $derived(nodes[nodes.length - 1]);
+  // Current task line: while live, show the agent's activity verbatim (incl.
+  // tool churn like "cymbal_map") so it flips through what it's actually
+  // doing, with the triangle spinner. Terminal: show the head node title.
+  const currentTone = $derived(live_ ? "active" : (headNode?.tone ?? "done"));
+  const currentTitle = $derived.by(() => {
+    if (live_) {
+      const raw = live?.activity?.trim();
+      if (!raw || /^(?:thinking|working)/i.test(raw)) return "Working…";
+      return raw.replace(/\s+/g, " ").replace(/[….\s]+$/u, "");
+    }
+    return headNode && headNode.title.trim() !== "" ? headNode.title : "Spawned";
+  });
 </script>
 
 <article class="agent-entity" data-agent-kind={kindInfo.kind} style="--ae-accent: {kindInfo.accent}" data-testid="subagent-card">
@@ -149,7 +157,7 @@
         >{currentTitle}</p>
       {/key}
     </div>
-    {#if nodes.length > 0}
+    {#if fullNodes.length > 0}
       <button
         class="agent-entity__action agent-entity__action--expand"
         type="button"
@@ -164,7 +172,7 @@
 
   {#if !collapsed}
     <ol class="agent-entity__journey" transition:slide={{ duration: 260, easing: cubicInOut }}>
-      {#each nodes as node (node.id)}
+      {#each fullNodes as node (node.id)}
       {#key node.id}
       <li
         class="agent-entity__node agent-entity__node--{node.tone}"
