@@ -162,7 +162,7 @@
   </div>
 </header>
 
-<div class="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-6">
   {#if error}
     <div class="mb-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-[12px] text-danger">
       {error}

@@ -184,7 +184,7 @@
 <div
   bind:this={scroller}
   onscroll={onScroll}
-  class="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto px-4 pt-4 pb-6 transition-opacity {reconnecting
+  class="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-6 transition-opacity {reconnecting
     ? 'opacity-50'
     : ''}"
 >
