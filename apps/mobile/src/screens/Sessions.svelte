@@ -204,12 +204,15 @@
           </div>
           <div class="flex flex-col gap-1">
             {#each group.threads as s (s.threadId)}
-              <button
+              <div
                 class="pp-tap flex w-full items-center gap-2.5 rounded-[11px] border border-border bg-surface px-3 py-2 text-left transition-colors {s.status ===
                 'running'
                   ? 'border-accent/30'
                   : ''} active:bg-surface-2"
+                role="button"
+                tabindex="0"
                 onclick={() => openSession(s)}
+                onkeydown={(e) => e.key === 'Enter' && openSession(s)}
               >
                 {#if s.status === "running"}
                   <span class="shrink-0 text-accent"><HexSpinner size={15} dotSize={2} /></span>
@@ -233,7 +236,7 @@
                 >
                   <span class="capitalize">{s.status}</span>
                 </button>
-              </button>
+              </div>
             {/each}
           </div>
         </section>

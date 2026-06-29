@@ -143,17 +143,10 @@
   }
 
   function cycleThinking(): void {
-    if (overrideThinking) {
-      const order = availableThinking.length ? availableThinking : ["off"];
-      const idx = order.indexOf(overrideThinking);
-      overrideThinking = order[(idx + 1) % order.length] ?? "off";
-    } else if (sessionThinking) {
-      const order = availableThinking.length ? availableThinking : ["off"];
-      const idx = order.indexOf(sessionThinking);
-      overrideThinking = order[(idx + 1) % order.length] ?? "off";
-    } else {
-      overrideThinking = availableThinking[0] ?? "off";
-    }
+    const order: ThinkingLevel[] = availableThinking.length ? availableThinking : ["off"];
+    const current = overrideThinking ?? sessionThinking ?? "off";
+    const idx = order.indexOf(current);
+    overrideThinking = order[(idx + 1) % order.length] ?? "off";
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -197,6 +190,8 @@
       <div class="composer__editor">
         <div
           class="composer__screen"
+          role="button"
+          tabindex="-1"
           onmousedown={(e) => {
             const t = e.target as HTMLElement;
             if (t.closest("textarea, button")) return;
@@ -314,7 +309,7 @@
           {:else}
             <button
               class="send-dial"
-              {#if hasText}data-has-input=""{/if}
+              data-has-input={hasText ? "" : undefined}
               onclick={() => void submit()}
               disabled={!hasText || sending}
               title={running ? "Queue message" : "Send message"}
