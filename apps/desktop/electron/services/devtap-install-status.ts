@@ -37,8 +37,13 @@ export class DevTapInstallService {
 
   status(projectId: string): DevTapProjectStatus {
     const root = this.projectPath(projectId);
-    const names = ["devtap.ts", "devtap-vite.ts"];
-    const dirs = ["", "electron/services", "src"];
+    // Tap adapter files (copied from the devtap-install skill) live at these
+    // conventional names. Projects that consume the tap via the
+    // @devtap/electron or @devtap/node package have no copied adapter file —
+    // instead the marker appears in the entry point that imports/initializes
+    // it, so scan common entry-point filenames under the entry dirs too.
+    const names = ["devtap.ts", "devtap-vite.ts", "main.ts", "index.ts", "app.ts", "server.ts"];
+    const dirs = ["", "electron", "electron/services", "src"];
     // Vite/SvelteKit configs that may register the browser plugin.
     const configs = ["vite.config.ts", "vite.config.js", "vite.config.mts", "svelte.config.js"];
     const at = (base: string) => [

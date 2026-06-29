@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ModelInfo } from "@peach-pi/shared-types";
-  import { fly } from "svelte/transition";
+  import { quintOut } from "svelte/easing";
   import { sideChat } from "../stores/side-chat.svelte";
   import { api } from "../lib/ipc";
   import Markdown from "./Markdown.svelte";
@@ -61,15 +61,30 @@
     const model = models.find((m) => `${m.provider}/${m.id}` === value) ?? null;
     await sideChat.startNew(model);
   }
+
+  // Buttery reveal: animate the clip's width so the main content gives way
+  // smoothly and the panel grows out from the right (the inner panel is pinned
+  // to the right edge, so it never reflows or snaps).
+  function slidePanel(node: HTMLElement, { duration = 320 } = {}) {
+    const full = node.getBoundingClientRect().width || 368;
+    return {
+      duration,
+      easing: quintOut,
+      css: (t: number) => `width:${t * full}px;`,
+    };
+  }
 </script>
 
 {#if sideChat.open && sideChat.threadId === threadId}
   <aside
-    class="btw-panel relative my-2 mr-2 flex w-[23rem] shrink-0 flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
-    transition:fly={{ x: 380, duration: 220 }}
+    class="relative my-2 mr-2 w-[23rem] shrink-0 overflow-hidden rounded-[16px]"
+    transition:slidePanel
     onkeydown={onKeydown}
     tabindex="-1"
   >
+    <div
+      class="btw-panel absolute inset-y-0 right-0 flex w-[23rem] flex-col overflow-hidden rounded-[16px] border border-border bg-surface"
+    >
     <button
       class="absolute right-1.5 top-1.5 z-10 rounded p-1 text-faint hover:bg-surface-2 hover:text-fg"
       onclick={() => sideChat.close()}
@@ -198,20 +213,22 @@
       {/if}
     </div>
 
-    <!-- Input -->
-    <div class="border-t border-border p-3">
-      <!-- No send button here: the floating BTW cap sits over this slot (it never
-           moves) and acts as send. Reserve room on the right for it. -->
-      <div class="flex items-end rounded-lg border border-border-strong bg-surface py-2 pr-[3.25rem] pl-3">
-        <textarea
-          bind:value={sideChat.draft}
-          onkeydown={onKeydown}
-          rows="1"
-          use:focusOnMount
-          placeholder="Ask a side question…"
-          class="max-h-32 flex-1 resize-none self-center bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
-        ></textarea>
+    <!-- Input — reuses the composer chassis + cream screen for a single-line
+         field. The fixed BTW cap floats over the screen's right edge and acts
+         as the send button (room reserved via padding-right). -->
+    <div class="composer-device border-t border-border p-3">
+      <div class="composer__surface btw-input">
+        <div class="composer__screen btw-input__screen">
+          <textarea
+            bind:value={sideChat.draft}
+            onkeydown={onKeydown}
+            rows="1"
+            use:focusOnMount
+            placeholder="Ask a side question…"
+          ></textarea>
+        </div>
       </div>
+    </div>
     </div>
   </aside>
 {/if}
