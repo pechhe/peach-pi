@@ -117,6 +117,13 @@
   let releaseSendClick: (() => void) | null = null;
   // Same press/release spacing for the BTW (side-chat) toggle button.
   let btwRelease: (() => void) | null = null;
+  // Move the floating BTW cap to <body> so `position: fixed` resolves against
+  // the viewport (the composer/card ancestors create a containing block that
+  // otherwise drags it left when the /btw panel docks in).
+  function portal(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
   function pressSend(): void {
     sendPressed = true;
     releaseSendClick = pressClick();
@@ -1105,10 +1112,12 @@
     </div>
   </div>
 
-  <!-- Side conversation (/btw): fixed to the viewport's bottom-right so the cap never
-       moves. The docked panel slides in under it; once open the cap becomes the panel's
-       send button in place (no hide/reappear). Hidden only on the centered new state. -->
+  <!-- Side conversation (/btw): portaled to <body> and fixed to the viewport's
+       bottom-right so the cap never moves. The docked panel slides in under it;
+       once open the cap becomes the panel's send button in place. Hidden only on
+       the centered new state. -->
   {#if !centered}
+  <div class="composer-device" use:portal>
   <button
     class="btw-btn btw-btn--floating"
     data-press="self"
@@ -1138,6 +1147,7 @@
   >
     <span class="btw-btn__label">BTW</span>
   </button>
+  </div>
   {/if}
 
   <ModelScopeSelect bind:this={scopedModelsPanel} floating />

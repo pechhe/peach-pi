@@ -294,20 +294,23 @@
     };
   }
 
-  // Pick the topmost visible section in NAV order as the active one.
+  // Pick the active section: the last (in NAV order) whose top has reached
+  // the scroll container's content-top anchor line. This mirrors where
+  // scrollToSection parks a section (flush with the padding-top).
   function pickActive() {
     const root = scrollEl;
     if (!root) return;
-    let best: { id: string; top: number } | null = null;
+    const rootRect = root.getBoundingClientRect();
+    const anchor = parseFloat(getComputedStyle(root).paddingTop) || 0;
+    let active: NavItem | null = null;
     for (const it of NAV_ITEMS) {
       const el = sectionEls.get(it.id);
       if (!el || !hit(it.id)) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.bottom < 0) continue; // scrolled past
-      if (rect.top > root.clientHeight + 4) continue; // below viewport
-      if (best === null || rect.top < best.top) best = { id: it.id, top: rect.top };
+      const top = el.getBoundingClientRect().top - rootRect.top;
+      if (top <= anchor + 2) active = it; // reached/passed the anchor
+      else break; // below the anchor: NAV order means we're done
     }
-    if (best) activeId = best.id;
+    if (active) activeId = active.id;
     else if (!activeId && NAV_ITEMS[0]) activeId = NAV_ITEMS[0].id;
   }
 
@@ -315,11 +318,16 @@
   // the IntersectionObserver fires at intermediate positions and would otherwise
   // snap activeId to the section above the target before it reaches the top.
   let programmaticScroll = $state(false);
+  let scrollTargetId: string | null = null;
 
   $effect(() => {
     const root = scrollEl;
     if (!root) return;
     const onScrollEnd = () => {
+      if (scrollTargetId) {
+        activeId = scrollTargetId;
+        scrollTargetId = null;
+      }
       programmaticScroll = false;
       pickActive();
     };
@@ -350,12 +358,52 @@
     return () => io?.disconnect();
   });
 
+  // Snappy-but-smooth custom scroll. The native `behavior: "smooth"` easing is
+  // lethargic; this runs a short ease-out (~220ms) so clicks feel immediate.
+  let scrollAnim = $state<number | null>(null);
   function scrollToSection(id: string) {
+    const root = scrollEl;
     const el = sectionEls.get(id);
-    if (!el) return;
+    if (!root || !el) return;
     activeId = id;
     programmaticScroll = true;
-    el.scrollIntoView({ block: "start", behavior: "smooth" });
+    scrollTargetId = id;
+    if (scrollAnim != null) cancelAnimationFrame(scrollAnim);
+    const styles = getComputedStyle(root);
+    const paddingTop = parseFloat(styles.paddingTop) || 0;
+    const target = el.getBoundingClientRect().top - root.getBoundingClientRect().top - paddingTop + root.scrollTop;
+    const start = root.scrollTop;
+    const distance = target - start;
+    if (Math.abs(distance) < 1) {
+      programmaticScroll = false;
+      pickActive();
+      return;
+    }
+    const duration = Math.min(380, 200 + Math.abs(distance) * 0.55);
+    let startTime = 0;
+    const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+    const step = (now: number) => {
+      if (!startTime) startTime = now;
+      const t = Math.min(1, (now - startTime) / duration);
+      root.scrollTop = start + distance * easeOut(t);
+      if (t < 1) scrollAnim = requestAnimationFrame(step);
+      else {
+        scrollAnim = null;
+        programmaticScroll = false;
+        pickActive();
+      }
+    };
+    scrollAnim = requestAnimationFrame(step);
+    // Fallback: if scrollend doesn't fire (rare), still release the lock.
+    setTimeout(() => {
+      scrollAnim = null;
+      if (programmaticScroll && scrollTargetId) {
+        activeId = scrollTargetId;
+        scrollTargetId = null;
+        programmaticScroll = false;
+        pickActive();
+      }
+    }, duration + 120);
   }
 
   let muted = $state(soundsMuted());

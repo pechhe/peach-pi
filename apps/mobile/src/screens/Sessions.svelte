@@ -224,18 +224,6 @@
                   <span class="mx-[3px] h-1.5 w-1.5 shrink-0 rounded-full bg-fainter"></span>
                 {/if}
                 <span class="min-w-0 flex-1 truncate text-[14px] font-semibold">{s.title || s.threadId}</span>
-                {#if s.lastCheckpointSha}
-                  <span class="shrink-0 font-mono text-[10.5px] text-fainter">
-                    {s.lastCheckpointSha.slice(0, 7)}
-                  </span>
-                {/if}
-                <button
-                  class="shrink-0 px-1 text-[10px] text-faint"
-                  onclick={(e) => { e.stopPropagation(); statusFor = s; }}
-                  aria-label="Thread status"
-                >
-                  <span class="capitalize">{s.status}</span>
-                </button>
               </div>
             {/each}
           </div>
@@ -283,13 +271,6 @@
                         {:else if meta.key === "toTest" && s.toTestNote}
                           <span class="shrink-0 truncate max-w-[35%] text-[10.5px] text-faint">{s.toTestNote}</span>
                         {/if}
-                        <button
-                          class="shrink-0 px-1 text-[10px] text-faint"
-                          onclick={(e) => { e.stopPropagation(); statusFor = s; }}
-                          aria-label="Thread status"
-                        >
-                          <span class="capitalize">{s.status}</span>
-                        </button>
                       </div>
                     {/each}
                   </div>
