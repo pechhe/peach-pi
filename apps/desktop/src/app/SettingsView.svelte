@@ -294,22 +294,23 @@
     };
   }
 
-  // Pick the topmost visible section in NAV order as the active one.
+  // Pick the active section: the last (in NAV order) whose top has reached
+  // the scroll container's content-top anchor line. This mirrors where
+  // scrollToSection parks a section (flush with the padding-top).
   function pickActive() {
     const root = scrollEl;
     if (!root) return;
-    let best: { id: string; top: number } | null = null;
+    const rootRect = root.getBoundingClientRect();
+    const anchor = parseFloat(getComputedStyle(root).paddingTop) || 0;
+    let active: NavItem | null = null;
     for (const it of NAV_ITEMS) {
       const el = sectionEls.get(it.id);
       if (!el || !hit(it.id)) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.bottom <= 0) continue; // scrolled past (incl. touching top edge)
-      if (rect.top > root.clientHeight + 4) continue; // below viewport
-      // Prefer the section whose top is nearest the visible top (small negative ok).
-      const score = Math.abs(rect.top);
-      if (best === null || score < best.top) best = { id: it.id, top: score };
+      const top = el.getBoundingClientRect().top - rootRect.top;
+      if (top <= anchor + 2) active = it; // reached/passed the anchor
+      else break; // below the anchor: NAV order means we're done
     }
-    if (best) activeId = best.id;
+    if (active) activeId = active.id;
     else if (!activeId && NAV_ITEMS[0]) activeId = NAV_ITEMS[0].id;
   }
 
