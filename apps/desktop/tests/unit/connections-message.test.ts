@@ -7,16 +7,16 @@ import { buildConnectionsHint, parseConnectionsHint } from "../../src/lib/compos
 // the transcript keeps rendering badges if the hint wording ever changes.
 test("parses the hint produced by buildConnectionsHint and strips the body", () => {
   const hint = buildConnectionsHint([
-    { kind: "custom", name: "Leadmagic", baseUrl: "https://api.leadmagic.io" },
-    { kind: "composio", name: "Gmail", toolkitSlug: "gmail" },
+    { integration: "leadmagic", name: "Leadmagic" },
+    { integration: "gmail", name: "Gmail" },
   ]);
   const body = "can you find phone numbers for people at westminster waste";
   const parsed = parseConnectionsHint(`${hint}\n\n${body}`);
 
   assert.ok(parsed, "hint should parse");
   assert.deepEqual(parsed.connections, [
-    { kind: "custom", name: "Leadmagic" },
-    { kind: "composio", name: "Gmail" },
+    { integration: "leadmagic", name: "Leadmagic" },
+    { integration: "gmail", name: "Gmail" },
   ]);
   assert.equal(parsed.body, body);
 });
@@ -26,11 +26,9 @@ test("returns null for an ordinary message with no hint", () => {
 });
 
 test("handles a pinned connection with no typed body", () => {
-  const hint = buildConnectionsHint([
-    { kind: "custom", name: "Metabase", baseUrl: "https://mb.acme.com" },
-  ]);
+  const hint = buildConnectionsHint([{ integration: "metabase", name: "Metabase" }]);
   const parsed = parseConnectionsHint(hint);
   assert.ok(parsed);
-  assert.deepEqual(parsed.connections, [{ kind: "custom", name: "Metabase" }]);
+  assert.deepEqual(parsed.connections, [{ integration: "metabase", name: "Metabase" }]);
   assert.equal(parsed.body, "");
 });

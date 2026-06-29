@@ -24,19 +24,16 @@ import { PiUpdateService } from "./services/pi-update-service.ts";
 import { AutoUpdateService, initMainSentry } from "./services/telemetry-service.ts";
 import { setDevTapStateProvider } from "@devtap/electron";
 import { RecordingService } from "./services/recording-service.ts";
-import { ConnectorService } from "./services/connector-service.ts";
 import { BwsService } from "./services/bws-service.ts";
 import { CliService } from "./services/cli-service.ts";
-import { CustomConnectionService } from "./services/custom-connection-service.ts";
-import { ConnectionSetupService } from "./services/connection-setup-service.ts";
 import { McpService } from "./services/mcp-service.ts";
 import { ExecutorService } from "./services/executor-service.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
 import { UsageService } from "./services/usage/usage-service.ts";
 import { AuthService } from "./services/auth-service.ts";
-import { ConnectorResolver } from "./services/connector-resolver.ts";
-import { ensureConnectorExtension } from "./services/connector-extension.ts";
+import { BwsResolver } from "./services/bws-resolver.ts";
+import { ensureBwsExtension } from "./services/bws-extension.ts";
 import { ensureExecutorSkill } from "./services/executor-skill.ts";
 import { ensurePeachVisionConsentExtension } from "./services/peach-vision-consent-extension.ts";
 import {
@@ -100,18 +97,15 @@ export interface ServiceComposition {
   sideChatService: SideChatService;
   devTapInstallService: DevTapInstallService;
   fallowService: FallowService;
-  connectorService: ConnectorService;
   bwsService: BwsService;
   cliService: CliService;
-  customConnectionService: CustomConnectionService;
-  connectionSetupService: ConnectionSetupService;
   mcpService: McpService;
   executorService: ExecutorService;
   cuaDriverService: CuaDriverService;
   agentBrowserService: AgentBrowserService;
   usageService: UsageService;
   authService: AuthService;
-  connectorResolver: ConnectorResolver;
+  bwsResolver: BwsResolver;
   listTailnetPeersDefault: typeof listTailnetPeersDefault;
   enableServe: typeof enableServe;
   /** Refresh the App↔Thread cycle ownership predicate (used by boot's
@@ -430,15 +424,8 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   // is honored on next launch (no new crashes are sent once disabled).
   void getPiSettings().then((s) => initMainSentry(s.telemetryConsent));
 
-  const connectorService = new ConnectorService(emit);
   const bwsService = new BwsService(emit);
   const cliService = new CliService(emit);
-  const customConnectionService = new CustomConnectionService(emit);
-  const connectionSetupService = new ConnectionSetupService(
-    emit,
-    () => appService.getUtilityModel(),
-    customConnectionService,
-  );
   const mcpService = new McpService();
   // Register the bundled Executor CLI as an MCP server. Absolute path: a
   // Finder-launched app has no shell PATH, so a bare `executor` won't resolve.
@@ -460,9 +447,9 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     }
   })();
 
-  const connectorResolver = new ConnectorResolver(connectorService, customConnectionService, bwsService);
-  void connectorResolver.start().then(() => connectorResolver.writeBootstrap());
-  void ensureConnectorExtension();
+  const bwsResolver = new BwsResolver(bwsService);
+  void bwsResolver.start().then(() => bwsResolver.writeBootstrap());
+  void ensureBwsExtension();
   void ensureExecutorSkill();
   void ensurePeachVisionConsentExtension();
 
@@ -486,18 +473,15 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     sideChatService,
     devTapInstallService,
     fallowService,
-    connectorService,
     bwsService,
     cliService,
-    customConnectionService,
-    connectionSetupService,
     mcpService,
     executorService,
     cuaDriverService,
     agentBrowserService,
     usageService,
     authService,
-    connectorResolver,
+    bwsResolver,
     listTailnetPeersDefault,
     enableServe,
     setHudUpPredicate,

@@ -101,13 +101,9 @@
   let connLogos = $state<Map<string, string | null>>(new Map());
   async function loadConnLogos() {
     try {
-      const [composio, custom] = await Promise.all([
-        api.invoke("connectors:list"),
-        api.invoke("customConnections:list"),
-      ]);
+      const conns = await api.invoke("executor:connections");
       const m = new Map<string, string | null>();
-      for (const c of composio) m.set(c.name, c.logoUrl);
-      for (const c of custom) m.set(c.name, c.logoUrl);
+      for (const c of conns) m.set(c.identityLabel ?? c.name, null);
       connLogos = m;
     } catch {
       // Best-effort: badges fall back to a monogram without a logo.
@@ -115,7 +111,7 @@
   }
   $effect(() => {
     void loadConnLogos();
-    const off = api.on("event:connectorsChanged", () => void loadConnLogos());
+    const off = api.on("event:executorChanged", () => void loadConnLogos());
     return off;
   });
 

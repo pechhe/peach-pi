@@ -15,12 +15,7 @@ import type { ReferencedConnection, ReferencedSecret } from "@peach-pi/shared-ty
 /** Build a prompt hint to prepend when the user has @-pinned connections. */
 export function buildConnectionsHint(connections: ReferencedConnection[]): string {
   if (connections.length === 0) return "";
-  const items = connections.map((c) => {
-    if (c.kind === "custom") {
-      return `- custom connection "${c.name}"${c.baseUrl ? ` (base URL: ${c.baseUrl})` : ""}`;
-    }
-    return `- composio toolkit "${c.name}"${c.toolkitSlug ? ` (slug: ${c.toolkitSlug})` : ""}`;
-  });
+  const items = connections.map((c) => `- connection "${c.name}" (integration: ${c.integration})`);
   return ["The user has pinned these connections for this task. Use them preferentially:", ...items].join("\n");
 }
 
@@ -43,7 +38,7 @@ export function buildSecretsHint(secrets: ReferencedSecret[]): string {
  * hint block (see buildConnectionsHint above):
  *
  *   The user has pinned these connections for this task. Use them preferentially:
- *   - custom connection "Leadmagic" (base URL: https://api.leadmagic.io)
+ *   - connection "Leadmagic" (integration: leadmagic)
  *
  *   <the actual message body>
  *
@@ -52,7 +47,7 @@ export function buildSecretsHint(secrets: ReferencedSecret[]): string {
  * return the remaining body so the bubble renders only what the user typed.
  */
 export interface ParsedConnectionsHint {
-  connections: { kind: "custom" | "composio"; name: string }[];
+  connections: { integration: string; name: string }[];
   /** The message body after the hint block (what the user actually typed). */
   body: string;
 }
@@ -61,7 +56,7 @@ export interface ParsedConnectionsHint {
 // prefix line followed by one or more "- …" bullet lines, then the body.
 const HINT_RE =
   /^The user has pinned these connections for this task\. Use them preferentially:\n((?:- [^\n]*(?:\n|$))+)\n*/;
-const ITEM_RE = /^- (custom connection|composio toolkit) "([^"]+)"/gm;
+const ITEM_RE = /^- connection "([^"]+)" \(integration: ([^)]+)\)/gm;
 
 export function parseConnectionsHint(text: string): ParsedConnectionsHint | null {
   const m = HINT_RE.exec(text);
@@ -69,10 +64,7 @@ export function parseConnectionsHint(text: string): ParsedConnectionsHint | null
   const bullets = m[1] ?? "";
   const connections: ParsedConnectionsHint["connections"] = [];
   for (const item of bullets.matchAll(ITEM_RE)) {
-    connections.push({
-      kind: item[1] === "custom connection" ? "custom" : "composio",
-      name: item[2] ?? "",
-    });
+    connections.push({ name: item[1] ?? "", integration: item[2] ?? "" });
   }
   if (connections.length === 0) return null;
   return { connections, body: text.slice(m[0].length) };

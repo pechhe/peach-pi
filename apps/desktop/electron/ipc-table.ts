@@ -101,11 +101,8 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     sideChatService,
     devTapInstallService,
     fallowService,
-    connectorService,
     bwsService,
     cliService,
-    customConnectionService,
-    connectionSetupService,
     mcpService,
     executorService,
     cuaDriverService,
@@ -191,11 +188,6 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       },
       "executor:removeConnection": executorService.removeConnection.bind(executorService),
       "executor:addOpenApi": executorService.addOpenApi.bind(executorService),
-      "connectors:catalogue": connectorService.catalogue.bind(connectorService),
-      "connectors:toolkit": connectorService.toolkit.bind(connectorService),
-      "connectors:list": connectorService.list.bind(connectorService),
-      "connectors:connectFields": connectorService.connectFields.bind(connectorService),
-      "connectors:disconnect": connectorService.disconnect.bind(connectorService),
       "bws:status": bwsService.status.bind(bwsService),
       "bws:setAccessToken": bwsService.setAccessToken.bind(bwsService),
       "bws:clearAuth": bwsService.clearAuth.bind(bwsService),
@@ -210,13 +202,6 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "cli:refresh": cliService.refresh.bind(cliService),
       "cli:login": cliService.login.bind(cliService),
       "cli:setHidden": cliService.setHidden.bind(cliService),
-      "customConnections:list": customConnectionService.list.bind(customConnectionService),
-      "customConnections:create": customConnectionService.create.bind(customConnectionService),
-      "customConnections:delete": customConnectionService.delete.bind(customConnectionService),
-      "connectionSetup:start": connectionSetupService.start.bind(connectionSetupService),
-      "connectionSetup:send": connectionSetupService.send.bind(connectionSetupService),
-      "connectionSetup:save": connectionSetupService.save.bind(connectionSetupService),
-      "connectionSetup:close": connectionSetupService.close.bind(connectionSetupService),
       "cuaDriver:status": cuaDriverService.status.bind(cuaDriverService),
       "cuaDriver:grantPermissions": cuaDriverService.grantPermissions.bind(cuaDriverService),
       "agentBrowser:state": agentBrowserService.state.bind(agentBrowserService),
@@ -626,11 +611,6 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       },
       "app:installVisionProxy": () => installVisionProxy(emit),
       "app:getPiHealth": () => computePiHealth(__dirname),
-      "connectors:connect": async (slug) => {
-        const r = await connectorService.connect(slug);
-        if (r.redirectUrl) void shell.openExternal(r.redirectUrl);
-        return r;
-      },
       "devtap:report": (entry) =>
         emitDevTapEvent({
           level: entry.error ? "error" : "info",
