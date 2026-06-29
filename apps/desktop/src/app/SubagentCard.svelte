@@ -85,26 +85,34 @@
   const latest = $derived(entity.events[entity.events.length - 1]!);
   const task = $derived(latest.task ?? entity.events[0]!.task);
 
-  // Collapsed by default: the journey (all steps) is hidden until the user
-  // expands the card with the chevron. Only the current task line shows.
+  // Collapsed by default: the journey is hidden until the user expands the
+  // card with the chevron. Only the current task line shows.
   let collapsed = $state(true);
-  // Expanded journey shows every step incl. tool activity (verbose).
-  const fullNodes = $derived(
-    buildNodes(entity, activityLog.logFor(entity.name), live_, live?.activity, true),
-  );
   const headNode = $derived(nodes[nodes.length - 1]);
-  // Current task line: while live, show the agent's activity verbatim (incl.
-  // tool churn like "cymbal_map") so it flips through what it's actually
-  // doing, with the triangle spinner. Terminal: show the head node title.
+  // Live tool activity verbatim ("running command", "cymbal_outline…"),
+  // cleaned. The pi-subagents widget only exposes this single line.
+  const liveTool = $derived.by(() => {
+    if (!live_) return undefined;
+    const raw = live?.activity?.trim();
+    if (!raw || /^(?:thinking|working)/i.test(raw)) return undefined;
+    return raw.replace(/\s+/g, " ").replace(/[….\s]+$/u, "");
+  });
+  // Current task line. Prefer the agent's last narration (the folded journey
+  // head title — tool churn is folded into subtitles, so this is the last
+  // meaningful sentence). If the agent has only run tools and never narrated,
+  // fall back to the live tool activity rather than a dead "Working…".
   const currentTone = $derived(live_ ? "active" : (headNode?.tone ?? "done"));
   const currentTitle = $derived.by(() => {
-    if (live_) {
-      const raw = live?.activity?.trim();
-      if (!raw || /^(?:thinking|working)/i.test(raw)) return "Working…";
-      return raw.replace(/\s+/g, " ").replace(/[….\s]+$/u, "");
-    }
-    return headNode && headNode.title.trim() !== "" ? headNode.title : "Spawned";
+    const narration = headNode?.title?.trim();
+    if (narration) return narration;
+    if (liveTool) return liveTool;
+    return live_ ? "Working…" : "Spawned";
   });
+  // Dim sub-status: the live tool, shown under the narration when it differs
+  // (mirrors the TUI's two-line title + activity layout).
+  const currentSub = $derived(
+    live_ && liveTool && liveTool !== currentTitle ? liveTool : undefined,
+  );
 </script>
 
 <article class="agent-entity" data-agent-kind={kindInfo.kind} style="--ae-accent: {kindInfo.accent}" data-testid="subagent-card">
@@ -156,8 +164,19 @@
           out:fly={{ duration: 280, y: 6, opacity: 0, easing: cubicInOut }}
         >{currentTitle}</p>
       {/key}
+      {#if currentSub}
+        <div class="agent-entity__current-sub-wrap">
+          {#key currentSub}
+            <p
+              class="agent-entity__current-sub"
+              in:fly={{ duration: 240, y: -4, opacity: 0, easing: cubicOut }}
+              out:fly={{ duration: 240, y: 4, opacity: 0, easing: cubicInOut }}
+            >{currentSub}</p>
+          {/key}
+        </div>
+      {/if}
     </div>
-    {#if fullNodes.length > 0}
+    {#if nodes.length > 0}
       <button
         class="agent-entity__action agent-entity__action--expand"
         type="button"
@@ -172,7 +191,7 @@
 
   {#if !collapsed}
     <ol class="agent-entity__journey" transition:slide={{ duration: 260, easing: cubicInOut }}>
-      {#each fullNodes as node (node.id)}
+      {#each nodes as node (node.id)}
       {#key node.id}
       <li
         class="agent-entity__node agent-entity__node--{node.tone}"
@@ -488,6 +507,20 @@
   }
   .agent-entity__current[data-tone="active"] .agent-entity__current-title { color: var(--ae-accent); }
   .agent-entity__current[data-tone="blocked"] .agent-entity__current-title { color: #c2691a; }
+  .agent-entity__current-sub-wrap {
+    position: relative;
+    min-height: calc(1.4 * 10.5px);
+    margin-top: 1px;
+  }
+  .agent-entity__current-sub {
+    margin: 0;
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: var(--color-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .agent-entity__action--expand {
     grid-column: 3;
     margin-left: 0;

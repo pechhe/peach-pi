@@ -17,6 +17,7 @@ import type {
   TranscriptOp,
 } from "@peach-pi/shared-types";
 import { TranscriptRecorder, type RecorderEvent } from "./transcript-recorder.ts";
+import { createBashOverrideDefinition } from "./bash-override.ts";
 import { createUiBridge, type UiBridgeCallbacks } from "./extension-ui-bridge.ts";
 import { TerminalCustomDriver, type TerminalCustomFrameEvent } from "./terminal-custom.ts";
 import { scopeModels, stripThinkingSuffix } from "./scope-models.ts";
@@ -158,14 +159,31 @@ export class PiSession {
     } else {
       sessionManager = sdk.SessionManager.create(cwd);
     }
-    const loader = new sdk.DefaultResourceLoader({ cwd, agentDir: sdk.getAgentDir() });
+    const agentDir = sdk.getAgentDir();
+    const loader = new sdk.DefaultResourceLoader({ cwd, agentDir });
     await loader.reload();
+    // Override the built-in `bash` tool with one that applies a default
+    // per-command timeout when the agent omits one (see bash-override.ts).
+    // Without this, a runaway command like `find /` wedges the agent turn
+    // until the user manually aborts it. The SDK's tool registry lets a
+    // custom tool shadow a built-in by name, so we only swap `operations`.
+    const settings = sdk.SettingsManager.create(cwd, agentDir);
+    const bashOverride = createBashOverrideDefinition(
+      cwd,
+      sdk.createBashToolDefinition,
+      sdk.createLocalBashOperations,
+      {
+        shellPath: settings.getShellPath(),
+        commandPrefix: settings.getShellCommandPrefix(),
+      },
+    );
     const { session, extensionsResult } = await sdk.createAgentSession({
       cwd,
       sessionManager,
       authStorage,
       modelRegistry,
       resourceLoader: loader,
+      customTools: [bashOverride],
     });
     const recorder = new TranscriptRecorder();
     // Seed from the full active branch (root→leaf), not the SDK's trimmed

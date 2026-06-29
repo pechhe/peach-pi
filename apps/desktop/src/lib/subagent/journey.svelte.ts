@@ -203,12 +203,7 @@ export function buildNodes(
   log: ActivityEntry[],
   isLive: boolean,
   liveActivity?: string,
-  verbose = false,
 ): TimelineNode[] {
-  // When verbose, keep every tool activity as its own step instead of folding
-  // it into a subtitle — used by the expanded journey so the user sees all
-  // steps that actually happened.
-  const fold = !verbose;
   type U =
     | { t: number; kind: "event"; ev: AgentEvent }
     | { t: number; kind: "activity"; a: ActivityEntry };
@@ -274,7 +269,7 @@ export function buildNodes(
       // First real activity. If it's tool churn, fold it as a subtitle on
       // the shimmer slot and keep the shimmer pending — the first *narration*
       // line is what should become the first real title, not a tool status.
-      if (fold && pendingShimmerIdx >= 0 && isToolActivity(raw)) {
+      if (pendingShimmerIdx >= 0 && isToolActivity(raw)) {
         attachAsSubtitle(nodes, raw);
         continue;
       }
@@ -288,7 +283,7 @@ export function buildNodes(
         };
         lastActivityIdx = pendingShimmerIdx;
         pendingShimmerIdx = -1;
-      } else if (fold && isToolActivity(raw)) {
+      } else if (isToolActivity(raw)) {
         // Tool churn (reading, running command, cymbal_search, …) is low
         // signal as a standalone step: fold it as a subtitle onto the
         // latest narration node rather than adding another timeline row.
@@ -318,7 +313,7 @@ export function buildNodes(
     // Tool churn as the live activity: fold it as a subtitle on the latest
     // narration node and mark that node active, instead of pushing a noisy
     // standalone row.
-    if (fold && !isPlaceholder && isToolActivity(raw) && lastActivityIdx >= 0) {
+    if (!isPlaceholder && isToolActivity(raw) && lastActivityIdx >= 0) {
       const n = nodes[lastActivityIdx]!;
       nodes[lastActivityIdx] = { ...n, tone: "active", at: "Now", subtitle: raw, fullTitle: n.fullTitle ?? n.title };
     } else if (lastActivityIdx >= 0 && nodes[lastActivityIdx]!.title === current) {
