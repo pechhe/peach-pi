@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type { ExecConnection, ExecIntegration } from "@peach-pi/shared-types";
@@ -72,13 +75,39 @@ export class ExecutorService {
     }));
   }
 
-  /** Returns the local web-UI Add-account URL; the IPC handler opens it. The
-   *  user enters the credential there, so no secret passes through peach-pi. */
+  /** Returns the local web-UI Add-account URL (pre-authenticated); the IPC
+   *  handler opens it. The user enters the credential there, so no secret
+   *  passes through peach-pi. */
   async addConnection(integration: string): Promise<{ url: string; instructions: string }> {
-    return this.call<{ url: string; instructions: string }>(
+    const r = await this.call<{ url: string; instructions: string }>(
       ["coreTools", "connections", "createHandoff"],
       { integration },
     );
+    return { ...r, url: this.signUrl(r.url) };
+  }
+
+  /** Append the daemon's stable bearer token as `?_token=` so the browser opens
+   *  the Executor web UI already signed in (matching `executor open`). Without
+   *  this the page loads but its API calls 401 → "Authentication required". */
+  private signUrl(url: string): string {
+    const token = this.authToken();
+    if (!token) return url;
+    const u = new URL(url);
+    u.searchParams.set("_token", token);
+    return u.toString();
+  }
+
+  /** Reads the stable web token from `~/.executor/server-control/auth.json`
+   *  (honoring `EXECUTOR_DATA_DIR`). */
+  private authToken(): string | null {
+    try {
+      const dataDir = resolve(process.env.EXECUTOR_DATA_DIR ?? join(homedir(), ".executor"));
+      const raw = readFileSync(join(dataDir, "server-control", "auth.json"), "utf8");
+      const parsed = JSON.parse(raw) as { token?: string };
+      return typeof parsed.token === "string" && parsed.token.length > 0 ? parsed.token : null;
+    } catch {
+      return null;
+    }
   }
 
   async removeConnection(owner: "org" | "user", integration: string, name: string): Promise<void> {
