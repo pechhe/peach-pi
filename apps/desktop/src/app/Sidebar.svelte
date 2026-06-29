@@ -808,15 +808,6 @@
         <ArrowLeft size={15} />
       </button>
       <button
-        class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg"
-        onclick={() => { playRotary(); feedbackOpen = true; }}
-        data-testid="nav-feedback"
-        data-press="self"
-        title="Send feedback"
-      >
-        <Megaphone size={15} />
-      </button>
-      <button
         class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
         onclick={() => { playRotary(); onGoForward(); }}
         disabled={!canGoForward}
@@ -949,6 +940,15 @@
           <UsagePopover anchor={usageAnchor} onClose={() => (usageOpen = false)} />
         {/if}
       </div>
+      <button
+        class="main-nav-item flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-fg"
+        onclick={() => { playRotary(); feedbackOpen = true; }}
+        data-testid="nav-feedback"
+        data-press="self"
+        title="Send feedback"
+      >
+        <Megaphone size={15} /> Feedback
+      </button>
     </MovingHighlight>
   </nav>
 
