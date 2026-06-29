@@ -2,8 +2,9 @@
   import { onMount } from "svelte";
   import type { RemoteSessionInfo } from "@peach-pi/shared-types";
   import { store, hostLabel } from "../lib/store.svelte.ts";
-  import { listSessions } from "../lib/api.ts";
+  import { listSessions, RosterTapClient, type TapStatus } from "../lib/api.ts";
   import Icon from "../components/Icon.svelte";
+  import HexSpinner from "../components/HexSpinner.svelte";
   import StatusSheet from "../components/StatusSheet.svelte";
 
   let { masterId }: { masterId: string } = $props();
@@ -14,6 +15,7 @@
   let toast = $state<{ msg: string; kind: "ok" | "err" } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
   let statusFor = $state<RemoteSessionInfo | null>(null);
+  let rosterStatus = $state<TapStatus>({ kind: "connecting" });
   let expanded = $state<Record<Lane, boolean>>({
     active: true,
     snoozed: false,
@@ -42,8 +44,38 @@
     }
   }
 
+  // Roster tap: full served-thread snapshot on connect, then live updates on
+  // every roster-shape change (status flip, checkpoint, create/archive/snooze,
+  // lease handoff). Replaces the cached list wholesale each frame — no manual
+  // refresh button needed.
+  let rosterClient: RosterTapClient | null = null;
+  function connectRoster(): void {
+    if (!master) return;
+    rosterClient?.close();
+    rosterClient = new RosterTapClient(master, {
+      onRoster: (sessions) => store.setSessions(masterId, sessions),
+      onStatus: (s) => (rosterStatus = s),
+    });
+    rosterClient.start();
+  }
+
+  function onVisibility(): void {
+    if (document.hidden) {
+      rosterClient?.close(); // iOS suspends the stream anyway; drop it cleanly
+    } else {
+      connectRoster(); // resume — a fresh snapshot re-seeds the list
+    }
+  }
+
   onMount(() => {
-    if (!store.sessions[masterId]) refresh();
+    // Seed once so the screen renders before the tap opens, then stream.
+    if (master && !store.sessions[masterId]) refresh();
+    connectRoster();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      rosterClient?.close();
+    };
   });
 
   const sessions = $derived(store.sessions[masterId] ?? []);
@@ -108,9 +140,19 @@
       <Icon name="chevron-left" size={20} sw={2.4} />
       <span class="ml-0.5 text-[15px]">Masters</span>
     </button>
-    <button class="ml-auto flex items-center text-faint" onclick={() => refresh()} aria-label="Refresh sessions">
-      <Icon name="refresh" size={18} sw={1.8} />
-    </button>
+    <!-- Live roster indicator (replaces the manual refresh button). The list
+         now streams via the roster tap; the dot reflects connection state. -->
+    <span class="ml-auto flex items-center gap-1.5 text-[11px]" aria-label="Roster stream status">
+      {#if rosterStatus.kind === "live"}
+        <span class="h-1.5 w-1.5 rounded-full bg-success pp-pulse"></span>
+      {:else if rosterStatus.kind === "connecting"}
+        <span class="text-faint"><Icon name="spinner" size={12} sw={3} /></span>
+      {:else if rosterStatus.kind === "reconnecting"}
+        <span class="pp-spin text-warning-fg"><Icon name="spinner" size={12} sw={3} /></span>
+      {:else}
+        <span class="h-1.5 w-1.5 rounded-full bg-fainter"></span>
+      {/if}
+    </span>
     <button
       class="ml-4 flex items-center text-accent"
       onclick={() => store.push({ name: "new-thread", masterId })}
@@ -151,9 +193,9 @@
       </div>
       <button
         class="flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-4 py-2 text-[13px] text-accent"
-        onclick={() => refresh()}
+        onclick={() => connectRoster()}
       >
-        <Icon name="refresh" size={14} sw={1.8} /> Refresh sessions
+        <Icon name="refresh" size={14} sw={1.8} /> Reconnect
       </button>
     </div>
   {:else}
@@ -167,7 +209,7 @@
         >
           <button class="flex w-full items-center gap-2.5 text-left" onclick={() => openSession(s)}>
             {#if s.status === "running"}
-              <span class="shrink-0 text-accent"><Icon name="spinner" size={15} sw={3} /></span>
+              <span class="shrink-0 text-accent"><HexSpinner size={15} dotSize={2} /></span>
             {:else if s.status === "completed"}
               <span class="shrink-0 text-success"><Icon name="check" size={15} /></span>
             {:else if s.status === "failed"}

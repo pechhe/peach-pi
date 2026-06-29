@@ -2,7 +2,7 @@
  *  these ops; renderer applies them to a per-thread item list. */
 
 import type { ImagePayload } from "./entities.ts";
-import type { ThreadId, ThreadStatus } from "./entities.ts";
+import type { RemoteSessionInfo, ThreadId, ThreadStatus } from "./entities.ts";
 
 export type SubagentStatus =
   | "started"
@@ -149,3 +149,14 @@ export type RemoteTapFrame =
   | { kind: "status"; threadId: ThreadId; status: ThreadStatus }
   | { kind: "queue"; threadId: ThreadId; steering: string[]; followUp: string[] }
   | { kind: "bye"; threadId: ThreadId; reason: string };
+
+/** One frame on the roster tap wire (SSE). A full snapshot of every served
+ *  thread, pushed whenever the roster changes shape (status flip, checkpoint,
+ *  create/archive/snooze/mark-to-test, lease handoff). The phone's sessions
+ *  list folds by replacing its cached list wholesale — small payload, no
+ *  delta/reconciliation cost. Separate from `RemoteTapFrame` (per-thread)
+ *  so each router stays a clean tagged union. */
+export type RosterFrame = {
+  kind: "roster";
+  sessions: RemoteSessionInfo[];
+};

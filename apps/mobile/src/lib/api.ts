@@ -294,3 +294,84 @@ export class TapClient {
     this.es = null;
   }
 }
+
+/** A roster tap listener: receives full-snapshot roster frames. Reused by
+ *  Sessions.svelte to fold phone-side without a manual refresh button. */
+export interface RosterTapHandlers {
+  onRoster: (sessions: RemoteSessionInfo[]) => void;
+  onStatus: (status: TapStatus) => void;
+}
+
+/**
+ * Reconnecting SSE roster tap client. Mirrors `TapClient`'s lifecycle (token
+ * on the query string because EventSource can't set headers, exponential
+ * backoff, clean close on visibility drop). Roster frames carry the full
+ * served-thread snapshot each time — no `lastSeq` resume needed, so reconnect
+ * just re-seeds from a fresh snapshot.
+ */
+export class RosterTapClient {
+  private es: EventSource | null = null;
+  private closed = false;
+  private retryMs = 1000;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly master: Master,
+    private readonly handlers: RosterTapHandlers,
+  ) {}
+
+  start(): void {
+    this.connect(true);
+  }
+
+  private connect(first: boolean): void {
+    if (this.closed) return;
+    this.handlers.onStatus(
+      first ? { kind: "connecting" } : { kind: "reconnecting", fromSeq: 0, retryInMs: this.retryMs },
+    );
+
+    const u = new URL(`${baseUrl(this.master)}/roster`);
+    u.searchParams.set("token", this.master.token);
+    u.searchParams.set("clientId", this.master.id);
+    u.searchParams.set("clientName", this.master.name);
+
+    const es = new EventSource(u.toString());
+    this.es = es;
+
+    es.onopen = () => {
+      this.retryMs = 1000;
+      this.handlers.onStatus({ kind: "live" });
+    };
+
+    es.onmessage = (ev) => {
+      let frame: { kind: string; sessions?: RemoteSessionInfo[] };
+      try {
+        frame = JSON.parse(ev.data);
+      } catch {
+        return; // ignore the ": connected" comment / malformed lines
+      }
+      if (frame.kind === "roster" && Array.isArray(frame.sessions)) {
+        this.handlers.onRoster(frame.sessions);
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      if (this.closed) return;
+      this.scheduleReconnect();
+    };
+  }
+
+  private scheduleReconnect(): void {
+    this.handlers.onStatus({ kind: "reconnecting", fromSeq: 0, retryInMs: this.retryMs });
+    this.timer = setTimeout(() => this.connect(false), this.retryMs);
+    this.retryMs = Math.min(this.retryMs * 2, 30000);
+  }
+
+  close(): void {
+    this.closed = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.es?.close();
+    this.es = null;
+  }
+}

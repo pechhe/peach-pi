@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Project, Thread } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
-  import Eye from "@lucide/svelte/icons/eye";
+  import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
 
@@ -127,7 +127,7 @@
             </div>
           {:else}
             <p class="mt-2 flex items-center gap-1.5 text-xs text-faint">
-              <Eye size={12} /> Generating runthrough…
+              <FlaskConical size={12} /> Generating runthrough…
             </p>
           {/if}
           {#if rejectingId === thread.id}

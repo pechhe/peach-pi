@@ -16,6 +16,7 @@
   import Search from "@lucide/svelte/icons/search";
   import Eye from "@lucide/svelte/icons/eye";
   import EyeOff from "@lucide/svelte/icons/eye-off";
+  import FlaskConical from "@lucide/svelte/icons/flask-conical";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import BellRing from "@lucide/svelte/icons/bell-ring";
   import Plug from "@lucide/svelte/icons/plug";
@@ -1071,7 +1072,7 @@
                   {activeView === 'testing' ? 'text-accent' : 'text-faint hover:text-fg'}"
                 onclick={() => onOpenTesting(group.project.id)}
                 data-testid="project-to-test"
-                aria-label="Open testing area"><Eye size={14} /><span>{group.toTest.length}</span></button
+                aria-label="Open testing area"><FlaskConical size={14} /><span>{group.toTest.length}</span></button
               >
             </Tooltip>
           {/if}

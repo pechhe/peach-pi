@@ -21,6 +21,7 @@ import type {
   RemoteSessionInfo,
   RemoteSettingsSnapshot,
   RemoteTapFrame,
+  RosterFrame,
   ScopedModel,
   SessionMeta,
   ThreadId,
@@ -202,6 +203,11 @@ export class RemoteHostService {
   private enabled = false;
   /** SSE listeners per thread: late-joiners get a backfill, all get the tail. */
   private listeners = new Map<ThreadId, Set<ServerResponse>>();
+  /** Roster SSE listeners (the phone's sessions list). Each gets a full
+   *  snapshot on connect, then incremental snapshots on roster-shape changes
+   *  (status flip, checkpoint, create/archive/snooze, lease handoff). Separate
+   *  from the per-thread tap because one subscriber covers every served thread. */
+  private rosterListeners = new Set<ServerResponse>();
   /** "Serve all projects" shortcut — when true, current AND future projects
    *  are served; `servedProjects` is ignored. Defaults to true so a new install
    *  exposes everything to the tailnet without extra configuration. */
@@ -384,6 +390,8 @@ export class RemoteHostService {
     this.enabled = false;
     this.listeners.forEach((set) => set.forEach((res) => res.end()));
     this.listeners.clear();
+    this.rosterListeners.forEach((res) => res.end());
+    this.rosterListeners.clear();
     if (lo) await new Promise<void>((r) => lo.close(() => r()));
     if (s) await new Promise<void>((r) => s.close(() => r()));
   }
@@ -409,18 +417,53 @@ export class RemoteHostService {
       sha,
       at: new Date().toISOString(),
     });
+    void this.forwardRoster();
   }
 
   /** Inject a run-status frame so the phone composer morphs send↔stop. */
   forwardStatus(threadId: ThreadId, status: ThreadStatus): void {
     if (!this.server || !this.isServedThread(threadId)) return;
     this.broadcast(threadId, { kind: "status", threadId, status });
+    void this.forwardRoster();
   }
 
   /** Inject a queue frame so the phone shows the steer/follow-up backlog. */
   forwardQueue(threadId: ThreadId, steering: string[], followUp: string[]): void {
     if (!this.server || !this.isServedThread(threadId)) return;
     this.broadcast(threadId, { kind: "queue", threadId, steering, followUp });
+    void this.forwardRoster();
+  }
+
+  /** Build the full served-thread roster. Shared by `GET /sessions` and the
+   *  roster tap so they can never drift in shape. */
+  private async buildRoster(): Promise<RemoteSessionInfo[]> {
+    const sessions: RemoteSessionInfo[] = [];
+    for (const t of this.deps.threads()) {
+      if (t.archivedAt) continue;
+      if (!this.isServedThread(t.id)) continue;
+      const info = await this.sessionInfo(t.id);
+      if (info) sessions.push(info);
+    }
+    return sessions;
+  }
+
+  /** Push a full roster snapshot to every sessions-list listener. Fire-and-
+   *  forget from the synchronous per-thread forwards (status/queue/checkpoint);
+   *  awaited from POST mutations so a 200 reflects the new roster having been
+   *  pushed. No-op when the server is unbound or nobody is listening. Public so
+   *  the host wiring (and tests) can also force a flush after bulk changes. */
+  async forwardRoster(): Promise<void> {
+    if (!this.server || this.rosterListeners.size === 0) return;
+    const sessions = await this.buildRoster();
+    const frame: RosterFrame = { kind: "roster", sessions };
+    const line = `data: ${JSON.stringify(frame)}\n\n`;
+    for (const res of this.rosterListeners) {
+      try {
+        res.write(line);
+      } catch {
+        this.rosterListeners.delete(res);
+      }
+    }
   }
 
   private broadcast(threadId: ThreadId, frame: RemoteTapFrame): void {
@@ -451,14 +494,7 @@ export class RemoteHostService {
       }
 
       if (req.method === "GET" && url.pathname === "/sessions") {
-        const sessions: RemoteSessionInfo[] = [];
-        for (const t of this.deps.threads()) {
-          if (t.archivedAt) continue;
-          if (!this.isServedThread(t.id)) continue;
-          const info = await this.sessionInfo(t.id);
-          if (info) sessions.push(info);
-        }
-        return this.send(res, 200, sessions);
+        return this.send(res, 200, await this.buildRoster());
       }
 
       if (req.method === "GET" && url.pathname === "/projects") {
@@ -493,6 +529,10 @@ export class RemoteHostService {
 
       if (req.method === "GET" && url.pathname === "/tap") {
         return this.handleTap(req, res, url);
+      }
+
+      if (req.method === "GET" && url.pathname === "/roster") {
+        return this.handleRosterTap(req, res);
       }
 
       if (req.method === "POST") {
@@ -576,6 +616,37 @@ export class RemoteHostService {
     });
   }
 
+  /** SSE roster tap: seed the full served-thread list, then stream full
+   *  snapshots on roster-shape changes. The phone's sessions list replaces its
+   *  cache on each frame (small payload, no delta reconciliation). */
+  private async handleRosterTap(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      ...CORS_HEADERS,
+    });
+    res.write(": connected\n\n");
+
+    // Seed the full roster so a late-joiner renders immediately.
+    try {
+      const frame: RosterFrame = { kind: "roster", sessions: await this.buildRoster() };
+      res.write(`data: ${JSON.stringify(frame)}\n\n`);
+    } catch {
+      // Threads unavailable — live snapshots will arrive as state changes.
+    }
+
+    this.rosterListeners.add(res);
+    reqCloseHandler(req, () => {
+      this.rosterListeners.delete(res);
+      try {
+        res.end();
+      } catch {
+        // already closed
+      }
+    });
+  }
+
   /** Build the public session info for one thread (shared by /sessions and the
    *  POST /threads + /chats responses). Null when the thread vanished. */
   private async sessionInfo(threadId: ThreadId): Promise<RemoteSessionInfo | null> {
@@ -631,10 +702,12 @@ export class RemoteHostService {
         opts.worktreeId = body.worktreeId;
       else if (body.worktree === true) opts.worktree = true;
       const id = await a.createThread(projectId as ProjectId, opts);
+      await this.forwardRoster();
       return this.send(res, 200, await this.sessionInfo(id));
     }
     if (seg.length === 1 && seg[0] === "chats") {
       const id = await a.createChat();
+      await this.forwardRoster();
       return this.send(res, 200, await this.sessionInfo(id));
     }
 
@@ -656,6 +729,7 @@ export class RemoteHostService {
         if (!client) return this.send(res, 401, { error: "client identity required" });
         if (body.release === true) {
           this.leases.release(threadId, client);
+          await this.forwardRoster();
           return this.send(res, 200, { ok: true, ...this.leaseFields(threadId) });
         }
         const force = body.force !== false; // default true
@@ -666,6 +740,7 @@ export class RemoteHostService {
             controllerName: this.leases.fields(threadId).controllerName,
           });
         }
+        await this.forwardRoster();
         return this.send(res, 200, { ok: true, ...this.leaseFields(threadId) });
       }
       case "archive": {
@@ -674,6 +749,7 @@ export class RemoteHostService {
         const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await this.deps.actions.archiveThread(threadId);
+        await this.forwardRoster();
         return this.send(res, 200, { ok: true });
       }
       case "snooze": {
@@ -683,6 +759,7 @@ export class RemoteHostService {
         const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await this.deps.actions.snoozeThread(threadId, until);
+        await this.forwardRoster();
         return this.send(res, 200, { ok: true });
       }
       case "unsnooze": {
@@ -690,6 +767,7 @@ export class RemoteHostService {
         const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await this.deps.actions.unsnoozeThread(threadId);
+        await this.forwardRoster();
         return this.send(res, 200, { ok: true });
       }
       case "mark-to-test": {
@@ -700,6 +778,7 @@ export class RemoteHostService {
           threadId,
           typeof body.note === "string" ? body.note : undefined,
         );
+        await this.forwardRoster();
         return this.send(res, 200, { ok: true });
       }
       case "unmark-to-test": {
@@ -707,6 +786,7 @@ export class RemoteHostService {
         const guard = this.leases.assertControl(threadId, client);
         if (guard !== true) return this.send(res, guard.status, guard.body);
         await this.deps.actions.unmarkToTest(threadId);
+        await this.forwardRoster();
         return this.send(res, 200, { ok: true });
       }
       case "message": {

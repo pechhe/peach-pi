@@ -163,6 +163,28 @@ test("setHostEnabled(false) is a no-op stop and fires onStatusChange", async () 
   assert.equal(status.enabled, false);
 });
 
+// ── roster tap (ADR-0013): live sessions-list stream ──────────────
+// The roster frame is a full-snapshot push; forwardRoster must be a silent
+// no-op when the server is unbound (gated identically to forwardStatus), so
+// the per-thread forwards never throw before start().
+test("forwardRoster is a no-op before the server binds", async () => {
+  const h = new RemoteHostService(
+    deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+  );
+  h.setProjectServed("p1", true);
+  await assert.doesNotReject(() => h.forwardRoster());
+});
+
+test("forwardRoster is a no-op when no roster listeners are attached", async () => {
+  const h = new RemoteHostService(
+    deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+  );
+  h.setProjectServed("p1", true);
+  // buildRoster is exercised publicly via /sessions; forwardRoster internally
+  // short-circuits at `rosterListeners.size === 0`. Should not reject.
+  await assert.doesNotReject(() => h.forwardRoster());
+});
+
 // NOTE: skipped — these bind a real HTTP server on an ephemeral port and
 // hang the test runner (no network isolation). The start/stop/serve glue is
 // better covered by an integration test. Re-enable when isolated.
