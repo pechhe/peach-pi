@@ -36,6 +36,7 @@ import type {
   WorkQueueOpenCountResult,
   ExecConnection,
   ExecIntegration,
+  ExecDetectResult,
 
   McpServer,
   SubagentAgentInfo,
@@ -731,6 +732,17 @@ export const ipcContracts = {
     requireNonEmptyString(u, "url");
     requireNonEmptyString(s, "slug");
   }),
+  /** Auto-detect the integration kind behind a URL (paste-a-URL flow). */
+  "executor:detect": invoke<[url: string], ExecDetectResult[]>((u) =>
+    requireNonEmptyString(u, "url"),
+  ),
+  /** Open Executor's signed-in "add integration" web page for a plugin,
+   *  optionally pre-targeting a curated preset or detected URL. The catalogue
+   *  + credential entry happen there; no secret reaches peach-pi. */
+  "executor:openAddPage": invoke<
+    [pluginKey: string, opts: { preset?: string; url?: string; namespace?: string }],
+    void
+  >((k) => requireNonEmptyString(k, "pluginKey")),
 
   // Agent Browser (native web computer-use tool; see ADR-0008). The
   // pi-agent-browser-native package exposes the native `agent_browser` tool,

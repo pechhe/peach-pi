@@ -188,6 +188,10 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       },
       "executor:removeConnection": executorService.removeConnection.bind(executorService),
       "executor:addOpenApi": executorService.addOpenApi.bind(executorService),
+      "executor:detect": executorService.detect.bind(executorService),
+      "executor:openAddPage": async (pluginKey, opts) => {
+        void shell.openExternal(executorService.buildAddUrl(pluginKey, opts));
+      },
       "bws:status": bwsService.status.bind(bwsService),
       "bws:setAccessToken": bwsService.setAccessToken.bind(bwsService),
       "bws:clearAuth": bwsService.clearAuth.bind(bwsService),

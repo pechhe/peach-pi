@@ -1138,6 +1138,17 @@ export interface ExecConnection {
   isOAuth: boolean;
 }
 
+/** A URL auto-detection result from `coreTools.integrations.detect` (the
+ *  paste-a-URL flow in the Connect dialog). */
+export interface ExecDetectResult {
+  /** Detected plugin kind, e.g. "openapi" | "mcp" | "graphql" | "googleDiscovery". */
+  kind: string;
+  confidence: "high" | "medium" | "low";
+  endpoint: string;
+  name: string;
+  slug: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BWS — Bitwarden Secrets Manager CLI
 // ─────────────────────────────────────────────────────────────────────────────

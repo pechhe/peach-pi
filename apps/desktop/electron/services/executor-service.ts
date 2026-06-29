@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import type { ExecConnection, ExecIntegration } from "@peach-pi/shared-types";
+import type { ExecConnection, ExecDetectResult, ExecIntegration } from "@peach-pi/shared-types";
 
 import type { Emit } from "../ipc/registry.ts";
 
@@ -108,6 +108,48 @@ export class ExecutorService {
     } catch {
       return null;
     }
+  }
+
+  /** Auto-detect the integration kind behind a URL (the paste-a-URL flow). */
+  async detect(url: string): Promise<ExecDetectResult[]> {
+    const d = await this.call<{ results: ExecDetectResult[] }>(
+      ["coreTools", "integrations", "detect"],
+      { url },
+    );
+    return d.results;
+  }
+
+  /** Build the signed Executor web-UI "add integration" URL for a plugin. The
+   *  IPC handler opens it; Executor resolves the spec/endpoint and the user
+   *  enters the credential there. */
+  buildAddUrl(
+    pluginKey: string,
+    opts: { preset?: string; url?: string; namespace?: string },
+  ): string {
+    const u = new URL(`/integrations/add/${pluginKey}`, this.daemonOrigin());
+    if (opts.preset) u.searchParams.set("preset", opts.preset);
+    if (opts.url) u.searchParams.set("url", opts.url);
+    if (opts.namespace) u.searchParams.set("namespace", opts.namespace);
+    return this.signUrl(u.toString());
+  }
+
+  /** Origin of the running daemon (the web UI is served there). Read from the
+   *  daemon record in the Executor data dir; falls back to the default port. */
+  private daemonOrigin(): string {
+    try {
+      const dataDir = resolve(process.env.EXECUTOR_DATA_DIR ?? join(homedir(), ".executor"));
+      const file = readdirSync(dataDir)
+        .filter((f) => f.startsWith("daemon-active-") && f.endsWith(".json"))
+        .map((f) => join(dataDir, f))
+        .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+      if (file) {
+        const r = JSON.parse(readFileSync(file, "utf8")) as { hostname?: string; port?: number };
+        if (r.hostname && r.port) return `http://${r.hostname}:${r.port}`;
+      }
+    } catch {
+      /* fall through */
+    }
+    return "http://localhost:4788";
   }
 
   async removeConnection(owner: "org" | "user", integration: string, name: string): Promise<void> {
