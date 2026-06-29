@@ -28,6 +28,7 @@ import {
 } from "./services/pi-vision-proxy.ts";
 import { computePiHealth } from "./services/pi-health.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
+import { githubToken } from "./services/issues-service.ts";
 import { importTheme } from "./services/theme-import-service.ts";
 import { initMainSentry } from "./services/telemetry-service.ts";
 import type { ServiceComposition } from "./compose-services.ts";
@@ -558,6 +559,42 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     },
     {
       "app:ping": () => ({ pong: true, version: app.getVersion() }),
+      "feedback:send": async (body) => {
+        // The peach-pi repo is the feedback sink. Token comes from the git
+        // credential helper (same source as the issues service), so the
+        // user must have authenticated `gh` or `git credential` for
+        // github.com on this machine.
+        const owner = "pechhe";
+        const repo = "peach-pi";
+        const token = await githubToken();
+        if (!token) {
+          return { ok: false, error: "GitHub not authenticated. Run `gh auth login` or configure `git credential` for github.com." };
+        }
+        const version = app.getVersion();
+        const os = `${process.platform}/${process.arch}`;
+        const firstLine = body.split("\n").find((l) => l.trim())?.slice(0, 80) || "Feedback";
+        const issueBody = `## Feedback\n\n${body}\n\n---\n*peach-pi ${version} · ${os}*`;
+        try {
+          const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
+            method: "POST",
+            headers: {
+              Accept: "application/vnd.github+json",
+              "User-Agent": "peach-pi",
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ title: `Feedback: ${firstLine}`, body: issueBody, labels: ["feedback"] }),
+          });
+          if (!res.ok) {
+            const detail = await res.text().catch(() => "");
+            return { ok: false, error: `GitHub API ${res.status}: ${detail.slice(0, 200)}` };
+          }
+          const json = (await res.json()) as { html_url: string };
+          return { ok: true, url: json.html_url };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
       "app:listScopedModels": async () => {
         const { listScopedModels } = await import("@peach-pi/pi-client");
         return listScopedModels();

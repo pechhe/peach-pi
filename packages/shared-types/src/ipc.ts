@@ -179,6 +179,11 @@ export const ipcContracts = {
   ),
   /** Abort the in-flight OAuth login flow. */
   "auth:cancelOAuthLogin": invoke<[], void>(),
+  /** Send user feedback as a new issue in the peach-pi repo. Returns the
+   *  created issue URL, or an error message. */
+  "feedback:send": invoke<[body: string], { ok: true; url: string } | { ok: false; error: string }>(
+    (body) => requireNonEmptyString(body, "body"),
+  ),
   /** Clear a provider's stored credentials (OAuth token or API key). */
   "auth:logout": invoke<[providerId: string], AuthProviderStatus[]>((id) =>
     requireNonEmptyString(id, "providerId"),
