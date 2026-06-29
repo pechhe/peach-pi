@@ -310,3 +310,32 @@ test("overlapping compaction_start finalises the orphaned card", () => {
   const live = start2[1]!.item as { running: boolean };
   assert.equal(live.running, true);
 });
+
+test("auto_retry_end drops trailing empty assistant error card", () => {
+  // Final retry failure: SDK emits message_end(error) for the last attempt,
+  // then auto_retry_end(success=false). The recorder must drop the redundant
+  // empty assistant error card that lands after the retry card, so the only
+  // visible failure surface is the finalised "gave up" retry card.
+  const r = new TranscriptRecorder();
+  const view = run(r, [
+    { type: "agent_start" },
+    { type: "message_start", message: { role: "user", content: [{ type: "text", text: "hi" }] } },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    { type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } },
+    { type: "auto_retry_start", attempt: 1, maxAttempts: 3, errorMessage: "Connection failed" },
+    { type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } },
+    { type: "auto_retry_start", attempt: 2, maxAttempts: 3, errorMessage: "Connection failed" },
+    { type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } },
+    { type: "auto_retry_start", attempt: 3, maxAttempts: 3, errorMessage: "Connection failed" },
+    { type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } },
+    { type: "auto_retry_end", success: false, finalError: "Connection error." },
+  ]);
+  // user + retry card only; no trailing empty assistant error card
+  assert.equal(view.length, 2);
+  assert.equal(view[0]!.kind, "user");
+  const retry = view[1]!;
+  assert.equal(retry.kind, "retry");
+  assert.equal((retry as { running: boolean }).running, false);
+  assert.equal((retry as { attempt: number }).attempt, 3);
+  assert.equal((retry as { error?: string }).error, "Connection error.");
+});

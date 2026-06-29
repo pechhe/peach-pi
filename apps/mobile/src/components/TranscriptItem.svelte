@@ -3,6 +3,8 @@
   import { marked } from "marked";
   import DOMPurify from "dompurify";
   import Icon from "./Icon.svelte";
+  import SquareSpinner from "./SquareSpinner.svelte";
+  import TriangleSpinner from "./TriangleSpinner.svelte";
 
   let { item }: { item: TranscriptItem } = $props();
 
@@ -46,7 +48,7 @@
     <button class="flex w-full items-center gap-2 bg-surface-2/60 px-3 py-2.5 text-left text-[13px]" onclick={() => (showTool = !showTool)}>
       <span class="shrink-0 {item.status === 'error' ? 'text-danger' : 'text-success'}">
         {#if item.status === "running"}
-          <Icon name="spinner" size={13} sw={3} />
+          <SquareSpinner size={13} dotSize={2} />
         {:else if item.status === "error"}
           <Icon name="alert-circle" size={13} sw={1.6} />
         {:else}
@@ -64,9 +66,32 @@
     {/if}
   </div>
 {:else if item.kind === "subagent"}
-  <div class="flex items-center gap-2 text-[13px] text-faint">
-    <Icon name="git-branch" size={13} sw={1.6} />
-    <span>{item.rows.length} {item.rows.length === 1 ? "agent" : "agents"} · {item.verb}</span>
+  <div class="flex flex-col gap-1.5 text-[13px] text-faint">
+    <div class="flex items-center gap-2">
+      <Icon name="git-branch" size={13} sw={1.6} />
+      <span>{item.rows.length} {item.rows.length === 1 ? "agent" : "agents"} · {item.verb}</span>
+    </div>
+    <ul class="flex flex-col gap-1 pl-5">
+      {#each item.rows as row (row.name)}
+        <li class="flex items-center gap-1.5">
+          <span class="shrink-0 {row.status === 'failed' ? 'text-danger' : row.status === 'completed' ? 'text-success' : 'text-accent'}">
+            {#if row.status === "running" || row.status === "started" || row.status === "batch"}
+              <TriangleSpinner size={11} dotSize={1.5} />
+            {:else if row.status === "failed"}
+              <Icon name="alert-circle" size={11} sw={1.6} />
+            {:else if row.status === "completed"}
+              <Icon name="check" size={11} />
+            {:else}
+              <span class="h-2 w-2 rounded-full bg-fainter"></span>
+            {/if}
+          </span>
+          <span class="truncate text-[12.5px]">{row.title || row.name}</span>
+          {#if row.summary}
+            <span class="truncate text-[11px] text-fainter">· {row.summary}</span>
+          {/if}
+        </li>
+      {/each}
+    </ul>
   </div>
 {:else if item.kind === "compaction"}
   <div class="text-[11px] italic text-faint">

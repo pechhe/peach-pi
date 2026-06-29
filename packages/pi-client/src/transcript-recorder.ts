@@ -580,13 +580,23 @@ export class TranscriptRecorder {
         this.retryId = null;
         if (!id) return [];
         if (event.success) return [this.deleteOp(id)];
+        // The final failed attempt's message_end lands a trailing empty
+        // assistant error card AFTER the retry card (same shape as the
+        // pre-retry one dropped in auto_retry_start). Without dropping it,
+        // the user sees a redundant "Connection error." card stacked under
+        // the finalised "gave up" retry card.
+        const ops: TranscriptOp[] = [];
+        const last = this.items[this.items.length - 1];
+        if (last?.kind === "assistant" && last.error && !last.text && !last.thinking) {
+          ops.push(this.deleteOp(last.id));
+        }
         const existing = this.items.find((i) => i.id === id);
         const attempt =
           event.attempt ??
           (existing?.kind === "retry" ? existing.attempt : 1);
         const maxAttempts =
           existing?.kind === "retry" ? existing.maxAttempts : attempt;
-        return [
+        ops.push(
           this.upsertOp({
             id,
             kind: "retry",
@@ -595,7 +605,8 @@ export class TranscriptRecorder {
             maxAttempts,
             error: event.finalError ?? "Connection failed",
           }),
-        ];
+        );
+        return ops;
       }
       default:
         return [];
