@@ -44,25 +44,34 @@
     <div class="text-[12px] text-danger">{item.error}</div>
   {/if}
 {:else if item.kind === "tool"}
-  <div class="overflow-hidden rounded-lg border border-border/70">
-    <button class="flex w-full items-center gap-1.5 bg-surface-2/40 px-2.5 py-1.5 text-left text-[12px]" onclick={() => (showTool = !showTool)}>
-      <span class="shrink-0 {item.status === 'error' ? 'text-danger' : 'text-success'}">
+  <div class="flex flex-col">
+    <button
+      class="flex w-full items-center gap-2 py-0.5 text-left text-[12px] {item.output ? '' : 'pointer-events-none'}"
+      onclick={() => (showTool = !showTool)}
+    >
+      <span class="shrink-0 {item.status === 'error' ? 'text-danger' : item.status === 'running' ? 'text-accent' : 'text-fainter'}">
         {#if item.status === "running"}
-          <SquareSpinner size={11} dotSize={2} />
+          <SquareSpinner size={10} dotSize={2} />
         {:else if item.status === "error"}
           <Icon name="alert-circle" size={11} sw={1.6} />
         {:else}
-          <Icon name="check" size={11} />
+          <Icon name="check" size={11} sw={2.2} />
         {/if}
       </span>
-      <span class="shrink-0 font-mono font-medium text-accent">{item.toolName}</span>
-      <span class="flex-1 truncate font-mono text-fainter">{item.argsSummary}</span>
-      <span class="shrink-0 text-fainter transition-transform" style="transform: rotate({showTool ? 90 : 0}deg)">
-        <Icon name="chevron-right" size={11} sw={2} />
-      </span>
+      <span class="shrink-0 font-mono text-[12px] text-faint">{item.toolName}</span>
+      {#if item.argsSummary}
+        <span class="flex-1 truncate font-mono text-[11.5px] text-fainter">{item.argsSummary}</span>
+      {:else}
+        <span class="flex-1"></span>
+      {/if}
+      {#if item.output}
+        <span class="shrink-0 text-fainter transition-transform" style="transform: rotate({showTool ? 90 : 0}deg)">
+          <Icon name="chevron-right" size={10} sw={2} />
+        </span>
+      {/if}
     </button>
     {#if showTool && item.output}
-      <pre class="overflow-x-auto border-t border-border bg-surface px-2.5 py-2 font-mono text-[11px] leading-[1.55] text-fg-soft">{item.output}</pre>
+      <pre class="mt-1 overflow-x-auto rounded-md border border-border bg-surface-2/50 px-2.5 py-2 font-mono text-[11px] leading-[1.55] text-fg-soft">{item.output}</pre>
     {/if}
   </div>
 {:else if item.kind === "subagent"}
