@@ -1310,7 +1310,7 @@
           </div>
         {/if}
       {/if}
-      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming) && !items.some((i) => i.kind === "tool" && i.status === "running") && !items.some((i) => i.kind === "compaction" && i.running)}
+      {#if thread.status === "running" && !items.some((i) => i.kind === "assistant" && i.streaming) && !items.some((i) => i.kind === "tool" && i.status === "running") && !items.some((i) => i.kind === "compaction" && i.running) && !items.some((i) => i.kind === "retry" && i.running)}
         <div class="item-enter text-xs">
           <WorkingLabel label="Working…" />
         </div>
