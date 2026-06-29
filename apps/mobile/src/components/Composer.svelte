@@ -89,27 +89,47 @@
       .trim();
   }
 
-  // Tap-anywhere / drag the metallic track to jump models. Maps the pointer's
-  // x within the track to the nearest slot; pickSlot is local-only (applies on
-  // send), so live dragging is cheap.
+  // Tap-anywhere / drag the metallic track. While dragging the thumb tracks
+  // the pointer continuously (--drag-frac, no transition); each time the
+  // nearest slot changes we apply it (detent tick). On release the thumb snaps
+  // back to the discrete slot (transition re-enables).
   let sliderEl = $state<HTMLElement | null>(null);
-  function pickByPointer(clientX: number): void {
+  let dragging = $state(false);
+  let dragFrac = $state(0);
+  let dragSlot = -1;
+
+  function applyDrag(clientX: number): void {
     if (!sliderEl) return;
     const r = sliderEl.getBoundingClientRect();
     if (r.width <= 0) return;
     const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-    const idx = Math.round(frac * sliderSpan);
-    const m = sliderSlots[idx];
-    if (m) pickSlot(m);
+    dragFrac = frac;
+    const idx = Math.max(0, Math.min(sliderSpan, Math.round(frac * sliderSpan)));
+    if (idx !== dragSlot) {
+      dragSlot = idx; // crossed into a new model slot → detent
+      const m = sliderSlots[idx];
+      if (m) pickSlot(m); // pickSlot fires the haptic
+    }
   }
+
   function onSliderPointerDown(e: PointerEvent): void {
     e.preventDefault();
+    dragging = true;
+    dragSlot = -1;
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    pickByPointer(e.clientX);
+    applyDrag(e.clientX);
   }
   function onSliderPointerMove(e: PointerEvent): void {
-    if (e.buttons === 0) return;
-    pickByPointer(e.clientX);
+    if (!dragging) return;
+    applyDrag(e.clientX);
+  }
+  function onSliderPointerUp(e: PointerEvent): void {
+    if (!dragging) return;
+    dragging = false;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  }
+  function onSliderPointerCancel(): void {
+    dragging = false;
   }
 
   const hasText = $derived(text.trim().length > 0);
@@ -368,8 +388,8 @@
         <div class="composer__controls">
           <span class="composer__key-mount">
             <span
-              class="model-selector__badge model-selector__badge--slider"
-              style="--model-slider-position: {sliderPosition}; --slider-span: {sliderSpan}"
+              class="model-selector__badge model-selector__badge--slider{dragging ? ' is-dragging' : ''}"
+              style="--model-slider-position: {sliderPosition}; --slider-span: {sliderSpan}; --drag-frac: {dragFrac}"
             >
               <span
                 bind:this={sliderEl}
@@ -377,6 +397,8 @@
                 aria-hidden="true"
                 onpointerdown={onSliderPointerDown}
                 onpointermove={onSliderPointerMove}
+                onpointerup={onSliderPointerUp}
+                onpointercancel={onSliderPointerCancel}
               >
                 <span class="model-selector__slider-ticks">
                   <span class="model-selector__slider-tick model-selector__slider-tick--0"></span>
@@ -635,6 +657,14 @@
   .composer-device .model-selector__badge--slider .model-selector__slider-tick--2 { left: calc(100% - 20px); }
   .composer-device .model-selector__badge--slider .model-selector__slider-label--slot-2 {
     right: 0;
+  }
+  /* While dragging: thumb tracks the pointer continuously (--drag-frac),
+     no transition lag. On release the class drops and the 460ms transition
+     snaps it back to the discrete slot. */
+  .composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-thumb,
+  .composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-glow {
+    left: calc(20px + var(--drag-frac, 0) * (100% - 40px)) !important;
+    transition: none !important;
   }
   .composer-device .composer__footer-row {
     flex-wrap: nowrap;
