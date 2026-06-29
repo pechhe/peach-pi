@@ -360,7 +360,9 @@
     activeId = id;
     programmaticScroll = true;
     if (scrollAnim != null) cancelAnimationFrame(scrollAnim);
-    const target = el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+    const styles = getComputedStyle(root);
+    const paddingTop = parseFloat(styles.paddingTop) || 0;
+    const target = el.getBoundingClientRect().top - root.getBoundingClientRect().top - paddingTop + root.scrollTop;
     const start = root.scrollTop;
     const distance = target - start;
     if (Math.abs(distance) < 1) {
