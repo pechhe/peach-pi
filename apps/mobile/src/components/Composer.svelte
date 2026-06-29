@@ -5,6 +5,7 @@
   import Icon from "./Icon.svelte";
   import ModelPicker from "./ModelPicker.svelte";
   import ReasoningDial from "./ReasoningDial.svelte";
+  import { haptic } from "../lib/haptic.ts";
 
   let {
     master,
@@ -122,13 +123,18 @@
   }
 
   function pickSlot(m: ScopedModel): void {
+    // Only tick when the selection actually crosses into a new slot, so a
+    // drag across the track feels like detents rather than a buzz.
+    if (overrideModel?.provider === m.provider && overrideModel?.id === m.id) return;
     overrideModel = { provider: m.provider, id: m.id, name: m.name };
+    haptic(6);
   }
 
   async function submit(): Promise<void> {
     if (isStop) return void stop();
     const body = text.trim();
     if (!body || sending) return;
+    haptic(12);
     sending = true;
     try {
       if (steer && running) {
@@ -159,6 +165,7 @@
   }
 
   async function stop(): Promise<void> {
+    haptic(12);
     try {
       await abortRun(master, threadId);
     } catch (e) {
@@ -179,6 +186,7 @@
     const current = overrideThinking ?? sessionThinking ?? "off";
     const idx = order.indexOf(current);
     overrideThinking = order[(idx + 1) % order.length] ?? "off";
+    haptic(6);
   }
 
   function onKeydown(e: KeyboardEvent): void {
