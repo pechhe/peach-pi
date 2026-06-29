@@ -69,7 +69,7 @@
           rows={5}
           placeholder="Describe your feedback…"
           data-testid="feedback-input"
-          class="mt-3 w-full resize-y rounded-lg border border-border bg-surface-2 p-3 text-[13px] text-fg placeholder:text-fainter focus:outline-none focus:ring-1 focus:ring-accent"
+          class="mt-3 w-full rounded-lg border border-border bg-surface-2 p-3 text-[13px] text-fg placeholder:text-fainter focus:outline-none focus:ring-1 focus:ring-accent resize-none"
         ></textarea>
       {/if}
       {#if error}
