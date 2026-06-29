@@ -573,8 +573,7 @@
     grid-area: 1 / 1;
   }
   .agent-entity__current-sub {
-    margin-top: 1px;
-    margin: 0;
+    margin: 1px 0 0;
     font-size: 10.5px;
     line-height: 1.4;
     color: var(--color-muted);
