@@ -303,7 +303,7 @@
       const el = sectionEls.get(it.id);
       if (!el || !hit(it.id)) continue;
       const rect = el.getBoundingClientRect();
-      if (rect.bottom < 0) continue; // scrolled past
+      if (rect.bottom <= 0) continue; // scrolled past (incl. touching top edge)
       if (rect.top > root.clientHeight + 4) continue; // below viewport
       if (best === null || rect.top < best.top) best = { id: it.id, top: rect.top };
     }
@@ -370,7 +370,7 @@
       pickActive();
       return;
     }
-    const duration = Math.min(260, 120 + Math.abs(distance) * 0.35);
+    const duration = Math.min(380, 200 + Math.abs(distance) * 0.55);
     let startTime = 0;
     const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
     const step = (now: number) => {
