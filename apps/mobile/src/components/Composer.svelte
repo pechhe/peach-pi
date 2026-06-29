@@ -60,27 +60,24 @@
   const activeThinking = $derived(overrideThinking ?? sessionThinking);
   const hasOverride = $derived(!!overrideModel || !!overrideThinking);
 
-  // Pinned slider slots: up to three scoped models echoed in the metallic
-  // slider (mirrors the desktop's pinned-slot affordance). In-memory on the
-  // phone — the desktop persists these in modelPrefs, but the mobile composer
-  // is per-thread and reconstructs from the catalog each open.
+  // Pinned slider slots: STABLE first-three scoped models (catalog order). The
+  // thumb slides to whichever slot is active — slots never reorder (that was
+  // the "it just replaces the first one" bug). Mirrors desktop ModelSelector:
+  // when the active model isn't one of the three pinned, it's appended as a
+  // 4th overflow slot so the thumb still has somewhere to point.
+  const keyOf = (m: ScopedModel | ModelInfo) => `${m.provider}:${m.id}`;
+  const activeKey = $derived(activeModel ? keyOf(activeModel) : null);
   const scopedModels = $derived(models.filter((m) => m.scoped));
-  const sliderSlots = $derived.by(() => {
-    const byKey = new Map(scopedModels.map((m) => [`${m.provider}:${m.id}`, m]));
-    const picked: ScopedModel[] = [];
-    const activeKey = activeModel ? `${activeModel.provider}:${activeModel.id}` : null;
-    if (activeKey) {
-      const a = byKey.get(activeKey);
-      if (a) picked.push(a);
-    }
-    for (const m of scopedModels) {
-      if (picked.length >= 3) break;
-      if (!picked.some((p) => p.provider === m.provider && p.id === m.id)) picked.push(m);
-    }
-    const overflow = picked.length < 4 && activeKey && !picked.some((p) => `${p.provider}:${p.id}` === activeKey)
-      ? scopedModels.find((m) => `${m.provider}:${m.id}` === activeKey)
-      : null;
-    return overflow ? [...picked, overflow].slice(0, 4) : picked.slice(0, 4);
+  const pinnedSlots = $derived(scopedModels.slice(0, 3));
+  const overflowSlot = $derived.by(() => {
+    if (!activeKey || pinnedSlots.some((m) => keyOf(m) === activeKey)) return null;
+    return scopedModels.find((m) => keyOf(m) === activeKey) ?? null;
+  });
+  const sliderSlots = $derived(overflowSlot ? [...pinnedSlots, overflowSlot] : pinnedSlots);
+  const sliderSpan = $derived(Math.max(1, sliderSlots.length - 1));
+  const sliderPosition = $derived.by(() => {
+    const idx = sliderSlots.findIndex((m) => keyOf(m) === activeKey);
+    return idx >= 0 ? idx : 0;
   });
 
   function shortLabel(label: string): string {
@@ -90,12 +87,29 @@
       .replace(/\s+/g, " ")
       .trim();
   }
-  const keyOf = (m: ScopedModel | ModelInfo) => `${m.provider}:${m.id}`;
-  const activeKey = $derived(activeModel ? keyOf(activeModel) : null);
-  const sliderPosition = $derived.by(() => {
-    const idx = sliderSlots.findIndex((m) => keyOf(m) === activeKey);
-    return idx >= 0 ? idx : 1;
-  });
+
+  // Tap-anywhere / drag the metallic track to jump models. Maps the pointer's
+  // x within the track to the nearest slot; pickSlot is local-only (applies on
+  // send), so live dragging is cheap.
+  let sliderEl = $state<HTMLElement | null>(null);
+  function pickByPointer(clientX: number): void {
+    if (!sliderEl) return;
+    const r = sliderEl.getBoundingClientRect();
+    if (r.width <= 0) return;
+    const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const idx = Math.round(frac * sliderSpan);
+    const m = sliderSlots[idx];
+    if (m) pickSlot(m);
+  }
+  function onSliderPointerDown(e: PointerEvent): void {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    pickByPointer(e.clientX);
+  }
+  function onSliderPointerMove(e: PointerEvent): void {
+    if (e.buttons === 0) return;
+    pickByPointer(e.clientX);
+  }
 
   const hasText = $derived(text.trim().length > 0);
   // Empty + running → the button stops the run (mirrors the desktop send-dial).
@@ -347,9 +361,15 @@
           <span class="composer__key-mount">
             <span
               class="model-selector__badge model-selector__badge--slider"
-              style="--model-slider-position: {sliderPosition}"
+              style="--model-slider-position: {sliderPosition}; --slider-span: {sliderSpan}"
             >
-              <span class="model-selector__slider" aria-hidden="true">
+              <span
+                bind:this={sliderEl}
+                class="model-selector__slider"
+                aria-hidden="true"
+                onpointerdown={onSliderPointerDown}
+                onpointermove={onSliderPointerMove}
+              >
                 <span class="model-selector__slider-ticks">
                   <span class="model-selector__slider-tick model-selector__slider-tick--0"></span>
                   <span class="model-selector__slider-tick model-selector__slider-tick--1"></span>
@@ -532,32 +552,60 @@
      ~30% too large. Shrink the individual parts (not the whole frame, which
      would leave a gutter) to bring the chassis to a phone-native height. */
   .composer-device .composer__surface {
-    padding: 9px 9px 8px;
+    padding: 8px 8px 7px;
     border-radius: 13px;
+    overflow: hidden;
   }
   .composer-device .composer__screen {
-    min-height: 64px;
-    padding: 11px 13px;
-    border-radius: 12px;
+    min-height: 50px;
+    padding: 9px 12px;
+    border-radius: 11px;
+  }
+  .composer-device .composer__controls {
+    min-width: 0;
+    flex: 1 1 auto;
   }
   .composer-device .reasoning-dial {
-    --dial-size: 50px;
+    --dial-size: 44px;
   }
   .composer-device .send-dial,
   .composer-device .send-dial--stop {
-    width: 46px;
-    min-width: 46px;
-    height: 46px;
-    margin-left: 8px;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    margin-left: 6px;
   }
-  /* The slider badge is 360px on desktop. On the phone we let it flex down and
-     hide the inactive slot tick labels under narrow widths. */
+  /* The slider badge is 360px on desktop with fixed-px thumb/tick geometry
+     (52px + pos*128px) that overflows a phone. Let it flex full width and
+     re-derive the thumb/ticks as percentages of the actual track so nothing
+     spills past the viewport (was the source of horizontal scroll). */
   .composer-device .model-selector__badge--slider,
   :root[data-composer="dark"].composer-device .model-selector__badge--slider {
     width: 100%;
     min-width: 0;
-    max-width: 300px;
-    height: 62px;
+    max-width: 100%;
+    height: 58px;
+  }
+  .composer-device .model-selector__slider {
+    pointer-events: auto;
+    touch-action: none;
+    cursor: pointer;
+  }
+  /* Percentage thumb/tick geometry keyed off --slider-span (= slots - 1).
+     20px inset keeps the ~40px thumb fully on-track at the extremes. */
+  .composer-device .model-selector__badge--slider .model-selector__slider-thumb,
+  .composer-device .model-selector__badge--slider .model-selector__slider-glow {
+    left: calc(20px + (var(--model-slider-position, 0) / var(--slider-span, 2)) * (100% - 40px));
+  }
+  .composer-device .model-selector__badge--slider .model-selector__slider-ticks {
+    left: 0;
+    right: 0;
+  }
+  .composer-device .model-selector__badge--slider .model-selector__slider-tick--0 { left: 20px; }
+  .composer-device .model-selector__badge--slider .model-selector__slider-tick--1 { left: 50%; }
+  .composer-device .model-selector__badge--slider .model-selector__slider-tick--2 { left: calc(100% - 20px); }
+  .composer-device .model-selector__badge--slider .model-selector__slider-label--slot-2 {
+    right: 0;
   }
   .composer-device .composer__footer-row {
     /* Wrap the controls below the editor screen on narrow phones; the slider
