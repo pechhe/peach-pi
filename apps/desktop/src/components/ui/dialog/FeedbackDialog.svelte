@@ -59,9 +59,6 @@
       data-testid="feedback-dialog"
     >
       <AlertDialog.Title class="text-sm font-semibold text-fg">Send feedback</AlertDialog.Title>
-      <AlertDialog.Description class="mt-1.5 text-[13px] leading-relaxed text-fg-soft">
-        Bugs, ideas, or notes — goes straight to the peach-pi repo as a GitHub issue.
-      </AlertDialog.Description>
       {#if successUrl}
         <div class="mt-3 rounded-lg border border-success-border/50 bg-success-surface/20 px-3 py-2 text-[12px] text-success">
           Sent. <a href={successUrl} target="_blank" rel="noreferrer" class="underline">View issue →</a>
