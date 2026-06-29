@@ -784,6 +784,17 @@
     class="titlebar-drag relative shrink-0"
     style="height: calc(var(--titlebar-content-top, 40px) / var(--zoom-factor, 1))"
   >
+    <div class="absolute left-3 top-2 flex items-center gap-1">
+      <button
+        class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg"
+        onclick={() => { playRotary(); feedbackOpen = true; }}
+        data-testid="nav-feedback"
+        data-press="self"
+        title="Send feedback"
+      >
+        <Megaphone size={15} />
+      </button>
+    </div>
     <div class="absolute right-3 top-2 flex items-center gap-1">
       {#if extensionUi.extUpdates.length > 0}
         <button
@@ -940,15 +951,6 @@
           <UsagePopover anchor={usageAnchor} onClose={() => (usageOpen = false)} />
         {/if}
       </div>
-      <button
-        class="main-nav-item flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-fg"
-        onclick={() => { playRotary(); feedbackOpen = true; }}
-        data-testid="nav-feedback"
-        data-press="self"
-        title="Send feedback"
-      >
-        <Megaphone size={15} /> Feedback
-      </button>
     </MovingHighlight>
   </nav>
 

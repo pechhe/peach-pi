@@ -36,6 +36,7 @@ import { UsageService } from "./services/usage/usage-service.ts";
 import { AuthService } from "./services/auth-service.ts";
 import { ConnectorResolver } from "./services/connector-resolver.ts";
 import { ensureConnectorExtension } from "./services/connector-extension.ts";
+import { ensureExecutorSkill } from "./services/executor-skill.ts";
 import { ensurePeachVisionConsentExtension } from "./services/peach-vision-consent-extension.ts";
 import {
   RemoteHostService,
@@ -459,6 +460,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const connectorResolver = new ConnectorResolver(connectorService, customConnectionService, bwsService);
   void connectorResolver.start().then(() => connectorResolver.writeBootstrap());
   void ensureConnectorExtension();
+  void ensureExecutorSkill();
   void ensurePeachVisionConsentExtension();
 
   return {
