@@ -384,7 +384,16 @@ export class GitService {
     } catch {
       await git(["merge", "--abort"], projectPath).catch(() => undefined);
       if (localDirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
-      return { ok: false, error: `Merge conflict on ${target} — aborted` };
+      // Conflict flagged so the UI can offer to hand the resolve to the agent:
+      // it merges <target> into <branch> inside its own worktree (refs are
+      // shared), resolves, commits — then merge-to-local runs clean.
+      return {
+        ok: false,
+        error: `Merge conflict on ${target} — aborted`,
+        conflict: true,
+        target,
+        branch,
+      };
     }
 
     const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);

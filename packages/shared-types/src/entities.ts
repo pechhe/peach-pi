@@ -781,7 +781,7 @@ export type GitMergePrResult =
 /** Merge a worktree's branch (--no-ff) into the local project's current branch. */
 export type GitMergeResult =
   | { ok: true; target: string; branch: string; hasRemote: boolean; warning?: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; conflict?: true; target?: string; branch?: string };
 
 /** Push the local project repo's current branch after a merge-to-local. */
 export type GitPushLocalResult =
