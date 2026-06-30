@@ -383,8 +383,8 @@
   });
 
   // ── @-connections menu ────────────────────────────────────────────────
-  // Typing `@` opens the ConnectionsMenu picker (custom HTTP + Composio
-  // toolkits + BWS secrets). The child owns the catalogs, ensure* loaders,
+  // Typing `@` opens the ConnectionsMenu picker (Executor connections
+  // + BWS secrets). The child owns the catalogs, ensure* loaders,
   // event invalidation, and match filtering; the host owns caret context,
   // the active index (bindable), and the chip pin/remove (draft mutations +
   // textarea refocus). Underlying tools (custom_request / connector_execute)
@@ -414,14 +414,11 @@
     const text = draft.text;
     // Strip the `@query` token so it doesn't leak into the message text.
     const stripped = ctx ? text.slice(0, ctx.start) + text.slice(cursor) : "";
-    const ref: ReferencedConnection =
-      c.kind === "custom"
-        ? { kind: "custom", name: c.name, baseUrl: c.baseUrl, logoUrl: c.logoUrl }
-        : { kind: "composio", name: c.name, toolkitSlug: c.toolkitSlug, logoUrl: c.logoUrl };
-    // Dedupe by kind+name: pinning a connection twice is meaningless.
-    if (!draft.connections.some((r) => r.kind === ref.kind && r.name === ref.name)) {
+    const ref: ReferencedConnection = { integration: c.integration, name: c.name, logoUrl: c.logoUrl };
+    // Dedupe by integration+name: pinning a connection twice is meaningless.
+    if (!draft.connections.some((r) => r.integration === ref.integration && r.name === ref.name)) {
       drafts.update(thread.id, { text: stripped, connections: [...draft.connections, ref] });
-      captureEvent("connection_pinned", { kind: c.kind });
+      captureEvent("connection_pinned", { integration: c.integration });
     } else {
       drafts.update(thread.id, { text: stripped });
     }
@@ -846,7 +843,7 @@
     <!-- Pinned @-connections shelf -->
     {#if draft.connections.length > 0}
       <div class="mb-2 flex flex-wrap gap-2" data-testid="connections-shelf">
-        {#each draft.connections as c, i (c.kind + ":" + c.name)}
+        {#each draft.connections as c, i (c.integration + ":" + c.name)}
           <div class="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1 text-xs text-fg-soft">
             <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={14} />
             <span class="max-w-40 truncate">@{c.name}</span>

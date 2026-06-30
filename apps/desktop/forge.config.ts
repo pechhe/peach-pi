@@ -74,7 +74,12 @@ const config: ForgeConfig = {
     icon: path.join(__dirname, "build/icon"), // .icns appended per-platform by packager
     // Ship the bundled CuaDriver.app (vendored by the prePackage hook) into
     // Contents/Resources so CuaDriverService can install + drive it (ADR-0007).
-    extraResource: [path.join(__dirname, "build/cua-driver/CuaDriver.app")],
+    // Ship the Executor CLI dir (binary + FFI sidecars) into
+    // Contents/Resources/executor so McpService can register `executor mcp`.
+    extraResource: [
+      path.join(__dirname, "build/cua-driver/CuaDriver.app"),
+      path.join(__dirname, "build/executor"),
+    ],
     // Native N-API prebuilds (clipboard, pi-tui) must live outside the asar.
     // node-pty's prebuilds dir also holds the spawn-helper executable.
     asar: { unpack: "{**/*.node,**/node-pty/prebuilds/**}" },
@@ -98,6 +103,9 @@ const config: ForgeConfig = {
     // Idempotent + pinned + checksum-verified (see scripts/fetch-cua-driver.mjs).
     prePackage: async () => {
       execFileSync(process.execPath, [path.join(__dirname, "scripts/fetch-cua-driver.mjs")], {
+        stdio: "inherit",
+      });
+      execFileSync(process.execPath, [path.join(__dirname, "scripts/fetch-executor.mjs")], {
         stdio: "inherit",
       });
     },

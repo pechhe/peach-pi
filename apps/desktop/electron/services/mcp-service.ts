@@ -80,6 +80,41 @@ export class McpService {
     return out;
   }
 
+  /** Ensure the bundled Executor MCP server is registered. Writes an
+   *  `mcpServers.executor` entry pointing at the absolute path of the bundled
+   *  binary (a Finder-launched app has no shell PATH, so a bare `executor`
+   *  won't resolve). `executor mcp` itself attaches to an existing local
+   *  daemon or elects a new owner over the default `~/.executor` data dir, so
+   *  the user's existing Executor connections appear automatically. Idempotent:
+   *  preserves all other keys and leaves a user-disabled entry alone. */
+  async ensureExecutorServer(binPath: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      let raw: {
+        mcpServers?: Record<string, RawServerSpec>;
+        peachDisabledMcpServers?: Record<string, RawServerSpec>;
+      };
+      try {
+        raw = JSON.parse(await readFile(MCP_CONFIG, "utf8"));
+      } catch {
+        raw = {};
+      }
+      const active = raw.mcpServers ?? {};
+      const disabled = raw.peachDisabledMcpServers ?? {};
+      // Respect a deliberate disable; only refresh the binary path if active.
+      if (disabled.executor) {
+        disabled.executor = { command: binPath, args: ["mcp"] };
+        raw.peachDisabledMcpServers = disabled;
+      } else {
+        active.executor = { command: binPath, args: ["mcp"] };
+        raw.mcpServers = active;
+      }
+      await writeFile(MCP_CONFIG, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  }
+
   /** Toggle whether an MCP server is in `mcpServers` (enabled) or moved to the
    *  peach-managed `peachDisabledMcpServers` stash (disabled). Preserves all
    *  other keys in mcp.json. Applies to new sessions. */

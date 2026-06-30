@@ -38,10 +38,10 @@
 {#if conn}
   {#if variant === "rich"}
     <div class="flex flex-wrap justify-end gap-1.5" data-testid="connection-badges">
-      {#each conn.connections as c (c.kind + ":" + c.name)}
+      {#each conn.connections as c (c.integration + ":" + c.name)}
         <span
           class="inline-flex items-center gap-1.5 rounded-full border border-border-strong/50 bg-surface-2/80 py-0.5 pl-1 pr-2.5 text-[11.5px] font-medium text-fg-soft"
-          title={`${c.kind === "custom" ? "Custom connection" : "Composio toolkit"}: ${c.name}`}
+          title={`Connection (${c.integration}): ${c.name}`}
         >
           <ConnectorIcon logoUrl={connLogos.get(c.name) ?? null} label={c.name} size={16} />
           <span>@{c.name}</span>
@@ -50,7 +50,7 @@
     </div>
   {:else}
     <div class="msg-badges-row">
-      {#each conn.connections as c (c.kind + ":" + c.name)}<span class="msg-badge">@{c.name}</span>{/each}
+      {#each conn.connections as c (c.integration + ":" + c.name)}<span class="msg-badge">@{c.name}</span>{/each}
     </div>
   {/if}
 {/if}

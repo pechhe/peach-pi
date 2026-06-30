@@ -3,27 +3,25 @@
   //
   // Extracted from Composer.svelte (issue #27). Owns the connections + BWS
   // secrets catalogs (loaded lazily on first `@`), the ensure* loaders, the
-  // `event:connectorsChanged` / `event:bwsChanged` invalidation subscriptions,
+  // `event:executorChanged` / `event:bwsChanged` invalidation subscriptions,
   // and the match list filtering the catalog by the active `@query`.
   //
   // The host (Composer) drives caret context: it derives `query` from the
   // textarea and calls `handleMenuKey(e)` for ArrowUp/Down/Enter navigation so
   // the keyboard matrix stays in one place. Picks delegate back to the host,
   // which mutates the pinned-draft chips and re-syncs the textarea.
-  import type { Connection, CustomConnection, ReferencedConnection, ReferencedSecret } from "@peach-pi/shared-types";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import ConnectorIcon from "../ConnectorIcon.svelte";
   import { api } from "../../lib/ipc";
 
   /**
-   * One selectable row in the picker: a custom HTTP connection, a Composio
-   * toolkit, or a BWS secret (the latter carries an id for `bws_get_secret`).
+   * One selectable row in the picker: an Executor connection, or a BWS secret
+   * (the latter carries an id for `bws_get_secret`).
    */
   export type ConnMenuItem = {
-    kind: "custom" | "composio";
+    /** Executor integration slug. */
+    integration: string;
     name: string;
-    toolkitSlug?: string;
-    baseUrl?: string;
     logoUrl: string | null;
   };
   export type SecMenuItem = { id: string; name: string; projectId: string };
@@ -55,37 +53,21 @@
     if (connectionsLoaded) return;
     connectionsLoaded = true;
     try {
-      const [composio, custom] = await Promise.all([
-        api.invoke("connectors:list"),
-        api.invoke("customConnections:list"),
-      ]);
-      const bySlug = new Map<string, ConnMenuItem>();
-      for (const c of composio as Connection[]) {
-        if (c.status !== "ACTIVE") continue; // pending/expired aren't callable yet
-        if (bySlug.has(c.toolkitSlug)) continue; // one row per toolkit (N accounts)
-        bySlug.set(c.toolkitSlug, {
-          kind: "composio",
-          name: c.name,
-          toolkitSlug: c.toolkitSlug,
-          logoUrl: c.logoUrl,
-        });
-      }
-      const customs = (custom as CustomConnection[]).map((c) => ({
-        kind: "custom" as const,
-        name: c.name,
-        baseUrl: c.baseUrl,
-        logoUrl: c.logoUrl,
+      const conns = await api.invoke("executor:connections");
+      connectionsCatalog = conns.map((c) => ({
+        integration: c.integration,
+        name: c.identityLabel ?? c.name,
+        logoUrl: null,
       }));
-      connectionsCatalog = [...customs, ...bySlug.values()];
     } catch {
       connectionsLoaded = false; // allow retry on next `@`
     }
   }
 
   /** Refresh the cached catalog when connections change elsewhere in the app
-   *  (ConnectorsView add/remove/reconnect) so the `@` picker stays current. */
+   *  (ConnectorsView add/remove) so the `@` picker stays current. */
   $effect(() => {
-    const off = api.on("event:connectorsChanged", () => {
+    const off = api.on("event:executorChanged", () => {
       connectionsLoaded = false;
       connectionsCatalog = [];
     });
@@ -221,7 +203,7 @@
       {:else}
         {#if atMatches.length > 0}
           <div class="border-b border-border-strong/50 px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Connections</div>
-          {#each atMatches as c, i (c.kind + ":" + c.name)}
+          {#each atMatches as c, i (c.integration + ":" + c.name)}
             <div class="flex items-center {i === index ? 'bg-surface-2' : ''} hover:bg-surface-2">
               <button
                 class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
@@ -229,7 +211,7 @@
               >
                 <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={18} />
                 <span class="min-w-0 truncate text-fg">{c.name}</span>
-                <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide {c.kind === 'custom' ? 'bg-violet-500/15 text-violet-700' : 'bg-sky-500/15 text-sky-700'}">{c.kind}</span>
+                <span class="ml-auto shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] lowercase tracking-wide text-muted">{c.integration}</span>
               </button>
             </div>
           {/each}
