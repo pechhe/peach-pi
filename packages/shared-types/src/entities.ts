@@ -1149,23 +1149,6 @@ export interface ExecDetectResult {
   slug: string;
 }
 
-/** A row from Executor's full discovery registry (~/.executor/cache/
- *  integrations.json, ~3.5k entries). Mostly a docs/detection index: many
- *  rows have no resolvable `url` and are browse-only. */
-export interface ExecCatalogueItem {
-  slug: string;
-  name: string;
-  description: string;
-  /** "openapi" | "mcp" | "graphql". */
-  kind: string;
-  /** Brand domain for the favicon. */
-  domain?: string;
-  /** Docs or endpoint URL (absent for many entries). */
-  url?: string;
-  /** Registry popularity score (higher = more popular). */
-  popularity: number;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // BWS — Bitwarden Secrets Manager CLI
 // ─────────────────────────────────────────────────────────────────────────────

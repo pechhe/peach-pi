@@ -189,7 +189,6 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "executor:removeConnection": executorService.removeConnection.bind(executorService),
       "executor:addOpenApi": executorService.addOpenApi.bind(executorService),
       "executor:detect": executorService.detect.bind(executorService),
-      "executor:catalogue": executorService.catalogue.bind(executorService),
       "executor:openAddPage": async (pluginKey, opts) => {
         void shell.openExternal(executorService.buildAddUrl(pluginKey, opts));
       },
