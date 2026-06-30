@@ -5,9 +5,12 @@
   import Server from "@lucide/svelte/icons/server";
   import Terminal from "@lucide/svelte/icons/terminal";
   import Plug from "@lucide/svelte/icons/plug";
+  import Boxes from "@lucide/svelte/icons/boxes";
+  import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { Switch } from "../components/ui/switch";
   import ExecutorConnections from "./ExecutorConnections.svelte";
+  import { executorStore, execDisplayName, execFaviconUrl } from "../lib/executor-store.svelte";
 
   // Connections surface. Executor is the primary connections backbone (its own
   // self-contained panel); MCP servers and CLIs are read-only/affordance views.
@@ -83,11 +86,32 @@
     }
   }
 
+  /** Select an Executor integration and show it in the detail pane. */
+  function selectIntegration(slug: string) {
+    executorStore.selectedSlug = slug;
+    mode = "executor";
+  }
+
   onMount(() => {
     void loadMcp();
     void loadClis();
-    const off = api.on("event:clisChanged", () => void loadClis());
-    return off;
+    void executorStore.load();
+    void executorStore.loadCatalogue();
+    const offClis = api.on("event:clisChanged", () => void loadClis());
+    const offExec = api.on("event:executorChanged", () => void executorStore.load());
+    // The add/OAuth flow finishes in the system browser, which we can't observe.
+    // Re-list when the app window regains focus so new connections appear.
+    const onReturn = () => {
+      if (document.visibilityState === "visible") void executorStore.load();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      offClis();
+      offExec();
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
   });
 </script>
 
@@ -99,15 +123,43 @@
     </header>
 
     <nav class="flex-1 overflow-y-auto px-2 pb-4">
-      <button
-        class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
-        class:bg-surface={mode === "executor"}
-        onclick={() => (mode = "executor")}
-        data-testid="sidebar-executor"
-      >
-        <span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-muted"><Plug size={12} /></span>
-        <span class="flex-1 truncate text-sm {mode === 'executor' ? 'text-fg' : 'text-muted'}">Executor</span>
-      </button>
+      <div class="flex items-center justify-between px-2 pb-1 pt-2">
+        <p class="text-[11px] font-semibold uppercase tracking-wider text-fainter">Integrations</p>
+        <button
+          class="flex h-5 w-5 items-center justify-center rounded-md text-fainter transition-colors hover:bg-surface hover:text-fg"
+          onclick={() => (executorStore.connectOpen = true)}
+          title="Connect an integration"
+          aria-label="Connect an integration"
+          data-testid="sidebar-connect"
+        ><Plus size={13} /></button>
+      </div>
+      {#if executorStore.integrations.length > 0}
+        {#each executorStore.integrations as integ (integ.slug)}
+          {@const active = mode === "executor" && executorStore.selectedSlug === integ.slug}
+          {@const count = executorStore.byIntegration.get(integ.slug)?.length ?? 0}
+          {@const favicon = execFaviconUrl(executorStore.domainFor(integ.slug, integ.kind))}
+          <button
+            class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
+            class:bg-surface={active}
+            onclick={() => selectIntegration(integ.slug)}
+            data-testid={`sidebar-integration-${integ.slug}`}
+          >
+            <span class="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface text-muted">
+              {#if favicon}<img src={favicon} alt="" class="h-3.5 w-3.5 object-contain" />{:else if integ.kind === "built-in"}<Plug size={12} />{:else if integ.kind === "mcp"}<Server size={12} />{:else}<Boxes size={12} />{/if}
+            </span>
+            <span class="flex-1 truncate text-sm {active ? 'text-fg' : 'text-muted'}">{execDisplayName(integ.slug)}</span>
+            {#if count > 0}
+              <span class="num-badge" title="{count} connection{count === 1 ? '' : 's'}">{count}</span>
+            {/if}
+          </button>
+        {/each}
+      {:else}
+        <button
+          class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
+          onclick={() => (mode = "executor")}
+          data-testid="sidebar-executor"
+        ><Plug size={13} /> {executorStore.loading ? "Loading…" : "No integrations yet"}</button>
+      {/if}
 
       <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">MCP servers</p>
       {#if mcpServers.length > 0}

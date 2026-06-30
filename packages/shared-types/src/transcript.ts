@@ -57,6 +57,29 @@ export interface SubagentStep {
   at: string;
 }
 
+/** Token usage + speed for one assistant turn. Tokens/cost come from the
+ *  provider (persisted in the session file); ttft/tokensPerSec are runtime
+ *  timings measured by the recorder and are absent on reloaded threads. */
+export interface AssistantUsage {
+  /** Fresh (uncached) input tokens, summed across the turn's calls. Billed at
+   *  the model's full input rate. */
+  input: number;
+  /** Cached input tokens read, summed. Billed at a steep discount (~10% of the
+   *  input rate), so a high share here is what makes a turn cheap. */
+  cacheRead: number;
+  /** Input tokens written to cache, summed. A one-time premium (~125% of the
+   *  input rate) that becomes cheap cacheRead on later turns. */
+  cacheWrite: number;
+  /** Output tokens generated across the whole turn (summed). Highest unit price. */
+  output: number;
+  /** Total cost in USD, when the model's pricing is known (0 → omitted). */
+  costUsd?: number;
+  /** Time to first token, in milliseconds (runtime only). */
+  ttftMs?: number;
+  /** Output tokens per second over the generation phase (runtime only). */
+  tokensPerSec?: number;
+}
+
 export type TranscriptItem =
   | { id: string; kind: "user"; text: string; images?: ImagePayload[] }
   | {
@@ -66,6 +89,7 @@ export type TranscriptItem =
       thinking: string;
       streaming: boolean;
       error?: string;
+      usage?: AssistantUsage;
     }
   | {
       id: string;

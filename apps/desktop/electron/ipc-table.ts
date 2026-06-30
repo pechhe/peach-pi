@@ -95,6 +95,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     automationService,
     terminalService,
     recordingService,
+    clipService,
     gitService,
     handoffService,
     remoteHost,
@@ -324,6 +325,12 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "recording:cancel": recordingService.cancel.bind(recordingService),
       "recording:status": recordingService.status.bind(recordingService),
       "recording:revealSkill": recordingService.revealSkill.bind(recordingService),
+      "clip:start": clipService.start.bind(clipService),
+      "clip:stop": clipService.stop.bind(clipService),
+      "clip:cancel": clipService.cancel.bind(clipService),
+      "clip:status": clipService.status.bind(clipService),
+      "clip:attachToThread": clipService.attachToThread.bind(clipService),
+      "clip:reveal": clipService.reveal.bind(clipService),
       "resources:inspect": threadService.inspectResources.bind(threadService),
       "resources:inspectSlotCommand": threadService.inspectSlotCommand.bind(threadService),
       "skills:save": saveSkillFile,
@@ -424,6 +431,11 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
         if (listRes.ok) for (const i of listRes.issues) issueTitles.set(i.number, i.title);
         const titleFor = (n: number) => issueTitles.get(n) ?? `Issue #${n}`;
         const items: MergeBatchItemResult[] = [];
+        // Recovery is sequential: at most one agent is nudged per batch run, so
+        // we never kick off several threads resolving conflicts concurrently.
+        // Clean items still merge; the next blocked item is handled on the
+        // user's next merge attempt, once this agent has finished.
+        let nudged = false;
         for (const issueNumber of issueNumbers) {
           const wt = projectWorktrees.find((w) => w.name === `issue-${issueNumber}`);
           const thread = wt ? snap.threads.find((t) => t.worktreeId === wt.id) : undefined;
@@ -438,26 +450,22 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
             emit("event:mergeProgress", { projectId, issueNumber, phase: "rebase", done: true, item });
             continue;
           }
-          const rebaseRes = await gitService.rebaseAndTest(thread.id);
+          const rebaseRes = await gitService.rebaseOntoDefault(thread.id);
           if (!rebaseRes.ok) {
-            const item = { ok: false as const, issueNumber, phase: rebaseRes.error.includes("Tests") ? ("tests" as const) : ("rebase" as const), error: rebaseRes.error };
+            const item = { ok: false as const, issueNumber, phase: "rebase" as const, error: rebaseRes.error };
             items.push(item);
             emit("event:mergeProgress", { projectId, issueNumber, phase: item.phase, done: true, item });
-            // On any rebase-phase failure, nudge the issue's thread to resolve
-            // it: the thread is the actor that can fix whatever blocked the
-            // rebase — uncommitted changes left in the worktree, a real
-            // rebase conflict, a detached HEAD, etc. rebaseAndTest already
-            // aborted (on conflict) or refused (on dirty tree), leaving the
-            // worktree on the agent's branch, so the agent can commit/stash,
-            // re-run the rebase, fix conflicts, push, and stop for the human
-            // to re-attempt the merge. Test-phase failures are left alone
-            // (a different concern).
-            if (item.phase === "rebase") {
+            // Nudge the issue's thread to resolve it — the thread is the actor
+            // that can fix whatever blocked the rebase (uncommitted changes, a
+            // real rebase conflict, a detached HEAD, …). rebaseOntoDefault
+            // already aborted/refused, leaving the worktree on the agent's
+            // branch, so the agent can commit/stash, re-run the rebase, fix
+            // conflicts, push, and stop for the human to re-attempt. Only the
+            // first failing item is nudged — sequential recovery.
+            if (!nudged) {
+              nudged = true;
               await threadService
-                .prompt(
-                  thread.id,
-                  rebaseFailure(issueNumber, rebaseRes.error),
-                )
+                .prompt(thread.id, rebaseFailure(issueNumber, rebaseRes.error))
                 .catch((e) =>
                   console.error(`[mergeBatch] failed to prompt thread ${thread.id} for rebase failure:`, e),
                 );
@@ -473,7 +481,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
           if (workflow === "local") {
             const mergeRes = await gitService.mergeBranchToDefault(thread.id);
             const item: MergeBatchItemResult = mergeRes.ok
-              ? { ok: true, issueNumber, mergedTo: mergeRes.target, tests: rebaseRes.tests }
+              ? { ok: true, issueNumber, mergedTo: mergeRes.target }
               : { ok: false, issueNumber, phase: "merge", error: mergeRes.error };
             items.push(item);
             emit("event:mergeProgress", { projectId, issueNumber, phase: "merge", done: true, item });
@@ -487,12 +495,10 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
               await appService.archive(wt!.id).catch((e) =>
                 console.error(`[mergeBatch] failed to archive worktree ${wt!.id}:`, e),
               );
-            } else {
+            } else if (!nudged) {
+              nudged = true;
               await threadService
-                .prompt(
-                  thread.id,
-                  localMergeFailure(issueNumber, mergeRes.error),
-                )
+                .prompt(thread.id, localMergeFailure(issueNumber, mergeRes.error))
                 .catch((e) =>
                   console.error(`[mergeBatch] failed to prompt thread ${thread.id} for local merge failure:`, e),
                 );
@@ -514,7 +520,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
             ? await gitService.mergePr(thread.id)
             : ensured;
           const item: MergeBatchItemResult = mergeRes.ok
-            ? { ok: true, issueNumber, prUrl: mergeRes.prUrl, tests: rebaseRes.tests }
+            ? { ok: true, issueNumber, prUrl: mergeRes.prUrl }
             : { ok: false, issueNumber, phase: "merge", error: mergeRes.error };
           items.push(item);
           emit("event:mergeProgress", { projectId, issueNumber, phase: "merge", done: true, item });
@@ -564,7 +570,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
         return result;
       },
       "git:pushLocal": gitService.pushLocal.bind(gitService),
-      "git:rebaseAndTest": gitService.rebaseAndTest.bind(gitService),
+      "git:rebaseOntoDefault": gitService.rebaseOntoDefault.bind(gitService),
       // remote session hosting (ADR-0009)
       "remote:hostStatus": remoteHost.status.bind(remoteHost),
       "remote:setHostEnabled": remoteHost.setHostEnabled.bind(remoteHost),
@@ -638,14 +644,6 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "app:listScopedModels": async () => {
         const { listScopedModels } = await import("@peach-pi/pi-client");
         return listScopedModels();
-      },
-      "app:listScopedModelsForProject": async (projectId) => {
-        const { listScopedModels } = await import("@peach-pi/pi-client");
-        const project = appService.snapshot().projects.find((p) => p.id === projectId);
-        // Read the scope from the project dir so it matches the TUI / composer
-        // (project settings.json overrides global). Falls back to the global
-        // read if the project is unknown or has no path.
-        return listScopedModels(project?.path);
       },
       "app:setModelScoped": async (provider, modelId, scoped) => {
         const { setModelScoped } = await import("@peach-pi/pi-client");

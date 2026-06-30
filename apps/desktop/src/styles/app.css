@@ -886,6 +886,7 @@ button {
 /* Message-level copy button (assistant responses). */
 .assistant-actions {
   display: flex;
+  align-items: center;
   margin-top: 6px;
   opacity: 0;
   transition: opacity 0.12s;
@@ -910,6 +911,26 @@ button {
 .copy-btn:hover {
   color: var(--color-fg);
   background: var(--color-surface-2);
+}
+.assistant-usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 11px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}
+.assistant-usage .usage-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.assistant-usage .usage-cache {
+  color: var(--color-faint);
 }
 .md blockquote {
   margin: 0.65em 0;
