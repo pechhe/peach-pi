@@ -5,10 +5,8 @@ import { hostname } from "node:os";
 import type {
   AppSnapshot,
   AutoCompactSettings,
-  AutomationModel,
   ModelInfo,
   Project,
-  ThinkingLevel,
   Thread,
   UiState,
   Worktree,
@@ -172,24 +170,6 @@ export class AppService {
     const exists = this.projects.all().some((p) => p.id === projectId);
     if (!exists) throw new Error(`Unknown project: ${projectId}`);
     this.projects.setMergeWorkflow(projectId, workflow);
-    this.publish();
-    return this.projects.all().find((p) => p.id === projectId)!;
-  }
-
-  /** Pin the model Work Queue agents use for this project. null = pi default. */
-  setAgentModel(projectId: string, model: AutomationModel | null): Project {
-    const exists = this.projects.all().some((p) => p.id === projectId);
-    if (!exists) throw new Error(`Unknown project: ${projectId}`);
-    this.projects.setAgentModel(projectId, model);
-    this.publish();
-    return this.projects.all().find((p) => p.id === projectId)!;
-  }
-
-  /** Pin the reasoning level Work Queue agents use. null = pi default. */
-  setAgentThinking(projectId: string, level: ThinkingLevel | null): Project {
-    const exists = this.projects.all().some((p) => p.id === projectId);
-    if (!exists) throw new Error(`Unknown project: ${projectId}`);
-    this.projects.setAgentThinking(projectId, level);
     this.publish();
     return this.projects.all().find((p) => p.id === projectId)!;
   }

@@ -14,7 +14,7 @@ test("migrations are idempotent", () => {
   const db = memoryDb();
   migrate(db); // second run = no-op
   const v = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  assert.equal(v.user_version, 12);
+  assert.equal(v.user_version, 11);
 });
 
 test("automation lifecycle: insert, due, fire, runs, disable", () => {

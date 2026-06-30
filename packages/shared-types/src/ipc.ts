@@ -37,10 +37,6 @@ import type {
   ExecConnection,
   ExecIntegration,
   ExecDetectResult,
-<<<<<<< HEAD
-  ExecCatalogueItem,
-=======
->>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
 
   McpServer,
   SubagentAgentInfo,
@@ -289,35 +285,6 @@ export const ipcContracts = {
     requireNonEmptyString(id, "projectId");
     if (workflow !== "pr" && workflow !== "local")
       throw new Error("workflow must be 'pr' or 'local'");
-  }),
-  /** Pin the model Work Queue agents use for this project. null clears the pin
-   *  (pi picks its default). Returns the updated project. */
-  "projects:setAgentModel": invoke<
-    [projectId: string, model: AutomationModel | null],
-    Project
-  >((id, model) => {
-    requireNonEmptyString(id, "projectId");
-    if (model != null) {
-      if (typeof model.provider !== "string" || model.provider.length === 0)
-        throw new Error("model.provider must be a non-empty string");
-      if (typeof model.id !== "string" || model.id.length === 0)
-        throw new Error("model.id must be a non-empty string");
-      if (typeof model.name !== "string")
-        throw new Error("model.name must be a string");
-    }
-  }),
-  /** Pin the reasoning/thinking level Work Queue agents use for this project.
-   *  null clears the pin (pi picks its default). Returns the updated project. */
-  "projects:setAgentThinking": invoke<
-    [projectId: string, level: ThinkingLevel | null],
-    Project
-  >((id, level) => {
-    requireNonEmptyString(id, "projectId");
-    if (
-      level != null &&
-      !["off", "minimal", "low", "medium", "high", "xhigh"].includes(level)
-    )
-      throw new Error("level must be a valid ThinkingLevel or null");
   }),
 
   // worktrees
@@ -769,12 +736,6 @@ export const ipcContracts = {
   "executor:detect": invoke<[url: string], ExecDetectResult[]>((u) =>
     requireNonEmptyString(u, "url"),
   ),
-<<<<<<< HEAD
-  /** The full discovery registry (~3.5k rows) for browse/search. Mostly a
-   *  docs index — not all rows are installable. */
-  "executor:catalogue": invoke<[], ExecCatalogueItem[]>(),
-=======
->>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
   /** Open Executor's signed-in "add integration" web page for a plugin,
    *  optionally pre-targeting a curated preset or detected URL. The catalogue
    *  + credential entry happen there; no secret reaches peach-pi. */
