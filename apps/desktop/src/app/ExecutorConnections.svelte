@@ -106,6 +106,12 @@
     void openAdd(p.pluginKey, { preset: p.id, ...(p.url ? { url: p.url } : {}) });
   }
 
+  /** Favicon via Google's service (CSP-allowed), keyed by the brand domain —
+   *  mirrors how Executor's own UI resolves integration icons. */
+  function faviconUrl(domain: string | undefined): string | null {
+    return domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=32` : null;
+  }
+
   /** googleDiscovery → google; otherwise the kind is already the plugin key. */
   function kindToPlugin(kind: string): string {
     return kind === "googleDiscovery" ? "google" : kind;
@@ -313,7 +319,7 @@
         <!-- Popular / matching presets -->
         <div class="flex min-w-0 flex-col gap-2">
           <p class="text-xs font-medium text-fg-soft/80">{(isUrl ? "" : query).trim() ? "Matching integrations" : "Popular integrations"}</p>
-          <div class="max-h-64 overflow-y-auto rounded-lg border border-border">
+          <div class="max-h-[48vh] overflow-y-auto rounded-lg border border-border">
             {#if presetMatches.length === 0}
               <div class="flex flex-col items-center justify-center gap-1 px-4 py-8 text-center">
                 <p class="text-sm text-muted">No matching presets</p>
@@ -326,8 +332,8 @@
                   onclick={() => pickPreset(p)}
                   data-testid={`executor-preset-${p.pluginKey}-${p.id}`}
                 >
-                  {#if p.icon}
-                    <img src={p.icon} alt="" class="h-5 w-5 shrink-0 object-contain" loading="lazy" />
+                  {#if faviconUrl(p.domain)}
+                    <img src={faviconUrl(p.domain)} alt="" class="h-5 w-5 shrink-0 object-contain" loading="lazy" />
                   {:else}
                     <span class="h-5 w-5 shrink-0 rounded bg-surface"></span>
                   {/if}
