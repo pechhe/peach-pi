@@ -30,35 +30,28 @@
 }
 
 /* Bloom, halo, muted, inactive */
-/* Bloom is a fixed-radius glow drawn on a ::after layer; its *intensity*
-   comes from animating that layer's opacity (--dmx-bloom-level), NOT the blur
-   radius. Opacity changes recomposite a cached layer; animating the blur
-   radius (the old approach) re-rasterised every dot's filter every frame and
-   pegged the GPU process. The dot itself stays crisp and filter-free. */
 .dmx-bloom .dmx-dot {
-	position: relative;
-	will-change: opacity;
-}
-
-.dmx-bloom .dmx-dot::after {
-	content: "";
-	position: absolute;
-	inset: 0;
-	border-radius: inherit;
-	box-shadow:
-		0 0 calc(var(--dmx-dot-size, 3px) * 0.18) currentColor,
-		0 0 calc(var(--dmx-dot-size, 3px) * 0.32) currentColor;
-	opacity: var(--dmx-bloom-level, 0);
-	pointer-events: none;
-	will-change: opacity;
+	filter: drop-shadow(
+			0 0 calc(var(--dmx-dot-size, 3px) * 0.18 * var(--dmx-bloom-level, 0)) currentColor
+		)
+		drop-shadow(
+			0 0 calc(var(--dmx-dot-size, 3px) * 0.32 * var(--dmx-bloom-level, 0)) currentColor
+		);
+	will-change: opacity, filter;
 }
 
 /* Halo: modestly wider falloff than selective bloom (same --dmx-bloom-level on each dot). */
-.dmx-root.dmx-bloom-halo.dmx-bloom .dmx-dot::after {
-	box-shadow:
-		0 0 calc(var(--dmx-dot-size, 3px) * 0.22) currentColor,
-		0 0 calc(var(--dmx-dot-size, 3px) * 0.4) currentColor,
-		0 0 calc(var(--dmx-dot-size, 3px) * 0.62) currentColor;
+.dmx-root.dmx-bloom-halo.dmx-bloom .dmx-dot {
+	filter: drop-shadow(
+			0 0 calc(var(--dmx-dot-size, 3px) * 0.22 * var(--dmx-bloom-level, 0)) currentColor
+		)
+		drop-shadow(
+			0 0 calc(var(--dmx-dot-size, 3px) * 0.4 * var(--dmx-bloom-level, 0)) currentColor
+		)
+		drop-shadow(
+			0 0 calc(var(--dmx-dot-size, 3px) * 0.62 * var(--dmx-bloom-level, 0)) currentColor
+		);
+	will-change: opacity, filter;
 }
 
 /* Bloom strength comes from inline --dmx-bloom-level (see opacityToBloomLevel). */
@@ -77,10 +70,6 @@
 	pointer-events: none;
 	will-change: auto;
 	filter: none;
-}
-
-.dmx-dot.dmx-inactive::after {
-	display: none;
 }
 
 /* Phase 1 public animation classes */

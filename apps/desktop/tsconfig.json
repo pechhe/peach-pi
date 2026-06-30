@@ -3,8 +3,6 @@
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "noEmit": true,
-    "incremental": true,
-    "tsBuildInfoFile": "./node_modules/.cache/tsc-app.tsbuildinfo",
     "allowImportingTsExtensions": true,
     "types": ["svelte", "vite/client"],
     "baseUrl": ".",
