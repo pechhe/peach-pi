@@ -374,6 +374,19 @@ export class GitService {
     const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
     if (target === branch) return { ok: false, error: `Local repo is on ${branch}` };
 
+    // Refuse to fold worktree work onto the repo's default branch (e.g.
+    // `master`/`main`). Merging there rewrites the shared checkout's working
+    // tree and history mechanicaly — the contamination source for "master
+    // keeps gaining errors while worktree threads run". Switch the local
+    // repo to a feature branch first, then merge.
+    const defaultBranch = await this.defaultBranch(projectPath);
+    if (defaultBranch && target === defaultBranch) {
+      return {
+        ok: false,
+        error: `Local repo is on the default branch (${target}). Check out a feature branch before merging — merging onto ${target} dirties the shared checkout.`,
+      };
+    }
+
     // Stash any uncommitted local work so the --no-ff merge has a clean tree,
     // then restore it on top of the merge (the "integrate while dirty" pattern).
     const localDirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
@@ -535,12 +548,47 @@ export class GitService {
     mkdirSync(this.worktreesDir, { recursive: true });
 
     const dir = path.join(this.worktreesDir, randomUUID());
-    // Always start the worktree at a clean HEAD. We intentionally do NOT seed
-    // the main checkout's uncommitted work into the worktree: copying it
-    // duplicated in-flight edits across both trees and made merge-back
-    // self-conflict on those same lines. The worktree's in-flight work stays
-    // its own; main keeps its uncommitted work untouched and separate.
-    await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
+    const dirty = Boolean((await git(["status", "--porcelain"], project.path)).trim());
+    if (!dirty) {
+      await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
+      return dir;
+    }
+
+    // Seed the worktree with a COPY of the main checkout's uncommitted work
+    // (modified tracked + deletions + untracked, .gitignore-respecting) so
+    // isolated iteration carries the in-flight edits. Flow: stash-push on
+    // main (main goes clean) → create worktree at HEAD → apply the stash INTO
+    // the worktree (copy, not move) → pop on main to restore its original
+    // dirty state. Main ends up exactly as it was; the work is duplicated into
+    // the worktree, not moved.
+    //
+    // Note on the old smear concern: an earlier version refused dirty trees
+    // because the previous flow copied uncommitted state into EVERY sibling,
+    // drifting across worktrees. That trade-off is now explicit: each new
+    // worktree seeds from main's current uncommitted state at creation time.
+    // If the process dies between push and pop, the work is preserved in
+    // `git stash list` — recoverable by `git stash pop` on the main checkout.
+    await git(["stash", "push", "-u", "-m", "peach-pi worktree seed"], project.path);
+    try {
+      await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
+      try {
+        // Apply (not pop): leaves the stash in place so we can restore main
+        // next. Same HEAD as when the stash was made → applies clean.
+        await git(["stash", "apply"], dir);
+      } catch (err) {
+        // Shouldn't happen against a fresh worktree at the same HEAD, but if
+        // it does, tear down the half-seeded worktree and surface the error
+        // before the finally restores main — no work is silently lost.
+        await git(["worktree", "remove", "--force", dir], project.path).catch(() => {});
+        throw new Error(`Could not seed worktree from local changes: ${(err as Error).message}`);
+      }
+    } finally {
+      // Restore main's uncommitted state. pop = apply + drop; safe because
+      // main is clean (reset by the push) and the stash was made against this
+      // same HEAD. If pop somehow fails, the stash remains in `git stash list`
+      // for manual recovery.
+      await git(["stash", "pop"], project.path).catch(() => {});
+    }
     return dir;
   }
 
