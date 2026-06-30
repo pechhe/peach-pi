@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Thread } from "@peach-pi/shared-types";
   import { recording } from "../../stores/recording.svelte";
-  import { playClick } from "../../lib/sound/button-click-sound";
   import Composer from "../../app/Composer.svelte";
   import Circle from "@lucide/svelte/icons/circle";
 
@@ -46,7 +45,6 @@
   async function toggleEnvironment() {
     const target = !isWorktree;
     envOverride = { id: thread.id, worktree: target };
-    playClick("down");
     try {
       await onSetEnvironment?.(thread.id, target);
     } catch {
@@ -95,6 +93,7 @@
         onmousedown={(e) => e.preventDefault()}
         onclick={toggleEnvironment}
         data-testid="environment-toggle"
+        data-press="rotary"
         title={isWorktree
           ? "Working in an isolated git worktree (seeded from a copy of your main checkout's changes)"
           : "Working in the project directory — switching to Worktree seeds it from a copy of your current changes, main is left untouched"}

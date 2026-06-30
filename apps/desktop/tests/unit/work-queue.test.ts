@@ -117,7 +117,7 @@ test("enrichIssues: a closed issue is done (resolved, not actionable)", () => {
   assert.equal(issues.find((i) => i.number === 30)!.status, "done");
 });
 
-test("enrichIssues: blocker satisfied only by a merged PR, not by closure", () => {
+test("enrichIssues: blocker satisfied by a merged PR or by completed closure", () => {
   // #17 open → #18 blocked.
   const open17 = enrichIssues([
     raw({ number: 17 }),
@@ -125,12 +125,21 @@ test("enrichIssues: blocker satisfied only by a merged PR, not by closure", () =
   ]);
   assert.equal(open17.find((i) => i.number === 18)!.status, "blocked");
 
-  // #17 closed WITHOUT a merged PR → #18 stays blocked (does not unblock).
-  const closedUnmerged = enrichIssues([
+  // #17 closed as completed (no merged PR) → #18 unblocks to ready.
+  const closedCompleted = enrichIssues([
     raw({ number: 17, state: "closed", stateReason: "completed" }),
     raw({ number: 18, body: "## Blocked by\n\n- #17\n" }),
   ]);
-  const i18 = closedUnmerged.find((i) => i.number === 18)!;
+  const completed18 = closedCompleted.find((i) => i.number === 18)!;
+  assert.equal(completed18.status, "ready");
+  assert.deepEqual(completed18.unmetBlockers, []);
+
+  // #17 closed as not_planned (abandoned) → #18 stays blocked.
+  const closedNotPlanned = enrichIssues([
+    raw({ number: 17, state: "closed", stateReason: "not_planned" }),
+    raw({ number: 18, body: "## Blocked by\n\n- #17\n" }),
+  ]);
+  const i18 = closedNotPlanned.find((i) => i.number === 18)!;
   assert.equal(i18.status, "blocked");
   assert.deepEqual(i18.unmetBlockers, [17]);
 

@@ -3,7 +3,6 @@
   import { usage } from "../../stores/usage.svelte";
   import { usagePrefs } from "../../stores/usage-prefs.svelte";
   import { featuredMetrics, shortTag, urgencyClass, fmtResetsIn } from "../../lib/usage-featured";
-  import { playButtonSecondary } from "../../lib/sound/button-click-sound";
   import MovingHighlight from "../../app/MovingHighlight.svelte";
   import UsagePopover from "../../app/UsagePopover.svelte";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
@@ -32,7 +31,6 @@
   let usageOpen = $state(false);
 
   function toggleUsagePopover(): void {
-    playButtonSecondary("click");
     usageOpen = !usageOpen;
   }
 
@@ -57,6 +55,7 @@
         {activeView === 'automations' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onOpenView("automations")}
       data-testid="nav-automations"
+      data-press="rotary"
     >
       <span class="flex items-center gap-2.5"><AlarmClock size={15} /> Automations</span>
       {#if automationCount > 0}
@@ -68,6 +67,7 @@
         {activeView === 'skills' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onOpenView("skills")}
       data-testid="nav-skills"
+      data-press="rotary"
     >
       <span class="flex items-center gap-2.5"><BookOpen size={15} /> Skills</span>
     </button>
@@ -76,6 +76,7 @@
         {activeView === 'extensions' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onOpenView("extensions")}
       data-testid="nav-extensions"
+      data-press="rotary"
     >
       <span class="flex items-center gap-2.5"><Puzzle size={15} /> Extensions</span>
     </button>
@@ -84,6 +85,7 @@
         {activeView === 'settings' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onOpenView("settings")}
       data-testid="nav-settings"
+      data-press="rotary"
     >
       <span class="flex items-center gap-2.5"><Settings size={15} /> Settings</span>
     </button>
@@ -92,6 +94,7 @@
         {activeView === 'connections' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onOpenView("connections")}
       data-testid="nav-connections"
+      data-press="rotary"
     >
       <span class="flex items-center gap-2.5"><Plug size={15} /> Connections</span>
     </button>
@@ -100,6 +103,7 @@
         {activeView === 'bws' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onOpenView("bws")}
       data-testid="nav-bws"
+      data-press="rotary"
     >
       <span class="flex items-center gap-2.5"><KeyRound size={15} /> Secrets</span>
     </button>
@@ -108,6 +112,7 @@
         {activeView === 'remote' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
       onclick={() => onOpenView("remote")}
       data-testid="nav-remote"
+      data-press="rotary"
       data-remote-first={remoteFirst ? "on" : undefined}
     >
       <span class="flex items-center gap-2.5 {remoteFirst ? 'remote-first-pulse' : ''}">
@@ -120,6 +125,7 @@
         class="main-nav-item flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-fg"
         onclick={toggleUsagePopover}
         data-testid="nav-usage"
+        data-press="rotary"
       >
         <span class="flex items-center gap-2.5"><Gauge size={15} /> Usage</span>
         {#if featuredLine.length > 0}

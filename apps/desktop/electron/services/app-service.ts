@@ -8,6 +8,7 @@ import type {
   AutomationModel,
   ModelInfo,
   Project,
+  SnapshotPatch,
   ThinkingLevel,
   Thread,
   UiState,
@@ -43,7 +44,7 @@ export class AppService {
   private snoozeTimer: NodeJS.Timeout | null = null;
   /** Coalesced publish timer: bursts of mutations (sidebar drag, streaming-
    *  driven onThreadsChanged callbacks, rapid status flips) collapse into one
-   *  `event:snapshot` emit so the 5-query snapshot isn't re-run ~60x/sec. */
+   *  `event:snapshotPatch` emit so the diff isn't re-run ~60x/sec. */
   private publishTimer: NodeJS.Timeout | null = null;
   private emit: Emit;
   /** Collaborators for worktree teardown (archive a worktree → archive its
@@ -57,6 +58,12 @@ export class AppService {
   /** Supplies synthetic threads mirrored from remote masters (set by main.ts),
    *  merged into the snapshot so they render in the sidebar tagged as remote. */
   private remoteThreads: () => Thread[] = () => [];
+  /** The last snapshot the renderer is known to hold, with stable entity refs.
+   *  Each publish diffs the freshly-queried `snapshot()` against this and emits
+   *  only changed entities on `event:snapshotPatch`; this is where identity is
+   *  owned (at the source), so the renderer no longer reconstructs it. Null
+   *  until the first publish, which emits a full-replacement patch. */
+  private lastEmitted: AppSnapshot | null = null;
 
   constructor(db: AppDb, emit: Emit) {
     this.emit = emit;
@@ -139,7 +146,7 @@ export class AppService {
   addProject(path: string): Project {
     const kind = existsSync(`${path}/.git`) ? "repo" : "folder";
     const project = this.projects.add(path, basename(path), kind);
-    this.publish();
+    this.notify();
     return project;
   }
 
@@ -148,13 +155,13 @@ export class AppService {
     this.saveUiState({
       collapsedProjects: this.loadUiState().collapsedProjects.filter((cid) => cid !== id),
     });
-    this.publish();
+    this.notify();
   }
 
   /** Persist a new sidebar order (full ordered list of project IDs). */
   reorderProjects(orderedIds: string[]): void {
     this.projects.reorder(orderedIds);
-    this.publish();
+    this.notify();
   }
 
   /** Collapse/expand a project's thread list in the sidebar. */
@@ -163,7 +170,7 @@ export class AppService {
     if (collapsed) collapsedProjects.add(projectId);
     else collapsedProjects.delete(projectId);
     this.saveUiState({ collapsedProjects: [...collapsedProjects] });
-    this.publish();
+    this.notify();
   }
 
   /** Set a project's Work Queue merge workflow ('pr' | 'local'). Returns the
@@ -172,7 +179,7 @@ export class AppService {
     const exists = this.projects.all().some((p) => p.id === projectId);
     if (!exists) throw new Error(`Unknown project: ${projectId}`);
     this.projects.setMergeWorkflow(projectId, workflow);
-    this.publish();
+    this.notify();
     return this.projects.all().find((p) => p.id === projectId)!;
   }
 
@@ -181,7 +188,7 @@ export class AppService {
     const exists = this.projects.all().some((p) => p.id === projectId);
     if (!exists) throw new Error(`Unknown project: ${projectId}`);
     this.projects.setAgentModel(projectId, model);
-    this.publish();
+    this.notify();
     return this.projects.all().find((p) => p.id === projectId)!;
   }
 
@@ -190,20 +197,20 @@ export class AppService {
     const exists = this.projects.all().some((p) => p.id === projectId);
     if (!exists) throw new Error(`Unknown project: ${projectId}`);
     this.projects.setAgentThinking(projectId, level);
-    this.publish();
+    this.notify();
     return this.projects.all().find((p) => p.id === projectId)!;
   }
 
   /** Persist the sidebar width (clamped to a sane range). */
   setSidebarWidth(width: number): void {
     this.saveUiState({ sidebarWidth: Math.round(Math.min(560, Math.max(200, width))) });
-    this.publish();
+    this.notify();
   }
 
   /** Persist whether the sidebar is collapsed (hidden, reveal-on-hover). */
   setSidebarCollapsed(collapsed: boolean): void {
     this.saveUiState({ sidebarCollapsed: collapsed });
-    this.publish();
+    this.notify();
   }
 
   addWorktree(projectId: string, dir: string, name?: string): Worktree {
@@ -212,7 +219,7 @@ export class AppService {
       dir,
       name: name ?? this.worktrees.nextName(projectId),
     });
-    this.publish();
+    this.notify();
     return wt;
   }
 
@@ -222,7 +229,7 @@ export class AppService {
 
   renameWorktree(id: string, name: string): void {
     this.worktrees.setName(id, name);
-    this.publish();
+    this.notify();
   }
 
   /** Mark a worktree archived; returns its live (non-archived) thread ids so
@@ -233,7 +240,7 @@ export class AppService {
     const threadIds = this.threads.all()
       .filter((t) => t.worktreeId === id && !t.archivedAt)
       .map((t) => t.id);
-    this.publish();
+    this.notify();
     return threadIds;
   }
 
@@ -254,7 +261,7 @@ export class AppService {
   setSelectedThread(threadId: string | null): void {
     this.saveUiState({ selectedThreadId: threadId });
     if (threadId) this.threads.markSeen(threadId);
-    this.publish();
+    this.notify();
   }
 
   /** Read the HUD's active thread (independent of `selectedThreadId`). */
@@ -265,7 +272,7 @@ export class AppService {
   /** Point the HUD at a thread. Does NOT touch the Main Window selection. */
   setHudThread(threadId: string | null): void {
     this.saveUiState({ hudThreadId: threadId });
-    this.publish();
+    this.notify();
   }
 
   /**
@@ -294,7 +301,7 @@ export class AppService {
 
   setHudAutoReveal(on: boolean): void {
     this.saveUiState({ hudAutoRevealOnFinish: on });
-    this.publish();
+    this.notify();
   }
 
   /** Read the persisted "don't warn me" flag for archiving a sole-thread
@@ -311,17 +318,17 @@ export class AppService {
 
   snoozeThread(threadId: string, until: string): void {
     this.threads.setSnoozedUntil(threadId, until);
-    this.publish();
+    this.notify();
   }
 
   unsnoozeThread(threadId: string): void {
     this.threads.setSnoozedUntil(threadId, null);
-    this.publish();
+    this.notify();
   }
 
   unmarkToTest(threadId: string): void {
     this.threads.setToTest(threadId, null, null);
-    this.publish();
+    this.notify();
   }
 
   /** All auth-configured models (global). Lazy import keeps pi SDK out of boot path. */
@@ -351,23 +358,157 @@ export class AppService {
 
   private wakeExpiredSnoozes(): void {
     const woken = this.threads.clearExpiredSnoozes(new Date().toISOString());
-    if (woken.length > 0) this.publish();
+    if (woken.length > 0) this.notify();
   }
 
-  /** Schedule a coalesced snapshot emit. External collaborators (ThreadService
+  /** Schedule a coalesced snapshot-patch emit. External collaborators (ThreadService
    *  via onThreadsChanged, automations, remote relay) call this instead of
-   *  emitting `event:snapshot` directly so hot paths share one debounce. */
+   *  emitting `event:snapshotPatch` directly so hot paths share one debounce. */
   notify(): void {
     if (this.publishTimer) return;
     // 0-delay: coalesces all calls within the current macrotask into one
     // emit, and naturally bounds steady-state (~1000/sec max → same tick).
     this.publishTimer = setTimeout(() => {
       this.publishTimer = null;
-      this.emit("event:snapshot", this.snapshot());
+      const next = this.snapshot();
+      const patch = this.diff(this.lastEmitted, next);
+      // Empty diff (e.g. a notify() with no underlying state change) → no
+      // emit, so reactive consumers don't invalidate for nothing.
+      if (patch) this.emit("event:snapshotPatch", patch);
+      this.lastEmitted = next;
     }, 0);
   }
 
-  private publish(): void {
-    this.notify();
+  /** Diff `next` against `prev` (the last-emitted snapshot, with stable refs)
+   *  and return the entity-scoped patch, or null when nothing changed.
+   *  `prev` null (first publish, or post-reset) → full-replacement patch.
+   *  Identity is owned here: an unchanged entity reuses the `prev` ref so the
+   *  renderer never sees a new ref for it. */
+  private diff(prev: AppSnapshot | null, next: AppSnapshot): SnapshotPatch | null {
+    if (!prev) {
+      // First publish: emit everything so the renderer converges regardless
+      // of whether its `app:getSnapshot` initial load has landed yet.
+      return {
+        threads: { upserts: byId(next.threads), order: ids(next.threads) },
+        projects: { upserts: byId(next.projects), order: ids(next.projects) },
+        worktrees: { upserts: byId(next.worktrees), order: ids(next.worktrees) },
+        automations: { upserts: byId(next.automations), order: ids(next.automations) },
+        ui: next.ui,
+      };
+    }
+    let patch: SnapshotPatch = {};
+    const t = diffCollection(prev.threads, next.threads);
+    if (t) patch.threads = t;
+    const p = diffCollection(prev.projects, next.projects);
+    if (p) patch.projects = p;
+    const w = diffCollection(prev.worktrees, next.worktrees);
+    if (w) patch.worktrees = w;
+    const a = diffCollection(prev.automations, next.automations);
+    if (a) patch.automations = a;
+    const ui = diffUi(prev.ui, next.ui);
+    if (ui) patch.ui = ui;
+    return hasKeys(patch) ? patch : null;
   }
+}
+
+// ── patch-diff helpers (entity-shape knowledge lives here, at the source) ──
+
+interface Keyed {
+  id: string;
+}
+
+function byId<T extends Keyed>(list: T[]): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const e of list) out[e.id] = e;
+  return out;
+}
+
+function ids<T extends Keyed>(list: T[]): string[] {
+  return list.map((e) => e.id);
+}
+
+/** Shallow field-by-field comparison over an entity. Same semantics as the old
+ *  renderer `shallowEqualThread` — now in one place (main) so the renderer no
+ *  longer holds entity-shape knowledge. */
+function shallowEqualEntity<T>(a: T, b: T): boolean {
+  if (a === b) return true;
+  const ka = Object.keys(a as Record<string, unknown>);
+  const kb = Object.keys(b as Record<string, unknown>);
+  if (ka.length !== kb.length) return false;
+  const ra = a as Record<string, unknown>;
+  const rb = b as Record<string, unknown>;
+  for (const k of ka) {
+    const av = ra[k];
+    const bv = rb[k];
+    if (av === bv) continue;
+    if (Array.isArray(av) && Array.isArray(bv)) {
+      if (av.length !== bv.length) return false;
+      for (let i = 0; i < av.length; i++) if (av[i] !== bv[i]) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Diff one collection against its prev (stable refs). Returns the patch when
+ *  any entity changed or the id sequence changed (add/remove/reorder). */ 
+function diffCollection<T extends Keyed>(
+  prev: T[],
+  next: T[],
+): { upserts?: Record<string, T>; order?: string[] } | null {
+  const prevById = new Map(prev.map((e) => [e.id, e]));
+  const upserts: Record<string, T> = {};
+  let orderChanged = false;
+  if (prev.length !== next.length) orderChanged = true;
+  for (const n of next) {
+    const p = prevById.get(n.id);
+    if (!p) {
+      upserts[n.id] = n;
+      orderChanged = true;
+    } else if (!shallowEqualEntity(p, n)) {
+      upserts[n.id] = n;
+    }
+  }
+  if (!orderChanged) {
+    // Reorder detection: compare the id sequence (covers add/remove already
+    // caught via length; also catches pure reordering of unchanged entities).
+    const prevSeq = prev.map((e) => e.id).join("\0");
+    const nextSeq = next.map((e) => e.id).join("\0");
+    if (prevSeq !== nextSeq) orderChanged = true;
+  }
+  const hasUpserts = Object.keys(upserts).length > 0;
+  if (!orderChanged && !hasUpserts) return null;
+  const patch: { upserts?: Record<string, T>; order?: string[] } = {};
+  if (hasUpserts) patch.upserts = upserts;
+  if (orderChanged) patch.order = next.map((e) => e.id);
+  return patch;
+}
+
+/** Field-level diff of UiState: returns only changed top-level fields. */
+function diffUi(prev: UiState, next: UiState): Partial<UiState> | null {
+  const patch: Record<string, unknown> = {};
+  for (const k of Object.keys(next) as (keyof UiState)[]) {
+    const pv = prev[k];
+    const nv = next[k];
+    if (pv === nv) continue;
+    if (Array.isArray(pv) && Array.isArray(nv)) {
+      if (pv.length === nv.length && pv.every((v, i) => v === nv[i])) continue;
+    } else if (
+      pv && nv && typeof pv === "object" && typeof nv === "object"
+    ) {
+      const ka = Object.keys(pv);
+      const kb = Object.keys(nv as object);
+      if (
+        ka.length === kb.length &&
+        ka.every((kk) => (pv as Record<string, unknown>)[kk] === (nv as Record<string, unknown>)[kk])
+      ) continue;
+    }
+    patch[k as string] = nv;
+  }
+  return Object.keys(patch).length > 0 ? (patch as Partial<UiState>) : null;
+}
+
+function hasKeys(o: object): boolean {
+  return Object.keys(o).length > 0;
 }

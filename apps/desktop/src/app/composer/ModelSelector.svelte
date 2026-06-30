@@ -180,6 +180,7 @@
             type="button"
             title={`Switch to ${option.name}`}
             data-testid={index === 0 ? "model-selector" : undefined}
+            data-press="self"
             onclick={() => {
               if (index === 3 && isActive) toggleMenu();
               else selectModel(option);

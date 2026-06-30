@@ -234,6 +234,7 @@
         {open ? 'bg-surface-2 text-fg' : 'text-faint hover:bg-surface hover:text-fg-soft'}"
       onclick={toggle}
       data-testid="git-widget"
+      data-press="rotary"
       title="Git status"
     >
       <span>⎇ {info.branch ?? "detached"}</span>
