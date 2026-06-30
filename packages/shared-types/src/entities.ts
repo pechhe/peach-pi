@@ -1043,13 +1043,37 @@ export interface SideDonePayload {
   error?: string;
 }
 
-/** Snapshot published main → renderer. Grows with features. */
+/** Snapshot published main → renderer on initial load (`app:getSnapshot`).
+ *  Grows with features. */
 export interface AppSnapshot {
   projects: Project[];
   worktrees: Worktree[];
   threads: Thread[];
   automations: Automation[];
   ui: UiState;
+}
+
+/** Patch published main → renderer after a mutation (replaces the old full-tree
+ *  `event:snapshot` push). The main process diffs against what it last emitted
+ *  and sends only changed entities, so the renderer reuses unchanged refs by
+ *  construction — the field-by-field `reconcile()`/`shallowEqualThread`
+ *  compensator that lived in the renderer is gone.
+ *
+ *  Each collection patch carries optional `upserts` (changed/new entities
+ *  keyed by id) and an optional `order` (the full new id sequence, present only
+ *  when ids were added/removed/reordered). `order` subsumes removals: a
+ *  vanished id is simply absent from the list. `ui` is a field merge over the
+ *  current UiState. Empty diff → no emit. */
+export interface SnapshotCollectionPatch<T> {
+  upserts?: Record<string, T>;
+  order?: string[];
+}
+export interface SnapshotPatch {
+  threads?: SnapshotCollectionPatch<Thread>;
+  projects?: SnapshotCollectionPatch<Project>;
+  worktrees?: SnapshotCollectionPatch<Worktree>;
+  automations?: SnapshotCollectionPatch<Automation>;
+  ui?: Partial<UiState>;
 }
 
 /** App↔Thread collaborator surface (ADR-0015). `ThreadService` consumes the

@@ -12,18 +12,13 @@
     shouldPasteAsAttachment,
   } from "../lib/composer/attachments";
   import { playButtonClick, playClick, pressClick, playRotary } from "../lib/sound/button-click-sound";
-  import FileText from "@lucide/svelte/icons/file-text";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
-  import KeyRound from "@lucide/svelte/icons/key-round";
   import X from "@lucide/svelte/icons/x";
-  import Tooltip from "./Tooltip.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
   import { transcripts } from "../stores/transcripts.svelte";
-  import { lightbox } from "../stores/lightbox.svelte";
-  import { textViewer } from "../stores/text-viewer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
   import { caveman } from "../stores/caveman.svelte";
   import { autoCompact } from "../stores/auto-compact.svelte";
@@ -34,14 +29,21 @@
   import { markAborted } from "../lib/composer/abort-signal.svelte";
   import { api } from "../lib/ipc";
   import { detectSecret, type DetectedSecret } from "../lib/secret-detect";
+  import { SYSTEM_COMMAND_LIST, SYSTEM_COMMAND_NAMES } from "../lib/composer/system-commands";
   import BwsSecretPrompt from "./BwsSecretPrompt.svelte";
   import ReasoningDial from "./composer/ReasoningDial.svelte";
   import ModelSelector from "./composer/ModelSelector.svelte";
   import ModelScopeSelect from "../components/ui/model-scope-select/model-scope-select.svelte";
   import QuickSlots from "./composer/QuickSlots.svelte";
-  import ConnectorIcon from "./ConnectorIcon.svelte";
   import SlashMenu from "./composer/SlashMenu.svelte";
   import ConnectionsMenu, { type ConnMenuItem, type SecMenuItem } from "./composer/ConnectionsMenu.svelte";
+  import QueuedShelf from "./composer/QueuedShelf.svelte";
+  import PinnedConnectionsShelf from "./composer/PinnedConnectionsShelf.svelte";
+  import PinnedSecretsShelf from "./composer/PinnedSecretsShelf.svelte";
+  import AttachmentsShelf from "./composer/AttachmentsShelf.svelte";
+  import ModeToggle from "./composer/ModeToggle.svelte";
+  import ContextBar from "./composer/ContextBar.svelte";
+  import BtwButton from "./composer/BtwButton.svelte";
   import { captureEvent } from "../lib/telemetry";
 
   let { thread, onRewind, onNewThread, onCloneThread, onForkPicker, centered = false }: {
@@ -115,15 +117,6 @@
   // Holds the up-click released on send spring-back; pressClick spaces it off
   // the down-click so a fast Enter tap doesn't smear the two into one sound.
   let releaseSendClick: (() => void) | null = null;
-  // Same press/release spacing for the BTW (side-chat) toggle button.
-  let btwRelease: (() => void) | null = null;
-  // Move the floating BTW cap to <body> so `position: fixed` resolves against
-  // the viewport (the composer/card ancestors create a containing block that
-  // otherwise drags it left when the /btw panel docks in).
-  function portal(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy: () => node.remove() };
-  }
   function pressSend(): void {
     sendPressed = true;
     releaseSendClick = pressClick();
@@ -157,13 +150,6 @@
     sessionMetas.set(await api.invoke("threads:setModel", thread.id, provider, id));
     captureEvent("model_changed", { provider });
   }
-
-  const fmtTokens = (n: number | null | undefined): string => {
-    if (n == null) return "\u2014";
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
-    return String(Math.round(n));
-  };
 
   async function cycleThinking(direction: 1 | -1 = 1) {
     if (!meta) return;
@@ -238,23 +224,6 @@
     return { start: slash, query: token.toLowerCase() };
   });
   const slashQuery = $derived(slashContext?.query ?? null);
-  // GUI-native "system" commands: slash aliases that fire the GUI flow
-  // (never sent to pi). See runSystemCommand for the wiring.
-  const systemCommandList: CommandInfo[] = [
-    { name: "model", description: "Choose the model", kind: "system" },
-    { name: "compact", description: "Compact the conversation", kind: "system" },
-    { name: "rewind", description: "Rewind the last turn (/rewind [n])", kind: "system" },
-    { name: "btw", description: "Ask a side question (/btw <question>)", kind: "system" },
-    { name: "plan", description: "Switch to Plan mode", kind: "system" },
-    { name: "build", description: "Switch to Build mode", kind: "system" },
-    { name: "new", description: "Start a new thread in this project", kind: "system" },
-    { name: "branch", description: "Branch this thread into a new thread", kind: "system" },
-    { name: "clone", description: "Clone this thread into a new thread", kind: "system" },
-    { name: "fork", description: "Pick a turn to fork a new thread from", kind: "system" },
-    { name: "reload", description: "Reload extensions/skills/prompts from disk", kind: "system" },
-    { name: "scoped-models", description: "Pick which models appear in the composer", kind: "system" },
-  ];
-  const systemCommandNames = new Set(systemCommandList.map((c) => c.name));
   // The host owns the lazy command-list load (so the chip-auto-collapse effect
   // + QuickSlots + SlashMenu share one source) and feeds it down as
   // `loadedCommands`. SlashMenu derives allCommands = system + loaded.
@@ -559,7 +528,7 @@
     // Typed-out system commands (e.g. `/model`, `/compact`, `/new`) fire the
     // GUI-native flow rather than being sent to pi as text.
     const sysMatch = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(raw);
-    if (sysMatch && !draft.command && systemCommandNames.has(sysMatch[1]!)) {
+    if (sysMatch && !draft.command && SYSTEM_COMMAND_NAMES.has(sysMatch[1]!)) {
       drafts.clearText(thread.id);
       runSystemCommand(sysMatch[1]!, (sysMatch[2] ?? "").trim());
       return;
@@ -810,7 +779,7 @@
     <SlashMenu
       bind:this={slashMenu}
       query={slashQuery}
-      systemCommands={systemCommandList}
+      systemCommands={SYSTEM_COMMAND_LIST}
       loadedCommands={commands}
       bind:index={slashIndex}
       onPick={pickSlash}
@@ -825,117 +794,20 @@
       onPickSecret={pickSecret}
     />
 
-    <!-- Queued messages shelf — metallic chassis bar, one row per queued msg -->
-    {#if queue.followUp.length > 0}
-      <section
-        class="qq"
-        data-testid="queued-shelf"
-        role="list"
-        aria-label={`${queue.followUp.length} queued`}
-      >
-        {#each queue.followUp as t, i ("f-" + i)}
-          <div class="qq-row" role="listitem">
-            <span class="qq-row__dot" aria-hidden="true"></span>
-            <span class="qq-row__label">QUEUE</span>
-            <span class="qq-row__count" aria-hidden="true">{i + 1}</span>
-            <span class="qq-row__text" title={t}>{t}</span>
-            <button
-              class="qq-row__btn qq-row__btn--promote"
-              onclick={() => api.invoke("threads:promoteFollowUpToSteer", thread.id, i)}
-              title="Steer now"
-              aria-label="Steer now"
-              data-testid="promote-steer"
-            ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
-            <button
-              class="qq-row__btn qq-row__btn--delete"
-              onclick={() => api.invoke("threads:deleteFollowUp", thread.id, i).catch(console.error)}
-              title="Remove"
-              aria-label="Remove queued message"
-              data-testid="delete-followup"
-            ><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg></button>
-          </div>
-        {/each}
-      </section>
-    {/if}
+    <!-- Queued messages shelf (child: row markup + .qq* styles + steer/remove IPC) -->
+    <QueuedShelf threadId={thread.id} followUp={queue.followUp} />
 
-    <!-- Pinned @-connections shelf -->
-    {#if draft.connections.length > 0}
-      <div class="mb-2 flex flex-wrap gap-2" data-testid="connections-shelf">
-        {#each draft.connections as c, i (c.integration + ":" + c.name)}
-          <div class="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1 text-xs text-fg-soft">
-            <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={14} />
-            <span class="max-w-40 truncate">@{c.name}</span>
-            <button
-              class="ml-0.5 text-faint hover:text-danger"
-              onclick={() => removeConnection(i)}
-              title="Remove connection"
-              aria-label="Remove connection {c.name}"
-            ><X size={12} /></button>
-          </div>
-        {/each}
-      </div>
-    {/if}
+    <!-- Pinned @-connections shelf (child owns chip markup) -->
+    <PinnedConnectionsShelf
+      connections={draft.connections}
+      onRemove={removeConnection}
+    />
 
     <!-- Pinned @-secrets shelf (names only; values never enter the prompt) -->
-    {#if draft.secrets.length > 0}
-      <div class="mb-2 flex flex-wrap gap-2" data-testid="secrets-shelf">
-        {#each draft.secrets as s, i (s.id)}
-          <div class="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-800">
-            <KeyRound size={14} class="shrink-0" />
-            <span class="max-w-40 truncate font-mono">@{s.name}</span>
-            <button
-              class="ml-0.5 text-amber-600/60 hover:text-danger"
-              onclick={() => removeSecret(i)}
-              title="Remove secret"
-              aria-label="Remove secret {s.name}"
-            ><X size={12} /></button>
-          </div>
-        {/each}
-      </div>
-    {/if}
+    <PinnedSecretsShelf secrets={draft.secrets} onRemove={removeSecret} />
 
-    <!-- Attachments shelf -->
-    {#if draft.attachments.length > 0}
-      <div class="mb-2 flex flex-wrap gap-2" data-testid="attachment-shelf">
-        {#each draft.attachments as att (att.id)}
-          <div class="group relative">
-            {#if att.kind === "image"}
-              <button
-                type="button"
-                class="block cursor-zoom-in"
-                onclick={() => lightbox.open(`data:${att.mimeType};base64,${att.data}`)}
-                title="Click to enlarge"
-              >
-                <img
-                  src={`data:${att.mimeType};base64,${att.data}`}
-                  alt={att.name}
-                  class="h-16 w-16 rounded-lg border border-border-strong object-cover"
-                />
-              </button>
-            {:else if att.kind === "text"}
-              <button
-                type="button"
-                class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg-soft hover:bg-surface-2"
-                title="Click to view"
-                onclick={() => textViewer.open(att.name, att.kind === "text" ? att.content : "")}
-              >
-                <FileText size={13} />
-                <span class="max-w-40 truncate">{att.name}</span>
-              </button>
-            {:else}
-              <div class="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg-soft">
-                <FileText size={13} />
-                <span class="max-w-40 truncate">{att.name}</span>
-              </div>
-            {/if}
-            <button
-              class="absolute -top-1.5 -right-1.5 hidden size-4 items-center justify-center rounded-full bg-surface-3 text-[10px] text-fg group-hover:flex hover:bg-danger"
-              onclick={() => removeAttachment(att.id)}><X size={10} /></button
-            >
-          </div>
-        {/each}
-      </div>
-    {/if}
+    <!-- Attachments shelf (child owns chip + lightbox/text-viewer open) -->
+    <AttachmentsShelf attachments={draft.attachments} onRemove={removeAttachment} />
 
     <!-- Device chassis -->
     <div
@@ -1005,36 +877,13 @@
             rows="1"
           ></textarea>
 
-          {#if meta?.contextPercent != null}
-            <div class="composer__context" data-testid="context-usage">
-              <div class="composer__context-track">
-                <div class="composer__context-fill" style="width: {Math.min(100, meta.contextPercent)}%"></div>
-                <Tooltip
-                  class="composer__context-marker"
-                  style="left: {autoCompactPercent}%"
-                  text={autoCompactTokens != null
-                    ? `Auto-compacts at ${fmtTokens(autoCompactTokens)} tokens`
-                    : `Auto-compacts at ${Math.round(autoCompactPercent)}%`}
-                />
-              </div>
-              <span class="composer__context-label">
-                {fmtTokens(meta.contextTokens)} / {fmtTokens(meta.contextWindow)}
-                {#if meta.contextPercent > 30 && !running}
-                  <button
-                    class="composer__context-compact"
-                    onclick={() => { captureEvent("context_compacted"); void api.invoke("threads:compact", thread.id); }}
-                    data-testid="compact-button"
-                    title="Compact context (auto-compacts at {Math.round(autoCompactPercent)}%)"
-                  >Compact</button>
-                {/if}
-              </span>
-            </div>
-          {:else}
-            <div class="composer__context">
-              <div class="composer__context-track"></div>
-              <span class="composer__context-label">Context —</span>
-            </div>
-          {/if}
+          <ContextBar
+            meta={meta}
+            running={running}
+            threadId={thread.id}
+            autoCompactPercent={autoCompactPercent}
+            autoCompactTokens={autoCompactTokens}
+          />
         </div>
       </div>
 
@@ -1042,20 +891,7 @@
       <div class="composer__footer-row">
         <div class="composer__controls">
           <!-- BUILD / PLAN switch (.composer-mode) -->
-          <span class="composer__key-mount composer__key-mount--mode">
-            <button
-              class="composer-mode {draft.mode === 'plan' ? 'composer-mode--plan' : ''}"
-              aria-pressed={draft.mode === 'plan'}
-              aria-label={`Composer mode: ${draft.mode === 'plan' ? 'Plan' : 'Build'}`}
-              onclick={toggleMode}
-              data-testid="mode-toggle"
-              title="⌘B build · ⌘P plan"
-            >
-              <span class="composer-mode__label {draft.mode !== 'plan' ? 'composer-mode__label--active' : ''}">Build</span>
-              <span class="composer-mode__track" aria-hidden="true"><span class="composer-mode__thumb"></span></span>
-              <span class="composer-mode__label {draft.mode === 'plan' ? 'composer-mode__label--active' : ''}">Plan</span>
-            </button>
-          </span>
+          <ModeToggle mode={draft.mode} onToggle={toggleMode} />
 
           <ModelSelector
             bind:this={modelSelector}
@@ -1079,7 +915,7 @@
 
           <!-- Quick-access drawer: a row of custom actions. -->
           <QuickSlots
-            commands={[...systemCommandList, ...commands]}
+            commands={[...SYSTEM_COMMAND_LIST, ...commands]}
             cavemanEnabled={caveman.enabled}
             onToggleCaveman={toggleCaveman}
             onInjectSkill={injectSkill}
@@ -1131,196 +967,8 @@
        bottom-right so the cap never moves. The docked panel slides in under it;
        once open the cap becomes the panel's send button in place. Hidden only on
        the centered new state. -->
-  {#if !centered}
-  <div class="composer-device" use:portal>
-  <button
-    class="btw-btn btw-btn--floating"
-    data-press="self"
-    data-has-input={sideChat.open &&
-      sideChat.threadId === thread.id &&
-      sideChat.draft.trim() &&
-      !sideChat.streaming
-      ? ""
-      : undefined}
-    onpointerdown={(e) => {
-      if (e.button !== 0) return;
-      btwRelease = pressClick();
-    }}
-    onpointerup={(e) => {
-      if (e.button !== 0) return;
-      btwRelease?.();
-      btwRelease = null;
-      // Open the panel, or — when it's already open for this thread — act as its
-      // send button. (Close via the panel's ×.)
-      const panelOpen = sideChat.open && sideChat.threadId === thread.id;
-      if (panelOpen) { void sideChat.submitDraft(); } else { captureEvent("side_chat_opened"); void sideChat.openPanel(thread.id); }
-    }}
-    onpointercancel={() => { btwRelease = null; }}
-    data-testid="open-side-chat"
-    title="Side conversation (/btw) — ask a quick question without touching this task"
-    aria-label="Open side conversation"
-  >
-    <span class="btw-btn__label">BTW</span>
-  </button>
-  </div>
-  {/if}
+  <BtwButton {thread} centered={centered} />
 
   <ModelScopeSelect bind:this={scopedModelsPanel} floating />
 </footer>
 
-<style>
-  /* Queued-messages shelf — metallic chassis bar matching composer surface.
-     One raised metal row per queued message: dot + QUEUE wordmark + pos +
-     mono text + steer/remove controls. Reuses --crt-body* so dark mode
-     (composer-device-dark.css overrides) stays in sync. */
-  .qq {
-    margin-bottom: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .qq-row {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 6px 8px 6px 10px;
-    border-radius: 9px;
-    isolation: isolate;
-    min-width: 0;
-    background:
-      linear-gradient(180deg, oklch(1 0.002 250 / 0.5), oklch(0.92 0.003 250 / 0.12) 48%, oklch(0.66 0.003 250 / 0.1) 100%),
-      linear-gradient(180deg, var(--crt-body-top) 0%, var(--crt-body) 52%, var(--crt-body-bottom) 100%);
-    box-shadow:
-      inset 0 1px 0 oklch(1 0.002 250 / 0.9),
-      inset 0 2px 3px oklch(1 0.002 250 / 0.32),
-      inset 1px 0 0 oklch(1 0.002 250 / 0.42),
-      inset -1px 0 0 oklch(0.34 0.004 250 / 0.3),
-      0 0 0 0.5px oklch(0.9 0.002 250 / 0.7),
-      0 1px 0 0.5px oklch(0.58 0.004 250 / 0.5),
-      0 2px 4px -1px oklch(0.22 0.004 250 / 0.45),
-      0 5px 10px -4px oklch(0 0 0 / 0.4);
-    animation: qq-slide 160ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .qq-row::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    border-radius: inherit;
-    opacity: 0.5;
-    background:
-      linear-gradient(90deg, oklch(1 0.002 250 / 0.24), transparent 8%, transparent 92%, oklch(0.3 0.004 250 / 0.1)),
-      linear-gradient(180deg, oklch(1 0.002 250 / 0.3), transparent 12%, transparent 88%, oklch(0.3 0.004 250 / 0.12));
-  }
-  .qq-row > * { position: relative; z-index: 1; }
-
-  .qq-row__dot {
-    flex: none;
-    width: 6px;
-    height: 6px;
-    border-radius: 9999px;
-    background: oklch(0.72 0.19 52);
-    box-shadow:
-      0 0 6px 0 oklch(0.72 0.19 52 / 0.7),
-      inset 0 0 0 0.5px oklch(0.55 0.2 52 / 0.6);
-    animation: qq-pulse 1.6s ease-out infinite;
-  }
-  .qq-row__label {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: oklch(0.42 0.004 250);
-    user-select: none;
-  }
-  .qq-row__count {
-    flex: none;
-    min-width: 15px;
-    height: 15px;
-    padding: 0 4px;
-    border-radius: 4px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 9.5px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-variant-numeric: tabular-nums;
-    color: oklch(0.4 0.004 250);
-    background: oklch(0.94 0.003 250 / 0.55);
-    box-shadow:
-      inset 0 1px 0 oklch(1 / 0.6),
-      inset 0 -1px 0 oklch(0.6 0.004 250 / 0.18),
-      0 0 0 0.5px oklch(0.7 0.004 250 / 0.4);
-  }
-  .qq-row__text {
-    flex: 1 1 auto;
-    min-width: 0;
-    font-size: 12px;
-    line-height: 1.35;
-    font-family: ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace;
-    color: oklch(0.5 0.004 250 / 0.85);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    user-select: text;
-  }
-  .qq-row__btn {
-    flex: none;
-    width: 20px;
-    height: 20px;
-    border-radius: 6px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: oklch(0.4 0.004 250 / 0.7);
-    opacity: 0.6;
-    cursor: pointer;
-    background: oklch(0.92 0.003 250 / 0.4);
-    box-shadow:
-      inset 0 1px 0 oklch(1 / 0.5),
-      0 0 0 0.5px oklch(0.7 0.004 250 / 0.35);
-    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
-  }
-  .qq-row:hover .qq-row__btn,
-  .qq-row:focus-within .qq-row__btn { opacity: 1; }
-  .qq-row__btn--promote:hover {
-    background: oklch(0.72 0.19 52 / 0.22);
-    color: oklch(0.62 0.2 52);
-  }
-  .qq-row__btn--delete:hover {
-    background: oklch(0.6 0.22 25 / 0.2);
-    color: oklch(0.55 0.24 25);
-  }
-  .qq-row__btn svg { width: 11px; height: 11px; }
-
-  /* Dark-mode reassurance: chassis vars are overridden by composer-device-dark,
-     but the muted ink/espresso text helpers below use color-mix on those vars so
-     both themes read correctly without per-theme rules. */
-  :global([data-composer="dark"]) .qq-row__label {
-    color: color-mix(in oklch, var(--crt-body-top) 55%, oklch(0.7 0.004 250));
-  }
-  :global([data-composer="dark"]) .qq-row__text {
-    color: color-mix(in oklch, var(--crt-body-top) 48%, transparent);
-  }
-  :global([data-composer="dark"]) .qq-row__btn {
-    color: color-mix(in oklch, var(--crt-body-top) 55%, transparent);
-  }
-
-  @keyframes qq-pulse {
-    0% { box-shadow: 0 0 0 0 oklch(0.72 0.19 52 / 0.5), inset 0 0 0 0.5px oklch(0.55 0.2 52 / 0.6); }
-    70% { box-shadow: 0 0 0 4px oklch(0.72 0.19 52 / 0), inset 0 0 0 0.5px oklch(0.55 0.2 52 / 0.6); }
-    100% { box-shadow: 0 0 0 0 oklch(0.72 0.19 52 / 0), inset 0 0 0 0.5px oklch(0.55 0.2 52 / 0.6); }
-  }
-  @keyframes qq-slide {
-    from { opacity: 0; transform: translateY(-3px) scale(0.985); }
-    to { opacity: 1; transform: none; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .qq-row { animation: none; }
-    .qq-row__dot { animation: none; }
-  }
-</style>
