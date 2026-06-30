@@ -1,11 +1,5 @@
 <script lang="ts">
-  import type {
-    CustomConnection,
-    Connection,
-    ReferencedConnection,
-    SkillInfo,
-    CommandInfo,
-  } from "@peach-pi/shared-types";
+  import type { ReferencedConnection, SkillInfo, CommandInfo } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import ConnectorIcon from "./ConnectorIcon.svelte";
   import BookOpen from "@lucide/svelte/icons/book-open";
@@ -36,10 +30,8 @@
   let slashCatalog = $state<SlashItem[]>([]);
   let slashLoaded = $state(false);
   type ConnItem = {
-    kind: "custom" | "composio";
+    integration: string;
     name: string;
-    baseUrl?: string;
-    toolkitSlug?: string;
     logoUrl: string | null;
   };
   let connCatalog = $state<ConnItem[]>([]);
@@ -112,25 +104,14 @@
   $effect(() => {
     if (activeKind === "at" && !connLoaded) {
       connLoaded = true;
-      void Promise.all([api.invoke("connectors:list"), api.invoke("customConnections:list")])
-        .then(([composio, custom]) => {
-          const bySlug = new Map<string, ConnItem>();
-          for (const c of composio as Connection[]) {
-            if (c.status !== "ACTIVE" || bySlug.has(c.toolkitSlug)) continue;
-            bySlug.set(c.toolkitSlug, {
-              kind: "composio",
-              name: c.name,
-              toolkitSlug: c.toolkitSlug,
-              logoUrl: c.logoUrl,
-            });
-          }
-          const customs = (custom as CustomConnection[]).map((c) => ({
-            kind: "custom" as const,
-            name: c.name,
-            baseUrl: c.baseUrl,
-            logoUrl: c.logoUrl,
+      void api
+        .invoke("executor:connections")
+        .then((conns) => {
+          connCatalog = conns.map((c) => ({
+            integration: c.integration,
+            name: c.identityLabel ?? c.name,
+            logoUrl: null,
           }));
-          connCatalog = [...customs, ...bySlug.values()];
         })
         .catch(() => (connLoaded = false));
     }
@@ -172,11 +153,8 @@
 
   function pickConnection(c: ConnItem) {
     replaceToken("");
-    const ref: ReferencedConnection =
-      c.kind === "custom"
-        ? { kind: "custom", name: c.name, baseUrl: c.baseUrl, logoUrl: c.logoUrl }
-        : { kind: "composio", name: c.name, toolkitSlug: c.toolkitSlug, logoUrl: c.logoUrl };
-    if (!connections.some((r) => r.kind === ref.kind && r.name === ref.name)) {
+    const ref: ReferencedConnection = { integration: c.integration, name: c.name, logoUrl: c.logoUrl };
+    if (!connections.some((r) => r.integration === ref.integration && r.name === ref.name)) {
       connections = [...connections, ref];
     }
   }
@@ -224,7 +202,7 @@
 
   {#if connections.length > 0}
     <div class="flex flex-wrap gap-1.5">
-      {#each connections as conn, i (conn.kind + conn.name)}
+      {#each connections as conn, i (conn.integration + conn.name)}
         <span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface-2 px-1.5 py-0.5 text-[12px] text-fg-soft">
           <ConnectorIcon logoUrl={conn.logoUrl ?? null} label={conn.name} size={12} />
           {conn.name}
@@ -260,7 +238,7 @@
           </button>
         {/each}
       {:else}
-        {#each atMatches as conn, i (conn.kind + conn.name)}
+        {#each atMatches as conn, i (conn.integration + conn.name)}
           <button
             type="button"
             class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm {i === selIndex
@@ -271,7 +249,7 @@
           >
             {#if conn.logoUrl}<ConnectorIcon logoUrl={conn.logoUrl} label={conn.name} size={14} />{:else}<Plug size={14} class="shrink-0 text-faint" />{/if}
             <span class="shrink-0 font-medium">{conn.name}</span>
-            <span class="truncate text-[12px] text-faint">{conn.kind === "custom" ? conn.baseUrl : conn.toolkitSlug}</span>
+            <span class="truncate text-[12px] text-faint">{conn.integration}</span>
           </button>
         {/each}
       {/if}

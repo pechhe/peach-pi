@@ -28,6 +28,7 @@ import {
 } from "./services/pi-vision-proxy.ts";
 import { computePiHealth } from "./services/pi-health.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
+import { githubToken } from "./services/issues-service.ts";
 import { importTheme } from "./services/theme-import-service.ts";
 import { initMainSentry } from "./services/telemetry-service.ts";
 import type { ServiceComposition } from "./compose-services.ts";
@@ -100,12 +101,10 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     sideChatService,
     devTapInstallService,
     fallowService,
-    connectorService,
     bwsService,
     cliService,
-    customConnectionService,
-    connectionSetupService,
     mcpService,
+    executorService,
     cuaDriverService,
     agentBrowserService,
     usageService,
@@ -180,11 +179,19 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "extensions:setEnabled": piUpdateService.setEnabledExtension.bind(piUpdateService),
       "mcp:setEnabled": mcpService.setEnabled.bind(mcpService),
       "mcp:list": mcpService.list.bind(mcpService),
-      "connectors:catalogue": connectorService.catalogue.bind(connectorService),
-      "connectors:toolkit": connectorService.toolkit.bind(connectorService),
-      "connectors:list": connectorService.list.bind(connectorService),
-      "connectors:connectFields": connectorService.connectFields.bind(connectorService),
-      "connectors:disconnect": connectorService.disconnect.bind(connectorService),
+      "executor:integrations": executorService.integrations.bind(executorService),
+      "executor:connections": executorService.connections.bind(executorService),
+      "executor:addConnection": async (integration) => {
+        const r = await executorService.addConnection(integration);
+        void shell.openExternal(r.url);
+        return r;
+      },
+      "executor:removeConnection": executorService.removeConnection.bind(executorService),
+      "executor:addOpenApi": executorService.addOpenApi.bind(executorService),
+      "executor:detect": executorService.detect.bind(executorService),
+      "executor:openAddPage": async (pluginKey, opts) => {
+        void shell.openExternal(executorService.buildAddUrl(pluginKey, opts));
+      },
       "bws:status": bwsService.status.bind(bwsService),
       "bws:setAccessToken": bwsService.setAccessToken.bind(bwsService),
       "bws:clearAuth": bwsService.clearAuth.bind(bwsService),
@@ -199,13 +206,6 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "cli:refresh": cliService.refresh.bind(cliService),
       "cli:login": cliService.login.bind(cliService),
       "cli:setHidden": cliService.setHidden.bind(cliService),
-      "customConnections:list": customConnectionService.list.bind(customConnectionService),
-      "customConnections:create": customConnectionService.create.bind(customConnectionService),
-      "customConnections:delete": customConnectionService.delete.bind(customConnectionService),
-      "connectionSetup:start": connectionSetupService.start.bind(connectionSetupService),
-      "connectionSetup:send": connectionSetupService.send.bind(connectionSetupService),
-      "connectionSetup:save": connectionSetupService.save.bind(connectionSetupService),
-      "connectionSetup:close": connectionSetupService.close.bind(connectionSetupService),
       "cuaDriver:status": cuaDriverService.status.bind(cuaDriverService),
       "cuaDriver:grantPermissions": cuaDriverService.grantPermissions.bind(cuaDriverService),
       "agentBrowser:state": agentBrowserService.state.bind(agentBrowserService),
@@ -558,6 +558,42 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     },
     {
       "app:ping": () => ({ pong: true, version: app.getVersion() }),
+      "feedback:send": async (body) => {
+        // The peach-pi repo is the feedback sink. Token comes from the git
+        // credential helper (same source as the issues service), so the
+        // user must have authenticated `gh` or `git credential` for
+        // github.com on this machine.
+        const owner = "pechhe";
+        const repo = "peach-pi";
+        const token = await githubToken();
+        if (!token) {
+          return { ok: false, error: "GitHub not authenticated. Run `gh auth login` or configure `git credential` for github.com." };
+        }
+        const version = app.getVersion();
+        const os = `${process.platform}/${process.arch}`;
+        const firstLine = body.split("\n").find((l) => l.trim())?.slice(0, 80) || "Feedback";
+        const issueBody = `## Feedback\n\n${body}\n\n---\n*peach-pi ${version} · ${os}*`;
+        try {
+          const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
+            method: "POST",
+            headers: {
+              Accept: "application/vnd.github+json",
+              "User-Agent": "peach-pi",
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ title: `Feedback: ${firstLine}`, body: issueBody, labels: ["feedback"] }),
+          });
+          if (!res.ok) {
+            const detail = await res.text().catch(() => "");
+            return { ok: false, error: `GitHub API ${res.status}: ${detail.slice(0, 200)}` };
+          }
+          const json = (await res.json()) as { html_url: string };
+          return { ok: true, url: json.html_url };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
       "app:listScopedModels": async () => {
         const { listScopedModels } = await import("@peach-pi/pi-client");
         return listScopedModels();
@@ -579,11 +615,6 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       },
       "app:installVisionProxy": () => installVisionProxy(emit),
       "app:getPiHealth": () => computePiHealth(__dirname),
-      "connectors:connect": async (slug) => {
-        const r = await connectorService.connect(slug);
-        if (r.redirectUrl) void shell.openExternal(r.redirectUrl);
-        return r;
-      },
       "devtap:report": (entry) =>
         emitDevTapEvent({
           level: entry.error ? "error" : "info",

@@ -41,6 +41,7 @@
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import Folder from "@lucide/svelte/icons/folder";
   import MessageSquare from "@lucide/svelte/icons/message-square";
+  import Megaphone from "@lucide/svelte/icons/megaphone";
   import Archive from "@lucide/svelte/icons/archive";
   import GitBranchPlus from "@lucide/svelte/icons/git-branch-plus";
   import ListChecks from "@lucide/svelte/icons/list-checks";
@@ -48,6 +49,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { TAG_META } from "../lib/tag-meta";
   import ConfirmDialog from "../components/ui/dialog/ConfirmDialog.svelte";
+  import FeedbackDialog from "../components/ui/dialog/FeedbackDialog.svelte";
   import { snapshot } from "../stores/snapshot.svelte";
   import { usage } from "../stores/usage.svelte";
   import { usagePrefs } from "../stores/usage-prefs.svelte";
@@ -123,6 +125,9 @@
 
   // Global reload-all-sessions button spin state.
   let reloading = $state(false);
+
+  // Feedback dialog (hosted in the sidebar, opened from the top nav cluster).
+  let feedbackOpen = $state(false);
 
   // ⌘⇧↑/↓ traversal: while the modifiers are held the highlight "hovers"
   // a thread without selecting it; releasing ⌘ or ⇧ "clicks" the previewed
@@ -793,6 +798,15 @@
         </button>
       {/if}
       <button
+        class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg"
+        onclick={() => { playRotary(); feedbackOpen = true; }}
+        data-testid="nav-feedback"
+        data-press="self"
+        title="Send feedback"
+      >
+        <Megaphone size={15} />
+      </button>
+      <button
         class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg disabled:opacity-50"
         onclick={() => { playRotary(); onGoBack(); }}
         disabled={!canGoBack}
@@ -1224,6 +1238,8 @@
   dontShowAgainLabel="Don't warn me about this"
   onConfirm={(dontShowAgain) => confirmArchiveSoleWorktreeThread(dontShowAgain)}
 />
+
+<FeedbackDialog bind:open={feedbackOpen} />
 
 <style>
   /* Nav buttons are mouse/keyboard-activated, not tab-stopped — the
