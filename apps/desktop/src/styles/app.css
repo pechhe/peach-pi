@@ -929,9 +929,6 @@ button {
   align-items: center;
   gap: 1px;
 }
-.assistant-usage .usage-cache {
-  color: var(--color-faint);
-}
 .md blockquote {
   margin: 0.65em 0;
   padding: 0.1em 0 0.1em 0.9em;

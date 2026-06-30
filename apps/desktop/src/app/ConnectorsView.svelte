@@ -20,6 +20,12 @@
   let cliBusy = $state<string | null>(null);
   const visibleClis = $derived(clis.filter((c) => !c.hidden));
   const hiddenClis = $derived(clis.filter((c) => c.hidden));
+  // Executor's own MCP seam and the built-in record-replay server are app
+  // infrastructure, not user connections — hide them. Executor appears as the
+  // INTEGRATIONS section above; record-replay is auto-managed. The MCP servers
+  // section then only surfaces genuinely user-added mcp.json servers.
+  const INTERNAL_MCP = new Set(["executor", "record-replay"]);
+  const userMcpServers = $derived(mcpServers.filter((s) => !INTERNAL_MCP.has(s.name)));
   let error = $state("");
 
   // What the detail pane shows. Opens on Executor (the primary view).
@@ -161,9 +167,9 @@
         ><Plug size={13} /> {executorStore.loading ? "Loading…" : "No integrations yet"}</button>
       {/if}
 
-      <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">MCP servers</p>
-      {#if mcpServers.length > 0}
-        {#each mcpServers as s (s.name)}
+      {#if userMcpServers.length > 0}
+        <p class="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-fainter">MCP servers</p>
+        {#each userMcpServers as s (s.name)}
           <button
             class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-surface"
             class:bg-surface={mode === "mcp"}
@@ -177,12 +183,6 @@
             {/if}
           </button>
         {/each}
-      {:else}
-        <button
-          class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-fainter transition-colors hover:bg-surface hover:text-fg"
-          onclick={() => (mode = "mcp")}
-          data-testid="sidebar-mcp-empty"
-        ><Server size={13} /> No MCP servers configured</button>
       {/if}
 
       <button
@@ -230,7 +230,7 @@
           </div>
         </div>
 
-        {#if mcpServers.length === 0}
+        {#if userMcpServers.length === 0}
           <p class="mt-6 text-sm text-fainter">
             No MCP servers configured. Add them under
             <code class="rounded bg-surface px-1 text-xs">mcpServers</code> in
@@ -239,7 +239,7 @@
           </p>
         {:else}
           <div class="mt-6 overflow-hidden rounded-xl border border-border bg-surface">
-            {#each mcpServers as s, i (s.name)}
+            {#each userMcpServers as s, i (s.name)}
               <div class="px-4 py-3" class:border-t={i > 0} class:border-border={i > 0}>
                 <div class="flex items-center gap-2">
                   <span class="h-1.5 w-1.5 shrink-0 rounded-full {s.connected ? "bg-emerald-500" : "bg-fainter"}"></span>

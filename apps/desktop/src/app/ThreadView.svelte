@@ -60,7 +60,6 @@
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
-  import Database from "@lucide/svelte/icons/database";
   import type { CompactionItem } from "./CompactionDialog.svelte";
   import CompactionDialog from "./CompactionDialog.svelte";
   import Composer from "./Composer.svelte";
@@ -1260,13 +1259,14 @@
                 {#if item.usage}
                   {@const u = item.usage}
                   {@const totalInput = u.input + u.cacheRead + u.cacheWrite}
+                  {@const cachePct = totalInput > 0 ? Math.round((u.cacheRead / totalInput) * 100) : 0}
                   <div
                     class="assistant-usage"
                     data-testid="assistant-usage"
                     title={`${u.input} fresh + ${u.cacheWrite} cache write + ${u.cacheRead} cache read = ${totalInput} input · ${u.output} output${u.costUsd != null ? ` · ${fmtCost(u.costUsd)} estimated equivalent API cost` : ""}`}
                   >
                     <span class="usage-stat"><ArrowUp size={11} />{fmtTokens(totalInput)}</span>
-                    {#if u.cacheRead > 0}<span class="usage-stat usage-cache"><Database size={10} />{fmtTokens(u.cacheRead)}</span>{/if}
+                    {#if cachePct > 0}<span class="usage-stat">({cachePct}% cached)</span>{/if}
                     <span class="usage-stat"><ArrowDown size={11} />{fmtTokens(u.output)}</span>
                     {#if u.tokensPerSec}<span>· {u.tokensPerSec.toFixed(1)} tok/s</span>{/if}
                     {#if u.ttftMs != null}<span>· {(u.ttftMs / 1000).toFixed(2)}s to first</span>{/if}
