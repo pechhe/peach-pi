@@ -25,6 +25,7 @@
   import X from "@lucide/svelte/icons/x";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import FileText from "@lucide/svelte/icons/file-text";
+  import ScrollText from "@lucide/svelte/icons/scroll-text";
   import BrailleSpinner from "./BrailleSpinner.svelte";
   import InstructionsDialog from "./InstructionsDialog.svelte";
   import type { FleetAgent } from "../lib/subagent/fleet";
@@ -60,6 +61,7 @@
   }
 
   let showInstructions = $state(false);
+  let showOutput = $state(false);
 
   const kindInfo = $derived(agentKind(entity.agent));
   const live_ = $derived(isEntityLive(entity, live));
@@ -125,6 +127,12 @@
     }
     return undefined;
   });
+  // The agent's final result: its last narration message in full. Surfaced via
+  // the "View output" button once the agent is no longer live. Not every agent
+  // ends with a tidy summary, so the button only shows when narration exists.
+  const finalOutput = $derived(
+    lastNarration ? (lastNarration.fullTitle ?? lastNarration.title) : undefined,
+  );
   const currentTone = $derived(live_ ? "active" : (headNode?.tone ?? "done"));
   const currentTitle = $derived.by(() => {
     const narration = (lastNarration?.title ?? headNode?.title)?.trim();
@@ -136,6 +144,11 @@
   // it differs (mirrors the TUI's two-line title + activity layout).
   const currentSub = $derived(
     live_ && liveTool && liveTool !== currentTitle ? liveTool : undefined,
+  );
+  // Only show the current-task row when it carries real content. A bare
+  // "Working…"/"Spawned" placeholder (no narration, no live tool) is noise.
+  const hasCurrent = $derived(
+    Boolean((lastNarration?.title ?? headNode?.title)?.trim() || liveTool),
   );
 
   async function refreshSteps(): Promise<void> {
@@ -179,6 +192,12 @@
         {#if stats.length > 0}<span class="agent-entity__stats">{stats.join(" · ")}</span>{/if}
       </div>
     </div>
+    {#if !live_ && finalOutput}
+      <button class="agent-entity__action agent-entity__action--top" type="button" aria-expanded={showOutput} onclick={() => (showOutput = true)}>
+        <ScrollText size={14} />
+        View output
+      </button>
+    {/if}
     {#if task}
       <button class="agent-entity__action agent-entity__action--top" type="button" aria-expanded={showInstructions} onclick={() => (showInstructions = true)}>
         <FileText size={14} />
@@ -190,6 +209,7 @@
   <!-- Current task: flips through what the agent is doing as the head
        node changes. Collapsed by default (the full journey hides behind
        the chevron), so this is the single live line the user sees. -->
+  {#if hasCurrent}
   <div class="agent-entity__current" data-tone={currentTone}>
     <span class="agent-entity__current-marker agent-entity__marker--{currentTone}" aria-hidden="true">
       {#if currentTone === "active"}
@@ -203,16 +223,18 @@
       {/if}
     </span>
     <div class="agent-entity__current-body">
-      {#key currentTitle}
-        <p
-          class="agent-entity__current-title"
-          title={lastNarration?.fullTitle ?? headNode?.fullTitle ?? currentTitle}
-          in:fly={{ duration: 280, y: -6, opacity: 0, easing: cubicOut }}
-          out:fly={{ duration: 280, y: 6, opacity: 0, easing: cubicInOut }}
-        >{currentTitle}</p>
-      {/key}
+      <div class="agent-entity__flip">
+        {#key currentTitle}
+          <p
+            class="agent-entity__current-title"
+            title={lastNarration?.fullTitle ?? headNode?.fullTitle ?? currentTitle}
+            in:fly={{ duration: 280, y: -6, opacity: 0, easing: cubicOut }}
+            out:fly={{ duration: 280, y: 6, opacity: 0, easing: cubicInOut }}
+          >{currentTitle}</p>
+        {/key}
+      </div>
       {#if currentSub}
-        <div class="agent-entity__current-sub-wrap">
+        <div class="agent-entity__flip">
           {#key currentSub}
             <p
               class="agent-entity__current-sub"
@@ -235,6 +257,7 @@
       </button>
     {/if}
   </div>
+  {/if}
 
   {#if !collapsed}
     <ol class="agent-entity__journey" transition:slide={{ duration: 260, easing: cubicInOut }}>
@@ -252,7 +275,7 @@
           {#if node.tone === "pending"}
             <span class="agent-entity__shimmer" aria-label="Waiting for first activity">Spawned</span>
           {:else}
-            <span class="agent-entity__node-title" title={node.fullTitle ?? node.title}>{node.title}</span>
+            <span class="agent-entity__node-title">{node.fullTitle ?? node.title}</span>
           {/if}
           {#if node.subtitle}
             <div class="agent-entity__node-sub-wrap">
@@ -279,6 +302,14 @@
       title="Agent instructions"
       subtitle={entity.name}
       content={task}
+    />
+  {/if}
+  {#if showOutput && finalOutput}
+    <InstructionsDialog
+      bind:open={showOutput}
+      title="Agent output"
+      subtitle={entity.name}
+      content={finalOutput}
     />
   {/if}
 </article>
@@ -554,13 +585,17 @@
   }
   .agent-entity__current[data-tone="active"] .agent-entity__current-title { color: var(--ae-accent); }
   .agent-entity__current[data-tone="blocked"] .agent-entity__current-title { color: #c2691a; }
-  .agent-entity__current-sub-wrap {
-    position: relative;
-    min-height: calc(1.4 * 10.5px);
-    margin-top: 1px;
+  /* Overlap the outgoing + incoming keyed lines in a single grid cell so
+     they crossfade in place instead of stacking (which expands/retracts
+     the card height during the flip). */
+  .agent-entity__flip {
+    display: grid;
+  }
+  .agent-entity__flip > * {
+    grid-area: 1 / 1;
   }
   .agent-entity__current-sub {
-    margin: 0;
+    margin: 1px 0 0;
     font-size: 10.5px;
     line-height: 1.4;
     color: var(--color-muted);

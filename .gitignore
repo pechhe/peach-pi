@@ -10,6 +10,8 @@ playwright-report/
 apps/desktop/out/
 # Vendored at build time by scripts/fetch-cua-driver.mjs (pinned + checksummed).
 apps/desktop/build/cua-driver/
+# Vendored at build time by scripts/fetch-executor.mjs (pinned + checksummed).
+apps/desktop/build/executor/
 .pi/devtap.jsonl
 .pi/devtap/
 .vercel

@@ -145,7 +145,7 @@ test("@-pinned connections + secrets are hinted before the body", () => {
   const out = buildOutgoing(
     draft({
       text: "do the thing",
-      connections: [{ kind: "custom", name: "Leadmagic", baseUrl: "https://api.x", logoUrl: null }],
+      connections: [{ integration: "leadmagic", name: "Leadmagic", logoUrl: null }],
       secrets: [{ id: "s1", name: "API_KEY", projectId: "p1" }],
     }),
     localThread({ status: "idle" }),
@@ -154,7 +154,7 @@ test("@-pinned connections + secrets are hinted before the body", () => {
   assert.equal(out.channel, "threads:prompt");
   const [, text] = out.args;
   assert.ok(text.startsWith("The user has pinned these connections"));
-  assert.ok(text.includes('custom connection "Leadmagic"'));
+  assert.ok(text.includes('connection "Leadmagic" (integration: leadmagic)'));
   assert.ok(text.includes("Bitwarden Secrets Manager"));
   assert.ok(text.includes('secret "API_KEY" (id: s1)'));
   assert.ok(text.endsWith("do the thing"));

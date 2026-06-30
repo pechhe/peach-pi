@@ -11,8 +11,7 @@ import type {
   CliStatus,
   CommandInfo,
   CuaDriverStatus,
-  Connection,
-  ConnectStartResult,
+
   DevTapProjectStatus,
   FallowProjectStatus,
   FallowReport,
@@ -35,16 +34,11 @@ import type {
   MergeBatchResult,
   MergeProgressPayload,
   WorkQueueOpenCountResult,
-  CustomConnection,
-  CustomConnectionInput,
-  ProposedConnectionConfig,
-  ConnSetupDeltaPayload,
-  ConnSetupProbePayload,
-  ConnSetupConfigPayload,
-  ConnSetupDonePayload,
+  ExecConnection,
+  ExecIntegration,
+  ExecDetectResult,
+
   McpServer,
-  ToolkitCatalogEntry,
-  ToolkitDetail,
   SubagentAgentInfo,
   SubagentAgentPatch,
   ExtensionStatusPayload,
@@ -179,6 +173,11 @@ export const ipcContracts = {
   ),
   /** Abort the in-flight OAuth login flow. */
   "auth:cancelOAuthLogin": invoke<[], void>(),
+  /** Send user feedback as a new issue in the peach-pi repo. Returns the
+   *  created issue URL, or an error message. */
+  "feedback:send": invoke<[body: string], { ok: true; url: string } | { ok: false; error: string }>(
+    (body) => requireNonEmptyString(body, "body"),
+  ),
   /** Clear a provider's stored credentials (OAuth token or API key). */
   "auth:logout": invoke<[providerId: string], AuthProviderStatus[]>((id) =>
     requireNonEmptyString(id, "providerId"),
@@ -695,89 +694,55 @@ export const ipcContracts = {
     void
   >(),
 
-  // connectors (Composio toolkits). Composio owns auth + token storage; the
-  // main process holds the API key and proxies catalogue/connect/execute. The
-  // renderer only ever sees toolkit metadata + connection status — never a
-  // token. OAuth completion is async and reported via event:connectorsChanged.
-  /** Search the Composio toolkit catalogue. Empty query → popular toolkits. */
-  "connectors:catalogue": invoke<[query: string], ToolkitCatalogEntry[]>(),
-  /** Full detail for one toolkit (metadata + tool list) for the detail pane. */
-  "connectors:toolkit": invoke<[toolkitSlug: string], ToolkitDetail>((s) =>
-    requireNonEmptyString(s, "toolkitSlug"),
-  ),
-  /** The local user's connected accounts (ACTIVE + pending). */
-  "connectors:list": invoke<[], Connection[]>(),
-  /** Begin connecting a toolkit. OAuth → opens the hosted authorize URL via
-   *  shell.openExternal and returns its redirectUrl; completion arrives later
-   *  via event:connectorsChanged. API-key schemes are rejected here — use
-   *  connectors:connectApiKey. */
-  "connectors:connect": invoke<[toolkitSlug: string], ConnectStartResult>((s) =>
-    requireNonEmptyString(s, "toolkitSlug"),
-  ),
-  /** Connect a non-OAuth toolkit with user-supplied credential fields (e.g.
-   *  Metabase base URL + API key). `fields` keys are the Composio field names
-   *  from ToolkitDetail.authFields. Completes synchronously. */
-  "connectors:connectFields": invoke<
-    [toolkitSlug: string, fields: Record<string, string>],
-    Connection
-  >((slug) => requireNonEmptyString(slug, "toolkitSlug")),
-  /** Disconnect: delete the connected account at Composio. */
-  "connectors:disconnect": invoke<[connectionId: string], void>((id) =>
-    requireNonEmptyString(id, "connectionId"),
-  ),
-
-  // custom connections (local API key + URL, independent of Composio). Stored
-  // on-device; the agent uses them via the `custom_request` tool. Raw keys
-  // never reach the renderer.
-  /** List saved custom connections (keys masked). */
-  "customConnections:list": invoke<[], CustomConnection[]>(),
-  /** Save a new custom connection. */
-  "customConnections:create": invoke<[input: CustomConnectionInput], CustomConnection>(
-    (input) => {
-      requireNonEmptyString(input?.name, "name");
-      requireNonEmptyString(input?.baseUrl, "baseUrl");
-      requireNonEmptyString(input?.apiKey, "apiKey");
-    },
-  ),
-  /** Delete a custom connection by id. */
-  "customConnections:delete": invoke<[id: string], void>((id) =>
-    requireNonEmptyString(id, "id"),
-  ),
-
-  // connection setup assistant (interactive, utility-model driven). The raw
-  // key is held in the main process for the session and injected into probe
-  // requests; it never reaches the model. Activity streams via event:connSetup*.
-  /** Start a setup session: fetch the docs URL (or accept pasted docs text),
-   *  hold the key, and kick off the first assistant turn. */
-  "connectionSetup:start": invoke<
-    [input: { docs: string; apiKey: string; name?: string }],
-    { sessionId: string }
-  >((input) => {
-    requireNonEmptyString(input?.docs, "docs");
-    requireNonEmptyString(input?.apiKey, "apiKey");
-  }),
-  /** Send a user reply into a setup session; the answer streams back. */
-  "connectionSetup:send": invoke<[sessionId: string, text: string], void>((id, t) => {
-    requireNonEmptyString(id, "sessionId");
-    requireNonEmptyString(t, "text");
-  }),
-  /** Save the proposed config using the session's held key; returns the saved
-   *  connection and ends the session. */
-  "connectionSetup:save": invoke<
-    [sessionId: string, config: ProposedConnectionConfig],
-    CustomConnection
-  >((id) => requireNonEmptyString(id, "sessionId")),
-  /** Discard a setup session and wipe its held key from memory. */
-  "connectionSetup:close": invoke<[sessionId: string], void>((id) =>
-    requireNonEmptyString(id, "sessionId"),
-  ),
-
   // MCP servers (read-only display). Configuration lives in
   // ~/.pi/agent/mcp.json and is managed by the pi-mcp-adapter extension
   // (`/mcp` commands). peach-pi surfaces them in the Connections view; it
   // does not start/stop them.
   /** List configured MCP servers with cached tool counts. */
   "mcp:list": invoke<[], McpServer[]>(),
+
+  // Executor (local-first MCP proxy; bundled CLI talks to a local daemon that
+  // owns ~/.executor). Integrations are catalogue entries, connections are
+  // credentialed instances (many per integration). Secrets stay in Executor
+  // and never reach the renderer: adding a connection returns a local web-UI
+  // URL where the user enters the credential.
+  /** List integrations in the Executor catalogue. */
+  "executor:integrations": invoke<[], ExecIntegration[]>(),
+  /** List saved connections (non-secret metadata). */
+  "executor:connections": invoke<[], ExecConnection[]>(),
+  /** Begin adding a connection to an integration. Opens the Executor web-UI
+   *  Add-account flow (via shell.openExternal) and returns its URL +
+   *  instructions; the user enters the secret there, not in peach-pi. */
+  "executor:addConnection": invoke<[integration: string], { url: string; instructions: string }>(
+    (s) => requireNonEmptyString(s, "integration"),
+  ),
+  /** Remove a saved connection. */
+  "executor:removeConnection": invoke<
+    [owner: "org" | "user", integration: string, name: string],
+    void
+  >((_o, i, n) => {
+    requireNonEmptyString(i, "integration");
+    requireNonEmptyString(n, "name");
+  }),
+  /** Add an OpenAPI integration to the catalogue from a spec URL. */
+  "executor:addOpenApi": invoke<
+    [url: string, slug: string],
+    { slug: string; toolCount: number }
+  >((u, s) => {
+    requireNonEmptyString(u, "url");
+    requireNonEmptyString(s, "slug");
+  }),
+  /** Auto-detect the integration kind behind a URL (paste-a-URL flow). */
+  "executor:detect": invoke<[url: string], ExecDetectResult[]>((u) =>
+    requireNonEmptyString(u, "url"),
+  ),
+  /** Open Executor's signed-in "add integration" web page for a plugin,
+   *  optionally pre-targeting a curated preset or detected URL. The catalogue
+   *  + credential entry happen there; no secret reaches peach-pi. */
+  "executor:openAddPage": invoke<
+    [pluginKey: string, opts: { preset?: string; url?: string; namespace?: string }],
+    void
+  >((k) => requireNonEmptyString(k, "pluginKey")),
 
   // Agent Browser (native web computer-use tool; see ADR-0008). The
   // pi-agent-browser-native package exposes the native `agent_browser` tool,
@@ -1032,11 +997,6 @@ export const ipcContracts = {
   "event:authLoginEvent": event<AuthLoginEvent>(),
   /** Provider auth changed (login/logout) — renderer re-reads via auth:listProviders. */
   "event:authProvidersChanged": event<void>(),
-  /** Connection-setup assistant streaming + activity. */
-  "event:connSetupDelta": event<ConnSetupDeltaPayload>(),
-  "event:connSetupProbe": event<ConnSetupProbePayload>(),
-  "event:connSetupConfig": event<ConnSetupConfigPayload>(),
-  "event:connSetupDone": event<ConnSetupDonePayload>(),
   /** Notification click — main window should select this thread. */
   "event:focusThread": event<ThreadId>(),
   /** A run finished while the HUD is up — renderer turns this into an ambient cue. */
@@ -1045,9 +1005,9 @@ export const ipcContracts = {
   /** The global `enabledModels` scope changed (settings.json). Live pi sessions
    *  reload settings + republish meta; the renderer re-lists scoped models. */
   "event:scopeChanged": event<void>(),
-  /** A connector's status changed (connected/revoked/refreshed). Renderer
-   *  re-lists via `connectors:list`. */
-  "event:connectorsChanged": event<void>(),
+  /** An Executor integration or connection changed. Renderer re-lists via
+   *  `executor:integrations` / `executor:connections`. */
+  "event:executorChanged": event<void>(),
   "event:terminalData": event<{ threadId: ThreadId; data: string }>(),
   "event:terminalExit": event<{ threadId: ThreadId; exitCode: number }>(),
   /** A render frame from an extension's `custom()` TUI, for the xterm overlay. */

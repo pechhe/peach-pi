@@ -346,7 +346,7 @@ async function ghAvailable(): Promise<boolean> {
 
 /** Best-effort GitHub token from the git credential helper. Returns null when
  *  unavailable; the REST call then proceeds unauthenticated (public repos). */
-async function githubToken(): Promise<string | null> {
+export async function githubToken(): Promise<string | null> {
   try {
     const child = execFile("git", ["credential", "fill"]);
     child.stdin?.end("protocol=https\nhost=github.com\n\n");

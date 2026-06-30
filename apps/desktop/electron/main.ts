@@ -99,7 +99,7 @@ async function boot(): Promise<void> {
     svc.terminalService.dispose();
     svc.recordingService.dispose();
     tray?.destroy();
-    void svc.connectorResolver.stop();
+    void svc.bwsResolver.stop();
     svc.threadService.dispose();
     svc.remoteClient.detach();
     void svc.remoteHost.stop();
