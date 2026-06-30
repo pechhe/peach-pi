@@ -7,6 +7,7 @@ import type {
   Project,
   SideConversation,
   SideMessage,
+  ThinkingLevel,
   Thread,
   ThreadTag,
   UiState,
@@ -23,6 +24,8 @@ interface ProjectRow {
   created_at: string;
   archived_at: string | null;
   merge_workflow: string;
+  agent_model: string | null;
+  agent_thinking: string | null;
 }
 
 interface ThreadRow {
@@ -53,6 +56,8 @@ const toProject = (r: ProjectRow): Project => ({
   createdAt: r.created_at,
   archivedAt: r.archived_at ?? undefined,
   mergeWorkflow: r.merge_workflow === "local" ? "local" : "pr",
+  agentModel: parseModel(r.agent_model),
+  agentThinking: toThinkingLevel(r.agent_thinking),
 });
 
 const toThread = (r: ThreadRow): Thread => ({
@@ -122,6 +127,20 @@ export class ProjectRepo {
   /** Set a project's Work Queue merge workflow ('pr' | 'local'). */
   setMergeWorkflow(id: string, workflow: Project["mergeWorkflow"]): void {
     this.db.prepare("UPDATE projects SET merge_workflow = ? WHERE id = ?").run(workflow, id);
+  }
+
+  /** Pin the model used by Work Queue agent launches for this project.
+   *  null clears the pin (pi picks its default). */
+  setAgentModel(id: string, model: AutomationModel | null): void {
+    this.db
+      .prepare("UPDATE projects SET agent_model = ? WHERE id = ?")
+      .run(model ? JSON.stringify(model) : null, id);
+  }
+
+  /** Pin the reasoning/thinking level for Work Queue agent launches.
+   *  null clears the pin (pi picks its default). */
+  setAgentThinking(id: string, level: ThinkingLevel | null): void {
+    this.db.prepare("UPDATE projects SET agent_thinking = ? WHERE id = ?").run(level, id);
   }
 }
 
@@ -371,6 +390,22 @@ const parseModel = (raw: string | null): AutomationModel | null => {
     // Malformed legacy row — treat as unset.
   }
   return null;
+};
+
+const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+];
+
+const toThinkingLevel = (raw: string | null): ThinkingLevel | null => {
+  if (!raw) return null;
+  return (THINKING_LEVELS as readonly string[]).includes(raw)
+    ? (raw as ThinkingLevel)
+    : null;
 };
 
 const toAutomation = (r: AutomationRow): Automation => ({

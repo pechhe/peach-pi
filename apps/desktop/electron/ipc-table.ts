@@ -138,6 +138,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     await gitService.branchWorktree(dir, issueBranchName(issue.number, issue.title));
     const wt = appService.addWorktree(projectId, dir, issueWorktreeName(issue.number));
     const thread = await threadService.createThread(projectId, { worktreeId: wt.id });
+    await applyPinnedProjectPrefs(projectId, thread.id);
     const parentPrd =
       issue.parent != null
         ? (allIssues.find((i) => i.number === issue.parent && i.isPrd) ?? null)
@@ -146,6 +147,24 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       appService.snapshot().projects.find((p) => p.id === projectId)?.mergeWorkflow ?? "pr";
     await threadService.prompt(thread.id, buildSeedPrompt(issue, parentPrd, workflow));
     return thread.id;
+  }
+
+  // Apply a project's pinned Work Queue model/thinking overrides to a freshly
+  // created thread, before prompting. null = leave pi's default alone. Mirrors
+  // AutomationService.fire, which pins the model before the first prompt.
+  async function applyPinnedProjectPrefs(projectId: string, threadId: string): Promise<void> {
+    const project = appService.snapshot().projects.find((p) => p.id === projectId);
+    if (!project) return;
+    if (project.agentModel) {
+      await threadService.setModel(
+        threadId,
+        project.agentModel.provider,
+        project.agentModel.id,
+      );
+    }
+    if (project.agentThinking) {
+      await threadService.setThinking(threadId, project.agentThinking);
+    }
   }
 
   registerIpcHandlers(
@@ -194,6 +213,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "executor:removeConnection": executorService.removeConnection.bind(executorService),
       "executor:addOpenApi": executorService.addOpenApi.bind(executorService),
       "executor:detect": executorService.detect.bind(executorService),
+      "executor:catalogue": executorService.catalogue.bind(executorService),
       "executor:openAddPage": async (pluginKey, opts) => {
         void shell.openExternal(executorService.buildAddUrl(pluginKey, opts));
       },
@@ -223,6 +243,8 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "projects:reorder": appService.reorderProjects.bind(appService),
       "projects:setCollapsed": appService.setProjectCollapsed.bind(appService),
       "projects:setMergeWorkflow": appService.setMergeWorkflow.bind(appService),
+      "projects:setAgentModel": appService.setAgentModel.bind(appService),
+      "projects:setAgentThinking": appService.setAgentThinking.bind(appService),
       "worktrees:rename": appService.renameWorktree.bind(appService),
       "worktrees:archive": appService.archive.bind(appService),
       "threads:create": threadService.createThread.bind(threadService),
@@ -360,6 +382,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
         const prd = res.issues.find((i) => i.number === prdNumber && i.isPrd);
         if (!prd) return { ok: false, reason: "error", message: "PRD not found" };
         const thread = await threadService.createThread(projectId);
+        await applyPinnedProjectPrefs(projectId, thread.id);
         await threadService.prompt(thread.id, buildPrdBreakdownPrompt(prd));
         return { ok: true, threadId: thread.id };
       },
@@ -374,6 +397,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
         await gitService.branchWorktree(dir, prdBranchName(prd.number, prd.title));
         const wt = appService.addWorktree(projectId, dir, `prd-${prd.number}`);
         const thread = await threadService.createThread(projectId, { worktreeId: wt.id });
+        await applyPinnedProjectPrefs(projectId, thread.id);
         const workflow =
           appService.snapshot().projects.find((p) => p.id === projectId)?.mergeWorkflow ?? "pr";
         await threadService.prompt(thread.id, buildPrdAgentPrompt(prd, workflow));
