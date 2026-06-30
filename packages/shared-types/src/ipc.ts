@@ -32,6 +32,7 @@ import type {
   GitPushLocalResult,
   GitRebaseResult,
   MergeBatchResult,
+  MergeBatchOptions,
   MergeProgressPayload,
   WorkQueueOpenCountResult,
   ExecConnection,
@@ -562,7 +563,7 @@ export const ipcContracts = {
    *  main locally. A conflict aborts that one item before main is touched; the
    *  batch continues with the next. */
   "workQueue:mergeBatch": invoke<
-    [projectId: ProjectId, issueNumbers: number[]],
+    [projectId: ProjectId, issueNumbers: number[], opts?: MergeBatchOptions],
     MergeBatchResult
   >((id) => requireNonEmptyString(id, "projectId")),
 

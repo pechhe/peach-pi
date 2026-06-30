@@ -9,6 +9,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Play from "@lucide/svelte/icons/play";
   import GitMerge from "@lucide/svelte/icons/git-merge";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 
   let {
     projects,
@@ -201,6 +202,14 @@
     await mergeQueue.run(projectId, order);
     // GitHub reports a just-merged issue as open for a beat; defer the reload
     // so the sidebar badge + Work Queue list reflect the new closed state.
+    setTimeout(() => { void workQueue.load(projectId); }, 1500);
+  }
+
+  /** Retry one issue's local merge after stashing dirty local WIP. The stash is
+   *  popped around a successful merge so the user keeps their in-flight work. */
+  async function stashRetry(issueNumber: number) {
+    if (!projectId || batchRunning) return;
+    await mergeQueue.run(projectId, [issueNumber], { stashLocal: true });
     setTimeout(() => { void workQueue.load(projectId); }, 1500);
   }
 
@@ -592,6 +601,16 @@
                     {/if}
                     {#if mergeQueue.byIssue.get(issue.number)}
                       {@const p = mergeQueue.byIssue.get(issue.number)!}
+                      {#if !p.item.ok && p.item.dirtyLocal}
+                        <button
+                          class="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"
+                          onclick={() => stashRetry(issue.number)}
+                          disabled={batchRunning}
+                          data-testid="stash-retry"
+                          title={p.item.error}
+                          ><RotateCcw size={12} /> Stash local & retry</button
+                        >
+                      {/if}
                       <span
                         class="shrink-0 text-xs {p.item.ok ? 'text-emerald-500' : 'text-amber-600'}"
                         data-testid="merge-status"

@@ -35,11 +35,11 @@ class MergeQueueStore {
 
   /** Start a batch merge for the given issues in the chosen order. Returns
    *  when the whole batch is done (the result is also streamed via events). */
-  async run(projectId: string, issueNumbers: number[]): Promise<void> {
+  async run(projectId: string, issueNumbers: number[], opts?: { stashLocal?: boolean }): Promise<void> {
     this.runningFor = projectId;
     this.byIssue = new Map();
     try {
-      await api.invoke("workQueue:mergeBatch", projectId, issueNumbers);
+      await api.invoke("workQueue:mergeBatch", projectId, issueNumbers, opts);
       // Handled lazily by the caller's workQueue.reload() — no-op here.
     } finally {
       this.runningFor = null;

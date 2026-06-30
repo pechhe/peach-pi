@@ -239,7 +239,19 @@ export type MergeBatchItemResult =
       issueNumber: number;
       phase: "rebase" | "merge";
       error: string;
+      /** Local-workflow merge only: the main checkout was dirty so the merge
+       *  was refused. The UI offers "Stash local & retry" instead of nudging
+       *  the agent (the agent can't fix the user's local WIP). */
+      dirtyLocal?: true;
+      base?: string;
     };
+
+/** Optional knobs for {@link workQueue:mergeBatch}. `stashLocal` asks the
+ *  local-workflow merge step to stash dirty local WIP around the merge
+ *  instead of refusing — used by the "Stash local & retry" action. */
+export interface MergeBatchOptions {
+  stashLocal?: boolean;
+}
 
 /** Result of `workQueue:mergeBatch`: a per-item outcome for every issue in
  *  the requested order. The whole batch is never a single failure — each item
@@ -779,7 +791,17 @@ export type GitMergePrResult =
 /** Merge a worktree's branch (--no-ff) into the local project's current branch. */
 export type GitMergeResult =
   | { ok: true; target: string; branch: string; hasRemote: boolean; warning?: string }
-  | { ok: false; error: string; conflict?: true; target?: string; branch?: string };
+  | {
+      ok: false;
+      error: string;
+      conflict?: true;
+      target?: string;
+      branch?: string;
+      /** The main checkout was dirty — set when the merge was refused so the
+       *  caller can offer a stash-and-retry action (`stashLocal` option). */
+      dirtyLocal?: true;
+      base?: string;
+    };
 
 /** Push the local project repo's current branch after a merge-to-local. */
 export type GitPushLocalResult =
