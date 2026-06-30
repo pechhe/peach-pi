@@ -1155,6 +1155,7 @@ export interface ExecDetectResult {
   slug: string;
 }
 
+<<<<<<< HEAD
 /** A row from Executor's full discovery registry (~/.executor/cache/
  *  integrations.json, ~3.5k entries). Mostly a docs/detection index: many
  *  rows have no resolvable `url` and are browse-only. */
@@ -1172,6 +1173,8 @@ export interface ExecCatalogueItem {
   popularity: number;
 }
 
+=======
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
 // ─────────────────────────────────────────────────────────────────────────────
 // BWS — Bitwarden Secrets Manager CLI
 // ─────────────────────────────────────────────────────────────────────────────

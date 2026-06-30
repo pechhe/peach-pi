@@ -2,7 +2,10 @@
   import { onMount } from "svelte";
   import {
     EXECUTOR_PRESETS,
+<<<<<<< HEAD
     type ExecCatalogueItem,
+=======
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
     type ExecConnection,
     type ExecIntegration,
     type ExecPreset,
@@ -28,6 +31,7 @@
   let connectOpen = $state(false);
   let query = $state("");
   let detecting = $state(false);
+<<<<<<< HEAD
   /** Full discovery registry (~3.5k rows), lazy-loaded on first open. */
   let catalogue = $state<ExecCatalogueItem[]>([]);
   let catalogueLoaded = $state(false);
@@ -35,6 +39,8 @@
   let shownExtra = $state(0);
   const SHOW_STEP = 50;
   const presetKeys = new Set(EXECUTOR_PRESETS.map((p) => `${p.pluginKey}:${p.id}`));
+=======
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
 
   /** Manual "add integration type" buttons, mirroring Executor's dialog. */
   const MANUAL: { key: string; label: string }[] = [
@@ -58,14 +64,20 @@
   }
 
   const isUrl = $derived(looksLikeUrl(query));
+<<<<<<< HEAD
   const q = $derived((isUrl ? "" : query).trim().toLowerCase());
   const searching = $derived(q.length > 0);
   const presetMatches = $derived.by(() => {
+=======
+  const presetMatches = $derived.by(() => {
+    const q = (isUrl ? "" : query).trim().toLowerCase();
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
     if (!q) return EXECUTOR_PRESETS;
     return EXECUTOR_PRESETS.filter((p) =>
       `${p.name} ${p.summary} ${p.pluginKey}`.toLowerCase().includes(q),
     );
   });
+<<<<<<< HEAD
   // Registry rows not already covered by a curated preset (popular-area tail).
   const registryExtra = $derived(
     catalogue.filter((i) => !presetKeys.has(`${i.kind}:${i.slug}`)),
@@ -78,6 +90,8 @@
       .filter((i) => `${i.name} ${i.description} ${i.slug} ${i.kind}`.toLowerCase().includes(q))
       .slice(0, 200);
   });
+=======
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
 
   // Connections grouped by integration slug.
   const byIntegration = $derived.by(() => {
@@ -106,6 +120,7 @@
     }
   }
 
+<<<<<<< HEAD
   async function openConnect() {
     query = "";
     error = null;
@@ -119,6 +134,12 @@
         /* registry cache may be absent; browse falls back to curated only */
       }
     }
+=======
+  function openConnect() {
+    query = "";
+    error = null;
+    connectOpen = true;
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
   }
 
   /** Opens Executor's signed-in add page, then closes + prompts a refresh. */
@@ -136,6 +157,7 @@
     void openAdd(p.pluginKey, { preset: p.id, ...(p.url ? { url: p.url } : {}) });
   }
 
+<<<<<<< HEAD
   /** Registry rows are discovery-only. With a URL, run Detect; otherwise open
    *  the manual add page for that kind so the user can paste a spec. */
   async function pickCatalogue(it: ExecCatalogueItem) {
@@ -147,6 +169,8 @@
     }
   }
 
+=======
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
   /** Favicon via Google's service (CSP-allowed), keyed by the brand domain —
    *  mirrors how Executor's own UI resolves integration icons. */
   function faviconUrl(domain: string | undefined): string | null {
@@ -302,6 +326,7 @@
   {/if}
 </div>
 
+<<<<<<< HEAD
 {#snippet row(p: { name: string; summary: string; domain?: string; badge: string; onpick: () => void; testid: string })}
   <button
     class="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-surface"
@@ -321,6 +346,8 @@
   </button>
 {/snippet}
 
+=======
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
 {#if connectOpen}
   <!-- Connect dialog: mirrors Executor's "Connect an integration" flow. -->
   <div
@@ -345,7 +372,11 @@
               <Search size={14} class="shrink-0 text-fainter" />
               <input
                 class="w-full bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
+<<<<<<< HEAD
                 placeholder="Search all integrations, or paste a URL"
+=======
+                placeholder="Search or paste a URL"
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
                 bind:value={query}
                 onkeydown={(e) => { if (e.key === "Enter" && isUrl) void detect(); }}
                 data-testid="executor-connect-search"
@@ -376,6 +407,7 @@
           </div>
         </div>
 
+<<<<<<< HEAD
         <!-- Popular (curated 36 + registry tail) / full-registry search -->
         <div class="flex min-w-0 flex-col gap-2">
           <div class="flex items-center justify-between">
@@ -415,6 +447,38 @@
               data-testid="executor-show-more"
             >Show more ({registryExtra.length - shownExtra} more)</button>
           {/if}
+=======
+        <!-- Popular / matching presets -->
+        <div class="flex min-w-0 flex-col gap-2">
+          <p class="text-xs font-medium text-fg-soft/80">{(isUrl ? "" : query).trim() ? "Matching integrations" : "Popular integrations"}</p>
+          <div class="max-h-[48vh] overflow-y-auto rounded-lg border border-border">
+            {#if presetMatches.length === 0}
+              <div class="flex flex-col items-center justify-center gap-1 px-4 py-8 text-center">
+                <p class="text-sm text-muted">No matching presets</p>
+                <p class="text-xs text-fainter">Paste a URL above to auto-detect, or pick a type manually.</p>
+              </div>
+            {:else}
+              {#each presetMatches as p (`${p.pluginKey}-${p.id}`)}
+                <button
+                  class="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-surface"
+                  onclick={() => pickPreset(p)}
+                  data-testid={`executor-preset-${p.pluginKey}-${p.id}`}
+                >
+                  {#if faviconUrl(p.domain)}
+                    <img src={faviconUrl(p.domain)} alt="" class="h-5 w-5 shrink-0 object-contain" loading="lazy" />
+                  {:else}
+                    <span class="h-5 w-5 shrink-0 rounded bg-surface"></span>
+                  {/if}
+                  <span class="flex min-w-0 flex-1 flex-col">
+                    <span class="truncate text-sm text-fg">{p.name}</span>
+                    <span class="truncate text-xs text-fainter">{p.summary}</span>
+                  </span>
+                  <span class="shrink-0 rounded-md bg-surface px-1.5 py-0.5 text-[11px] text-muted uppercase">{p.pluginKey}</span>
+                </button>
+              {/each}
+            {/if}
+          </div>
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
         </div>
       </div>
     </div>

@@ -4,12 +4,16 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
+<<<<<<< HEAD
 import type {
   ExecCatalogueItem,
   ExecConnection,
   ExecDetectResult,
   ExecIntegration,
 } from "@peach-pi/shared-types";
+=======
+import type { ExecConnection, ExecDetectResult, ExecIntegration } from "@peach-pi/shared-types";
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
 
 import type { Emit } from "../ipc/registry.ts";
 
@@ -115,6 +119,7 @@ export class ExecutorService {
     }
   }
 
+<<<<<<< HEAD
   /** Reads Executor's full discovery registry from its on-disk cache
    *  (~/.executor/cache/integrations.json). Browse/search only — many rows are
    *  docs links without a resolvable spec. Cached in memory after first read. */
@@ -151,6 +156,8 @@ export class ExecutorService {
     return this.catalogueCache;
   }
 
+=======
+>>>>>>> agent/issue-49-extract-recovery-prompts-module-from-ipc
   /** Auto-detect the integration kind behind a URL (the paste-a-URL flow). */
   async detect(url: string): Promise<ExecDetectResult[]> {
     const d = await this.call<{ results: ExecDetectResult[] }>(
