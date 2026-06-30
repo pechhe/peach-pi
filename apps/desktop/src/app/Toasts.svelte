@@ -45,10 +45,13 @@
 
 {#if toasts.length > 0}
   <!-- Anchored bottom-right of the window (sidebar is on the left, so this is
-       inside the content area). beui stack renders flex-col-reverse so newer
-       toasts stack upward; enter/exit/drag animations are handled by beui. -->
+       inside the content area). z-[60] sits above the floating /btw button
+       (z-50, also portaled to <body>) so toasts render on top of it, but
+       below modal dialogs (z-100). beui stack renders flex-col-reverse so
+       newer toasts stack upward; enter/exit/drag animations are handled by
+       beui. -->
   <div
-    class="fixed bottom-6 right-4 z-50 flex w-80 flex-col"
+    class="fixed bottom-6 right-4 z-[60] flex w-80 flex-col"
     style="-webkit-app-region: no-drag"
     data-testid="toasts"
   >

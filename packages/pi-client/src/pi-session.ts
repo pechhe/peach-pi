@@ -71,6 +71,10 @@ export class PiSession {
   private extensionsResult: LoadExtensionsResult | null = null;
   private allToolNames: string[];
   private toolMode: ToolMode = "all";
+  /** Resolvers waiting for an in-flight compaction to end before their
+   *  queued prompt is sent. Sending during compaction aborts it; these let
+   *  prompt() queue instead. */
+  private compactionWaiters: Array<() => void> = [];
 
   private constructor(
     session: AgentSession,
@@ -113,6 +117,11 @@ export class PiSession {
         if (!event.willRetry && !this.session.isStreaming) {
           this.callbacks.onRunningChange(false);
         }
+        // Release any prompts queued while the compaction was running.
+        // Compact's finally clears `_compactionAbortController` after the
+        // emit, so each waiter re-checks `isCompacting` and re-arms via a
+        // microtask if it's not yet false (retry / emit-before-finally).
+        this.wakeCompactionWaiters();
       }
       if (event.type === "thinking_level_changed") this.callbacks.onMetaChange?.();
       if (event.type === "queue_update") {
@@ -403,6 +412,12 @@ export class PiSession {
   }
 
   async prompt(text: string, images?: ImagePayload[], toolMode?: ToolMode): Promise<void> {
+    // If a compaction is in flight, wait for it to finish before sending.
+    // Barging ahead aborts the compaction (the SDK's prompt path conflicts
+    // with the in-flight compact() run). Queue the prompt instead and let
+    // compaction complete cleanly — the optimistic echo + send run once the
+    // leaf is rebuilt from the compacted branch.
+    while (this.session.isCompacting) await this.waitForCompaction();
     text = this.resolveSlashShorthand(text);
     if (toolMode && toolMode !== this.toolMode) {
       this.toolMode = toolMode;
@@ -489,6 +504,28 @@ export class PiSession {
       if (i !== index) await this.session.steer(steering[i]!);
     }
     for (const f of followUp) await this.session.followUp(f);
+  }
+
+  /** Resolve one queued prompt waiter once the in-flight compaction ends.
+   *  Re-arms via a microtask until `isCompacting` is actually false, so it is
+   *  robust whether the SDK's `compaction_end` fires before or after its
+   *  finally-block clears the abort controller. */
+  private waitForCompaction(): Promise<void> {
+    if (!this.session.isCompacting) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const check = () => {
+        if (!this.session.isCompacting) resolve();
+        else queueMicrotask(check);
+      };
+      this.compactionWaiters.push(check);
+    });
+  }
+
+  private wakeCompactionWaiters(): void {
+    if (this.compactionWaiters.length === 0) return;
+    const waiters = this.compactionWaiters;
+    this.compactionWaiters = [];
+    for (const check of waiters) queueMicrotask(check);
   }
 
   /** Manual compaction. Progress/result surface as notice transcript items. */

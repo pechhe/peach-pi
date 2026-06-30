@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import {
     EXECUTOR_PRESETS,
     type ExecCatalogueItem,
     type ExecConnection,
-    type ExecIntegration,
     type ExecPreset,
   } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
+  import { executorStore, execDisplayName } from "../lib/executor-store.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -15,22 +14,15 @@
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
 
-  let integrations = $state<ExecIntegration[]>([]);
-  let connections = $state<ExecConnection[]>([]);
-  let loading = $state(true);
   let error = $state<string | null>(null);
   let busy = $state<string | null>(null);
   /** Last handoff hint after a Connect/Add click (the user finishes in
    *  Executor's web UI; we can't observe completion, so prompt a refresh). */
   let handoff = $state<string | null>(null);
 
-  // Connect dialog.
-  let connectOpen = $state(false);
+  // Connect dialog (open state + catalogue live in the store).
   let query = $state("");
   let detecting = $state(false);
-  /** Full discovery registry (~3.5k rows), lazy-loaded on first open. */
-  let catalogue = $state<ExecCatalogueItem[]>([]);
-  let catalogueLoaded = $state(false);
   /** Registry rows shown in the popular area beyond the curated 36. */
   let shownExtra = $state(0);
   const SHOW_STEP = 50;
@@ -68,65 +60,49 @@
   });
   // Registry rows not already covered by a curated preset (popular-area tail).
   const registryExtra = $derived(
-    catalogue.filter((i) => !presetKeys.has(`${i.kind}:${i.slug}`)),
+    executorStore.catalogue.filter((i) => !presetKeys.has(`${i.kind}:${i.slug}`)),
   );
   const popularExtra = $derived(registryExtra.slice(0, shownExtra));
   // Search spans the full registry, not just the curated 36.
   const searchResults = $derived.by(() => {
     if (!searching) return [] as ExecCatalogueItem[];
-    return catalogue
+    return executorStore.catalogue
       .filter((i) => `${i.name} ${i.description} ${i.slug} ${i.kind}`.toLowerCase().includes(q))
       .slice(0, 200);
   });
 
-  // Connections grouped by integration slug.
-  const byIntegration = $derived.by(() => {
-    const m = new Map<string, ExecConnection[]>();
-    for (const c of connections) {
-      const list = m.get(c.integration) ?? [];
-      list.push(c);
-      m.set(c.integration, list);
-    }
-    return m;
-  });
+  // The integration shown in the detail pane (selection lives in the store, set
+  // from the sidebar in ConnectorsView).
+  const selected = $derived(executorStore.selected);
+  const conns = $derived(
+    executorStore.byIntegration.get(executorStore.selectedSlug ?? "") ?? [],
+  );
+  const headerSubtitle = $derived(
+    selected && selected.description && selected.description !== execDisplayName(selected.slug)
+      ? selected.description
+      : "Local connections proxy. Integrations are services; each holds many connections. Secrets stay in Executor — connecting opens its local window to enter the credential.",
+  );
 
-  async function load() {
-    error = null;
-    try {
-      const [ints, conns] = await Promise.all([
-        api.invoke("executor:integrations"),
-        api.invoke("executor:connections"),
-      ]);
-      integrations = ints;
-      connections = conns;
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      loading = false;
-    }
+  function openConnect() {
+    executorStore.connectOpen = true;
   }
 
-  async function openConnect() {
+  // Reset dialog fields + lazy-load the registry whenever the dialog opens
+  // (including when opened from the sidebar "+").
+  $effect(() => {
+    if (!executorStore.connectOpen) return;
     query = "";
     error = null;
     shownExtra = 0;
-    connectOpen = true;
-    if (!catalogueLoaded) {
-      catalogueLoaded = true;
-      try {
-        catalogue = await api.invoke("executor:catalogue");
-      } catch {
-        /* registry cache may be absent; browse falls back to curated only */
-      }
-    }
-  }
+    void executorStore.loadCatalogue();
+  });
 
   /** Opens Executor's signed-in add page, then closes + prompts a refresh. */
   async function openAdd(pluginKey: string, opts: { preset?: string; url?: string; namespace?: string }) {
     try {
       await api.invoke("executor:openAddPage", pluginKey, opts);
-      connectOpen = false;
-      handoff = "Finish in the Executor window, then Refresh.";
+      executorStore.connectOpen = false;
+      handoff = "Finish in the Executor window — this list updates when you return.";
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -202,6 +178,7 @@
     busy = `rm:${c.integration}:${c.name}`;
     try {
       await api.invoke("executor:removeConnection", c.owner, c.integration, c.name);
+      await executorStore.load();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -209,27 +186,18 @@
     }
   }
 
-  onMount(() => {
-    void load();
-    const off = api.on("event:executorChanged", () => void load());
-    return off;
-  });
 </script>
 
 <div class="mx-auto w-full max-w-3xl px-8 py-6" data-testid="executor-connections">
   <div class="flex items-start gap-3">
     <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-muted"><ExternalLink size={16} /></span>
     <div class="min-w-0 flex-1">
-      <h2 class="text-lg font-semibold text-fg">Executor</h2>
-      <p class="text-sm text-fainter">
-        Local connections proxy. Integrations are services; each can hold many
-        connections. Secrets stay in Executor — connecting opens its local
-        window to enter the credential.
-      </p>
+      <h2 class="text-lg font-semibold text-fg">{selected ? execDisplayName(selected.slug) : "Executor"}</h2>
+      <p class="text-sm text-fainter">{headerSubtitle}</p>
     </div>
     <button
       class="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-muted transition-colors hover:bg-surface hover:text-fg"
-      onclick={() => void load()}
+      onclick={() => void executorStore.load()}
       data-testid="executor-refresh"
     ><RefreshCw size={13} /> Refresh</button>
     <button
@@ -244,15 +212,15 @@
       {handoff}
     </p>
   {/if}
-  {#if error}
+  {#if error || executorStore.error}
     <p class="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-400" data-testid="executor-error">
-      {error}
+      {error ?? executorStore.error}
     </p>
   {/if}
 
-  {#if loading}
+  {#if executorStore.loading}
     <p class="mt-6 text-sm text-fainter">Loading…</p>
-  {:else if integrations.length === 0}
+  {:else if executorStore.integrations.length === 0}
     <div class="mt-8 flex flex-col items-center justify-center rounded-2xl border border-dashed border-border py-16">
       <span class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface text-muted"><Plus size={20} /></span>
       <p class="mb-1 text-sm font-medium text-fg-soft">No integrations yet</p>
@@ -262,42 +230,38 @@
         onclick={openConnect}
       ><Plus size={14} /> Connect an integration</button>
     </div>
-  {:else}
-    <div class="mt-6 space-y-3">
-      {#each integrations as integ (integ.slug)}
-        {@const conns = byIntegration.get(integ.slug) ?? []}
-        <div class="overflow-hidden rounded-xl border border-border bg-surface" data-testid={`executor-integration-${integ.slug}`}>
-          <div class="flex items-center gap-2 px-4 py-3">
-            <span class="text-sm font-medium text-fg">{integ.description || integ.slug}</span>
-            <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-fainter">{integ.kind}</span>
+  {:else if selected}
+    <div class="mt-6 overflow-hidden rounded-xl border border-border bg-surface" data-testid={`executor-integration-${selected.slug}`}>
+      <div class="flex items-center gap-2 px-4 py-3">
+        <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-fainter">{selected.kind}</span>
+        <button
+          class="ml-auto flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:bg-bg hover:text-fg disabled:opacity-50"
+          disabled={busy === `add:${selected.slug}`}
+          onclick={() => void addConnection(selected.slug)}
+          data-testid={`executor-add-${selected.slug}`}
+        ><Plus size={12} /> {busy === `add:${selected.slug}` ? "Opening…" : "Add connection"}</button>
+      </div>
+      {#if conns.length > 0}
+        {#each conns as c (c.name)}
+          <div class="flex items-center gap-2 border-t border-border px-4 py-2" data-testid={`executor-conn-${selected.slug}-${c.name}`}>
+            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"></span>
+            <span class="text-sm text-fg">{c.identityLabel || c.name}</span>
+            {#if c.isOAuth}
+              <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-muted">OAuth</span>
+            {/if}
             <button
-              class="ml-auto flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:bg-bg hover:text-fg disabled:opacity-50"
-              disabled={busy === `add:${integ.slug}`}
-              onclick={() => void addConnection(integ.slug)}
-              data-testid={`executor-add-${integ.slug}`}
-            ><Plus size={12} /> {busy === `add:${integ.slug}` ? "Opening…" : "Add connection"}</button>
+              class="ml-auto rounded-md p-1 text-fainter transition-colors hover:bg-bg hover:text-rose-400 disabled:opacity-50"
+              disabled={busy === `rm:${c.integration}:${c.name}`}
+              onclick={() => void removeConnection(c)}
+              title="Remove connection"
+              aria-label="Remove connection"
+              data-testid={`executor-rm-${selected.slug}-${c.name}`}
+            ><Trash2 size={13} /></button>
           </div>
-          {#if conns.length > 0}
-            {#each conns as c (c.name)}
-              <div class="flex items-center gap-2 border-t border-border px-4 py-2" data-testid={`executor-conn-${integ.slug}-${c.name}`}>
-                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"></span>
-                <span class="text-sm text-fg">{c.identityLabel || c.name}</span>
-                {#if c.isOAuth}
-                  <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-muted">OAuth</span>
-                {/if}
-                <button
-                  class="ml-auto rounded-md p-1 text-fainter transition-colors hover:bg-bg hover:text-rose-400 disabled:opacity-50"
-                  disabled={busy === `rm:${c.integration}:${c.name}`}
-                  onclick={() => void removeConnection(c)}
-                  title="Remove connection"
-                  aria-label="Remove connection"
-                  data-testid={`executor-rm-${integ.slug}-${c.name}`}
-                ><Trash2 size={13} /></button>
-              </div>
-            {/each}
-          {/if}
-        </div>
-      {/each}
+        {/each}
+      {:else}
+        <p class="border-t border-border px-4 py-3 text-sm text-fainter">No connections yet. Use “Add connection” to add one.</p>
+      {/if}
     </div>
   {/if}
 </div>
@@ -321,12 +285,12 @@
   </button>
 {/snippet}
 
-{#if connectOpen}
+{#if executorStore.connectOpen}
   <!-- Connect dialog: mirrors Executor's "Connect an integration" flow. -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     role="presentation"
-    onclick={(e) => { if (e.target === e.currentTarget) connectOpen = false; }}
+    onclick={(e) => { if (e.target === e.currentTarget) executorStore.connectOpen = false; }}
   >
     <div class="flex max-h-[85vh] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-border bg-bg shadow-xl" data-testid="executor-connect-dialog">
       <div class="flex items-start gap-3 border-b border-border px-5 py-4">
@@ -334,7 +298,7 @@
           <h3 class="text-base font-semibold text-fg">Connect an integration</h3>
           <p class="mt-0.5 text-xs text-fainter">Search the preset library, or paste a URL to auto-detect.</p>
         </div>
-        <button class="rounded-md p-1 text-fainter hover:text-fg" onclick={() => (connectOpen = false)} aria-label="Close"><X size={16} /></button>
+        <button class="rounded-md p-1 text-fainter hover:text-fg" onclick={() => (executorStore.connectOpen = false)} aria-label="Close"><X size={16} /></button>
       </div>
 
       <div class="flex min-h-0 flex-col gap-5 overflow-y-auto px-5 py-4">

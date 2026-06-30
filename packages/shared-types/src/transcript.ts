@@ -61,12 +61,18 @@ export interface SubagentStep {
  *  provider (persisted in the session file); ttft/tokensPerSec are runtime
  *  timings measured by the recorder and are absent on reloaded threads. */
 export interface AssistantUsage {
+  /** Fresh (uncached) input tokens, summed across the turn's calls. Billed at
+   *  the model's full input rate. */
   input: number;
-  output: number;
+  /** Cached input tokens read, summed. Billed at a steep discount (~10% of the
+   *  input rate), so a high share here is what makes a turn cheap. */
   cacheRead: number;
+  /** Input tokens written to cache, summed. A one-time premium (~125% of the
+   *  input rate) that becomes cheap cacheRead on later turns. */
   cacheWrite: number;
-  totalTokens: number;
-  /** Total cost in USD, when the model's pricing is known. */
+  /** Output tokens generated across the whole turn (summed). Highest unit price. */
+  output: number;
+  /** Total cost in USD, when the model's pricing is known (0 → omitted). */
   costUsd?: number;
   /** Time to first token, in milliseconds (runtime only). */
   ttftMs?: number;

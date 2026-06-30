@@ -366,10 +366,11 @@ test("agent_end attaches turn usage, cost, tokens/sec and TTFT to the final answ
   view = applyTranscriptOps(view, r.handleEvent({ type: "agent_end" }));
   const a = view[0] as TranscriptItem & { kind: "assistant" };
   assert.ok(a.usage, "usage attached at agent_end");
+  // Buckets are summed across the turn (one call here).
   assert.equal(a.usage!.input, 120);
-  assert.equal(a.usage!.output, 30);
   assert.equal(a.usage!.cacheRead, 8);
-  assert.equal(a.usage!.totalTokens, 158);
+  assert.equal(a.usage!.cacheWrite, 0);
+  assert.equal(a.usage!.output, 30);
   assert.equal(a.usage!.costUsd, 0.0021);
   assert.ok(a.usage!.ttftMs! >= 10, "TTFT measured from agent_start to first token");
   assert.ok(a.usage!.tokensPerSec! > 0, "tokens/sec derived from generation window");
@@ -396,12 +397,11 @@ test("multi-call turn aggregates into one footer on the final answer", () => {
   assert.equal(assistants.length, 2);
   // First (intermediate) answer carries no footer.
   assert.equal(assistants[0]!.usage, undefined);
-  // Final answer carries the summed totals.
+  // Final answer: every bucket summed across both calls.
   const u = assistants[1]!.usage!;
-  assert.equal(u.input, 300);
-  assert.equal(u.output, 60);
-  assert.equal(u.cacheRead, 5);
-  assert.equal(u.totalTokens, 365);
+  assert.equal(u.input, 300); // 100 + 200
+  assert.equal(u.cacheRead, 5); // 0 + 5
+  assert.equal(u.output, 60); // 20 + 40
   assert.equal(u.costUsd, 0.004);
 });
 
@@ -434,7 +434,8 @@ test("empty turn produces no footer; reload keeps tokens+cost but no timings", (
     },
   ]);
   const item = (ops[0] as { items: TranscriptItem[] }).items[0] as TranscriptItem & { kind: "assistant" };
-  assert.equal(item.usage!.totalTokens, 60);
+  assert.equal(item.usage!.input, 50);
+  assert.equal(item.usage!.output, 10);
   assert.equal(item.usage!.costUsd, 0.001);
   assert.equal(item.usage!.ttftMs, undefined);
   assert.equal(item.usage!.tokensPerSec, undefined);

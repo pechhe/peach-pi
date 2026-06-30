@@ -43,11 +43,14 @@ interface MessageLike {
  *  several LLM calls interleaved with tool calls). The turn's stats render once,
  *  on the final answer, not on every intermediate call. */
 interface TurnUsageAccum {
+  /** All token buckets, summed across every call in the turn. Summed (not a
+   *  snapshot) so a tool-heavy turn reflects the full input the model processed
+   *  — the basis for cost. Caching keeps fresh `input` small while re-reads land
+   *  in `cacheRead`, so the split, not the total, tells the cost story. */
   input: number;
-  output: number;
   cacheRead: number;
   cacheWrite: number;
-  totalTokens: number;
+  output: number;
   cost: number;
   hasCost: boolean;
   /** Summed generation windows (first-token → message end) per call, excluding
@@ -56,7 +59,7 @@ interface TurnUsageAccum {
 }
 
 function makeAccum(): TurnUsageAccum {
-  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0, hasCost: false, genMs: 0 };
+  return { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, cost: 0, hasCost: false, genMs: 0 };
 }
 
 /** Fold one assistant message's provider usage into the turn accumulator.
@@ -64,15 +67,10 @@ function makeAccum(): TurnUsageAccum {
 function addUsage(acc: TurnUsageAccum, m: MessageLike, genMs: number): void {
   const u = m.usage;
   if (!u) return;
-  const input = u.input ?? 0;
-  const output = u.output ?? 0;
-  const cacheRead = u.cacheRead ?? 0;
-  const cacheWrite = u.cacheWrite ?? 0;
-  acc.input += input;
-  acc.output += output;
-  acc.cacheRead += cacheRead;
-  acc.cacheWrite += cacheWrite;
-  acc.totalTokens += u.totalTokens ?? input + output + cacheRead + cacheWrite;
+  acc.input += u.input ?? 0;
+  acc.cacheRead += u.cacheRead ?? 0;
+  acc.cacheWrite += u.cacheWrite ?? 0;
+  acc.output += u.output ?? 0;
   const c = u.cost?.total;
   if (typeof c === "number" && c > 0) {
     acc.cost += c;
@@ -85,13 +83,14 @@ function addUsage(acc: TurnUsageAccum, m: MessageLike, genMs: number): void {
  *  is the turn's time-to-first-token (null on reload, where timing isn't
  *  persisted). Returns undefined for an empty turn so no zeroed footer flashes. */
 function accumToUsage(acc: TurnUsageAccum, ttftMs: number | null): AssistantUsage | undefined {
-  if (acc.totalTokens === 0 && !acc.hasCost) return undefined;
+  if (acc.input === 0 && acc.cacheRead === 0 && acc.cacheWrite === 0 && acc.output === 0 && !acc.hasCost) {
+    return undefined;
+  }
   const usage: AssistantUsage = {
     input: acc.input,
-    output: acc.output,
     cacheRead: acc.cacheRead,
     cacheWrite: acc.cacheWrite,
-    totalTokens: acc.totalTokens,
+    output: acc.output,
   };
   if (acc.hasCost) usage.costUsd = acc.cost;
   if (ttftMs != null && ttftMs >= 0) usage.ttftMs = ttftMs;

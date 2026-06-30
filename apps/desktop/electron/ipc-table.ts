@@ -415,7 +415,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "workQueue:reopenIssue": (projectId, issueNumber) =>
         issuesService.reopen(projectId, issueNumber),
       "workQueue:openCount": (projectId) => issuesService.openCount(projectId),
-      "workQueue:mergeBatch": async (projectId, issueNumbers) => {
+      "workQueue:mergeBatch": async (projectId, issueNumbers, opts) => {
         // Look up the thread (hence the git cwd) for each issue via its worktree
         // record name `issue-<n>`. Issues without a known worktree thread are
         // returned as rebase-phase failures — the caller can still proceed on
@@ -479,10 +479,13 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
           const workflow =
             snap.projects.find((p) => p.id === projectId)?.mergeWorkflow ?? "pr";
           if (workflow === "local") {
-            const mergeRes = await gitService.mergeBranchToDefault(thread.id);
+            const mergeRes = await gitService.mergeBranchToDefault(thread.id, opts);
+            const dirtyLocal = !mergeRes.ok && mergeRes.dirtyLocal === true;
             const item: MergeBatchItemResult = mergeRes.ok
               ? { ok: true, issueNumber, mergedTo: mergeRes.target }
-              : { ok: false, issueNumber, phase: "merge", error: mergeRes.error };
+              : dirtyLocal
+                ? { ok: false, issueNumber, phase: "merge", error: mergeRes.error, dirtyLocal: true, base: mergeRes.base }
+                : { ok: false, issueNumber, phase: "merge", error: mergeRes.error };
             items.push(item);
             emit("event:mergeProgress", { projectId, issueNumber, phase: "merge", done: true, item });
             if (mergeRes.ok) {
@@ -495,7 +498,10 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
               await appService.archive(wt!.id).catch((e) =>
                 console.error(`[mergeBatch] failed to archive worktree ${wt!.id}:`, e),
               );
-            } else if (!nudged) {
+            } else if (!dirtyLocal && !nudged) {
+              // Dirty-local is a human/local concern (the user's WIP), not the
+              // agent's — surface it for a stash-and-retry action instead of
+              // nudging. Real conflicts still nudge the agent, one per batch.
               nudged = true;
               await threadService
                 .prompt(thread.id, localMergeFailure(issueNumber, mergeRes.error))

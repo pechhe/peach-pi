@@ -58,6 +58,8 @@
   import { playClick } from "../lib/sound/button-click-sound";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import GitBranch from "@lucide/svelte/icons/git-branch";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import type { CompactionItem } from "./CompactionDialog.svelte";
   import CompactionDialog from "./CompactionDialog.svelte";
   import Composer from "./Composer.svelte";
@@ -347,7 +349,9 @@
   // Text of a transcript item, flattened across its searchable fields.
   /** Compact token count for the compaction card: 1234 → "1k", 950 → "950". */
   function fmtTokens(n: number): string {
-    return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
+    if (n >= 1000) return `${Math.round(n / 1000)}k`;
+    return `${n}`;
   }
 
   /** USD cost with precision scaled to magnitude (sub-cent turns are common). */
@@ -499,19 +503,25 @@
   // Running session totals: sum every assistant turn's tokens + cost. Cost is
   // only summed for turns whose model had known pricing (costUsd present).
   const sessionUsage = $derived.by(() => {
-    let tokens = 0;
+    let input = 0;
+    let cacheRead = 0;
+    let cacheWrite = 0;
+    let output = 0;
     let cost = 0;
     let hasCost = false;
     for (const it of items) {
       if (it.kind === "assistant" && it.usage) {
-        tokens += it.usage.totalTokens;
+        input += it.usage.input;
+        cacheRead += it.usage.cacheRead;
+        cacheWrite += it.usage.cacheWrite;
+        output += it.usage.output;
         if (it.usage.costUsd != null) {
           cost += it.usage.costUsd;
           hasCost = true;
         }
       }
     }
-    return { tokens, cost, hasCost };
+    return { input: input + cacheRead + cacheWrite, cacheRead, output, cost, hasCost };
   });
   // The composer centres (and the transcript hides) until the first message.
   // Two conditions, both required, so resumed threads never centre:
@@ -963,14 +973,16 @@
         Copied!
       </span>
     {/if}
-    {#if sessionUsage.tokens > 0}
+    {#if sessionUsage.input > 0 || sessionUsage.output > 0}
       <span
-        class="shrink-0 rounded-full border border-border-strong bg-surface px-2 py-0.5 text-[10px] text-muted"
+        class="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-surface px-2 py-0.5 text-[10px] text-muted"
         style="font-variant-numeric: tabular-nums"
         data-testid="session-usage"
-        title={`${fmtTokens(sessionUsage.tokens)} tokens this session${sessionUsage.hasCost ? ` · ${fmtCost(sessionUsage.cost)} estimated equivalent API cost` : ""}`}
+        title={`${fmtTokens(sessionUsage.input)} input (of which ${fmtTokens(sessionUsage.cacheRead)} cached reads) · ${fmtTokens(sessionUsage.output)} output this session${sessionUsage.hasCost ? ` · ${fmtCost(sessionUsage.cost)} estimated equivalent API cost` : ""}`}
       >
-        Σ {fmtTokens(sessionUsage.tokens)} tok{#if sessionUsage.hasCost} · {fmtCost(sessionUsage.cost)}{/if}
+        <span class="inline-flex items-center gap-0.5"><ArrowUp size={10} />{fmtTokens(sessionUsage.input)}</span>
+        <span class="inline-flex items-center gap-0.5"><ArrowDown size={10} />{fmtTokens(sessionUsage.output)}</span>
+        {#if sessionUsage.hasCost}<span>· {fmtCost(sessionUsage.cost)}</span>{/if}
       </span>
     {/if}
     {#each extensionUi.statusesFor(thread.id) as status (status)}
@@ -1244,20 +1256,24 @@
                     <GitBranch size={13} /> <span>Fork</span>
                   </button>
                 {/if}
+                {#if item.usage}
+                  {@const u = item.usage}
+                  {@const totalInput = u.input + u.cacheRead + u.cacheWrite}
+                  {@const cachePct = totalInput > 0 ? Math.round((u.cacheRead / totalInput) * 100) : 0}
+                  <div
+                    class="assistant-usage"
+                    data-testid="assistant-usage"
+                    title={`${u.input} fresh + ${u.cacheWrite} cache write + ${u.cacheRead} cache read = ${totalInput} input · ${u.output} output${u.costUsd != null ? ` · ${fmtCost(u.costUsd)} estimated equivalent API cost` : ""}`}
+                  >
+                    <span class="usage-stat"><ArrowUp size={11} />{fmtTokens(totalInput)}</span>
+                    {#if cachePct > 0}<span class="usage-stat">({cachePct}% cached)</span>{/if}
+                    <span class="usage-stat"><ArrowDown size={11} />{fmtTokens(u.output)}</span>
+                    {#if u.tokensPerSec}<span>· {u.tokensPerSec.toFixed(1)} tok/s</span>{/if}
+                    {#if u.ttftMs != null}<span>· {(u.ttftMs / 1000).toFixed(2)}s to first</span>{/if}
+                    {#if u.costUsd != null}<span>· {fmtCost(u.costUsd)}</span>{/if}
+                  </div>
+                {/if}
               </div>
-              {#if item.usage}
-                {@const u = item.usage}
-                <div
-                  class="assistant-usage"
-                  data-testid="assistant-usage"
-                  title={`${u.input} in · ${u.output} out${u.cacheRead ? ` · ${u.cacheRead} cache read` : ""}${u.cacheWrite ? ` · ${u.cacheWrite} cache write` : ""} tokens${u.costUsd != null ? ` · ${fmtCost(u.costUsd)} estimated equivalent API cost` : ""}`}
-                >
-                  <span>{fmtTokens(u.totalTokens)} tok</span>
-                  {#if u.tokensPerSec}<span>· {u.tokensPerSec.toFixed(1)} tok/s</span>{/if}
-                  {#if u.ttftMs != null}<span>· {(u.ttftMs / 1000).toFixed(2)}s to first</span>{/if}
-                  {#if u.costUsd != null}<span>· {fmtCost(u.costUsd)}</span>{/if}
-                </div>
-              {/if}
             {/if}
           </div>
         {:else if item.kind === "tool"}

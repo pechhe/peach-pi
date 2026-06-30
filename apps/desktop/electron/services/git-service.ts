@@ -418,8 +418,16 @@ export class GitService {
    *  branch to origin. Unlike {@link mergeToLocal}, this deliberately targets
    *  the default branch — it's the Work Queue 'local' workflow's merge step,
    *  gated behind a fresh `rebaseOntoDefault` so the branch is current.
-   *  Leaves the main checkout on the default branch after the merge. */
-  async mergeBranchToDefault(threadId: string): Promise<GitMergeResult> {
+   *  Leaves the main checkout on the default branch after the merge.
+   *
+   *  A dirty main checkout blocks the merge unless `opts.stashLocal` is set,
+   *  in which case the local WIP is stashed + restored around the merge
+   *  (mirror of {@link mergeToLocal}). Without it the result carries
+   *  `dirtyLocal` so the caller can offer a stash-and-retry action. */
+  async mergeBranchToDefault(
+    threadId: string,
+    opts?: { stashLocal?: boolean },
+  ): Promise<GitMergeResult> {
     const cwd = this.cwdFor(threadId);
     if (!cwd) return { ok: false, error: "No working directory" };
     const thread = this.threads.get(threadId);
@@ -434,11 +442,17 @@ export class GitService {
     const base = await this.defaultBranch(projectPath);
     if (!base) return { ok: false, error: "No default branch (origin/HEAD)" };
 
-    // Refuse if the main checkout is dirty: the merge would rewrite its
-    // working tree mid-flight. Fail loudly — the caller (mergeBatch) will
-    // nudge the issue's agent to sort it out.
-    if ((await git(["status", "--porcelain"], projectPath)).trim())
-      return { ok: false, error: `Local repo is dirty — commit or stash on ${base} first` };
+    // Dirty main checkout blocks a merge unless the caller asked to stash.
+    // Without stashing, surface a distinct `dirtyLocal` flag so the UI can
+    // offer a "Stash local & retry" action — the user's local WIP is theirs;
+    // auto-committing it would push unreviewed work to the default branch.
+    // With `stashLocal`, mirror {@link mergeToLocal}: stash -u, merge, push,
+    // pop — and keep the stash if the pop conflicts.
+    const dirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
+    if (dirty && !opts?.stashLocal)
+      return { ok: false, error: `Local is dirty — stash on ${base} and retry`, dirtyLocal: true, base };
+    if (dirty)
+      await git(["stash", "push", "-u", "-m", "peach-pi merge-batch"], projectPath);
 
     // Ensure the main checkout is on the default branch before merging.
     const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
@@ -446,6 +460,7 @@ export class GitService {
       try {
         await git(["checkout", base], projectPath);
       } catch (e) {
+        if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
         return { ok: false, error: `Could not check out ${base}: ${String(e)}` };
       }
     }
@@ -454,7 +469,8 @@ export class GitService {
       await git(["merge", "--no-ff", branch], projectPath);
     } catch {
       await git(["merge", "--abort"], projectPath).catch(() => undefined);
-      return { ok: false, error: `Merge conflict on ${base} — aborted` };
+      if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
+      return { ok: false, error: `Merge conflict on ${base} — aborted`, conflict: true, target: base, branch };
     }
 
     const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);
@@ -463,7 +479,9 @@ export class GitService {
         await git(["push", "origin", base], projectPath);
       } catch (e) {
         // Merge landed locally but the push failed (e.g. rejected non-fast-
-        // forward). Surface as a warning rather than rolling back the merge.
+        // forward). Restore stashed work so the user isn't left mid-pop, then
+        // surface as a warning rather than rolling back the merge.
+        if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
         return {
           ok: true,
           target: base,
@@ -472,6 +490,17 @@ export class GitService {
           warning: `Merged into ${base} but push failed: ${String(e)}`,
         };
       }
+    }
+    if (dirty) {
+      const restored = await gitOk(["stash", "pop"], projectPath);
+      if (!restored)
+        return {
+          ok: true,
+          target: base,
+          branch,
+          hasRemote,
+          warning: "local changes conflict with the merge — resolve in working tree (stash kept)",
+        };
     }
     return { ok: true, target: base, branch, hasRemote };
   }

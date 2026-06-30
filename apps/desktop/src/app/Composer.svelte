@@ -640,7 +640,37 @@
 
   // Thread-wide shortcuts (work regardless of focus). All meta-keyed so they
   // never interfere with literal typing in inputs.
+  // Two-press Esc-to-stop: first press arms (and toasts "Press Esc again"),
+  // second press aborts the running turn. Shared by the textarea-level
+  // onKeydown (when the composer has focus) and the window-level
+  // onShortcutKeydown (when it doesn't — e.g. the user clicked the
+  // transcript to scroll). Skip when compacting: the in-progress compaction
+  // card owns the Escape surface then.
+  function armOrAbortEsc(): void {
+    if (!running || compacting) return;
+    if (abortArmed) {
+      abortArmed = false;
+      markAborted(thread.id);
+      if (thread.remoteHostId && thread.remoteThreadId) {
+        void api.invoke("remote:abort", thread.remoteHostId, thread.remoteThreadId);
+      } else {
+        void api.invoke("threads:abort", thread.id);
+      }
+    } else {
+      abortArmed = true;
+      extensionUi.notify("Press Esc again to stop the model");
+      setTimeout(() => (abortArmed = false), 5000);
+    }
+  }
+
   function onShortcutKeydown(e: KeyboardEvent) {
+    // Esc-to-stop must work even when the composer textarea isn't focused.
+    // When it IS focused, onKeydown owns it — skip here to avoid double-firing
+    // (keydown bubbles: target → window, so both handlers would see one press).
+    if (e.key === "Escape" && document.activeElement !== textareaEl) {
+      armOrAbortEsc();
+      return;
+    }
     if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
     // ⌘L focuses the composer textarea (browser/terminal "focus the input" convention).
     if (e.key === "l" || e.key === "L") {
@@ -750,19 +780,7 @@
       return;
     }
     if (e.key === "Escape" && running && !compacting) {
-      if (abortArmed) {
-        abortArmed = false;
-        markAborted(thread.id);
-        if (thread.remoteHostId && thread.remoteThreadId) {
-          void api.invoke("remote:abort", thread.remoteHostId, thread.remoteThreadId);
-        } else {
-          void api.invoke("threads:abort", thread.id);
-        }
-      } else {
-        abortArmed = true;
-        extensionUi.notify("Press Esc again to stop the model");
-        setTimeout(() => (abortArmed = false), 5000);
-      }
+      armOrAbortEsc();
       return;
     }
     if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "p")) {
