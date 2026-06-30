@@ -41,6 +41,7 @@
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
+  import ShortcutsOverlay from "./ShortcutsOverlay.svelte";
   import TextAttachmentViewer from "./TextAttachmentViewer.svelte";
   import SkillDialog from "./SkillDialog.svelte";
   import Toasts from "./Toasts.svelte";
@@ -638,6 +639,7 @@
     <TerminalCustomOverlay frame={extensionUi.terminalCustom} threadId={extensionUi.terminalCustom.threadId} />
   {/if}
   <ImageLightbox />
+  <ShortcutsOverlay />
   <TextAttachmentViewer />
   <SkillDialog />
   <Toasts />
