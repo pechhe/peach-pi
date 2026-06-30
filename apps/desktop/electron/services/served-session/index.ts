@@ -19,6 +19,14 @@
  */
 export { RemoteHostService, authorizeRequest } from "./relay-host.ts";
 export type { RelayDeps, RelayActions } from "./relay-host.ts";
+export { makeRemoteHostDeps } from "./relay-deps.ts";
+export type {
+  RemoteHostDepsInput,
+  RemoteHostAppSlice,
+  RemoteHostThreadSlice,
+  RemoteHostGitSlice,
+  RemoteHostSettingsReader,
+} from "./relay-deps.ts";
 export { RemoteClientService } from "./relay-client.ts";
 export {
   checkpointBranch,

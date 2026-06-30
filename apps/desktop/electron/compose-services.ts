@@ -1,11 +1,7 @@
-import { BrowserWindow, Notification } from "electron";
+import { app, BrowserWindow, Notification } from "electron";
 import { homedir } from "node:os";
 import path from "node:path";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
-import {
-  PORTABLE_PI_CONFIG_FILES,
-  PORTABLE_PI_DIRS,
-} from "@peach-pi/shared-types";
+import { mkdir, writeFile } from "node:fs/promises";
 import { openDb } from "./persistence/db.ts";
 import type { Emit } from "./ipc/registry.ts";
 import { AppService } from "./services/app-service.ts";
@@ -24,57 +20,28 @@ import { PiUpdateService } from "./services/pi-update-service.ts";
 import { AutoUpdateService, initMainSentry } from "./services/telemetry-service.ts";
 import { setDevTapStateProvider } from "@devtap/electron";
 import { RecordingService } from "./services/recording-service.ts";
-import { ConnectorService } from "./services/connector-service.ts";
 import { BwsService } from "./services/bws-service.ts";
 import { CliService } from "./services/cli-service.ts";
-import { CustomConnectionService } from "./services/custom-connection-service.ts";
-import { ConnectionSetupService } from "./services/connection-setup-service.ts";
 import { McpService } from "./services/mcp-service.ts";
+import { ExecutorService } from "./services/executor-service.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
 import { UsageService } from "./services/usage/usage-service.ts";
 import { AuthService } from "./services/auth-service.ts";
-import { ConnectorResolver } from "./services/connector-resolver.ts";
-import { ensureConnectorExtension } from "./services/connector-extension.ts";
+import { BwsResolver } from "./services/bws-resolver.ts";
+import { ensureBwsExtension } from "./services/bws-extension.ts";
+import { ensureExecutorSkill } from "./services/executor-skill.ts";
 import { ensurePeachVisionConsentExtension } from "./services/peach-vision-consent-extension.ts";
 import {
   RemoteHostService,
   RemoteClientService,
+  makeRemoteHostDeps,
   recordCheckpoint,
   originUrl as originUrlOf,
   enableServe,
   listTailnetPeersDefault,
 } from "./services/served-session/index.ts";
 import { createHandoffService } from "./services/movable-execution/index.ts";
-
-/**
- * Recursive directory listing used by the pi-config pull (ADR-0011): relative
- * posix paths under `root`, skipping node_modules/.cache/lockfiles so each
- * machine keeps its own regenerable install state. The relay blind-overwrites
- * the extensions/ + skills/ trees.
- */
-async function collectTreeFiles(root: string): Promise<string[]> {
-  const { readdir } = await import("node:fs/promises");
-  const out: string[] = [];
-  async function walk(dir: string, prefix: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return; // missing dir on this machine: nothing to serve
-    }
-    for (const e of entries) {
-      if (e.name === "node_modules" || e.name === ".cache") continue;
-      const rel = prefix ? `${prefix}/${e.name}` : e.name;
-      if (e.name === "package-lock.json") continue;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) await walk(full, rel);
-      else out.push(rel);
-    }
-  }
-  await walk(root, "");
-  return out;
-}
 
 /** All constructed services + collaborators. The IPC table and HUD lifecycle
  *  read from this bag; `boot()` keeps the start/stop/teardown sequencing. */
@@ -98,17 +65,15 @@ export interface ServiceComposition {
   sideChatService: SideChatService;
   devTapInstallService: DevTapInstallService;
   fallowService: FallowService;
-  connectorService: ConnectorService;
   bwsService: BwsService;
   cliService: CliService;
-  customConnectionService: CustomConnectionService;
-  connectionSetupService: ConnectionSetupService;
   mcpService: McpService;
+  executorService: ExecutorService;
   cuaDriverService: CuaDriverService;
   agentBrowserService: AgentBrowserService;
   usageService: UsageService;
   authService: AuthService;
-  connectorResolver: ConnectorResolver;
+  bwsResolver: BwsResolver;
   listTailnetPeersDefault: typeof listTailnetPeersDefault;
   enableServe: typeof enableServe;
   /** Refresh the App↔Thread cycle ownership predicate (used by boot's
@@ -236,99 +201,12 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
 
   // Remote session hosting (ADR-0009). The master relay taps the same
   // transcript flush the renderer gets; checkpoints fire on run-idle. Both
-  // are off until a thread is served / a host is attached.
-  const remoteHost: RemoteHostService = new RemoteHostService({
-    transcript: (threadId) => threadService.getTranscript(threadId),
-    threads: () =>
-      appService.snapshot().threads.map((t) => ({
-        id: t.id,
-        title: t.title,
-        status: t.status,
-        projectId: t.projectId,
-        archivedAt: t.archivedAt,
-        snoozedUntil: t.snoozedUntil,
-        toTestAt: t.toTestAt,
-        toTestNote: t.toTestNote,
-      })),
-    threadCwd: (threadId) => gitService.cwdFor(threadId),
-    projects: () => {
-      const snap = appService.snapshot();
-      return snap.projects
-        .filter((p) => !p.archivedAt)
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          worktrees: snap.worktrees
-            .filter((w) => w.projectId === p.id && !w.archivedAt)
-            .map((w) => ({ id: w.id, name: w.name, dir: w.dir })),
-        }));
-    },
-    settings: async () => ({
-      piSettings: await getPiSettings(),
-      autoCompact: appService.getAutoCompact(),
-      utilityModel: appService.getUtilityModel(),
-    }),
-    piConfig: async () => {
-      const dir = path.join(homedir(), ".pi", "agent");
-      const out: Record<string, string | null> = {};
-      for (const name of PORTABLE_PI_CONFIG_FILES) {
-        try {
-          out[name] = await readFile(path.join(dir, name), "utf8");
-        } catch {
-          out[name] = null;
-        }
-      }
-      for (const sub of PORTABLE_PI_DIRS) {
-        const root = path.join(dir, sub);
-        const files = await collectTreeFiles(root);
-        for (const rel of files) out[`${sub}/${rel}`] = await readFile(path.join(root, rel), "utf8");
-      }
-      return out;
-    },
-    models: async () => {
-      const { listScopedModels } = await import("@peach-pi/pi-client");
-      return listScopedModels();
-    },
-    meta: (threadId) => threadService.getMeta(threadId),
-    actions: {
-      message: async (threadId, text, opts) => {
-        // Apply the mobile composer's per-send override before the prompt so
-        //  it takes effect for THIS turn (mobile composer, ADR-0011).
-        if (opts?.model) await threadService.setModel(threadId, opts.model.provider, opts.model.id);
-        if (opts?.thinking) await threadService.setThinking(threadId, opts.thinking);
-        await threadService.prompt(threadId, text, opts?.images ?? []);
-      },
-      steer: (threadId, text) => threadService.steer(threadId, text),
-      abort: (threadId) => threadService.abort(threadId),
-      archiveThread: (threadId) => {
-        threadService.archive(threadId);
-        return Promise.resolve();
-      },
-      snoozeThread: (threadId, until) => {
-        appService.snoozeThread(threadId, until);
-        return Promise.resolve();
-      },
-      unsnoozeThread: (threadId) => {
-        appService.unsnoozeThread(threadId);
-        return Promise.resolve();
-      },
-      markToTest: (threadId) => threadService.markToTest(threadId),
-      unmarkToTest: (threadId) => {
-        appService.unmarkToTest(threadId);
-        return Promise.resolve();
-      },
-      deleteQueued: (threadId, kind, index) =>
-        kind === "steer"
-          ? threadService.deleteSteer(threadId, index)
-          : threadService.deleteFollowUp(threadId, index),
-      createThread: async (projectId, opts) =>
-        (await threadService.createThread(projectId, opts)).id,
-      createChat: async () => (await threadService.createChat()).id,
-      gitCommitPush: (threadId, message) => gitService.commitPush(threadId, message),
-      gitPr: (threadId) => gitService.createPr(threadId),
-      gitMerge: (threadId) => gitService.mergeToLocal(threadId),
-    },
-  });
+  // are off until a thread is served / a host is attached. The dependency
+  // adapter (app+thread+git → relay shape) is built by the served-session
+  // factory (ADR-0012: the seam owns its own surface).
+  const remoteHost: RemoteHostService = new RemoteHostService(
+    makeRemoteHostDeps({ appService, threadService, gitService, getPiSettings }),
+  );
   // Auto-resume serving if the user had it on last run (persisted intent in
   // peach-remote-host.json). Hooks are set first (synchronously) so
   // onStatusChange fires during the auto-resumed setHostEnabled(true).
@@ -427,16 +305,18 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   // is honored on next launch (no new crashes are sent once disabled).
   void getPiSettings().then((s) => initMainSentry(s.telemetryConsent));
 
-  const connectorService = new ConnectorService(emit);
   const bwsService = new BwsService(emit);
   const cliService = new CliService(emit);
-  const customConnectionService = new CustomConnectionService(emit);
-  const connectionSetupService = new ConnectionSetupService(
-    emit,
-    () => appService.getUtilityModel(),
-    customConnectionService,
-  );
   const mcpService = new McpService();
+  // Register the bundled Executor CLI as an MCP server. Absolute path: a
+  // Finder-launched app has no shell PATH, so a bare `executor` won't resolve.
+  // `executor mcp` attaches to an existing local daemon or elects a new owner
+  // over the default ~/.executor data dir, so existing connections appear.
+  const executorBin = app.isPackaged
+    ? path.join(process.resourcesPath, "executor", "executor")
+    : path.join(app.getAppPath(), "build", "executor", "executor");
+  void mcpService.ensureExecutorServer(executorBin);
+  const executorService = new ExecutorService(executorBin, emit);
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
   const usageService = new UsageService(emit);
@@ -448,9 +328,10 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     }
   })();
 
-  const connectorResolver = new ConnectorResolver(connectorService, customConnectionService, bwsService);
-  void connectorResolver.start().then(() => connectorResolver.writeBootstrap());
-  void ensureConnectorExtension();
+  const bwsResolver = new BwsResolver(bwsService);
+  void bwsResolver.start().then(() => bwsResolver.writeBootstrap());
+  void ensureBwsExtension();
+  void ensureExecutorSkill();
   void ensurePeachVisionConsentExtension();
 
   return {
@@ -473,17 +354,15 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     sideChatService,
     devTapInstallService,
     fallowService,
-    connectorService,
     bwsService,
     cliService,
-    customConnectionService,
-    connectionSetupService,
     mcpService,
+    executorService,
     cuaDriverService,
     agentBrowserService,
     usageService,
     authService,
-    connectorResolver,
+    bwsResolver,
     listTailnetPeersDefault,
     enableServe,
     setHudUpPredicate,
