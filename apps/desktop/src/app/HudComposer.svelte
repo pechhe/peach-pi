@@ -2,10 +2,10 @@
   import {
     routeFinishCue,
     resolveHudTarget,
-    type AppSnapshot,
     type Thread,
   } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
+  import { snapshot } from "../stores/snapshot.svelte";
   import { transcripts } from "../stores/transcripts.svelte";
   import { queues } from "../stores/composer.svelte";
   import { sessionMetas } from "../stores/session-meta.svelte";
@@ -15,8 +15,6 @@
   import Composer from "./Composer.svelte";
   import Markdown from "./Markdown.svelte";
   import MessageBadges from "./MessageBadges.svelte";
-
-  let snapshot = $state<AppSnapshot | null>(null);
 
   // Reveal state.
   let expanded = $state(false);
@@ -43,19 +41,18 @@
   let overInteractive = $state(false);
 
   // Stores the real Composer depends on (same as App.svelte mounts).
+  snapshot.init();
   transcripts.init();
   queues.init();
   sessionMetas.init();
   extensionUi.init();
   void autoCompact.load();
-  void api.invoke("app:getSnapshot").then((s) => (snapshot = s));
-  api.on("event:snapshot", (s) => (snapshot = s));
 
   // The HUD's own active thread (independent of the Main Window selection).
-  const hudThreadId = $derived(snapshot?.ui.hudThreadId ?? null);
+  const hudThreadId = $derived(snapshot.current?.ui.hudThreadId ?? null);
   const target = $derived.by((): Thread | null => {
-    const id = resolveHudTarget(hudThreadId, snapshot?.threads.map((t) => t.id) ?? []);
-    return (id && snapshot?.threads.find((t) => t.id === id)) || null;
+    const id = resolveHudTarget(hudThreadId, snapshot.current?.threads.map((t) => t.id) ?? []);
+    return (id && snapshot.current?.threads.find((t) => t.id === id)) || null;
   });
   const items = $derived(hudThreadId ? transcripts.itemsFor(hudThreadId) : []);
 
@@ -144,12 +141,13 @@
 
   // Ambient finish cue (HUD up): pulse + done sound + badge / opt-in expand.
   api.on("event:hudFinish", ({ threadId }) => {
-    if (!snapshot) return;
+    const snap = snapshot.current;
+    if (!snap) return;
     const cue = routeFinishCue({
       finishedThreadId: threadId,
       hudThreadId,
       hudVisible: true,
-      autoRevealOnFinish: snapshot.ui.hudAutoRevealOnFinish,
+      autoRevealOnFinish: snap.ui.hudAutoRevealOnFinish,
     });
     if (cue.kind === "none") return;
     playDoneSound();
