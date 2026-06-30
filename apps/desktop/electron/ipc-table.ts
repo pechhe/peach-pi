@@ -478,6 +478,12 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
             items.push(item);
             emit("event:mergeProgress", { projectId, issueNumber, phase: "merge", done: true, item });
             if (mergeRes.ok) {
+              // No PR means no GitHub `Closes #N` auto-close, so close the
+              // issue explicitly — the local-workflow equivalent. Best-effort:
+              // a close failure must not undo a merge that already landed.
+              await issuesService.close(projectId, issueNumber, "completed").catch((e) =>
+                console.error(`[mergeBatch] failed to close issue #${issueNumber}:`, e),
+              );
               await appService.archive(wt!.id).catch((e) =>
                 console.error(`[mergeBatch] failed to archive worktree ${wt!.id}:`, e),
               );
@@ -536,7 +542,27 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "git:commitPush": gitService.commitPush.bind(gitService),
       "git:createPr": gitService.createPr.bind(gitService),
       "git:mergePr": gitService.mergePr.bind(gitService),
-      "git:mergeToLocal": gitService.mergeToLocal.bind(gitService),
+      // Merge a worktree branch into the local repo. When the target is the
+      // repo's default branch and the worktree is linked to a work-queue issue
+      // (`issue-<n>`), close that issue — the local-merge equivalent of a PR's
+      // `Closes #N`, so the Work Queue reflects "done". Worktree teardown stays
+      // the user's choice (the GitWidget Move/Delete buttons).
+      "git:mergeToLocal": async (threadId) => {
+        const result = await gitService.mergeToLocal(threadId);
+        if (!result.ok) return result;
+        const info = await gitService.info(threadId);
+        if (!info.defaultBranch || result.target !== info.defaultBranch) return result;
+        const snap = appService.snapshot();
+        const wtId = snap.threads.find((t) => t.id === threadId)?.worktreeId;
+        const wt = wtId ? snap.worktrees.find((w) => w.id === wtId) : undefined;
+        const issueNumber = wt ? Number(/^issue-(\d+)$/.exec(wt.name)?.[1] ?? NaN) : NaN;
+        if (wt && Number.isFinite(issueNumber)) {
+          await issuesService.close(wt.projectId, issueNumber, "completed").catch((e) =>
+            console.error(`[mergeToLocal] failed to close issue #${issueNumber}:`, e),
+          );
+        }
+        return result;
+      },
       "git:pushLocal": gitService.pushLocal.bind(gitService),
       "git:rebaseAndTest": gitService.rebaseAndTest.bind(gitService),
       // remote session hosting (ADR-0009)
@@ -612,6 +638,14 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "app:listScopedModels": async () => {
         const { listScopedModels } = await import("@peach-pi/pi-client");
         return listScopedModels();
+      },
+      "app:listScopedModelsForProject": async (projectId) => {
+        const { listScopedModels } = await import("@peach-pi/pi-client");
+        const project = appService.snapshot().projects.find((p) => p.id === projectId);
+        // Read the scope from the project dir so it matches the TUI / composer
+        // (project settings.json overrides global). Falls back to the global
+        // read if the project is unknown or has no path.
+        return listScopedModels(project?.path);
       },
       "app:setModelScoped": async (provider, modelId, scoped) => {
         const { setModelScoped } = await import("@peach-pi/pi-client");

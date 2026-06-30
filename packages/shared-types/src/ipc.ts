@@ -145,6 +145,12 @@ export const ipcContracts = {
   "app:listModels": invoke<[], ModelInfo[]>(),
   /** All auth-configured models paired with their scope membership (settings.json enabledModels). */
   "app:listScopedModels": invoke<[], ScopedModel[]>(),
+  /** Scoped models read from a specific project's settings.json (project scope
+   *  overrides global). Use this for project-bound pickers (Work Queue,
+   *  automations) so they match the composer's thread-bound list. */
+  "app:listScopedModelsForProject": invoke<[projectId: ProjectId], ScopedModel[]>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
   /** Toggle a model's membership in the global enabledModels scope; returns the updated list. */
   "app:setModelScoped": invoke<[provider: string, modelId: string, scoped: boolean], ScopedModel[]>(),
   /** Read the configured "utility" model for background LLM tasks (titles/commits). */

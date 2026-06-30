@@ -21,6 +21,9 @@
   // the merge) and optionally push <target> to origin. null = dialog closed.
   let pushPrompt = $state<string | null>(null);
   let pushChecked = $state(true);
+  // After a merge-to-local conflict: the target branch to ask the agent to
+  // merge into its worktree. null = no conflict pending.
+  let conflictTarget = $state<string | null>(null);
 
   // PR only makes sense on a feature branch (not the repo default branch).
   const canPr = $derived(
@@ -134,6 +137,7 @@
     pushPrompt = null;
     try {
       const result = await api.invoke("git:mergeToLocal", thread.id);
+      conflictTarget = null;
       if (result.ok) {
         lastResult = result.warning
           ? `⚠ Merged ${result.branch} → ${result.target}; ${result.warning}`
@@ -144,6 +148,7 @@
         }
       } else {
         lastResult = `✕ ${result.error}`;
+        if (result.conflict && result.target) conflictTarget = result.target;
       }
       await refresh();
     } finally {
@@ -166,6 +171,25 @@
       pushingLocal = false;
       pushPrompt = null;
     }
+  }
+
+  // Hand the conflict to the agent in this chat: it merges <target> into this
+  // worktree's branch (refs are shared), resolves, commits — then Merge to
+  // local runs clean. Sends the prompt straight into the current thread.
+  function askAgentToResolve() {
+    const target = conflictTarget;
+    if (!target) return;
+    const prompt =
+      `Merging this worktree's branch into \`${target}\` hit merge conflicts. ` +
+      `Resolve it here in the worktree:\n\n` +
+      `1. Run \`git merge ${target}\` (the branch is a shared ref, so this works from the worktree).\n` +
+      `2. Resolve every conflicted file.\n` +
+      `3. Commit the merge so the working tree is clean.\n\n` +
+      `Once committed I'll click "Merge to local" again and it will merge cleanly.`;
+    void api.invoke("threads:prompt", thread.id, prompt, [], "all").catch(console.error);
+    conflictTarget = null;
+    lastResult = "→ Asked the agent to resolve the conflict";
+    close();
   }
 
   // Fast-forward the current branch from origin when behind.
@@ -300,9 +324,22 @@
         </div>
 
         {#if lastResult}
-          <p class="border-b border-border/80 px-3 py-1.5 text-[11px] {lastResult.startsWith('✓') ? 'text-success' : 'text-danger'}">
+          <p class="border-b border-border/80 px-3 py-1.5 text-[11px] {lastResult.startsWith('✓') || lastResult.startsWith('→') ? 'text-success' : 'text-danger'}">
             {lastResult}
           </p>
+        {/if}
+        {#if conflictTarget}
+          <div class="flex items-center justify-between gap-2 border-b border-border/80 bg-surface/40 px-3 py-2">
+            <span class="text-[11px] text-muted">Let the agent merge <span class="font-mono text-fg-soft">{conflictTarget}</span> in and resolve it.</span>
+            <button
+              class="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-fg transition-opacity disabled:opacity-40"
+              onclick={askAgentToResolve}
+              data-testid="resolve-with-agent"
+              title="Send a prompt to this chat asking the agent to merge and resolve the conflict"
+            >
+              Ask agent to resolve
+            </button>
+          </div>
         {/if}
         <div class="flex-1 overflow-y-auto py-1">
           {#each files as file (file.path)}

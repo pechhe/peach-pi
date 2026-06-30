@@ -1,10 +1,9 @@
 <script lang="ts">
-  import type { Project, AutomationModel, ThinkingLevel } from "@peach-pi/shared-types";
+  import type { Project, AutomationModel, ThinkingLevel, ScopedModel } from "@peach-pi/shared-types";
   import { groupWorkQueue } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { workQueue } from "../stores/work-queue.svelte";
   import { mergeQueue } from "../stores/merge-queue.svelte";
-  import { scopedModels } from "../stores/scoped-models.svelte";
   import { Select } from "../components/ui/select";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Play from "@lucide/svelte/icons/play";
@@ -210,7 +209,12 @@
     { value: "high", label: "High" },
     { value: "xhigh", label: "Max" },
   ];
-  const scopedModelList = $derived(scopedModels.models.filter((m) => m.scoped));
+  // Scoped models read from THIS project's settings.json (project scope
+  // overrides global) so the list matches pi's TUI `/model scope` and the
+  // composer's thread-bound list. The global scopedModels store reads
+  // process.cwd() and would show every model.
+  let projectScopedModels = $state<ScopedModel[]>([]);
+  const scopedModelList = $derived(projectScopedModels.filter((m) => m.scoped));
   const modelItems = $derived(
     scopedModelList.map((m) => ({
       value: `${m.provider}\t${m.id}`,
@@ -257,10 +261,16 @@
     void workQueue.load(projectId);
   });
 
-  // Ensure the scoped-model list is available for the agent-model picker
-  // (mirrors AutomationDialog, which loads in case Settings was never opened).
+  // Load the project-scoped model list whenever the viewed project changes.
   $effect(() => {
-    void scopedModels.load();
+    const id = projectId;
+    if (!id) {
+      projectScopedModels = [];
+      return;
+    }
+    void api.invoke("app:listScopedModelsForProject", id).then((models) => {
+      if (projectId === id) projectScopedModels = models;
+    });
   });
 
   const result = $derived(workQueue.result);
@@ -367,13 +377,13 @@
         >Local</button>
       </div>
       <div
-        class="flex items-center gap-1 rounded-md border border-border px-1.5 py-1 titlebar-no-drag"
+        class="flex items-center gap-1.5 titlebar-no-drag"
         data-testid="agent-model-select"
         title="Model used when launching agents from the Work Queue"
       >
-        <span class="text-[11px] text-fainter">Model</span>
+        <span class="text-xs text-faint">Model</span>
         <Select
-          class="w-40"
+          class="w-32 gap-1 rounded-md border-border bg-transparent px-2 py-0.5 text-xs hover:bg-surface-2"
           placeholder="Default"
           value={agentModelKey}
           items={[{ value: "", label: "Default" }, ...modelItems]}
@@ -381,13 +391,13 @@
         />
       </div>
       <div
-        class="flex items-center gap-1 rounded-md border border-border px-1.5 py-1 titlebar-no-drag"
+        class="flex items-center gap-1.5 titlebar-no-drag"
         data-testid="agent-thinking-select"
         title="Reasoning level used when launching agents from the Work Queue"
       >
-        <span class="text-[11px] text-fainter">Reasoning</span>
+        <span class="text-xs text-faint">Reasoning</span>
         <Select
-          class="w-28"
+          class="w-24 gap-1 rounded-md border-border bg-transparent px-2 py-0.5 text-xs hover:bg-surface-2"
           placeholder="Default"
           value={agentThinking}
           items={THINKING_OPTIONS}

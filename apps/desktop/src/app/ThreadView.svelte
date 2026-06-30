@@ -640,11 +640,13 @@
     await onCloneThread?.();
   }
 
-  // Refetch the turn list (entry ids) whenever the conversation settles.
+  // Refetch the turn list (entry ids) when the transcript changes. Safe to
+  // run during a live turn: listTurns only returns user-message entries, which
+  // are stable mid-run (the in-progress assistant turn isn't a user turn), and
+  // forking/rewinding must work while a thread is running.
   $effect(() => {
     void items.length;
     const id = thread.id;
-    if (thread.status === "running") return;
     void api.invoke("threads:listTurns", id).then((t) => {
       if (thread.id === id) turns = t;
     }).catch(() => {});
@@ -994,7 +996,7 @@
           <button
             class="rounded px-2 py-0.5 text-faint hover:bg-surface hover:text-fg-soft disabled:opacity-50"
             onclick={openForkPicker}
-            disabled={!thread.piSessionFile || thread.status === 'running' || turns.length === 0}
+            disabled={!thread.piSessionFile || turns.length === 0}
             data-testid="fork-thread"
           ><GitBranch size={14} /></button
           >

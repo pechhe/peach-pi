@@ -309,7 +309,7 @@
     data-testid={p.testid}
   >
     {#if faviconUrl(p.domain)}
-      <img src={faviconUrl(p.domain)} alt="" class="h-5 w-5 shrink-0 object-contain" loading="lazy" />
+      <img src={faviconUrl(p.domain)} alt="" class="h-5 w-5 shrink-0 object-contain" />
     {:else}
       <span class="h-5 w-5 shrink-0 rounded bg-surface"></span>
     {/if}
@@ -413,7 +413,7 @@
               class="self-center rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface hover:text-fg"
               onclick={() => (shownExtra += SHOW_STEP)}
               data-testid="executor-show-more"
-            >Show more ({registryExtra.length - shownExtra} more)</button>
+            >Show 50 more <span class="text-fainter">· {registryExtra.length - shownExtra} remaining</span></button>
           {/if}
         </div>
       </div>

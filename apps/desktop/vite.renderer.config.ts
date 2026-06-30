@@ -19,4 +19,12 @@ export default defineConfig({
       $lib: fileURLToPath(new URL("./src/lib", import.meta.url)),
     },
   },
+  optimizeDeps: {
+    // `@peach-pi/shared-types` is a symlinked workspace source package (its
+    // `main` is src/index.ts). If Vite pre-bundles it into .vite/deps, edits to
+    // its source (e.g. EXECUTOR_PRESETS) are served stale until the cache is
+    // busted — which silently broke favicons here. Exclude it so it goes
+    // through the normal transform + HMR pipeline and stays fresh.
+    exclude: ["@peach-pi/shared-types"],
+  },
 });

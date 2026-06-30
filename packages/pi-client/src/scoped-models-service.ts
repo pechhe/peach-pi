@@ -17,13 +17,19 @@ export interface ScopedModel {
 /**
  * All auth-configured models paired with their scope membership. An empty
  * `enabledModels` array scopes every model implicitly (matches pi `/model`).
+ *
+ * `cwd` selects which settings.json the scope is read from. pi merges project
+ * settings (cwd) over global (agentDir), and `/model scope` in the TUI writes
+ * to the project-local settings, so a thread-free read MUST use the project
+ * directory or it falls back to the (often empty) global scope and reports
+ * every model as scoped. Defaults to `process.cwd()` for the global view.
  */
-export async function listScopedModels(): Promise<ScopedModel[]> {
+export async function listScopedModels(cwd: string = process.cwd()): Promise<ScopedModel[]> {
   try {
     const sdk = await import("@earendil-works/pi-coding-agent");
     const registry = sdk.ModelRegistry.create(sdk.AuthStorage.create());
     const available = registry.getAvailable();
-    const settings = sdk.SettingsManager.create(process.cwd(), sdk.getAgentDir());
+    const settings = sdk.SettingsManager.create(cwd, sdk.getAgentDir());
     const enabled = settings.getEnabledModels();
     const scopedSet = enabled && enabled.length > 0 ? scopeModels(available, enabled) : available;
     const scopedKeys = new Set(scopedSet.map((m) => `${m.provider}/${m.id}`));

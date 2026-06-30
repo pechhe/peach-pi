@@ -32,11 +32,15 @@ export function localMergeFailure(issueNumber: number, error: string): string {
   return (
     `The merge queue couldn't merge issue #${issueNumber} into the default ` +
     `branch — the local merge failed with:\n\n${error}\n\n` +
-    `Sort it out so the branch can be merged into the default branch. ` +
-    `If the local repo is dirty, commit or stash on the default branch. ` +
-    `If the merge hit a conflict, resolve it in the default branch's working ` +
-    `tree and commit the merge. Run the full test suite. Once green, push ` +
-    `the default branch. Then stop at the human gate — do not start new work.`
+    `Make your branch cleanly mergeable from this worktree — you can't reach ` +
+    `the main checkout from here. If the merge hit a conflict, your branch is ` +
+    `behind the default branch: run \`git rebase origin/main\` here, resolve ` +
+    `the conflicts in the affected files, then \`git rebase --continue\` ` +
+    `(repeat until it completes). Run the full test suite. Once green, ` +
+    `force-push your branch with \`git push --force-with-lease\` so the ` +
+    `merge queue can re-attempt. If instead the main checkout was dirty, that ` +
+    `can only be fixed there — flag it for the human. Then stop at the human ` +
+    `gate — do not merge yourself.`
   );
 }
 

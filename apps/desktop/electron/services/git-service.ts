@@ -374,19 +374,6 @@ export class GitService {
     const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
     if (target === branch) return { ok: false, error: `Local repo is on ${branch}` };
 
-    // Refuse to fold worktree work onto the repo's default branch (e.g.
-    // `master`/`main`). Merging there rewrites the shared checkout's working
-    // tree and history mechanicaly — the contamination source for "master
-    // keeps gaining errors while worktree threads run". Switch the local
-    // repo to a feature branch first, then merge.
-    const defaultBranch = await this.defaultBranch(projectPath);
-    if (defaultBranch && target === defaultBranch) {
-      return {
-        ok: false,
-        error: `Local repo is on the default branch (${target}). Check out a feature branch before merging — merging onto ${target} dirties the shared checkout.`,
-      };
-    }
-
     // Stash any uncommitted local work so the --no-ff merge has a clean tree,
     // then restore it on top of the merge (the "integrate while dirty" pattern).
     const localDirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
@@ -397,7 +384,16 @@ export class GitService {
     } catch {
       await git(["merge", "--abort"], projectPath).catch(() => undefined);
       if (localDirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
-      return { ok: false, error: `Merge conflict on ${target} — aborted` };
+      // Conflict flagged so the UI can offer to hand the resolve to the agent:
+      // it merges <target> into <branch> inside its own worktree (refs are
+      // shared), resolves, commits — then merge-to-local runs clean.
+      return {
+        ok: false,
+        error: `Merge conflict on ${target} — aborted`,
+        conflict: true,
+        target,
+        branch,
+      };
     }
 
     const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);
