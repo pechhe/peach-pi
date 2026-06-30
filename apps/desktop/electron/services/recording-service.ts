@@ -9,7 +9,7 @@
  * `list_recordings` tools and vice versa.
  */
 
-import { Tray, Menu } from "electron";
+import { Tray, Menu, type MenuItemConstructorOptions } from "electron";
 import { existsSync } from "node:fs";
 import { shell } from "electron";
 import type { Emit } from "../ipc/registry.ts";
@@ -60,6 +60,9 @@ export class RecordingService {
   /** Injected hook to send the synthesis prompt into a chat thread. Keeps
    *  this service decoupled from ThreadService. */
   private prompter: ((threadId: string, text: string) => void | Promise<void>) | null = null;
+  /** Extra context-menu items injected by other tray-sharing services (e.g.
+   *  ClipService). Kept generic so this service stays clip-agnostic. */
+  private menuExtras: (() => MenuItemConstructorOptions[]) | null = null;
 
   constructor(emit: Emit) {
     this.emit = emit;
@@ -68,6 +71,17 @@ export class RecordingService {
   /** Wire the hook that delivers the synthesis prompt to a chat thread. */
   setPrompter(fn: (threadId: string, text: string) => void | Promise<void>): void {
     this.prompter = fn;
+  }
+
+  /** Register extra tray menu items contributed by another service. */
+  setMenuExtras(fn: () => MenuItemConstructorOptions[]): void {
+    this.menuExtras = fn;
+    this.refreshTray();
+  }
+
+  /** Rebuild the tray menu now (e.g. when an extras provider's state changed). */
+  requestTrayRefresh(): void {
+    this.refreshTray();
   }
 
   /** Attach a tray icon with Start/Stop/Cancel + live status. */
@@ -85,7 +99,7 @@ export class RecordingService {
   private refreshTray(): void {
     if (!this.tray) return;
     const s = this.state;
-    const menu = Menu.buildFromTemplate([
+    const items: MenuItemConstructorOptions[] = [
       { label: this.trayTitle(), enabled: false },
       { type: "separator" },
       {
@@ -103,9 +117,11 @@ export class RecordingService {
         enabled: s.status === "recording",
         click: () => this.cancel(),
       },
-      { type: "separator" },
-      { label: "Quit Peach Pi", role: "quit" },
-    ]);
+    ];
+    const extras = this.menuExtras?.() ?? [];
+    if (extras.length) items.push({ type: "separator" }, ...extras);
+    items.push({ type: "separator" }, { label: "Quit Peach Pi", role: "quit" });
+    const menu = Menu.buildFromTemplate(items);
     this.tray.setContextMenu(menu);
     this.tray.setToolTip(this.trayTitle());
   }

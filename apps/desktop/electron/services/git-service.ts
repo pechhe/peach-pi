@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -14,7 +14,7 @@ import type {
   GitMergePrResult,
   GitPullResult,
   GitPushLocalResult,
-  GitRebaseTestResult,
+  GitRebaseResult,
   ModelInfo,
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
@@ -374,19 +374,6 @@ export class GitService {
     const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
     if (target === branch) return { ok: false, error: `Local repo is on ${branch}` };
 
-    // Refuse to fold worktree work onto the repo's default branch (e.g.
-    // `master`/`main`). Merging there rewrites the shared checkout's working
-    // tree and history mechanicaly — the contamination source for "master
-    // keeps gaining errors while worktree threads run". Switch the local
-    // repo to a feature branch first, then merge.
-    const defaultBranch = await this.defaultBranch(projectPath);
-    if (defaultBranch && target === defaultBranch) {
-      return {
-        ok: false,
-        error: `Local repo is on the default branch (${target}). Check out a feature branch before merging — merging onto ${target} dirties the shared checkout.`,
-      };
-    }
-
     // Stash any uncommitted local work so the --no-ff merge has a clean tree,
     // then restore it on top of the merge (the "integrate while dirty" pattern).
     const localDirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
@@ -397,7 +384,16 @@ export class GitService {
     } catch {
       await git(["merge", "--abort"], projectPath).catch(() => undefined);
       if (localDirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
-      return { ok: false, error: `Merge conflict on ${target} — aborted` };
+      // Conflict flagged so the UI can offer to hand the resolve to the agent:
+      // it merges <target> into <branch> inside its own worktree (refs are
+      // shared), resolves, commits — then merge-to-local runs clean.
+      return {
+        ok: false,
+        error: `Merge conflict on ${target} — aborted`,
+        conflict: true,
+        target,
+        branch,
+      };
     }
 
     const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);
@@ -421,7 +417,7 @@ export class GitService {
    *  `main`/`master`) in the project's main checkout, then push the default
    *  branch to origin. Unlike {@link mergeToLocal}, this deliberately targets
    *  the default branch — it's the Work Queue 'local' workflow's merge step,
-   *  gated behind a fresh `rebaseAndTest` so the branch is green and current.
+   *  gated behind a fresh `rebaseOntoDefault` so the branch is current.
    *  Leaves the main checkout on the default branch after the merge. */
   async mergeBranchToDefault(threadId: string): Promise<GitMergeResult> {
     const cwd = this.cwdFor(threadId);
@@ -548,47 +544,12 @@ export class GitService {
     mkdirSync(this.worktreesDir, { recursive: true });
 
     const dir = path.join(this.worktreesDir, randomUUID());
-    const dirty = Boolean((await git(["status", "--porcelain"], project.path)).trim());
-    if (!dirty) {
-      await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
-      return dir;
-    }
-
-    // Seed the worktree with a COPY of the main checkout's uncommitted work
-    // (modified tracked + deletions + untracked, .gitignore-respecting) so
-    // isolated iteration carries the in-flight edits. Flow: stash-push on
-    // main (main goes clean) → create worktree at HEAD → apply the stash INTO
-    // the worktree (copy, not move) → pop on main to restore its original
-    // dirty state. Main ends up exactly as it was; the work is duplicated into
-    // the worktree, not moved.
-    //
-    // Note on the old smear concern: an earlier version refused dirty trees
-    // because the previous flow copied uncommitted state into EVERY sibling,
-    // drifting across worktrees. That trade-off is now explicit: each new
-    // worktree seeds from main's current uncommitted state at creation time.
-    // If the process dies between push and pop, the work is preserved in
-    // `git stash list` — recoverable by `git stash pop` on the main checkout.
-    await git(["stash", "push", "-u", "-m", "peach-pi worktree seed"], project.path);
-    try {
-      await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
-      try {
-        // Apply (not pop): leaves the stash in place so we can restore main
-        // next. Same HEAD as when the stash was made → applies clean.
-        await git(["stash", "apply"], dir);
-      } catch (err) {
-        // Shouldn't happen against a fresh worktree at the same HEAD, but if
-        // it does, tear down the half-seeded worktree and surface the error
-        // before the finally restores main — no work is silently lost.
-        await git(["worktree", "remove", "--force", dir], project.path).catch(() => {});
-        throw new Error(`Could not seed worktree from local changes: ${(err as Error).message}`);
-      }
-    } finally {
-      // Restore main's uncommitted state. pop = apply + drop; safe because
-      // main is clean (reset by the push) and the stash was made against this
-      // same HEAD. If pop somehow fails, the stash remains in `git stash list`
-      // for manual recovery.
-      await git(["stash", "pop"], project.path).catch(() => {});
-    }
+    // Always start the worktree at a clean HEAD. We intentionally do NOT seed
+    // the main checkout's uncommitted work into the worktree: copying it
+    // duplicated in-flight edits across both trees and made merge-back
+    // self-conflict on those same lines. The worktree's in-flight work stays
+    // its own; main keeps its uncommitted work untouched and separate.
+    await git(["worktree", "add", "--detach", dir, "HEAD"], project.path);
     return dir;
   }
 
@@ -646,12 +607,12 @@ export class GitService {
   }
 
   /** Rebase this thread's branch onto the latest default branch (fetched from
-   *  origin) and run the project's tests. Used by the batch-merge flow: each
-   *  worktree branch built against an older main is brought up to date in its
-   *  own isolated cwd before its PR is merged, so conflicts surface here —
-   *  not on main — and main stays linear. Aborts cleanly on rebase conflict.
-   *  Tests are skipped (not failed) when no `pnpm test` runner is detected. */
-  async rebaseAndTest(threadId: string): Promise<GitRebaseTestResult> {
+   *  origin). Used by the batch-merge flow: each worktree branch built against
+   *  an older main is brought up to date in its own isolated cwd before it is
+   *  merged, so conflicts surface here — not on main — and main stays linear.
+   *  Aborts cleanly on rebase conflict. No test gate — branch correctness is
+   *  the agent's job, not the merge queue's. */
+  async rebaseOntoDefault(threadId: string): Promise<GitRebaseResult> {
     const cwd = this.cwdFor(threadId);
     if (!cwd) return { ok: false, error: "No working directory" };
     if (!(await gitOk(["rev-parse", "--git-dir"], cwd)))
@@ -677,24 +638,7 @@ export class GitService {
       }
       return { ok: false, error: `Rebase conflict on ${branch} — aborted` };
     }
-    const testCmd = await this.detectTestCommand(cwd);
-    if (!testCmd) return { ok: true, branch, base, tests: "skipped" };
-    try {
-      await runExec(testCmd[0], testCmd[1], { cwd, maxBuffer: 10 * 1024 * 1024 });
-    } catch (err) {
-      const e = err as { stderr?: string; stdout?: string; message?: string };
-      const tail = (e.stderr || e.stdout || e.message || "").trim().split("\n").slice(-8).join("\n");
-      return { ok: false, error: `Tests failed on ${branch}:\n${tail}` };
-    }
-    return { ok: true, branch, base, tests: "passed" };
-  }
-
-  /** Resolve the project's test command, or null when no runner is detected.
-   *  `pnpm test` when a package.json is present (the project's own gate per
-   *  its AGENTS.md); otherwise null so non-JS repos skip the test step. */
-  private async detectTestCommand(cwd: string): Promise<[string, string[]] | null> {
-    if (!existsSync(path.join(cwd, "package.json"))) return null;
-    return ["pnpm", ["test"]];
+    return { ok: true, branch, base };
   }
 
   async removeWorktree(projectPath: string, worktreeDir: string): Promise<void> {

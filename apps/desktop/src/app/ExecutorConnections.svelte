@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import {
     EXECUTOR_PRESETS,
+    type ExecCatalogueItem,
     type ExecConnection,
     type ExecIntegration,
     type ExecPreset,
@@ -27,6 +28,13 @@
   let connectOpen = $state(false);
   let query = $state("");
   let detecting = $state(false);
+  /** Full discovery registry (~3.5k rows), lazy-loaded on first open. */
+  let catalogue = $state<ExecCatalogueItem[]>([]);
+  let catalogueLoaded = $state(false);
+  /** Registry rows shown in the popular area beyond the curated 36. */
+  let shownExtra = $state(0);
+  const SHOW_STEP = 50;
+  const presetKeys = new Set(EXECUTOR_PRESETS.map((p) => `${p.pluginKey}:${p.id}`));
 
   /** Manual "add integration type" buttons, mirroring Executor's dialog. */
   const MANUAL: { key: string; label: string }[] = [
@@ -50,12 +58,25 @@
   }
 
   const isUrl = $derived(looksLikeUrl(query));
+  const q = $derived((isUrl ? "" : query).trim().toLowerCase());
+  const searching = $derived(q.length > 0);
   const presetMatches = $derived.by(() => {
-    const q = (isUrl ? "" : query).trim().toLowerCase();
     if (!q) return EXECUTOR_PRESETS;
     return EXECUTOR_PRESETS.filter((p) =>
       `${p.name} ${p.summary} ${p.pluginKey}`.toLowerCase().includes(q),
     );
+  });
+  // Registry rows not already covered by a curated preset (popular-area tail).
+  const registryExtra = $derived(
+    catalogue.filter((i) => !presetKeys.has(`${i.kind}:${i.slug}`)),
+  );
+  const popularExtra = $derived(registryExtra.slice(0, shownExtra));
+  // Search spans the full registry, not just the curated 36.
+  const searchResults = $derived.by(() => {
+    if (!searching) return [] as ExecCatalogueItem[];
+    return catalogue
+      .filter((i) => `${i.name} ${i.description} ${i.slug} ${i.kind}`.toLowerCase().includes(q))
+      .slice(0, 200);
   });
 
   // Connections grouped by integration slug.
@@ -85,10 +106,19 @@
     }
   }
 
-  function openConnect() {
+  async function openConnect() {
     query = "";
     error = null;
+    shownExtra = 0;
     connectOpen = true;
+    if (!catalogueLoaded) {
+      catalogueLoaded = true;
+      try {
+        catalogue = await api.invoke("executor:catalogue");
+      } catch {
+        /* registry cache may be absent; browse falls back to curated only */
+      }
+    }
   }
 
   /** Opens Executor's signed-in add page, then closes + prompts a refresh. */
@@ -104,6 +134,17 @@
 
   function pickPreset(p: ExecPreset) {
     void openAdd(p.pluginKey, { preset: p.id, ...(p.url ? { url: p.url } : {}) });
+  }
+
+  /** Registry rows are discovery-only. With a URL, run Detect; otherwise open
+   *  the manual add page for that kind so the user can paste a spec. */
+  async function pickCatalogue(it: ExecCatalogueItem) {
+    if (it.url) {
+      query = it.url;
+      await detect();
+    } else {
+      await openAdd(it.kind, { namespace: it.slug });
+    }
   }
 
   /** Favicon via Google's service (CSP-allowed), keyed by the brand domain —
@@ -261,6 +302,25 @@
   {/if}
 </div>
 
+{#snippet row(p: { name: string; summary: string; domain?: string; badge: string; onpick: () => void; testid: string })}
+  <button
+    class="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-surface"
+    onclick={p.onpick}
+    data-testid={p.testid}
+  >
+    {#if faviconUrl(p.domain)}
+      <img src={faviconUrl(p.domain)} alt="" class="h-5 w-5 shrink-0 object-contain" />
+    {:else}
+      <span class="h-5 w-5 shrink-0 rounded bg-surface"></span>
+    {/if}
+    <span class="flex min-w-0 flex-1 flex-col">
+      <span class="truncate text-sm text-fg">{p.name}</span>
+      <span class="truncate text-xs text-fainter">{p.summary}</span>
+    </span>
+    <span class="shrink-0 rounded-md bg-surface px-1.5 py-0.5 text-[11px] text-muted uppercase">{p.badge}</span>
+  </button>
+{/snippet}
+
 {#if connectOpen}
   <!-- Connect dialog: mirrors Executor's "Connect an integration" flow. -->
   <div
@@ -285,7 +345,7 @@
               <Search size={14} class="shrink-0 text-fainter" />
               <input
                 class="w-full bg-transparent text-sm text-fg outline-none placeholder:text-fainter"
-                placeholder="Search or paste a URL"
+                placeholder="Search all integrations, or paste a URL"
                 bind:value={query}
                 onkeydown={(e) => { if (e.key === "Enter" && isUrl) void detect(); }}
                 data-testid="executor-connect-search"
@@ -316,36 +376,45 @@
           </div>
         </div>
 
-        <!-- Popular / matching presets -->
+        <!-- Popular (curated 36 + registry tail) / full-registry search -->
         <div class="flex min-w-0 flex-col gap-2">
-          <p class="text-xs font-medium text-fg-soft/80">{(isUrl ? "" : query).trim() ? "Matching integrations" : "Popular integrations"}</p>
+          <div class="flex items-center justify-between">
+            <p class="text-xs font-medium text-fg-soft/80">{searching ? "Results" : "Popular integrations"}</p>
+            {#if searching}
+              <span class="text-[11px] text-fainter">{presetMatches.length + searchResults.length} found</span>
+            {/if}
+          </div>
           <div class="max-h-[48vh] overflow-y-auto rounded-lg border border-border">
-            {#if presetMatches.length === 0}
-              <div class="flex flex-col items-center justify-center gap-1 px-4 py-8 text-center">
-                <p class="text-sm text-muted">No matching presets</p>
-                <p class="text-xs text-fainter">Paste a URL above to auto-detect, or pick a type manually.</p>
-              </div>
+            {#if searching}
+              {#if presetMatches.length === 0 && searchResults.length === 0}
+                <div class="flex flex-col items-center justify-center gap-1 px-4 py-8 text-center">
+                  <p class="text-sm text-muted">No matching integrations</p>
+                  <p class="text-xs text-fainter">Paste a URL above to auto-detect, or pick a type manually.</p>
+                </div>
+              {:else}
+                {#each presetMatches as p (`p-${p.pluginKey}-${p.id}`)}
+                  {@render row({ name: p.name, summary: p.summary, domain: p.domain, badge: p.pluginKey, onpick: () => pickPreset(p), testid: `executor-preset-${p.pluginKey}-${p.id}` })}
+                {/each}
+                {#each searchResults as it (`c-${it.kind}-${it.slug}`)}
+                  {@render row({ name: it.name, summary: it.description, domain: it.domain, badge: it.kind, onpick: () => void pickCatalogue(it), testid: `executor-cat-${it.kind}-${it.slug}` })}
+                {/each}
+              {/if}
             {:else}
-              {#each presetMatches as p (`${p.pluginKey}-${p.id}`)}
-                <button
-                  class="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-surface"
-                  onclick={() => pickPreset(p)}
-                  data-testid={`executor-preset-${p.pluginKey}-${p.id}`}
-                >
-                  {#if faviconUrl(p.domain)}
-                    <img src={faviconUrl(p.domain)} alt="" class="h-5 w-5 shrink-0 object-contain" loading="lazy" />
-                  {:else}
-                    <span class="h-5 w-5 shrink-0 rounded bg-surface"></span>
-                  {/if}
-                  <span class="flex min-w-0 flex-1 flex-col">
-                    <span class="truncate text-sm text-fg">{p.name}</span>
-                    <span class="truncate text-xs text-fainter">{p.summary}</span>
-                  </span>
-                  <span class="shrink-0 rounded-md bg-surface px-1.5 py-0.5 text-[11px] text-muted uppercase">{p.pluginKey}</span>
-                </button>
+              {#each EXECUTOR_PRESETS as p (`p-${p.pluginKey}-${p.id}`)}
+                {@render row({ name: p.name, summary: p.summary, domain: p.domain, badge: p.pluginKey, onpick: () => pickPreset(p), testid: `executor-preset-${p.pluginKey}-${p.id}` })}
+              {/each}
+              {#each popularExtra as it (`c-${it.kind}-${it.slug}`)}
+                {@render row({ name: it.name, summary: it.description, domain: it.domain, badge: it.kind, onpick: () => void pickCatalogue(it), testid: `executor-cat-${it.kind}-${it.slug}` })}
               {/each}
             {/if}
           </div>
+          {#if !searching && shownExtra < registryExtra.length}
+            <button
+              class="self-center rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-surface hover:text-fg"
+              onclick={() => (shownExtra += SHOW_STEP)}
+              data-testid="executor-show-more"
+            >Show 50 more <span class="text-fainter">· {registryExtra.length - shownExtra} remaining</span></button>
+          {/if}
         </div>
       </div>
     </div>

@@ -339,3 +339,103 @@ test("auto_retry_end drops trailing empty assistant error card", () => {
   assert.equal((retry as { attempt: number }).attempt, 3);
   assert.equal((retry as { error?: string }).error, "Connection error.");
 });
+
+test("agent_end attaches turn usage, cost, tokens/sec and TTFT to the final answer", async () => {
+  const r = new TranscriptRecorder();
+  r.handleEvent({ type: "agent_start" });
+  r.handleEvent({ type: "message_start", message: { role: "assistant", content: [] } });
+  // Wait so the start→first-token gap (TTFT) is measurable.
+  await new Promise((res) => setTimeout(res, 15));
+  r.handleEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Hi" } });
+  await new Promise((res) => setTimeout(res, 15));
+  let view: TranscriptItem[] = [];
+  view = applyTranscriptOps(
+    view,
+    r.handleEvent({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Hi" }],
+        stopReason: "stop",
+        usage: { input: 120, output: 30, cacheRead: 8, cacheWrite: 0, totalTokens: 158, cost: { total: 0.0021 } },
+      },
+    }),
+  );
+  // No footer mid-turn (before agent_end).
+  assert.equal((view[0] as { usage?: unknown }).usage, undefined);
+  view = applyTranscriptOps(view, r.handleEvent({ type: "agent_end" }));
+  const a = view[0] as TranscriptItem & { kind: "assistant" };
+  assert.ok(a.usage, "usage attached at agent_end");
+  assert.equal(a.usage!.input, 120);
+  assert.equal(a.usage!.output, 30);
+  assert.equal(a.usage!.cacheRead, 8);
+  assert.equal(a.usage!.totalTokens, 158);
+  assert.equal(a.usage!.costUsd, 0.0021);
+  assert.ok(a.usage!.ttftMs! >= 10, "TTFT measured from agent_start to first token");
+  assert.ok(a.usage!.tokensPerSec! > 0, "tokens/sec derived from generation window");
+});
+
+test("multi-call turn aggregates into one footer on the final answer", () => {
+  // A turn with a tool round-trip: assistant call #1 (then a tool), then the
+  // final assistant answer. Only the last answer carries the summed footer.
+  const r = new TranscriptRecorder();
+  const view = run(r, [
+    { type: "agent_start" },
+    { type: "message_start", message: { role: "user", content: [{ type: "text", text: "go" }] } },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "…" } },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "working" }], stopReason: "toolUse", usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120, cost: { total: 0.001 } } } },
+    { type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "a.ts" } },
+    { type: "tool_execution_end", toolCallId: "t1", toolName: "read", result: { content: [{ type: "text", text: "ok" }] } },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "done" } },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop", usage: { input: 200, output: 40, cacheRead: 5, cacheWrite: 0, totalTokens: 245, cost: { total: 0.003 } } } },
+    { type: "agent_end" },
+  ]);
+  const assistants = view.filter((i) => i.kind === "assistant") as (TranscriptItem & { kind: "assistant" })[];
+  assert.equal(assistants.length, 2);
+  // First (intermediate) answer carries no footer.
+  assert.equal(assistants[0]!.usage, undefined);
+  // Final answer carries the summed totals.
+  const u = assistants[1]!.usage!;
+  assert.equal(u.input, 300);
+  assert.equal(u.output, 60);
+  assert.equal(u.cacheRead, 5);
+  assert.equal(u.totalTokens, 365);
+  assert.equal(u.costUsd, 0.004);
+});
+
+test("empty turn produces no footer; reload keeps tokens+cost but no timings", () => {
+  const r = new TranscriptRecorder();
+  // Zeroed-usage turn must not attach a footer even after agent_end.
+  const live = run(r, [
+    { type: "agent_start" },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "x" }],
+        stopReason: "stop",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+      },
+    },
+    { type: "agent_end" },
+  ]);
+  assert.equal((live[0] as { usage?: unknown }).usage, undefined);
+
+  // Reload path: persisted usage survives (tokens + cost) but timings do not.
+  const r2 = new TranscriptRecorder();
+  const ops = r2.load([
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      usage: { input: 50, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 60, cost: { total: 0.001 } },
+    },
+  ]);
+  const item = (ops[0] as { items: TranscriptItem[] }).items[0] as TranscriptItem & { kind: "assistant" };
+  assert.equal(item.usage!.totalTokens, 60);
+  assert.equal(item.usage!.costUsd, 0.001);
+  assert.equal(item.usage!.ttftMs, undefined);
+  assert.equal(item.usage!.tokensPerSec, undefined);
+});

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeRemoteHostDeps } from "../../electron/services/served-session/relay-deps.ts";
-import type { RemoteHostDepsInput } from "../../electron/services/served-session/relay-deps.ts";
+import type { RemoteHostDepsInput, RemoteHostThreadSlice } from "../../electron/services/served-session/relay-deps.ts";
 import type { RelayDeps } from "../../electron/services/served-session/index.ts";
 import type { ProjectId, ThreadId } from "@peach-pi/shared-types";
 
@@ -33,14 +33,14 @@ function fakeApp(
 
 /** Fake thread slice: records every write-path verb the relay forwards. */
 function fakeThread(): {
-  svc: RemoteHostDepsInput["threadService"];
+  svc: RemoteHostThreadSlice;
   calls: Record<string, unknown[]>;
 } {
   const calls: Record<string, unknown[]> = {};
   const rec = (k: string) => (...args: unknown[]) => {
     (calls[k] ??= []).push(args);
   };
-  const svc = {
+  const svc: RemoteHostThreadSlice = {
     getTranscript: async (id: ThreadId) => ({ items: [{ id, kind: "notice" as const, text: "" }], seq: 0 }),
     getMeta: async (id: ThreadId) => ({
       threadId: id,
@@ -62,7 +62,7 @@ function fakeThread(): {
     setThinking: async (...a: unknown[]) => rec("setThinking")(...a),
     createThread: async (projectId: ProjectId) => ({ id: `new-${projectId}` as ThreadId }),
     createChat: async () => ({ id: "chat-new" as ThreadId }),
-  };
+  } as RemoteHostThreadSlice;
   return { svc, calls };
 }
 
@@ -113,9 +113,9 @@ test("threads() maps the app snapshot onto the relay shape", () => {
   const deps = makeRemoteHostDeps(makeInput());
   const out = deps.threads();
   assert.equal(out.length, 1);
-  assert.equal(out[0].id, "t1");
-  assert.equal(out[0].projectId, "p1");
-  assert.equal(out[0].status, "idle");
+  assert.equal(out[0]!.id, "t1");
+  assert.equal(out[0]!.projectId, "p1");
+  assert.equal(out[0]!.status, "idle");
 });
 
 test("threadCwd() forwards to gitService.cwdFor", () => {
@@ -145,7 +145,7 @@ test("projects() only includes non-archived projects + their live worktrees", ()
   assert.equal(out.length, 2);
   const p1 = out.find((p) => p.id === "p1")!;
   assert.equal(p1.worktrees.length, 1);
-  assert.equal(p1.worktrees[0].id, "w1");
+  assert.equal(p1.worktrees[0]!.id, "w1");
 });
 
 test("settings() pulls piSettings + autoCompact + utilityModel from app", async () => {

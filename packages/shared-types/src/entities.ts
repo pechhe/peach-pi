@@ -17,6 +17,12 @@ export interface Project {
    *   'local' merges the worktree branch into the repo's default branch in the
    *   project's main checkout then pushes (no PR). Per-project. Defaults 'pr'. */
   mergeWorkflow: "pr" | "local";
+  /** Optional pinned model for Work Queue agent launches in this project.
+   *   null = pi picks its default. Mirrors `Automation.model`. */
+  agentModel?: AutomationModel | null;
+  /** Optional pinned reasoning/thinking level for Work Queue agent launches.
+   *   null = pi picks its default. */
+  agentThinking?: ThinkingLevel | null;
 }
 
 /** A first-class isolated git worktree owned by a project (ADR-0003 evolve).
@@ -221,19 +227,17 @@ export type MergeBatchItemResult =
       /** GitHub PR URL (pr workflow) or the default branch the branch was
        *   merged into (local workflow). */
       prUrl: string;
-      tests: "passed" | "skipped";
     }
   | {
       ok: true;
       issueNumber: number;
       /** Default branch the worktree branch was merged into (local workflow). */
       mergedTo: string;
-      tests: "passed" | "skipped";
     }
   | {
       ok: false;
       issueNumber: number;
-      phase: "rebase" | "tests" | "merge";
+      phase: "rebase" | "merge";
       error: string;
     };
 
@@ -250,7 +254,7 @@ export type MergeBatchResult =
 export interface MergeProgressPayload {
   projectId: ProjectId;
   issueNumber: number;
-  phase: "rebase" | "tests" | "merge";
+  phase: "rebase" | "merge";
   done: boolean;
   item: MergeBatchItemResult;
 }
@@ -775,7 +779,7 @@ export type GitMergePrResult =
 /** Merge a worktree's branch (--no-ff) into the local project's current branch. */
 export type GitMergeResult =
   | { ok: true; target: string; branch: string; hasRemote: boolean; warning?: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; conflict?: true; target?: string; branch?: string };
 
 /** Push the local project repo's current branch after a merge-to-local. */
 export type GitPushLocalResult =
@@ -789,10 +793,9 @@ export type GitPullResult =
 
 /** Rebase a thread's branch onto the latest default branch and run the
  *  project's tests. Used by the batch-merge flow to bring a worktree branch
- *  up to date against main before its PR is merged, so the merge is clean.
- *  `tests: "skipped"` when no test runner is detected (no package.json). */
-export type GitRebaseTestResult =
-  | { ok: true; branch: string; base: string; tests: "passed" | "skipped" }
+ *  up to date against main before it is merged, so the merge is clean. */
+export type GitRebaseResult =
+  | { ok: true; branch: string; base: string }
   | { ok: false; error: string }
 
 /** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */
@@ -1149,6 +1152,23 @@ export interface ExecDetectResult {
   slug: string;
 }
 
+/** A row from Executor's full discovery registry (~/.executor/cache/
+ *  integrations.json, ~3.5k entries). Mostly a docs/detection index: many
+ *  rows have no resolvable `url` and are browse-only. */
+export interface ExecCatalogueItem {
+  slug: string;
+  name: string;
+  description: string;
+  /** "openapi" | "mcp" | "graphql". */
+  kind: string;
+  /** Brand domain for the favicon. */
+  domain?: string;
+  /** Docs or endpoint URL (absent for many entries). */
+  url?: string;
+  /** Registry popularity score (higher = more popular). */
+  popularity: number;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BWS — Bitwarden Secrets Manager CLI
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1319,6 +1339,71 @@ export interface RecordingStopResult {
    *  forwards this to the chat thread that started the recording so the agent
    *  authors the skill inline, instead of the user asking manually. */
   synthesisPrompt: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clips — agent-readable screen-capture artifacts (Phase 1: frames + metadata)
+// ─────────────────────────────────────────────────────────────────────────────
+// Distinct from Record & Replay: that produces an executable skill; a Clip is
+// watchable, agent-readable media. The artifact (a directory: context.json +
+// frames/) mirrors agent-native Clips' /api/agent-context + /api/agent-frame
+// shape, so it is wire-compatible if ever served over HTTP. Phase 1 captures
+// frames + metadata only — no transcript (no audio capture yet).
+
+/** One timestamped keyframe in a clip. */
+export interface ClipFrame {
+  /** Milliseconds from clip start (t=0 = first event). */
+  atMs: number;
+  /** Path to the frame image, relative to the clip directory. */
+  path: string;
+  /** Why this frame was captured (click, focus, window, typing-burst…). */
+  label?: string;
+}
+
+/** A chapter marker, derived from app/window activation during capture. */
+export interface ClipChapter {
+  startMs: number;
+  title: string;
+}
+
+/** Agent-readable clip manifest. Written to `<clipDir>/context.json`. */
+export interface ClipContext {
+  id: string;
+  /** Agent-fillable title; null until generated. */
+  title: string | null;
+  /** Agent-fillable summary; null until generated. */
+  summary: string | null;
+  durationMs: number;
+  createdAt: string;
+  /** Transcript pointer. Phase 1: always "pending" with a null path. */
+  transcript: { status: "pending" | "ready" | "failed"; path: string | null };
+  chapters: ClipChapter[];
+  frames: ClipFrame[];
+}
+
+/** Live state of the clip recorder, pushed via `event:clipState`. */
+export interface ClipState {
+  status: "idle" | "recording" | "stopping" | "error";
+  /** Active clip id; null when idle. */
+  clipId: string | null;
+  /** Wall-clock ISO when capture started. */
+  startedAt: string | null;
+  /** Frames captured so far. */
+  frameCount: number;
+  /** Human-readable status/error note. */
+  message: string | null;
+  /** Directory of the finished clip once stop completes; null otherwise. */
+  clipDir: string | null;
+}
+
+/** Result of `clip:stop` — drives the post-stop UI (reveal the artifact). */
+export interface ClipStopResult {
+  clipId: string;
+  clipDir: string;
+  durationMs: number;
+  frameCount: number;
+  /** Absolute path to the written context.json. */
+  contextPath: string;
 }
 
 // ── Usage tracking ───────────────────────────────────────────────────

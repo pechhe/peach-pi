@@ -1,9 +1,10 @@
 <script lang="ts">
-  import type { Project } from "@peach-pi/shared-types";
+  import type { Project, AutomationModel, ThinkingLevel, ModelInfo } from "@peach-pi/shared-types";
   import { groupWorkQueue } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { workQueue } from "../stores/work-queue.svelte";
   import { mergeQueue } from "../stores/merge-queue.svelte";
+  import { Select } from "../components/ui/select";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Play from "@lucide/svelte/icons/play";
   import GitMerge from "@lucide/svelte/icons/git-merge";
@@ -192,9 +193,78 @@
     // The snapshot event will refresh `project` (and hence `workflow`).
   }
 
+  // ── Work Queue agent model + reasoning overrides ───────────────────
+  // Per-project pins applied to every agent launch from the Work Queue
+  // (startAgent / startAllReady / startPrdAgent / breakdownPrd). Mirrors the
+  // AutomationDialog model picker: same scoped-model list as the composer,
+  // encoded `${provider}\t${id}`, "" = pi default. Reasoning is a compact
+  // select (matching the Model select) — no live thread meta is available at
+  // the header level, so the composer's dial isn't a fit here.
+  const THINKING_OPTIONS: { value: string; label: string }[] = [
+    { value: "", label: "Default" },
+    { value: "off", label: "Off" },
+    { value: "minimal", label: "Minimal" },
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+    { value: "xhigh", label: "Max" },
+  ];
+  // The app's available model list (`app:listModels` = pi's auth-configured
+  // models, scoped by the global `enabledModels` setting). Same source the
+  // composer and the rest of the app use, so the picker stays consistent.
+  let availableModels = $state<ModelInfo[]>([]);
+  const scopedModelList = $derived(availableModels);
+  const modelItems = $derived(
+    scopedModelList.map((m) => ({
+      value: `${m.provider}\t${m.id}`,
+      label: m.name,
+      group: m.provider,
+    })),
+  );
+  const agentModelKey = $derived(
+    project?.agentModel ? `${project.agentModel.provider}\t${project.agentModel.id}` : "",
+  );
+  const agentThinking = $derived(project?.agentThinking ?? "");
+  let settingModel = $state(false);
+  let settingThinking = $state(false);
+
+  async function setAgentModel(key: string) {
+    if (!projectId || settingModel) return;
+    settingModel = true;
+    try {
+      const m = key
+        ? scopedModelList.find((x) => `${x.provider}\t${x.id}` === key) ?? null
+        : null;
+      const model: AutomationModel | null = m
+        ? { provider: m.provider, id: m.id, name: m.name }
+        : null;
+      await api.invoke("projects:setAgentModel", projectId, model);
+    } finally {
+      settingModel = false;
+    }
+  }
+
+  async function setAgentThinking(value: string) {
+    if (!projectId || settingThinking) return;
+    settingThinking = true;
+    try {
+      const level = (value || null) as ThinkingLevel | null;
+      await api.invoke("projects:setAgentThinking", projectId, level);
+    } finally {
+      settingThinking = false;
+    }
+  }
+
   // Reload whenever the viewed project changes.
   $effect(() => {
     void workQueue.load(projectId);
+  });
+
+  // Load the app's available model list (shared with the composer).
+  $effect(() => {
+    void api.invoke("app:listModels").then((models) => {
+      availableModels = models;
+    });
   });
 
   const result = $derived(workQueue.result);
@@ -299,6 +369,34 @@
           disabled={batchRunning}
           title="Merge the worktree branch into the default branch locally and push"
         >Local</button>
+      </div>
+      <div
+        class="flex items-center gap-1.5 titlebar-no-drag"
+        data-testid="agent-model-select"
+        title="Model used when launching agents from the Work Queue"
+      >
+        <span class="text-xs text-faint">Model</span>
+        <Select
+          class="w-32 gap-1 rounded-md border-border bg-transparent px-2 py-0.5 text-xs hover:bg-surface-2"
+          placeholder="Default"
+          value={agentModelKey}
+          items={[{ value: "", label: "Default" }, ...modelItems]}
+          onValueChange={setAgentModel}
+        />
+      </div>
+      <div
+        class="flex items-center gap-1.5 titlebar-no-drag"
+        data-testid="agent-thinking-select"
+        title="Reasoning level used when launching agents from the Work Queue"
+      >
+        <span class="text-xs text-faint">Reasoning</span>
+        <Select
+          class="w-24 gap-1 rounded-md border-border bg-transparent px-2 py-0.5 text-xs hover:bg-surface-2"
+          placeholder="Default"
+          value={agentThinking}
+          items={THINKING_OPTIONS}
+          onValueChange={setAgentThinking}
+        />
       </div>
       <button
         class="text-faint hover:text-fg"
@@ -479,8 +577,6 @@
                           merged ✓
                         {:else if p.phase === 'rebase'}
                           {!p.item.ok && p.item.error.includes('Rebase conflict') ? 'rebase conflict ⚠' : 'rebase stopped ⚠'}
-                        {:else if p.phase === 'tests'}
-                          tests failed ⚠
                         {:else}
                           merge failed ⚠
                         {/if}
@@ -544,7 +640,7 @@
         data-testid="merge-action-bar"
       >
         <span class="text-xs text-fg-soft">
-          {selected.length} selected · rebase → test → merge
+          {selected.length} selected · rebase → merge
           {workflow === "local" ? " locally via agent" : " on main"}
         </span>
         <button

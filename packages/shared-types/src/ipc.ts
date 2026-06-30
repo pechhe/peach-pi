@@ -30,13 +30,14 @@ import type {
   GitPrResult,
   GitMergePrResult,
   GitPushLocalResult,
-  GitRebaseTestResult,
+  GitRebaseResult,
   MergeBatchResult,
   MergeProgressPayload,
   WorkQueueOpenCountResult,
   ExecConnection,
   ExecIntegration,
   ExecDetectResult,
+  ExecCatalogueItem,
 
   McpServer,
   SubagentAgentInfo,
@@ -45,6 +46,8 @@ import type {
   ExtensionUiRequest,
   TerminalCustomFrame,
   ImagePayload,
+  ClipState,
+  ClipStopResult,
   ModelInfo,
   ScopedModel,
   AuthProviderStatus,
@@ -285,6 +288,35 @@ export const ipcContracts = {
     requireNonEmptyString(id, "projectId");
     if (workflow !== "pr" && workflow !== "local")
       throw new Error("workflow must be 'pr' or 'local'");
+  }),
+  /** Pin the model Work Queue agents use for this project. null clears the pin
+   *  (pi picks its default). Returns the updated project. */
+  "projects:setAgentModel": invoke<
+    [projectId: string, model: AutomationModel | null],
+    Project
+  >((id, model) => {
+    requireNonEmptyString(id, "projectId");
+    if (model != null) {
+      if (typeof model.provider !== "string" || model.provider.length === 0)
+        throw new Error("model.provider must be a non-empty string");
+      if (typeof model.id !== "string" || model.id.length === 0)
+        throw new Error("model.id must be a non-empty string");
+      if (typeof model.name !== "string")
+        throw new Error("model.name must be a string");
+    }
+  }),
+  /** Pin the reasoning/thinking level Work Queue agents use for this project.
+   *  null clears the pin (pi picks its default). Returns the updated project. */
+  "projects:setAgentThinking": invoke<
+    [projectId: string, level: ThinkingLevel | null],
+    Project
+  >((id, level) => {
+    requireNonEmptyString(id, "projectId");
+    if (
+      level != null &&
+      !["off", "minimal", "low", "medium", "high", "xhigh"].includes(level)
+    )
+      throw new Error("level must be a valid ThinkingLevel or null");
   }),
 
   // worktrees
@@ -556,7 +588,7 @@ export const ipcContracts = {
   /** Rebase a thread's branch onto the latest default branch and run tests.
    *  Used by the batch-merge flow to bring a worktree branch up to date against
    *  main in its own isolated cwd before its PR is merged. */
-  "git:rebaseAndTest": invoke<[threadId: ThreadId], GitRebaseTestResult>((id) =>
+  "git:rebaseOntoDefault": invoke<[threadId: ThreadId], GitRebaseResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
 
@@ -736,6 +768,9 @@ export const ipcContracts = {
   "executor:detect": invoke<[url: string], ExecDetectResult[]>((u) =>
     requireNonEmptyString(u, "url"),
   ),
+  /** The full discovery registry (~3.5k rows) for browse/search. Mostly a
+   *  docs index — not all rows are installable. */
+  "executor:catalogue": invoke<[], ExecCatalogueItem[]>(),
   /** Open Executor's signed-in "add integration" web page for a plugin,
    *  optionally pre-targeting a curated preset or detected URL. The catalogue
    *  + credential entry happen there; no secret reaches peach-pi. */
@@ -827,6 +862,25 @@ export const ipcContracts = {
   "recording:revealSkill": invoke<[skillPath: string], void>((p) =>
     requireNonEmptyString(p, "skillPath"),
   ),
+
+  // clips (agent-readable screen capture → frames + metadata artifact)
+  /** Begin a clip capture. `threadId` (optional) ties it to a chat so the
+   *  finished frames + metadata are attached there on stop. */
+  "clip:start": invoke<[threadId?: string], ClipState>(),
+  /** Stop capture + project into an agent-readable clip dir (context.json +
+   *  frames/). Discards the raw capture once projected. */
+  "clip:stop": invoke<[], ClipStopResult>(),
+  /** Stop + discard ALL captured data. Nothing persists. */
+  "clip:cancel": invoke<[], ClipState>(),
+  /** Current clip-recorder state (for initial renderer load). */
+  "clip:status": invoke<[], ClipState>(),
+  /** Attach a finished clip's frames (as images) + metadata into a thread so
+   *  the agent can "see" the workflow. */
+  "clip:attachToThread": invoke<[clipId: string, threadId: ThreadId], void>((id) =>
+    requireNonEmptyString(id, "clipId"),
+  ),
+  /** Reveal the clip directory in Finder. */
+  "clip:reveal": invoke<[clipDir: string], void>((p) => requireNonEmptyString(p, "clipDir")),
 
   // remote session hosting (ADR-0009). Two roles, same app:
   //   - master serves its running session over the tailnet + checkpoints
@@ -1014,6 +1068,7 @@ export const ipcContracts = {
   "event:terminalCustom": event<TerminalCustomFrame>(),
   /** Recorder state changed (start/stop/cancel/error/event-count tick). */
   "event:recordingState": event<RecordingState>(),
+  "event:clipState": event<ClipState>(),
   /** bws auth/project/secret state changed — renderer re-reads status/secrets. */
   "event:bwsChanged": event<void>(),
   /** A CLI's install/auth state changed (probe/login) — renderer re-reads via cli:list. */
