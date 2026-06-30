@@ -17,6 +17,12 @@ export interface Project {
    *   'local' merges the worktree branch into the repo's default branch in the
    *   project's main checkout then pushes (no PR). Per-project. Defaults 'pr'. */
   mergeWorkflow: "pr" | "local";
+  /** Optional pinned model for Work Queue agent launches in this project.
+   *   null = pi picks its default. Mirrors `Automation.model`. */
+  agentModel?: AutomationModel | null;
+  /** Optional pinned reasoning/thinking level for Work Queue agent launches.
+   *   null = pi picks its default. */
+  agentThinking?: ThinkingLevel | null;
 }
 
 /** A first-class isolated git worktree owned by a project (ADR-0003 evolve).
@@ -1147,6 +1153,23 @@ export interface ExecDetectResult {
   endpoint: string;
   name: string;
   slug: string;
+}
+
+/** A row from Executor's full discovery registry (~/.executor/cache/
+ *  integrations.json, ~3.5k entries). Mostly a docs/detection index: many
+ *  rows have no resolvable `url` and are browse-only. */
+export interface ExecCatalogueItem {
+  slug: string;
+  name: string;
+  description: string;
+  /** "openapi" | "mcp" | "graphql". */
+  kind: string;
+  /** Brand domain for the favicon. */
+  domain?: string;
+  /** Docs or endpoint URL (absent for many entries). */
+  url?: string;
+  /** Registry popularity score (higher = more popular). */
+  popularity: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
