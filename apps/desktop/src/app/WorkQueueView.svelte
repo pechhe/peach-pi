@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Project, AutomationModel, ThinkingLevel, ModelInfo } from "@peach-pi/shared-types";
+  import type { Project, AutomationModel, ThinkingLevel, ScopedModel } from "@peach-pi/shared-types";
   import { groupWorkQueue } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { workQueue } from "../stores/work-queue.svelte";
@@ -209,11 +209,12 @@
     { value: "high", label: "High" },
     { value: "xhigh", label: "Max" },
   ];
-  // The app's available model list (`app:listModels` = pi's auth-configured
-  // models, scoped by the global `enabledModels` setting). Same source the
-  // composer and the rest of the app use, so the picker stays consistent.
-  let availableModels = $state<ModelInfo[]>([]);
-  const scopedModelList = $derived(availableModels);
+  // Scoped models read from THIS project's settings.json (project scope
+  // overrides global) so the list matches pi's TUI `/model scope` and the
+  // composer's thread-bound list. The global scopedModels store reads
+  // process.cwd() and would show every model.
+  let projectScopedModels = $state<ScopedModel[]>([]);
+  const scopedModelList = $derived(projectScopedModels.filter((m) => m.scoped));
   const modelItems = $derived(
     scopedModelList.map((m) => ({
       value: `${m.provider}\t${m.id}`,
@@ -260,10 +261,15 @@
     void workQueue.load(projectId);
   });
 
-  // Load the app's available model list (shared with the composer).
+  // Load the project-scoped model list whenever the viewed project changes.
   $effect(() => {
-    void api.invoke("app:listModels").then((models) => {
-      availableModels = models;
+    const id = projectId;
+    if (!id) {
+      projectScopedModels = [];
+      return;
+    }
+    void api.invoke("app:listScopedModelsForProject", id).then((models) => {
+      if (projectId === id) projectScopedModels = models;
     });
   });
 
@@ -577,6 +583,8 @@
                           merged ✓
                         {:else if p.phase === 'rebase'}
                           {!p.item.ok && p.item.error.includes('Rebase conflict') ? 'rebase conflict ⚠' : 'rebase stopped ⚠'}
+                        {:else if p.phase === 'tests'}
+                          tests failed ⚠
                         {:else}
                           merge failed ⚠
                         {/if}
@@ -640,7 +648,7 @@
         data-testid="merge-action-bar"
       >
         <span class="text-xs text-fg-soft">
-          {selected.length} selected · rebase → merge
+          {selected.length} selected · rebase → test → merge
           {workflow === "local" ? " locally via agent" : " on main"}
         </span>
         <button

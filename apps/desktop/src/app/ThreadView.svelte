@@ -350,13 +350,6 @@
     return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
   }
 
-  /** USD cost with precision scaled to magnitude (sub-cent turns are common). */
-  function fmtCost(usd: number): string {
-    if (usd >= 1) return `$${usd.toFixed(2)}`;
-    if (usd >= 0.01) return `$${usd.toFixed(3)}`;
-    return `$${usd.toFixed(4)}`;
-  }
-
   function itemText(it: unknown): string {
     const i = it as Record<string, unknown>;
     return [i.text, i.thinking, i.output, i.summary, i.argsSummary]
@@ -496,23 +489,6 @@
   let didInitialScroll = $state(false);
 
   const items = $derived(transcripts.itemsFor(thread.id));
-  // Running session totals: sum every assistant turn's tokens + cost. Cost is
-  // only summed for turns whose model had known pricing (costUsd present).
-  const sessionUsage = $derived.by(() => {
-    let tokens = 0;
-    let cost = 0;
-    let hasCost = false;
-    for (const it of items) {
-      if (it.kind === "assistant" && it.usage) {
-        tokens += it.usage.totalTokens;
-        if (it.usage.costUsd != null) {
-          cost += it.usage.costUsd;
-          hasCost = true;
-        }
-      }
-    }
-    return { tokens, cost, hasCost };
-  });
   // The composer centres (and the transcript hides) until the first message.
   // Two conditions, both required, so resumed threads never centre:
   //  - transcript backfill has completed (hasLoaded) → not still [] because
@@ -963,16 +939,6 @@
         Copied!
       </span>
     {/if}
-    {#if sessionUsage.tokens > 0}
-      <span
-        class="shrink-0 rounded-full border border-border-strong bg-surface px-2 py-0.5 text-[10px] text-muted"
-        style="font-variant-numeric: tabular-nums"
-        data-testid="session-usage"
-        title={`${fmtTokens(sessionUsage.tokens)} tokens this session${sessionUsage.hasCost ? ` · ${fmtCost(sessionUsage.cost)} estimated equivalent API cost` : ""}`}
-      >
-        Σ {fmtTokens(sessionUsage.tokens)} tok{#if sessionUsage.hasCost} · {fmtCost(sessionUsage.cost)}{/if}
-      </span>
-    {/if}
     {#each extensionUi.statusesFor(thread.id) as status (status)}
       <span class="shrink-0 rounded-full border border-border-strong bg-surface px-2 py-0.5 text-[10px] text-muted">
         {status}
@@ -1245,19 +1211,6 @@
                   </button>
                 {/if}
               </div>
-              {#if item.usage}
-                {@const u = item.usage}
-                <div
-                  class="assistant-usage"
-                  data-testid="assistant-usage"
-                  title={`${u.input} in · ${u.output} out${u.cacheRead ? ` · ${u.cacheRead} cache read` : ""}${u.cacheWrite ? ` · ${u.cacheWrite} cache write` : ""} tokens${u.costUsd != null ? ` · ${fmtCost(u.costUsd)} estimated equivalent API cost` : ""}`}
-                >
-                  <span>{fmtTokens(u.totalTokens)} tok</span>
-                  {#if u.tokensPerSec}<span>· {u.tokensPerSec.toFixed(1)} tok/s</span>{/if}
-                  {#if u.ttftMs != null}<span>· {(u.ttftMs / 1000).toFixed(2)}s to first</span>{/if}
-                  {#if u.costUsd != null}<span>· {fmtCost(u.costUsd)}</span>{/if}
-                </div>
-              {/if}
             {/if}
           </div>
         {:else if item.kind === "tool"}

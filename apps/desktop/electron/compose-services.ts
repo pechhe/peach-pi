@@ -20,7 +20,6 @@ import { PiUpdateService } from "./services/pi-update-service.ts";
 import { AutoUpdateService, initMainSentry } from "./services/telemetry-service.ts";
 import { setDevTapStateProvider } from "@devtap/electron";
 import { RecordingService } from "./services/recording-service.ts";
-import { ClipService } from "./services/clip-service.ts";
 import { BwsService } from "./services/bws-service.ts";
 import { CliService } from "./services/cli-service.ts";
 import { McpService } from "./services/mcp-service.ts";
@@ -54,7 +53,6 @@ export interface ServiceComposition {
   automationService: AutomationService;
   terminalService: TerminalService;
   recordingService: RecordingService;
-  clipService: ClipService;
   gitService: GitService;
   handoffService: ReturnType<typeof createHandoffService>;
   remoteHost: RemoteHostService;
@@ -174,10 +172,6 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const recordingService = new RecordingService(emit);
   recordingService.setPrompter((threadId, text) =>
     threadService.prompt(threadId, text, [], "all"),
-  );
-  const clipService = new ClipService(emit);
-  clipService.setSender((threadId, text, images) =>
-    threadService.prompt(threadId, text, images, "all"),
   );
   const gitService = new GitService(
     db,
@@ -348,7 +342,6 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     automationService,
     terminalService,
     recordingService,
-    clipService,
     gitService,
     handoffService,
     remoteHost,

@@ -1,5 +1,4 @@
 import type {
-  AssistantUsage,
   SubagentRow,
   SubagentStatus,
   TranscriptItem,
@@ -26,77 +25,6 @@ interface MessageLike {
   // avoid a redundant generic tool row showing the steer preamble.
   toolName?: string;
   toolCallId?: string;
-  // Assistant messages carry provider-reported token usage + cost. Present on
-  // `message_end` and on persisted messages read back during reload.
-  usage?: {
-    input?: number;
-    output?: number;
-    cacheRead?: number;
-    cacheWrite?: number;
-    totalTokens?: number;
-    cost?: { total?: number };
-  };
-}
-
-/** Accumulates token usage + generation time across every assistant message in
- *  one agent turn (a user prompt → the agent finishing all its work, possibly
- *  several LLM calls interleaved with tool calls). The turn's stats render once,
- *  on the final answer, not on every intermediate call. */
-interface TurnUsageAccum {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  totalTokens: number;
-  cost: number;
-  hasCost: boolean;
-  /** Summed generation windows (first-token → message end) per call, excluding
-   *  tool-execution gaps, so tokens/sec reflects model throughput not wall clock. */
-  genMs: number;
-}
-
-function makeAccum(): TurnUsageAccum {
-  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: 0, hasCost: false, genMs: 0 };
-}
-
-/** Fold one assistant message's provider usage into the turn accumulator.
- *  `genMs` is that call's generation window (0 when unknown, e.g. on reload). */
-function addUsage(acc: TurnUsageAccum, m: MessageLike, genMs: number): void {
-  const u = m.usage;
-  if (!u) return;
-  const input = u.input ?? 0;
-  const output = u.output ?? 0;
-  const cacheRead = u.cacheRead ?? 0;
-  const cacheWrite = u.cacheWrite ?? 0;
-  acc.input += input;
-  acc.output += output;
-  acc.cacheRead += cacheRead;
-  acc.cacheWrite += cacheWrite;
-  acc.totalTokens += u.totalTokens ?? input + output + cacheRead + cacheWrite;
-  const c = u.cost?.total;
-  if (typeof c === "number" && c > 0) {
-    acc.cost += c;
-    acc.hasCost = true;
-  }
-  if (genMs > 0) acc.genMs += genMs;
-}
-
-/** Materialise the accumulator into the renderer-facing usage record. `ttftMs`
- *  is the turn's time-to-first-token (null on reload, where timing isn't
- *  persisted). Returns undefined for an empty turn so no zeroed footer flashes. */
-function accumToUsage(acc: TurnUsageAccum, ttftMs: number | null): AssistantUsage | undefined {
-  if (acc.totalTokens === 0 && !acc.hasCost) return undefined;
-  const usage: AssistantUsage = {
-    input: acc.input,
-    output: acc.output,
-    cacheRead: acc.cacheRead,
-    cacheWrite: acc.cacheWrite,
-    totalTokens: acc.totalTokens,
-  };
-  if (acc.hasCost) usage.costUsd = acc.cost;
-  if (ttftMs != null && ttftMs >= 0) usage.ttftMs = ttftMs;
-  if (acc.genMs > 0 && acc.output > 0) usage.tokensPerSec = acc.output / (acc.genMs / 1000);
-  return usage;
 }
 
 /** Structural subset of pi's `SessionEntry` read by `loadFromEntries`. The
@@ -336,16 +264,6 @@ export class TranscriptRecorder {
   private items: TranscriptItem[] = [];
   private seq = 0;
   private activeAssistantId: string | null = null;
-  /** Per-agent-turn usage state. `turnStartedAt` is set at agent_start;
-   *  `turnFirstTokenAt` is the first token of the whole turn (for TTFT);
-   *  `msgFirstTokenAt` is the first token of the in-flight call (for that
-   *  call's generation window). The turn's totals fold into `turnAccum` at each
-   *  message_end and render once on the final answer at agent_end. */
-  private turnStartedAt: number | null = null;
-  private turnFirstTokenAt: number | null = null;
-  private msgFirstTokenAt: number | null = null;
-  private turnAccum: TurnUsageAccum = makeAccum();
-  private lastAssistantId: string | null = null;
   /** FIFO of in-flight compaction card ids. Multiple compactions can overlap
    *  (app auto-compact, extension smart-compact, SDK builtin); a queue keeps
    *  every start→end pair closing the correct card so none orphan-spins. */
@@ -393,25 +311,13 @@ export class TranscriptRecorder {
   load(messages: MessageLike[]): TranscriptOp[] {
     this.items = [];
     this.seq = 0;
-    this.resetTurnState();
+    this.activeAssistantId = null;
     this.activeCompactionIds = [];
     this.retryId = null;
-    let acc = makeAccum();
-    let lastAssistant: TranscriptItem | undefined;
     for (const m of messages) {
       const item = this.messageToItem(m, false);
-      if (!item) continue;
-      this.upsert(item);
-      if (item.kind === "user") {
-        this.flushReloadTurn(acc, lastAssistant);
-        acc = makeAccum();
-        lastAssistant = undefined;
-      } else if (item.kind === "assistant") {
-        addUsage(acc, m, 0);
-        lastAssistant = item;
-      }
+      if (item) this.upsert(item);
     }
-    this.flushReloadTurn(acc, lastAssistant);
     return [{ op: "reset", items: this.items }];
   }
 
@@ -423,25 +329,13 @@ export class TranscriptRecorder {
   loadFromEntries(entries: BranchEntryLike[]): TranscriptOp[] {
     this.items = [];
     this.seq = 0;
-    this.resetTurnState();
+    this.activeAssistantId = null;
     this.activeCompactionIds = [];
     this.retryId = null;
-    let acc = makeAccum();
-    let lastAssistant: TranscriptItem | undefined;
     for (const entry of entries) {
       const item = this.entryToItem(entry);
-      if (!item) continue;
-      this.upsert(item);
-      if (item.kind === "user") {
-        this.flushReloadTurn(acc, lastAssistant);
-        acc = makeAccum();
-        lastAssistant = undefined;
-      } else if (item.kind === "assistant") {
-        if (entry.message) addUsage(acc, entry.message, 0);
-        lastAssistant = item;
-      }
+      if (item) this.upsert(item);
     }
-    this.flushReloadTurn(acc, lastAssistant);
     return [{ op: "reset", items: this.items }];
   }
 
@@ -479,33 +373,6 @@ export class TranscriptRecorder {
 
   handleEvent(event: RecorderEvent): TranscriptOp[] {
     switch (event.type) {
-      case "agent_start": {
-        // A new agent turn: a user prompt the agent will work until done.
-        // Start a fresh usage accumulator + TTFT clock.
-        this.turnStartedAt = Date.now();
-        this.turnFirstTokenAt = null;
-        this.msgFirstTokenAt = null;
-        this.turnAccum = makeAccum();
-        this.lastAssistantId = null;
-        return [];
-      }
-      case "agent_end": {
-        // Turn finished. Attach the aggregated usage to the final answer.
-        const id = this.lastAssistantId;
-        const ttft =
-          this.turnStartedAt != null && this.turnFirstTokenAt != null
-            ? this.turnFirstTokenAt - this.turnStartedAt
-            : null;
-        const usage = accumToUsage(this.turnAccum, ttft);
-        this.turnAccum = makeAccum();
-        this.turnStartedAt = null;
-        this.turnFirstTokenAt = null;
-        this.lastAssistantId = null;
-        if (!id || !usage) return [];
-        const prev = this.items.find((i) => i.id === id);
-        if (!prev || prev.kind !== "assistant") return [];
-        return [this.upsertOp({ ...prev, usage })];
-      }
       case "message_start": {
         if (!event.message) return [];
         // Extensions inject context (e.g. pi-subagents' agent roster) as
@@ -524,23 +391,13 @@ export class TranscriptRecorder {
         // Prompts serialise (isStreaming queues followUp), so at most one
         // placeholder is outstanding when a user message_start arrives.
         if (item.kind === "user") ops.push(...this.dropPendingPlaceholders());
-        if (item.kind === "assistant") {
-          this.activeAssistantId = item.id;
-          this.msgFirstTokenAt = null;
-          // Defensive: anchor the TTFT clock if no agent_start preceded.
-          if (this.turnStartedAt == null) this.turnStartedAt = Date.now();
-        }
+        if (item.kind === "assistant") this.activeAssistantId = item.id;
         ops.push(this.upsertOp(item));
         return ops;
       }
       case "message_update": {
         const id = this.activeAssistantId;
         if (!id) return [];
-        // First token (text or thinking) of this call ends the generation
-        // window's start, and of the whole turn ends the TTFT window.
-        const now = Date.now();
-        if (this.msgFirstTokenAt === null) this.msgFirstTokenAt = now;
-        if (this.turnFirstTokenAt === null) this.turnFirstTokenAt = now;
         // Prefer the authoritative accumulated message over raw deltas. On a
         // provider stream retry the SDK resets `partial` and re-streams the
         // same content from scratch, so blindly appending `delta` duplicates
@@ -558,13 +415,7 @@ export class TranscriptRecorder {
         const role = event.message.role;
         if (role !== "assistant") return [];
         const id = this.activeAssistantId ?? this.nextId("a");
-        // Fold this call into the turn total; the footer is attached later, on
-        // the turn's final answer at agent_end (not per intermediate call).
-        const genMs = this.msgFirstTokenAt != null ? Date.now() - this.msgFirstTokenAt : 0;
-        addUsage(this.turnAccum, event.message, genMs);
-        this.lastAssistantId = id;
         this.activeAssistantId = null;
-        this.msgFirstTokenAt = null;
         const stopReason = event.message.stopReason;
         const item: TranscriptItem = {
           id,
@@ -790,9 +641,6 @@ export class TranscriptRecorder {
       };
     }
     if (m.role === "assistant") {
-      // Per-message usage is intentionally not attached here: the turn's totals
-      // are aggregated and attached once, to the turn's final answer (live at
-      // agent_end, on reload in load/loadFromEntries via flushReloadTurn).
       return {
         id,
         kind: "assistant",
@@ -813,25 +661,6 @@ export class TranscriptRecorder {
       };
     }
     return { id, kind: "notice", text: blocksToText(m.content, "text") };
-  }
-
-  /** Clear all per-turn usage/timing state (start-of-turn or reload reset). */
-  private resetTurnState(): void {
-    this.activeAssistantId = null;
-    this.turnStartedAt = null;
-    this.turnFirstTokenAt = null;
-    this.msgFirstTokenAt = null;
-    this.turnAccum = makeAccum();
-    this.lastAssistantId = null;
-  }
-
-  /** Reload-path turn flush: attach the accumulated turn usage (tokens + cost
-   *  only; timings aren't persisted) onto the turn's last assistant item, which
-   *  is the same object held in `this.items`, so mutating it updates the view. */
-  private flushReloadTurn(acc: TurnUsageAccum, lastAssistant: TranscriptItem | undefined): void {
-    if (!lastAssistant || lastAssistant.kind !== "assistant") return;
-    const usage = accumToUsage(acc, null);
-    if (usage) (lastAssistant as { usage?: AssistantUsage }).usage = usage;
   }
 
   /** Reconcile the active assistant item against the authoritative message. */

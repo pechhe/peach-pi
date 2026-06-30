@@ -44,6 +44,7 @@ declare module '$env/static/private' {
 	export const VITE_CJS_IGNORE_WARNING: string;
 	export const DEEPSEEK_API_KEY: string;
 	export const TERM_PROGRAM: string;
+	export const npm_config_reporter: string;
 	export const NODE: string;
 	export const TELNYX_API_KEY: string;
 	export const INIT_CWD: string;
@@ -198,6 +199,7 @@ declare module '$env/dynamic/private' {
 		VITE_CJS_IGNORE_WARNING: string;
 		DEEPSEEK_API_KEY: string;
 		TERM_PROGRAM: string;
+		npm_config_reporter: string;
 		NODE: string;
 		TELNYX_API_KEY: string;
 		INIT_CWD: string;

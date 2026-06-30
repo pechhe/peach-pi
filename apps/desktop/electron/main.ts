@@ -72,10 +72,6 @@ async function boot(): Promise<void> {
   const tray = new Tray(trayIcon.isEmpty() ? nativeImage.createEmpty() : trayIcon);
   tray.setTitle("REC");
   svc.recordingService.attachTray(tray);
-  // Clip capture shares the recorder tray: contribute its menu items and ask
-  // the tray to rebuild whenever clip state changes.
-  svc.recordingService.setMenuExtras(() => svc.clipService.trayItems());
-  svc.clipService.setTrayRefresh(() => svc.recordingService.requestTrayRefresh());
 
   app.on("second-instance", () => {
     const [win] = BrowserWindow.getAllWindows();
@@ -102,7 +98,6 @@ async function boot(): Promise<void> {
     svc.piUpdateService.stop();
     svc.terminalService.dispose();
     svc.recordingService.dispose();
-    svc.clipService.dispose();
     tray?.destroy();
     void svc.bwsResolver.stop();
     svc.threadService.dispose();

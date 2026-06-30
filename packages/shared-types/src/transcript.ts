@@ -57,23 +57,6 @@ export interface SubagentStep {
   at: string;
 }
 
-/** Token usage + speed for one assistant turn. Tokens/cost come from the
- *  provider (persisted in the session file); ttft/tokensPerSec are runtime
- *  timings measured by the recorder and are absent on reloaded threads. */
-export interface AssistantUsage {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  totalTokens: number;
-  /** Total cost in USD, when the model's pricing is known. */
-  costUsd?: number;
-  /** Time to first token, in milliseconds (runtime only). */
-  ttftMs?: number;
-  /** Output tokens per second over the generation phase (runtime only). */
-  tokensPerSec?: number;
-}
-
 export type TranscriptItem =
   | { id: string; kind: "user"; text: string; images?: ImagePayload[] }
   | {
@@ -83,7 +66,6 @@ export type TranscriptItem =
       thinking: string;
       streaming: boolean;
       error?: string;
-      usage?: AssistantUsage;
     }
   | {
       id: string;

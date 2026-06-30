@@ -32,7 +32,6 @@
   import AutomationsView from "./AutomationsView.svelte";
   import PlayroomView from "./PlayroomView.svelte";
   import RecordingBar from "./RecordingBar.svelte";
-  import ClipBar from "./ClipBar.svelte";
   import ConnectorsView from "./ConnectorsView.svelte";
   import BwsView from "./BwsView.svelte";
   import TestingView from "./TestingView.svelte";
@@ -614,7 +613,6 @@
     {/if}
     </div>
     <RecordingBar />
-    <ClipBar />
     <SidePanel threadId={selectedThreadId} />
     <SearchOverlay
       open={searchOpen}

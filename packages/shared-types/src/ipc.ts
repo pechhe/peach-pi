@@ -30,7 +30,7 @@ import type {
   GitPrResult,
   GitMergePrResult,
   GitPushLocalResult,
-  GitRebaseResult,
+  GitRebaseTestResult,
   MergeBatchResult,
   MergeProgressPayload,
   WorkQueueOpenCountResult,
@@ -46,8 +46,6 @@ import type {
   ExtensionUiRequest,
   TerminalCustomFrame,
   ImagePayload,
-  ClipState,
-  ClipStopResult,
   ModelInfo,
   ScopedModel,
   AuthProviderStatus,
@@ -147,6 +145,12 @@ export const ipcContracts = {
   "app:listModels": invoke<[], ModelInfo[]>(),
   /** All auth-configured models paired with their scope membership (settings.json enabledModels). */
   "app:listScopedModels": invoke<[], ScopedModel[]>(),
+  /** Scoped models read from a specific project's settings.json (project scope
+   *  overrides global). Use this for project-bound pickers (Work Queue,
+   *  automations) so they match the composer's thread-bound list. */
+  "app:listScopedModelsForProject": invoke<[projectId: ProjectId], ScopedModel[]>((id) =>
+    requireNonEmptyString(id, "projectId"),
+  ),
   /** Toggle a model's membership in the global enabledModels scope; returns the updated list. */
   "app:setModelScoped": invoke<[provider: string, modelId: string, scoped: boolean], ScopedModel[]>(),
   /** Read the configured "utility" model for background LLM tasks (titles/commits). */
@@ -588,7 +592,7 @@ export const ipcContracts = {
   /** Rebase a thread's branch onto the latest default branch and run tests.
    *  Used by the batch-merge flow to bring a worktree branch up to date against
    *  main in its own isolated cwd before its PR is merged. */
-  "git:rebaseOntoDefault": invoke<[threadId: ThreadId], GitRebaseResult>((id) =>
+  "git:rebaseAndTest": invoke<[threadId: ThreadId], GitRebaseTestResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
 
@@ -863,25 +867,6 @@ export const ipcContracts = {
     requireNonEmptyString(p, "skillPath"),
   ),
 
-  // clips (agent-readable screen capture → frames + metadata artifact)
-  /** Begin a clip capture. `threadId` (optional) ties it to a chat so the
-   *  finished frames + metadata are attached there on stop. */
-  "clip:start": invoke<[threadId?: string], ClipState>(),
-  /** Stop capture + project into an agent-readable clip dir (context.json +
-   *  frames/). Discards the raw capture once projected. */
-  "clip:stop": invoke<[], ClipStopResult>(),
-  /** Stop + discard ALL captured data. Nothing persists. */
-  "clip:cancel": invoke<[], ClipState>(),
-  /** Current clip-recorder state (for initial renderer load). */
-  "clip:status": invoke<[], ClipState>(),
-  /** Attach a finished clip's frames (as images) + metadata into a thread so
-   *  the agent can "see" the workflow. */
-  "clip:attachToThread": invoke<[clipId: string, threadId: ThreadId], void>((id) =>
-    requireNonEmptyString(id, "clipId"),
-  ),
-  /** Reveal the clip directory in Finder. */
-  "clip:reveal": invoke<[clipDir: string], void>((p) => requireNonEmptyString(p, "clipDir")),
-
   // remote session hosting (ADR-0009). Two roles, same app:
   //   - master serves its running session over the tailnet + checkpoints
   //     working trees to disposable `wip/<threadId>` branches.
@@ -1068,7 +1053,6 @@ export const ipcContracts = {
   "event:terminalCustom": event<TerminalCustomFrame>(),
   /** Recorder state changed (start/stop/cancel/error/event-count tick). */
   "event:recordingState": event<RecordingState>(),
-  "event:clipState": event<ClipState>(),
   /** bws auth/project/secret state changed — renderer re-reads status/secrets. */
   "event:bwsChanged": event<void>(),
   /** A CLI's install/auth state changed (probe/login) — renderer re-reads via cli:list. */
