@@ -1,65 +1,111 @@
-import type {
-  AppSnapshot,
-  SnapshotCollectionPatch,
-  SnapshotPatch,
-} from "@peach-pi/shared-types";
+import type { AppSnapshot, Thread } from "@peach-pi/shared-types";
 import { api } from "../lib/ipc";
 
-/** Read model of main-process state. Renderer never mutates it directly.
- *
- *  Identity is owned at the source: the main process diffs against what it
- *  last emitted and sends only changed entities on `event:snapshotPatch`, so
- *  unchanged refs survive by construction. The renderer never reconstructs
- *  identity field-by-field — the old `reconcile()` / `shallowEqualThread`
- *  compensator is gone. */
+/** Read model of main-process state. Renderer never mutates it directly. */
 class SnapshotStore {
   current = $state<AppSnapshot | null>(null);
 
+  /** Last-seen top-level arrays/objects keyed by id (where stable). When a
+   *  fresh snapshot arrives, entries that are shallow-equal to the cached ref
+   *  reuse the *existing* ref so Svelte's keyed `{#each}` and `$derived`
+   *  comparisons skip reconciliation. The main process emits a full snapshot
+   *  on every status flip; without this, every Thread object gets a new ref
+   *  even when unchanged → sidebar rows + `selectedThread` churn on each
+   *  transition. With it, only actually-changed threads invalidate. */
+  private threadCache = new Map<string, Thread>();
+  private prevThreads: Thread[] = [];
+  private prevProjects: AppSnapshot["projects"] = [];
+  private prevWorktrees: AppSnapshot["worktrees"] = [];
+  private prevAutomations: AppSnapshot["automations"] = [];
+  private prevUi: AppSnapshot["ui"] | null = null;
+
   async init(): Promise<void> {
     this.current = await api.invoke("app:getSnapshot");
-    api.on("event:snapshotPatch", (patch) => this.applyPatch(patch));
+    this.cacheCurrent();
+    api.on("event:snapshot", (snapshot) => {
+      this.current = this.reconcile(snapshot);
+    });
   }
 
-  /** Merge an entity-scoped patch over `current`. Each touched collection is
-   *  rebuilt reusing existing refs for unchanged entities (main already
-   *  guaranteed they weren't in `upserts`); `ui` is a field merge. */
-  private applyPatch(patch: SnapshotPatch): void {
-    const prev = this.current;
-    if (!prev) return;
-    const next: AppSnapshot = { ...prev };
-    if (patch.threads) next.threads = applyCollection(prev.threads, patch.threads);
-    if (patch.projects) next.projects = applyCollection(prev.projects, patch.projects);
-    if (patch.worktrees) next.worktrees = applyCollection(prev.worktrees, patch.worktrees);
-    if (patch.automations) next.automations = applyCollection(prev.automations, patch.automations);
-    if (patch.ui) next.ui = { ...prev.ui, ...patch.ui };
-    this.current = next;
+  private cacheCurrent(): void {
+    if (!this.current) return;
+    for (const t of this.current.threads) this.threadCache.set(t.id, t);
+    this.prevThreads = this.current.threads;
+    this.prevProjects = this.current.projects;
+    this.prevWorktrees = this.current.worktrees;
+    this.prevAutomations = this.current.automations;
+    this.prevUi = this.current.ui;
+  }
+
+  /** Reuse existing refs for unchanged entries so downstream reactivity
+   *  invalidates only for entries that actually changed. Returns a snapshot
+   *  with stable identity for unchanged threads/projects/etc. */
+  private reconcile(next: AppSnapshot): AppSnapshot {
+    const threads: Thread[] = [];
+    const seen = new Set<string>();
+    for (const t of next.threads) {
+      seen.add(t.id);
+      const prev = this.threadCache.get(t.id);
+      if (prev && shallowEqualThread(prev, t)) {
+        threads.push(prev);
+      } else {
+        this.threadCache.set(t.id, t);
+        threads.push(t);
+      }
+    }
+    // Drop cached entries for threads no longer present (archived/deleted).
+    for (const id of this.threadCache.keys()) {
+      if (!seen.has(id)) this.threadCache.delete(id);
+    }
+    this.prevThreads = threads;
+    this.prevProjects = shallowEqual(this.prevProjects, next.projects) ? this.prevProjects : next.projects;
+    this.prevWorktrees = shallowEqual(this.prevWorktrees, next.worktrees) ? this.prevWorktrees : next.worktrees;
+    this.prevAutomations = shallowEqual(this.prevAutomations, next.automations) ? this.prevAutomations : next.automations;
+    this.prevUi = this.prevUi && shallowEqual(this.prevUi, next.ui) ? this.prevUi : next.ui;
+    return {
+      ...next,
+      threads,
+      projects: this.prevProjects,
+      worktrees: this.prevWorktrees,
+      automations: this.prevAutomations,
+      ui: this.prevUi ?? next.ui,
+    };
   }
 }
 
 export const snapshot = new SnapshotStore();
 
-/** Apply a collection patch: when `order` is present it is the authoritative
- *  new id sequence (a missing id was removed); otherwise upserts replace
- *  in-place preserving order. */
-function applyCollection<T extends { id: string }>(
-  prev: T[],
-  patch: SnapshotCollectionPatch<T>,
-): T[] {
-  if (patch.order) {
-    const byId = new Map(prev.map((e) => [e.id, e]));
-    if (patch.upserts) {
-      for (const [id, v] of Object.entries(patch.upserts)) byId.set(id, v);
-    }
-    const out: T[] = [];
-    for (const id of patch.order) {
-      const e = byId.get(id);
-      if (e) out.push(e);
-    }
-    return out;
+/** Shallow equal over arrays/primitives (used for projects/worktrees/ui which
+ *  are comparatively small and change rarely). Threads get a dedicated
+ *  comparator since they change most often and drive most invalidation. */
+function shallowEqual<T>(a: T, b: T): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
   }
-  if (patch.upserts) {
-    const up = patch.upserts;
-    return prev.map((e) => up[e.id] ?? e);
+  if (typeof a === "object" && typeof b === "object" && a && b) {
+    const ka = Object.keys(a as Record<string, unknown>);
+    const kb = Object.keys(b as Record<string, unknown>);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) {
+      if ((a as Record<string, unknown>)[k] !== (b as Record<string, unknown>)[k]) return false;
+    }
+    return true;
   }
-  return prev;
+  return false;
+}
+
+/** Shallow field-by-field comparison for Thread. Reusing the ref when nothing
+ *  changed is what stops the sidebar row + `selectedThread.find()` from
+ *  re-invalidating on every full-snapshot emission. */
+function shallowEqualThread(a: Thread, b: Thread): boolean {
+  if (a === b) return true;
+  const ra = a as unknown as Record<string, unknown>;
+  const rb = b as unknown as Record<string, unknown>;
+  for (const k in rb) {
+    if (ra[k] !== rb[k]) return false;
+  }
+  return true;
 }

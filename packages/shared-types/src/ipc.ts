@@ -1,6 +1,5 @@
 import type {
   AppSnapshot,
-  SnapshotPatch,
   AutoCompactSettings,
   BwsProject,
   BwsSecret,
@@ -1027,11 +1026,7 @@ export const ipcContracts = {
   "app:installUpdate": invoke<[], void>(),
 
   // events (main → renderer)
-  /** Patch of changed entities (keyed by id) emitted after a mutation.
-   *  Replaces the former full-tree `event:snapshot` push; the renderer
-   *  merges it over the `app:getSnapshot` initial load so unchanged refs
-   *  survive (identity owned at the source). */
-  "event:snapshotPatch": event<SnapshotPatch>(),
+  "event:snapshot": event<AppSnapshot>(),
   "event:threadChanged": event<Thread>(),
   "event:transcript": event<TranscriptDelta>(),
   "event:queue": event<QueueState>(),
