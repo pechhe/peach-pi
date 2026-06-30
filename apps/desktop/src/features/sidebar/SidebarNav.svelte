@@ -3,7 +3,7 @@
   import { usage } from "../../stores/usage.svelte";
   import { usagePrefs } from "../../stores/usage-prefs.svelte";
   import { featuredMetrics, shortTag, urgencyClass, fmtResetsIn } from "../../lib/usage-featured";
-  import { playButtonSecondary } from "../../lib/sound/button-click-sound";
+  import { playRotary } from "../../lib/sound/button-click-sound";
   import MovingHighlight from "../../app/MovingHighlight.svelte";
   import UsagePopover from "../../app/UsagePopover.svelte";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
@@ -32,7 +32,7 @@
   let usageOpen = $state(false);
 
   function toggleUsagePopover(): void {
-    playButtonSecondary("click");
+    playRotary();
     usageOpen = !usageOpen;
   }
 
@@ -55,8 +55,9 @@
     <button
       class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'automations' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-      onclick={() => onOpenView("automations")}
+      onclick={() => { playRotary(); onOpenView("automations"); }}
       data-testid="nav-automations"
+      data-press="self"
     >
       <span class="flex items-center gap-2.5"><AlarmClock size={15} /> Automations</span>
       {#if automationCount > 0}
@@ -66,48 +67,54 @@
     <button
       class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'skills' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-      onclick={() => onOpenView("skills")}
+      onclick={() => { playRotary(); onOpenView("skills"); }}
       data-testid="nav-skills"
+      data-press="self"
     >
       <span class="flex items-center gap-2.5"><BookOpen size={15} /> Skills</span>
     </button>
     <button
       class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'extensions' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-      onclick={() => onOpenView("extensions")}
+      onclick={() => { playRotary(); onOpenView("extensions"); }}
       data-testid="nav-extensions"
+      data-press="self"
     >
       <span class="flex items-center gap-2.5"><Puzzle size={15} /> Extensions</span>
     </button>
     <button
       class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'settings' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-      onclick={() => onOpenView("settings")}
+      onclick={() => { playRotary(); onOpenView("settings"); }}
       data-testid="nav-settings"
+      data-press="self"
     >
       <span class="flex items-center gap-2.5"><Settings size={15} /> Settings</span>
     </button>
     <button
       class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'connections' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-      onclick={() => onOpenView("connections")}
+      onclick={() => { playRotary(); onOpenView("connections"); }}
       data-testid="nav-connections"
+      data-press="self"
     >
       <span class="flex items-center gap-2.5"><Plug size={15} /> Connections</span>
     </button>
     <button
       class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'bws' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-      onclick={() => onOpenView("bws")}
+      onclick={() => { playRotary(); onOpenView("bws"); }}
       data-testid="nav-bws"
+      data-press="self"
     >
       <span class="flex items-center gap-2.5"><KeyRound size={15} /> Secrets</span>
     </button>
     <button
       class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
         {activeView === 'remote' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-      onclick={() => onOpenView("remote")}
+      onclick={() => { playRotary(); onOpenView("remote"); }}
       data-testid="nav-remote"
+      data-press="self"
       data-remote-first={remoteFirst ? "on" : undefined}
     >
       <span class="flex items-center gap-2.5 {remoteFirst ? 'remote-first-pulse' : ''}">
@@ -120,6 +127,7 @@
         class="main-nav-item flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-[13px] text-muted hover:text-fg"
         onclick={toggleUsagePopover}
         data-testid="nav-usage"
+        data-press="self"
       >
         <span class="flex items-center gap-2.5"><Gauge size={15} /> Usage</span>
         {#if featuredLine.length > 0}

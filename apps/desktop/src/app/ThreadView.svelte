@@ -55,7 +55,7 @@
   import { remoteClient } from "../stores/remote-client.svelte";
   import { drafts, queues } from "../stores/composer.svelte";
   import { mapTurns } from "../lib/transcript/turns";
-  import { playClick } from "../lib/sound/button-click-sound";
+  import { playRotary } from "../lib/sound/button-click-sound";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -161,7 +161,7 @@
   async function toggleEnvironment() {
     const target = !isWorktree;
     envOverride = { id: thread.id, worktree: target };
-    playClick("down");
+    playRotary();
     try {
       await onSetEnvironment?.(thread.id, target);
     } catch {
@@ -1425,6 +1425,7 @@
           onmousedown={(e) => e.preventDefault()}
           onclick={toggleEnvironment}
           data-testid="environment-toggle"
+          data-press="self"
           title={isWorktree
             ? "Working in an isolated git worktree (seeded from a copy of your main checkout's changes)"
             : "Working in the project directory — switching to Worktree seeds it from a copy of your current changes, main is left untouched"}

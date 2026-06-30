@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { GitChangedFile, GitInfo, Thread } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
+  import { playRotary } from "../lib/sound/button-click-sound";
 
   let { thread }: { thread: Thread } = $props();
 
@@ -232,8 +233,9 @@
     <button
       class="flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[11px] transition-colors
         {open ? 'bg-surface-2 text-fg' : 'text-faint hover:bg-surface hover:text-fg-soft'}"
-      onclick={toggle}
+      onclick={() => { playRotary(); void toggle(); }}
       data-testid="git-widget"
+      data-press="self"
       title="Git status"
     >
       <span>⎇ {info.branch ?? "detached"}</span>
