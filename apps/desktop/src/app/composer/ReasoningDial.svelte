@@ -58,6 +58,7 @@
   data-label="Reasoning"
   style="--dial-angle: {angle}deg"
   onclick={onCycle}
+  data-press="self"
   title="Reasoning level (click to cycle)"
   aria-label={`Reasoning ${level}`}
   data-testid="thinking-selector"

@@ -18,6 +18,7 @@
     aria-pressed={mode === 'plan'}
     aria-label={`Composer mode: ${mode === 'plan' ? 'Plan' : 'Build'}`}
     onclick={onToggle}
+    data-press="self"
     data-testid="mode-toggle"
     title="⌘B build · ⌘P plan"
   >

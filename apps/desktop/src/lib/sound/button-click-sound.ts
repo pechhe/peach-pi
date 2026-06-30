@@ -434,8 +434,11 @@ export function playButtonSecondary(_variant?: ButtonClickVariant): void {}
  * Give every <button> the send dial's audio: a down-click on press and an
  * up-click on release. No depress transform — the physical move is reserved
  * for buttons with their own press visuals (the send dial, device switches).
- * Buttons that own their own sound (the send dial, thread rows, …) opt out
- * with `data-press="self"`. Call once on app mount; returns a disposer.
+ * The sound is chosen by markup: `data-press="self"` opts a button out
+ * entirely (it owns its own sound — the send dial, thread rows, …), and
+ * `data-press="rotary"` swaps the down/up click for a single rotary switch
+ * click on press (nav items, toggles). Call once on app mount; returns a
+ * disposer.
  */
 export function installGlobalButtonPress(): () => void {
   if (typeof document === "undefined") return () => {};
@@ -445,7 +448,12 @@ export function installGlobalButtonPress(): () => void {
     if (e.button !== 0) return;
     const btn = (e.target as HTMLElement | null)?.closest("button");
     if (!(btn instanceof HTMLButtonElement)) return;
-    if (btn.disabled || btn.dataset.press === "self") return;
+    const mode = btn.dataset.press;
+    if (btn.disabled || mode === "self") return;
+    if (mode === "rotary") {
+      playRotary();
+      return;
+    }
     releaseHeld = pressClick();
   };
   const release = (playUp: boolean): void => {

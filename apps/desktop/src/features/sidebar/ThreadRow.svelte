@@ -135,6 +135,7 @@
       <Tooltip text="Done">
         <button
           class="rounded p-1 text-faint hover:text-fg"
+          data-press="self"
           onclick={() => sidebarStore.archiveThread(thread)}
         ><Check size={14} /></button>
       </Tooltip>
