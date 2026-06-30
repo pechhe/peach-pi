@@ -95,6 +95,7 @@
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} onblur={cancelHold} />
 
 {#if visible}
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-8"
     style="padding-left: var(--content-left, 0px)"
@@ -106,6 +107,7 @@
     data-testid="shortcuts-overlay"
   >
     <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
       class="max-h-full w-[40rem] max-w-full overflow-y-auto rounded-xl border border-border-strong bg-surface p-5 shadow-2xl"
       onclick={(e) => e.stopPropagation()}
