@@ -36,6 +36,8 @@
     canGoForward = false,
     /** Remote-first mode on: the Remote item glows red + pulses. */
     remoteFirst = false,
+    /** Relay host serving: the Remote item pulses green while active. */
+    hostActive = false,
   }: {
     width?: number;
     projects: Project[];
@@ -58,6 +60,7 @@
     canGoBack?: boolean;
     canGoForward?: boolean;
     remoteFirst?: boolean;
+    hostActive?: boolean;
   } = $props();
 
   // Mirror props into the sidebar store. Top-level assignment runs once at
@@ -133,6 +136,7 @@
     {automationCount}
     {onOpenView}
     {remoteFirst}
+    {hostActive}
   />
 
   <!-- Projects -->
