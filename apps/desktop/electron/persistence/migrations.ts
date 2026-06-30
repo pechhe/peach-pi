@@ -219,4 +219,14 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    version: 12,
+    up: (db) => {
+      // Optional per-project overrides for Work Queue agent launches: a pinned
+      // model (JSON {provider,id,name}) and/or a thinking level. null/absent =
+      // pi picks its default. Mirrors automations.model.
+      db.exec("ALTER TABLE projects ADD COLUMN agent_model TEXT");
+      db.exec("ALTER TABLE projects ADD COLUMN agent_thinking TEXT");
+    },
+  },
 ];

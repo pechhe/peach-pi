@@ -4,7 +4,12 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import type { ExecConnection, ExecDetectResult, ExecIntegration } from "@peach-pi/shared-types";
+import type {
+  ExecCatalogueItem,
+  ExecConnection,
+  ExecDetectResult,
+  ExecIntegration,
+} from "@peach-pi/shared-types";
 
 import type { Emit } from "../ipc/registry.ts";
 
@@ -108,6 +113,42 @@ export class ExecutorService {
     } catch {
       return null;
     }
+  }
+
+  /** Reads Executor's full discovery registry from its on-disk cache
+   *  (~/.executor/cache/integrations.json). Browse/search only — many rows are
+   *  docs links without a resolvable spec. Cached in memory after first read. */
+  private catalogueCache: ExecCatalogueItem[] | null = null;
+  async catalogue(): Promise<ExecCatalogueItem[]> {
+    if (this.catalogueCache) return this.catalogueCache;
+    try {
+      const dataDir = resolve(process.env.EXECUTOR_DATA_DIR ?? join(homedir(), ".executor"));
+      const raw = readFileSync(join(dataDir, "cache", "integrations.json"), "utf8");
+      const items = JSON.parse(raw) as Array<{
+        slug: string;
+        name: string;
+        description?: string;
+        kind: string;
+        domain?: string;
+        url?: string;
+        popularity?: number;
+      }>;
+      this.catalogueCache = items
+        .filter((i) => i.kind === "openapi" || i.kind === "mcp" || i.kind === "graphql")
+        .map((i) => ({
+          slug: i.slug,
+          name: i.name,
+          description: i.description ?? "",
+          kind: i.kind,
+          domain: i.domain,
+          url: i.url,
+          popularity: i.popularity ?? 0,
+        }))
+        .sort((a, b) => b.popularity - a.popularity);
+    } catch {
+      this.catalogueCache = [];
+    }
+    return this.catalogueCache;
   }
 
   /** Auto-detect the integration kind behind a URL (the paste-a-URL flow). */

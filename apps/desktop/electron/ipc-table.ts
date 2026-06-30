@@ -30,11 +30,6 @@ import { computePiHealth } from "./services/pi-health.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { githubToken } from "./services/issues-service.ts";
 import { importTheme } from "./services/theme-import-service.ts";
-import {
-  rebaseFailure,
-  localMergeFailure,
-  pullConflict,
-} from "./services/recovery-prompts.ts";
 import { initMainSentry } from "./services/telemetry-service.ts";
 import type { ServiceComposition } from "./compose-services.ts";
 import type { HudLifecycle } from "./hud-lifecycle.ts";
@@ -138,6 +133,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
     await gitService.branchWorktree(dir, issueBranchName(issue.number, issue.title));
     const wt = appService.addWorktree(projectId, dir, issueWorktreeName(issue.number));
     const thread = await threadService.createThread(projectId, { worktreeId: wt.id });
+    await applyPinnedProjectPrefs(projectId, thread.id);
     const parentPrd =
       issue.parent != null
         ? (allIssues.find((i) => i.number === issue.parent && i.isPrd) ?? null)
@@ -146,6 +142,24 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       appService.snapshot().projects.find((p) => p.id === projectId)?.mergeWorkflow ?? "pr";
     await threadService.prompt(thread.id, buildSeedPrompt(issue, parentPrd, workflow));
     return thread.id;
+  }
+
+  // Apply a project's pinned Work Queue model/thinking overrides to a freshly
+  // created thread, before prompting. null = leave pi's default alone. Mirrors
+  // AutomationService.fire, which pins the model before the first prompt.
+  async function applyPinnedProjectPrefs(projectId: string, threadId: string): Promise<void> {
+    const project = appService.snapshot().projects.find((p) => p.id === projectId);
+    if (!project) return;
+    if (project.agentModel) {
+      await threadService.setModel(
+        threadId,
+        project.agentModel.provider,
+        project.agentModel.id,
+      );
+    }
+    if (project.agentThinking) {
+      await threadService.setThinking(threadId, project.agentThinking);
+    }
   }
 
   registerIpcHandlers(
@@ -194,6 +208,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "executor:removeConnection": executorService.removeConnection.bind(executorService),
       "executor:addOpenApi": executorService.addOpenApi.bind(executorService),
       "executor:detect": executorService.detect.bind(executorService),
+      "executor:catalogue": executorService.catalogue.bind(executorService),
       "executor:openAddPage": async (pluginKey, opts) => {
         void shell.openExternal(executorService.buildAddUrl(pluginKey, opts));
       },
@@ -223,6 +238,8 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "projects:reorder": appService.reorderProjects.bind(appService),
       "projects:setCollapsed": appService.setProjectCollapsed.bind(appService),
       "projects:setMergeWorkflow": appService.setMergeWorkflow.bind(appService),
+      "projects:setAgentModel": appService.setAgentModel.bind(appService),
+      "projects:setAgentThinking": appService.setAgentThinking.bind(appService),
       "worktrees:rename": appService.renameWorktree.bind(appService),
       "worktrees:archive": appService.archive.bind(appService),
       "threads:create": threadService.createThread.bind(threadService),
@@ -360,6 +377,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
         const prd = res.issues.find((i) => i.number === prdNumber && i.isPrd);
         if (!prd) return { ok: false, reason: "error", message: "PRD not found" };
         const thread = await threadService.createThread(projectId);
+        await applyPinnedProjectPrefs(projectId, thread.id);
         await threadService.prompt(thread.id, buildPrdBreakdownPrompt(prd));
         return { ok: true, threadId: thread.id };
       },
@@ -374,6 +392,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
         await gitService.branchWorktree(dir, prdBranchName(prd.number, prd.title));
         const wt = appService.addWorktree(projectId, dir, `prd-${prd.number}`);
         const thread = await threadService.createThread(projectId, { worktreeId: wt.id });
+        await applyPinnedProjectPrefs(projectId, thread.id);
         const workflow =
           appService.snapshot().projects.find((p) => p.id === projectId)?.mergeWorkflow ?? "pr";
         await threadService.prompt(thread.id, buildPrdAgentPrompt(prd, workflow));
@@ -432,7 +451,15 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
               await threadService
                 .prompt(
                   thread.id,
-                  rebaseFailure(issueNumber, rebaseRes.error),
+                  `The merge queue couldn't merge issue #${issueNumber} — the rebase onto ` +
+                    `main failed with:\n\n${rebaseRes.error}\n\n` +
+                    `Fix whatever blocked the rebase, then make the branch mergeable again. ` +
+                    `If there are uncommitted changes, commit or stash them. If the rebase ` +
+                    `aborted on a conflict, run \`git rebase origin/main\` and resolve the ` +
+                    `conflicts in the affected files, then \`git rebase --continue\` (repeat ` +
+                    `until it completes). Run the full test suite. Once green, force-push ` +
+                    `your branch with \`git push --force-with-lease\` so the merge queue can ` +
+                    `re-attempt. Then stop at the human gate — do not merge yourself.`,
                 )
                 .catch((e) =>
                   console.error(`[mergeBatch] failed to prompt thread ${thread.id} for rebase failure:`, e),
@@ -461,7 +488,13 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
               await threadService
                 .prompt(
                   thread.id,
-                  localMergeFailure(issueNumber, mergeRes.error),
+                  `The merge queue couldn't merge issue #${issueNumber} into the default ` +
+                    `branch — the local merge failed with:\n\n${mergeRes.error}\n\n` +
+                    `Sort it out so the branch can be merged into the default branch. ` +
+                    `If the local repo is dirty, commit or stash on the default branch. ` +
+                    `If the merge hit a conflict, resolve it in the default branch's working ` +
+                    `tree and commit the merge. Run the full test suite. Once green, push ` +
+                    `the default branch. Then stop at the human gate — do not start new work.`,
                 )
                 .catch((e) =>
                   console.error(`[mergeBatch] failed to prompt thread ${thread.id} for local merge failure:`, e),
@@ -687,7 +720,17 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
           void threadService
             .prompt(
               threadId,
-              pullConflict(),
+              `A \`git pull --rebase\` stopped at a rebase conflict.\n\n` +
+                `Resolve it so the branch can be pushed. If there are uncommitted ` +
+                `changes, commit or stash them. If you want a clean slate, run ` +
+                `\`git rebase --abort\` to roll back to the pre-pull tip, then ` +
+                `\`git pull --rebase\` to re-attempt from a clean tree. If the ` +
+                `rebase stopped on a conflict, resolve the conflict markers in the ` +
+                `affected files, then \`git rebase --continue\` (repeat until it ` +
+                `completes). Run the full test suite. Once green, push with ` +
+                `\`git push\` (or \`git push --force-with-lease\` if the rebase ` +
+                `moved past the remote tip). Then stop at the human gate — do not ` +
+                `start new work.`,
             )
             .catch((e) =>
               console.error(`[git:pull] failed to prompt thread ${threadId} for rebase conflict:`, e),
