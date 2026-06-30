@@ -8,7 +8,7 @@
  *  lives in one named place, the call sites stay thin. */
 
 /** The merge-queue rebase onto main failed (dirty tree, conflict, detached
- *  HEAD, …). `rebaseAndTest` already aborted/refused, leaving the worktree on
+ *  HEAD, …). `rebaseOntoDefault` already aborted/refused, leaving the worktree on
  *  the agent's branch, so the agent can commit/stash, re-run the rebase,
  *  resolve conflicts, push, and stop for the human to re-attempt the merge. */
 export function rebaseFailure(issueNumber: number, error: string): string {

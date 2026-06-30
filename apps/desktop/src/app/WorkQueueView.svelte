@@ -1,8 +1,9 @@
 <script lang="ts">
-  import type { Project, AutomationModel, ThinkingLevel, ScopedModel } from "@peach-pi/shared-types";
+  import type { Project, AutomationModel, ThinkingLevel, ModelInfo, ThreadStatus } from "@peach-pi/shared-types";
   import { groupWorkQueue } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { workQueue } from "../stores/work-queue.svelte";
+  import { snapshot } from "../stores/snapshot.svelte";
   import { mergeQueue } from "../stores/merge-queue.svelte";
   import { Select } from "../components/ui/select";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -18,6 +19,23 @@
   } = $props();
 
   const project = $derived(projectId ? (projects.find((p) => p.id === projectId) ?? null) : null);
+
+  // Live agent status per in-progress issue, keyed off the worktree named
+  // `issue-<n>`. "running" = agent still working ("in progress"); "completed"
+  // = it finished its turn, so the work is done and ready to merge.
+  const agentStatusByIssue = $derived.by(() => {
+    const m = new Map<number, ThreadStatus>();
+    const snap = snapshot.current;
+    if (!snap) return m;
+    for (const wt of snap.worktrees) {
+      if (wt.projectId !== projectId || wt.archivedAt != null) continue;
+      const match = /^issue-(\d+)$/.exec(wt.name);
+      if (!match) continue;
+      const thread = snap.threads.find((t) => t.worktreeId === wt.id);
+      if (thread) m.set(Number(match[1]), thread.status);
+    }
+    return m;
+  });
 
   let launching = $state<number | null>(null);
   let launchingPrd = $state<number | null>(null);
@@ -209,12 +227,11 @@
     { value: "high", label: "High" },
     { value: "xhigh", label: "Max" },
   ];
-  // Scoped models read from THIS project's settings.json (project scope
-  // overrides global) so the list matches pi's TUI `/model scope` and the
-  // composer's thread-bound list. The global scopedModels store reads
-  // process.cwd() and would show every model.
-  let projectScopedModels = $state<ScopedModel[]>([]);
-  const scopedModelList = $derived(projectScopedModels.filter((m) => m.scoped));
+  // The app's available model list (`app:listModels` = pi's auth-configured
+  // models, scoped by the global `enabledModels` setting). Same source the
+  // composer and the rest of the app use, so the picker stays consistent.
+  let availableModels = $state<ModelInfo[]>([]);
+  const scopedModelList = $derived(availableModels);
   const modelItems = $derived(
     scopedModelList.map((m) => ({
       value: `${m.provider}\t${m.id}`,
@@ -261,15 +278,10 @@
     void workQueue.load(projectId);
   });
 
-  // Load the project-scoped model list whenever the viewed project changes.
+  // Load the app's available model list (shared with the composer).
   $effect(() => {
-    const id = projectId;
-    if (!id) {
-      projectScopedModels = [];
-      return;
-    }
-    void api.invoke("app:listScopedModelsForProject", id).then((models) => {
-      if (projectId === id) projectScopedModels = models;
+    void api.invoke("app:listModels").then((models) => {
+      availableModels = models;
     });
   });
 
@@ -553,12 +565,18 @@
                       class="min-w-0 flex-1 truncate text-[13px] text-fg hover:underline"
                       >{issue.title}</a
                     >
-                    {#if issue.inProgress}
-                      <span class="shrink-0 text-xs text-faint" data-testid="status-in-progress"
-                        >in progress</span
-                      >
-                    {:else if issue.status === "done"}
+                    {#if issue.status === "done"}
                       <span class="shrink-0 text-xs text-faint" data-testid="status-done">done</span>
+                    {:else if issue.inProgress}
+                      {#if agentStatusByIssue.get(issue.number) === "completed"}
+                        <span class="shrink-0 text-xs text-emerald-500" data-testid="status-agent-done"
+                          >done</span
+                        >
+                      {:else}
+                        <span class="shrink-0 text-xs text-faint" data-testid="status-in-progress"
+                          >in progress</span
+                        >
+                      {/if}
                     {:else if issue.status === "ready"}
                       <button
                         class="flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-fg hover:bg-surface-2 disabled:opacity-50"
@@ -583,8 +601,6 @@
                           merged ✓
                         {:else if p.phase === 'rebase'}
                           {!p.item.ok && p.item.error.includes('Rebase conflict') ? 'rebase conflict ⚠' : 'rebase stopped ⚠'}
-                        {:else if p.phase === 'tests'}
-                          tests failed ⚠
                         {:else}
                           merge failed ⚠
                         {/if}
@@ -648,7 +664,7 @@
         data-testid="merge-action-bar"
       >
         <span class="text-xs text-fg-soft">
-          {selected.length} selected · rebase → test → merge
+          {selected.length} selected · rebase → merge
           {workflow === "local" ? " locally via agent" : " on main"}
         </span>
         <button

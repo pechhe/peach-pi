@@ -911,6 +911,22 @@ button {
   color: var(--color-fg);
   background: var(--color-surface-2);
 }
+.assistant-usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.assistant-message:hover .assistant-usage,
+.assistant-usage:focus-within {
+  opacity: 1;
+}
 .md blockquote {
   margin: 0.65em 0;
   padding: 0.1em 0 0.1em 0.9em;

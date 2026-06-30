@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -14,7 +14,7 @@ import type {
   GitMergePrResult,
   GitPullResult,
   GitPushLocalResult,
-  GitRebaseTestResult,
+  GitRebaseResult,
   ModelInfo,
 } from "@peach-pi/shared-types";
 import type { AppDb } from "../persistence/db.ts";
@@ -417,7 +417,7 @@ export class GitService {
    *  `main`/`master`) in the project's main checkout, then push the default
    *  branch to origin. Unlike {@link mergeToLocal}, this deliberately targets
    *  the default branch — it's the Work Queue 'local' workflow's merge step,
-   *  gated behind a fresh `rebaseAndTest` so the branch is green and current.
+   *  gated behind a fresh `rebaseOntoDefault` so the branch is current.
    *  Leaves the main checkout on the default branch after the merge. */
   async mergeBranchToDefault(threadId: string): Promise<GitMergeResult> {
     const cwd = this.cwdFor(threadId);
@@ -607,12 +607,12 @@ export class GitService {
   }
 
   /** Rebase this thread's branch onto the latest default branch (fetched from
-   *  origin) and run the project's tests. Used by the batch-merge flow: each
-   *  worktree branch built against an older main is brought up to date in its
-   *  own isolated cwd before its PR is merged, so conflicts surface here —
-   *  not on main — and main stays linear. Aborts cleanly on rebase conflict.
-   *  Tests are skipped (not failed) when no `pnpm test` runner is detected. */
-  async rebaseAndTest(threadId: string): Promise<GitRebaseTestResult> {
+   *  origin). Used by the batch-merge flow: each worktree branch built against
+   *  an older main is brought up to date in its own isolated cwd before it is
+   *  merged, so conflicts surface here — not on main — and main stays linear.
+   *  Aborts cleanly on rebase conflict. No test gate — branch correctness is
+   *  the agent's job, not the merge queue's. */
+  async rebaseOntoDefault(threadId: string): Promise<GitRebaseResult> {
     const cwd = this.cwdFor(threadId);
     if (!cwd) return { ok: false, error: "No working directory" };
     if (!(await gitOk(["rev-parse", "--git-dir"], cwd)))
@@ -638,24 +638,7 @@ export class GitService {
       }
       return { ok: false, error: `Rebase conflict on ${branch} — aborted` };
     }
-    const testCmd = await this.detectTestCommand(cwd);
-    if (!testCmd) return { ok: true, branch, base, tests: "skipped" };
-    try {
-      await runExec(testCmd[0], testCmd[1], { cwd, maxBuffer: 10 * 1024 * 1024 });
-    } catch (err) {
-      const e = err as { stderr?: string; stdout?: string; message?: string };
-      const tail = (e.stderr || e.stdout || e.message || "").trim().split("\n").slice(-8).join("\n");
-      return { ok: false, error: `Tests failed on ${branch}:\n${tail}` };
-    }
-    return { ok: true, branch, base, tests: "passed" };
-  }
-
-  /** Resolve the project's test command, or null when no runner is detected.
-   *  `pnpm test` when a package.json is present (the project's own gate per
-   *  its AGENTS.md); otherwise null so non-JS repos skip the test step. */
-  private async detectTestCommand(cwd: string): Promise<[string, string[]] | null> {
-    if (!existsSync(path.join(cwd, "package.json"))) return null;
-    return ["pnpm", ["test"]];
+    return { ok: true, branch, base };
   }
 
   async removeWorktree(projectPath: string, worktreeDir: string): Promise<void> {
