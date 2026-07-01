@@ -38,6 +38,7 @@
  * The above values will be the same _even if_ different values for `ENVIRONMENT` or `PUBLIC_BASE_URL` are set at runtime, as they are statically replaced in your code with their build time values.
  */
 declare module '$env/static/private' {
+	export const COREPACK_ROOT: string;
 	export const NODE: string;
 	export const INIT_CWD: string;
 	export const POSTHOG_PERSONAL_API_KEY: string;
@@ -60,7 +61,9 @@ declare module '$env/static/private' {
 	export const npm_config_catalog: string;
 	export const PATH: string;
 	export const npm_package_json: string;
+	export const _: string;
 	export const __CFBundleIdentifier: string;
+	export const COREPACK_ENABLE_DOWNLOAD_PROMPT: string;
 	export const npm_command: string;
 	export const PWD: string;
 	export const npm_lifecycle_event: string;
@@ -70,9 +73,9 @@ declare module '$env/static/private' {
 	export const XPC_FLAGS: string;
 	export const npm_config_node_gyp: string;
 	export const npm_package_version: string;
-	export const pnpm_config_verify_deps_before_run: string;
 	export const PI_SUBAGENT_PI_COMMAND: string;
 	export const XPC_SERVICE_NAME: string;
+	export const pnpm_config_verify_deps_before_run: string;
 	export const SHLVL: string;
 	export const HOME: string;
 	export const LOGNAME: string;
@@ -81,7 +84,6 @@ declare module '$env/static/private' {
 	export const OSLogRateLimit: string;
 	export const npm_node_execpath: string;
 	export const npm_config_prefix: string;
-	export const _: string;
 	export const NODE_ENV: string;
 }
 
@@ -169,6 +171,7 @@ declare module '$env/static/public' {
  */
 declare module '$env/dynamic/private' {
 	export const env: {
+		COREPACK_ROOT: string;
 		NODE: string;
 		INIT_CWD: string;
 		POSTHOG_PERSONAL_API_KEY: string;
@@ -191,7 +194,9 @@ declare module '$env/dynamic/private' {
 		npm_config_catalog: string;
 		PATH: string;
 		npm_package_json: string;
+		_: string;
 		__CFBundleIdentifier: string;
+		COREPACK_ENABLE_DOWNLOAD_PROMPT: string;
 		npm_command: string;
 		PWD: string;
 		npm_lifecycle_event: string;
@@ -201,9 +206,9 @@ declare module '$env/dynamic/private' {
 		XPC_FLAGS: string;
 		npm_config_node_gyp: string;
 		npm_package_version: string;
-		pnpm_config_verify_deps_before_run: string;
 		PI_SUBAGENT_PI_COMMAND: string;
 		XPC_SERVICE_NAME: string;
+		pnpm_config_verify_deps_before_run: string;
 		SHLVL: string;
 		HOME: string;
 		LOGNAME: string;
@@ -212,7 +217,6 @@ declare module '$env/dynamic/private' {
 		OSLogRateLimit: string;
 		npm_node_execpath: string;
 		npm_config_prefix: string;
-		_: string;
 		NODE_ENV: string;
 		[key: `PUBLIC_${string}`]: undefined;
 		[key: `${string}`]: string | undefined;
