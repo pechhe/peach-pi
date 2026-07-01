@@ -29,6 +29,7 @@
   import ComputerUseSection from "../features/settings/sections/ComputerUseSection.svelte";
   import AboutSection from "../features/settings/sections/AboutSection.svelte";
   import { snapshot } from "../stores/snapshot.svelte";
+  import { Separator } from "../components/ui/separator/index.js";
 
   let { initialQuery = "", onOpenPlayroom }: { initialQuery?: string; onOpenPlayroom?: () => void } = $props();
 
@@ -260,6 +261,8 @@
       {/each}
     </nav>
 
+    <Separator orientation="vertical" />
+
     <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-6">
       <div class="mx-auto flex max-w-xl flex-col gap-4">
         {#if !anyMatch}
@@ -434,9 +437,6 @@
 
 <style>
   /* In-page settings sidebar — local to this view. */
-  .settings-nav {
-    border-right: 1px solid var(--color-border);
-  }
   .settings-nav-item.is-active {
     background: var(--color-surface-2);
     color: var(--color-fg);

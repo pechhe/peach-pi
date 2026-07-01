@@ -180,6 +180,7 @@
             type="button"
             title={`Switch to ${option.name}`}
             data-testid={index === 0 ? "model-selector" : undefined}
+            data-kbd-hint={`⌘${index + 1}`}
             data-press="self"
             onclick={() => {
               if (index === 3 && isActive) toggleMenu();
@@ -197,6 +198,7 @@
             aria-label="Open full model menu"
             aria-expanded={open}
             data-testid="model-menu-toggle"
+            data-kbd-hint="⌘4"
             onclick={toggleMenu}
           >…</button>
         {/if}

@@ -1,7 +1,6 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { randomUUID as uuid } from "node:crypto";
 import type {
   AppThreadCollaborator,
   AutoCompactSettings,
@@ -28,6 +27,7 @@ import type { GitService } from "./git-service.ts";
 import type { AppDb } from "../persistence/db.ts";
 import { ProjectRepo, ThreadRepo } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
+import { shouldSuppressNotice } from "./extension-notice-filter.ts";
 
 /** Remote-handoff hook injected by main.ts. When remote-first mode is on,
  *  `beforePrompt` guarantees the conversation thread has been handed off to
@@ -842,7 +842,7 @@ export class ThreadService {
         },
         onExtensionDialog: (req) =>
           new Promise((resolve) => {
-            const requestId = uuid();
+            const requestId = randomUUID();
             this.pendingDialogs.set(requestId, resolve);
             const settle = (value: string | boolean | undefined) =>
               this.respondExtensionUi(requestId, value);
@@ -859,29 +859,7 @@ export class ThreadService {
             });
           }),
         onExtensionNotify: (message, level) => {
-          // Cymbal nudges are agent-internal guidance (also injected as a
-          // hidden conversation message), so don't surface them as toasts.
-          if (message.startsWith("Cymbal suggests:")) return;
-          // Smart auto-compact status surfaces as an inline compaction card,
-          // so suppress its toasts. The pipeline (pi-smart-compact) fires many
-          // notify strings between compaction_start/end — gate on the live
-          // compaction window rather than matching individual prefixes. The
-          // wrapper's threshold/completed/failed notices fire just outside that
-          // window, so keep the prefix filter for those.
-          if (this.compacting.has(threadId)) return;
-          if (message.startsWith("Smart auto-compact")) return;
-          // Vision proxy runtime notices ("analyzing…", "analyzed N/M",
-          // "cancelled", slash-command confirmations, consent/mode/model echoes)
-          // are noise during normal use. The extension was renamed
-          // `pi-vision-proxy` → emits `[multimodal-proxy]` prefixed notices and
-          // bare `Vision proxy …` echoes; older builds emitted `[vision-proxy]`.
-          // Keep `error`-level ones so genuinely broken vision calls surface.
-          if (
-            level !== "error" &&
-            (message.startsWith("[vision-proxy]") ||
-              message.startsWith("[multimodal-proxy]") ||
-              message.startsWith("Vision proxy"))
-          )
+          if (shouldSuppressNotice(message, level, { compacting: this.compacting.has(threadId) }))
             return;
           this.emit("event:notice", { threadId, message, level });
         },
