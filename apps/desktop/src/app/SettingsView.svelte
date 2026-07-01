@@ -91,6 +91,11 @@
   }
   const anyMatch = $derived(q === "" || NAV_ITEMS.some((it) => it.keywords.includes(q)));
 
+  const groupById = new Map(NAV.map((g) => [g.id, g] as const));
+  // First group (in NAV order) with at least one visible section — suppresses
+  // the leading separator above it so the page doesn't start with a rule.
+  const firstVisibleGroupId = $derived(NAV.find((g) => groupHasMatch(g))?.id);
+
   /* --- In-page sidebar scrollspy --- */
   let activeId = $state<string>("");
   let sectionEls = new Map<string, HTMLElement>();
@@ -265,18 +270,29 @@
 
     <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-6">
       <div class="mx-auto flex max-w-xl flex-col gap-4">
+        {#snippet groupHeader(g: NavGroup)}
+          {#if groupHasMatch(g)}
+            {#if g.id !== firstVisibleGroupId}
+              <Separator class="mt-2 mb-1" />
+            {/if}
+            <h2 class="px-1 text-[11px] font-semibold uppercase tracking-wider text-fainter">{g.label}</h2>
+          {/if}
+        {/snippet}
+
         {#if !anyMatch}
           <p class="text-center text-xs text-fainter" data-testid="settings-search-empty">
             No settings match “{query.trim()}”.
           </p>
         {/if}
 
+        {@render groupHeader(groupById.get("account")!)}
         {#if hit("providers")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="providers" use:sectionAction={"providers"}>
           <ProvidersSection />
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("appearance")!)}
         {#if hit("playroom")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="playroom" use:sectionAction={"playroom"}>
           <PlayroomSection {onOpenPlayroom} />
@@ -331,6 +347,7 @@
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("sounds")!)}
         {#if hit("sounds")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="sounds" use:sectionAction={"sounds"}>
           <SoundsSection />
@@ -361,6 +378,7 @@
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("behavior")!)}
         {#if hit("autoCompact")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="autoCompact" use:sectionAction={"autoCompact"}>
           <AutoCompactSection />
@@ -401,6 +419,7 @@
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("models")!)}
         {#if hit("utilityModel")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="utilityModel" use:sectionAction={"utilityModel"}>
           <UtilityModelSection />
@@ -419,6 +438,7 @@
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("system")!)}
         {#if hit("computerUse")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="computerUse" data-testid="computer-use-section" use:sectionAction={"computerUse"}>
           <ComputerUseSection />
