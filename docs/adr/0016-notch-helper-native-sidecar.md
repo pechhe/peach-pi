@@ -61,3 +61,23 @@ path — no new renderer IPC is introduced.
   checkout), `NotchService.start()` logs and no-ops — the app runs without a notch.
 - The Swift lives at `apps/desktop/native/notch/` (SwiftPM), built to a `notch-helper`
   binary and shipped via `extraResource`, mirroring the CuaDriver vendoring.
+
+## Window & interaction model
+
+The notch is **one fixed, full-width, transparent `NSPanel`** pinned to the top of
+the notch screen at `level = .mainMenu + 3` (above the menu bar), spanning all
+Spaces. It **never resizes** — the SwiftUI `NotchShape` grows/shrinks the black
+island *inside* the fixed window (spring animation = the "bounce out" of the notch).
+
+- **Closed** = exactly the physical notch size, so it is invisible (merged with
+  the notch). While a run is in flight the island stays at notch *height* but
+  expands *width* to flank the notch with a spinner + running count ("tucked in").
+- **Finish** pulses the island and enters a brief `hint` state, then auto-collapses.
+- **Hover** (~0.45s) or **click** on the notch opens it downward into a clickable
+  finished-thread list; clicking a row emits `open` and collapses.
+
+The panel `ignoresMouseEvents` while closed (clicks pass through to the menu bar /
+apps behind) and accepts them only while opened. Hover/click are detected with
+global `NSEvent` monitors, so no menu-bar real estate is captured when idle, and
+no Accessibility permission is required. The window/shape/geometry approach is
+adapted from **pi-island** (MIT, © 2026 Julien Wintz); see `native/notch/NOTICE.md`.

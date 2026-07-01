@@ -1,88 +1,71 @@
 import AppKit
 import SwiftUI
 
-/// Owns the floating notch panel: computes notch geometry, hosts `NotchView`,
-/// and resizes/shows/hides the panel whenever the model changes. The panel is a
-/// non-activating, borderless, all-spaces `NSPanel` above the menu bar so it can
-/// draw into (and merge with) the physical notch without stealing focus.
+/// A fixed, full-width, transparent panel pinned to the top of the notch screen
+/// and living above the menu bar. It never resizes — the SwiftUI `NotchView`
+/// grows/shrinks the black island *inside* it (that's the spring "bounce"). The
+/// panel ignores mouse events while closed (clicks pass through to the menu bar
+/// / apps behind) and accepts them only while opened; hover/click detection is
+/// done with global `NSEvent` monitors. Window setup adapted from
+/// jwintz/pi-island (MIT).
+final class NotchPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
 @MainActor
 final class NotchController {
-    private let model = NotchModel()
-    private let panel: NSPanel
+    private let model: NotchModel
+    private let panel: NotchPanel
 
-    init() {
-        panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 40),
+    init(screen: NSScreen) {
+        let geometry = NotchGeometry(screen: screen)
+        model = NotchModel(geometry: geometry)
+
+        let height: CGFloat = 600
+        let frame = NSRect(
+            x: screen.frame.origin.x,
+            y: screen.frame.maxY - height,
+            width: screen.frame.width,
+            height: height)
+
+        panel = NotchPanel(
+            contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
-            defer: false
-        )
+            defer: false)
         panel.isFloatingPanel = true
-        panel.level = .statusBar
-        panel.backgroundColor = .clear
+        panel.level = .mainMenu + 3
         panel.isOpaque = false
+        panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.isMovable = false
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.ignoresMouseEvents = true
 
-        let root = NotchView(model: model, notchInset: notchInset(), onOpen: { id in emitOpen(id) })
-        panel.contentView = NSHostingView(rootView: root)
-
-        model.onChange = { [weak self] in self?.sync() }
-        startStdinReader { [weak self] frame in self?.model.apply(frame) }
-        sync()
-    }
-
-    /// The screen whose top holds the notch (falls back to the main screen).
-    private func notchScreen() -> NSScreen? {
-        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main
-    }
-
-    /// Height of the notch/menu-bar region to inset content below.
-    private func notchInset() -> CGFloat {
-        let top = notchScreen()?.safeAreaInsets.top ?? 0
-        return top > 0 ? top : 32
-    }
-
-    /// Width of the physical notch (gap between the two usable top areas).
-    private func notchWidth(_ s: NSScreen) -> CGFloat {
-        let left = s.auxiliaryTopLeftArea?.width ?? 0
-        let right = s.auxiliaryTopRightArea?.width ?? 0
-        if left > 0, right > 0 { return max(120, s.frame.width - left - right) }
-        return 200
-    }
-
-    /// Resize + reposition + show/hide the panel from the current model state.
-    private func sync() {
-        guard let screen = notchScreen() else { return }
-        if !model.visible {
-            panel.orderOut(nil)
-            return
-        }
-        let inset = notchInset()
-        let notch = notchWidth(screen)
-        let w: CGFloat
-        let h: CGFloat
-        if model.expandedShown {
-            let rows = max(model.completed.count, model.toast != nil ? 1 : 0)
-            w = 380
-            h = min(screen.frame.height - 8, inset + 44 + CGFloat(rows) * 38 + 12)
-        } else {
-            w = notch + 132
-            h = inset + 30
-        }
-        let x = screen.frame.midX - w / 2
-        let y = screen.frame.maxY - h
-        panel.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true, animate: false)
+        panel.contentView = NSHostingView(rootView: NotchView(model: model))
+        panel.setFrame(frame, display: true)
         panel.orderFrontRegardless()
+
+        model.onOpenThread = { id in emitOpen(id) }
+        // Accept clicks only while opened; otherwise let them pass through to the
+        // menu bar / app behind. A non-activating panel delivers row clicks
+        // without stealing key focus from the user's current app, so we do NOT
+        // activate/makeKey on hover-open (that would be jarring).
+        model.onStatusChange = { [weak panel] status in
+            panel?.ignoresMouseEvents = (status != .opened)
+        }
+
+        startStdinReader { [weak model] frame in model?.apply(frame) }
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: NotchController?
     func applicationDidFinishLaunching(_ notification: Notification) {
-        controller = NotchController()
+        guard let screen = NSScreen.notchScreen else { return }
+        controller = NotchController(screen: screen)
     }
 }
 

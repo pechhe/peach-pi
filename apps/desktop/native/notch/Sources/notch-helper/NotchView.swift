@@ -1,97 +1,137 @@
 import SwiftUI
 
-/// The Dynamic-Island-style content. A black rounded slab fills the whole panel
-/// (its top region overlaps the physical notch so the two merge); content is
-/// inset below the notch and grows downward. Collapsed = two counts; expanded =
-/// a toast (on finish) and a clickable list of finished threads.
+/// The island content, drawn top-centre inside the fixed full-width window.
+/// Closed = exactly the notch (invisible/merged); running expands the *width*
+/// at notch height (tucked, flanking counts); a finish pulses ("bounce out");
+/// opened grows downward into a clickable finished-thread list. Layout adapted
+/// from jwintz/pi-island (MIT).
 struct NotchView: View {
     @ObservedObject var model: NotchModel
-    let notchInset: CGFloat
-    var onOpen: (String) -> Void
+
+    private let sideWidth: CGFloat = 44
+    private let openAnim = Animation.spring(response: 0.42, dampingFraction: 0.78)
+    private let closeAnim = Animation.spring(response: 0.45, dampingFraction: 1.0)
+    private let flashAnim = Animation.spring(response: 0.3, dampingFraction: 0.55)
+
+    private var isOpen: Bool { model.status == .opened }
+    private var visible: Bool { model.hasActivity || model.status != .closed }
+
+    private var expansionWidth: CGFloat {
+        guard model.hasActivity, !isOpen else { return 0 }
+        return 2 * sideWidth
+    }
+    private var size: CGSize {
+        isOpen
+            ? model.openedSize
+            : CGSize(width: model.closedNotchSize.width + expansionWidth,
+                     height: model.closedNotchSize.height)
+    }
+    private var topRadius: CGFloat { isOpen ? 12 : 6 }
+    private var bottomRadius: CGFloat { isOpen ? 22 : 14 }
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: notchInset)
-            if model.expandedShown {
-                expanded
-            } else {
-                collapsed
-            }
+            content
+                .frame(width: size.width, height: size.height, alignment: .top)
+                .background(.black)
+                .clipShape(NotchShape(topCornerRadius: topRadius, bottomCornerRadius: bottomRadius))
+                .scaleEffect(model.flash ? 1.06 : 1.0, anchor: .top)
+                .shadow(color: isOpen ? .black.opacity(0.6) : .clear, radius: 8, y: 4)
+                .animation(isOpen ? openAnim : closeAnim, value: model.status)
+                .animation(openAnim, value: size)
+                .animation(flashAnim, value: model.flash)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.black)
-        )
-        .contentShape(Rectangle())
-        .onHover { model.hover = $0 }
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: model.expandedShown)
+        .opacity(visible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.2), value: visible)
+        .preferredColorScheme(.dark)
     }
 
-    // MARK: collapsed pill — the two counts flanking the notch.
-    private var collapsed: some View {
-        HStack(spacing: 14) {
-            if model.running > 0 {
-                counter(system: "circle.dotted", value: model.running, tint: .green)
-            }
-            if !model.completed.isEmpty {
-                counter(system: "checkmark.circle.fill", value: model.completed.count, tint: .blue)
-            }
+    @ViewBuilder private var content: some View {
+        if isOpen {
+            openedContent
+        } else {
+            header
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity)
     }
 
-    // MARK: expanded panel — toast + finished-thread list.
-    private var expanded: some View {
+    // MARK: - Closed / hint: counts flanking the notch at notch height.
+    private var header: some View {
+        HStack(spacing: 0) {
+            ZStack {
+                if model.running > 0 { runningBadge }
+            }
+            .frame(width: sideWidth)
+            Color.clear.frame(width: max(0, model.closedNotchSize.width - 12))
+            ZStack {
+                if !model.completed.isEmpty { completedBadge }
+            }
+            .frame(width: sideWidth)
+        }
+        .frame(height: model.closedNotchSize.height)
+    }
+
+    private var runningBadge: some View {
+        HStack(spacing: 4) {
+            Spinner()
+            Text("\(model.running)").foregroundStyle(.white).font(.system(size: 12, weight: .semibold))
+        }
+    }
+
+    private var completedBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.blue).font(.system(size: 12))
+                .scaleEffect(model.flash ? 1.25 : 1.0)
+            Text("\(model.completed.count)").foregroundStyle(.white).font(.system(size: 12, weight: .semibold))
+        }
+    }
+
+    // MARK: - Opened: header row + finished-thread list.
+    private var openedContent: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                if model.running > 0 {
-                    counter(system: "circle.dotted", value: model.running, tint: .green)
-                }
-                counter(system: "checkmark.circle.fill", value: model.completed.count, tint: .blue)
+                if model.running > 0 { runningBadge }
+                if !model.completed.isEmpty { completedBadge }
                 Spacer()
+                Text("Finished").foregroundStyle(.white.opacity(0.5)).font(.system(size: 11, weight: .medium))
             }
-            .padding(.bottom, 2)
+            .padding(.top, model.closedNotchSize.height - 6)
 
-            if let t = model.toast {
-                row(t, highlighted: true)
+            ForEach(model.completed) { t in
+                Button(action: { model.openThread(t.id) }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
+                        Text(t.title.isEmpty ? "Untitled thread" : t.title)
+                            .foregroundStyle(.white).font(.system(size: 13)).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.06)))
+                }
+                .buttonStyle(.plain)
             }
-            ForEach(model.completed.filter { $0.id != model.toast?.id }) { t in
-                row(t, highlighted: false)
+            if model.completed.isEmpty {
+                Text("No finished sessions").foregroundStyle(.white.opacity(0.4))
+                    .font(.system(size: 12)).padding(.vertical, 8)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14).padding(.bottom, 12)
     }
+}
 
-    private func counter(system: String, value: Int, tint: Color) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: system).foregroundStyle(tint)
-            Text("\(value)").foregroundStyle(.white).font(.system(size: 13, weight: .semibold))
-        }
-    }
-
-    private func row(_ t: NotchThread, highlighted: Bool) -> some View {
-        Button(action: { onOpen(t.id) }) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(highlighted ? Color.blue : Color.white.opacity(0.7))
-                Text(t.title.isEmpty ? "Untitled thread" : t.title)
-                    .foregroundStyle(.white)
-                    .font(.system(size: 13, weight: highlighted ? .semibold : .regular))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(highlighted ? Color.white.opacity(0.12) : Color.white.opacity(0.05))
-            )
-        }
-        .buttonStyle(.plain)
+/// A small rotating arc for the running indicator.
+private struct Spinner: View {
+    @State private var spin = false
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.72)
+            .stroke(Color.green, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .frame(width: 12, height: 12)
+            .rotationEffect(.degrees(spin ? 360 : 0))
+            .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
+            .onAppear { spin = true }
     }
 }
