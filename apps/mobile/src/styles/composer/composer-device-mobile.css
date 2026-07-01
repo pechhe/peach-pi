@@ -1,0 +1,223 @@
+/* Phone-size chassis geometry, applied AFTER the verbatim desktop port.
+ *
+ * This MUST be a plain stylesheet, not Composer.svelte <style>: Svelte scopes
+ * component CSS, so a rule like `.composer-device .reasoning-dial { … }`
+ * compiles to `.reasoning-dial:where(.svelte-hash)` — and the dial lives in a
+ * child component, so the rule matches nothing and the dial silently renders
+ * at its desktop size (68px knob on a 166×110 panel). Every selector here is
+ * unscoped and wins the cascade by import order (loaded last in main.ts).
+ *
+ * The desktop chassis lays out at 985px under zoom:0.78; the phone runs the
+ * frame at native scale and full viewport width, so each control is re-sized
+ * to a phone-native footprint instead of scaling the whole device. */
+
+/* ---------------- Frame / chassis ---------------- */
+.composer-device .composer__frame {
+  width: 100%;
+  max-width: 100%;
+  margin-inline: 0;
+  zoom: 1;
+}
+
+.composer-device .composer__surface {
+  padding: 8px 8px 6px;
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.composer-device .composer__screen {
+  min-height: 50px;
+  padding: 9px 12px;
+  border-radius: 11px;
+}
+
+/* Controls strip: one compact row — the slider flexes, the dial and send are
+   fixed-size. (Desktop uses display:contents + space-between across 985px.) */
+.composer-device .composer__footer-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 0;
+  padding: 8px 6px 2px;
+}
+.composer-device .composer__controls {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 10px;
+}
+.composer-device .composer__actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.composer-device .composer__key-mount {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+}
+
+/* ---------------- Model slider ---------------- */
+/* Full-flex badge, 48px tall, percentage-based thumb geometry (the desktop
+   badge is a fixed 360px with pixel detents at 52/180/308). */
+.composer-device .model-selector__badge.model-selector__badge--slider {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 48px;
+}
+
+.composer-device .model-selector__slider {
+  pointer-events: auto;
+  touch-action: none;
+  cursor: pointer;
+}
+
+/* The engraved ruler ticks are visual noise at this size. */
+.composer-device .model-selector__badge--slider .model-selector__slider-ticks {
+  display: none;
+}
+
+.composer-device .model-selector__badge--slider .model-selector__slider-rail {
+  left: 10px;
+  right: 10px;
+  top: 15px;
+  height: 9px;
+}
+.composer-device .model-selector__badge--slider .model-selector__slider-thumb {
+  width: 22px;
+  height: 22px;
+  top: 8px;
+}
+.composer-device .model-selector__badge--slider .model-selector__slider-glow {
+  width: 32px;
+  height: 6px;
+  top: 16px;
+}
+
+/* Detents as fractions of the actual track. 21px inset keeps the 22px thumb
+   fully on the rail at both extremes. --model-slider-position/--slider-span
+   are set inline on the badge by Composer.svelte. */
+.composer-device .model-selector__badge--slider .model-selector__slider-thumb,
+.composer-device .model-selector__badge--slider .model-selector__slider-glow {
+  left: calc(21px + (var(--model-slider-position, 0) / var(--slider-span, 2)) * (100% - 42px));
+}
+
+/* Neutralise the desktop press-preview jumps (they target the 360px badge's
+   pixel detents and would fling the thumb off-track mid-tap). */
+.model-selector__badge--slider:has(.model-selector__slider-label--slot-0:active) .model-selector__slider-thumb,
+.model-selector__badge--slider:has(.model-selector__slider-label--slot-0:active) .model-selector__slider-glow {
+  left: 21px;
+}
+.model-selector__badge--slider:has(.model-selector__slider-label--slot-1:active) .model-selector__slider-thumb,
+.model-selector__badge--slider:has(.model-selector__slider-label--slot-1:active) .model-selector__slider-glow {
+  left: calc(21px + (1 / var(--slider-span, 2)) * (100% - 42px));
+}
+.model-selector__badge--slider:has(.model-selector__slider-label--slot-2:active) .model-selector__slider-thumb,
+.model-selector__badge--slider:has(.model-selector__slider-label--slot-2:active) .model-selector__slider-glow {
+  left: calc(21px + (2 / var(--slider-span, 2)) * (100% - 42px));
+}
+.model-selector__badge--slider:has(.model-selector__slider-label--menu:active) .model-selector__slider-thumb {
+  left: calc(21px + (var(--model-slider-position, 0) / var(--slider-span, 2)) * (100% - 42px));
+  transform: translateX(-50%);
+}
+
+/* While dragging the thumb tracks the pointer continuously; on release the
+   class drops and the snap transition takes it to the discrete slot. */
+.composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-thumb,
+.composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-glow {
+  left: calc(21px + var(--drag-frac, 0) * (100% - 42px)) !important;
+  transition: none !important;
+}
+
+/* Labels: one ellipsised line under the rail, edge-anchored like the desktop
+   (centre-anchoring would push the outer labels off the chassis). */
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot {
+  top: auto;
+  bottom: 2px;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  display: block;
+  width: 33%;
+  max-width: 33%;
+  font-size: 7.5px;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform: none;
+}
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-0 {
+  left: 2px;
+  right: auto;
+  text-align: left;
+}
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-1 {
+  left: 50%;
+  right: auto;
+  text-align: center;
+  transform: translateX(-50%);
+}
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-2 {
+  left: auto;
+  right: 20px;
+  text-align: right;
+}
+.composer-device .model-selector__badge--slider .model-selector__slider-label--slot-3 {
+  left: auto;
+  right: 0;
+  text-align: right;
+}
+.composer-device .model-selector__badge--slider .model-selector__slider-label--menu {
+  width: 14px;
+  max-width: 14px;
+  font-size: 13px;
+  line-height: 0.9;
+  text-align: center;
+  bottom: 3px;
+}
+
+/* Colour alone marks the selected slot; the underline bar hangs below the
+   badge edge at this height. */
+.composer-device .model-selector__badge--slider .model-selector__slider-label--selected::after {
+  content: none;
+}
+
+/* ---------------- Reasoning dial ---------------- */
+/* 34px knob on a 76×50 panel (desktop: 68px on 166×110). Inactive settings
+   collapse to their indicator lights — six 6.5px captions around a knob this
+   size are unreadable smudge; the active level keeps its caption. */
+.composer-device .reasoning-dial {
+  --dial-size: 34px;
+  flex: 0 0 auto;
+  width: 76px;
+  height: 50px;
+}
+.composer-device .reasoning-dial__setting {
+  font-size: 7px;
+  gap: 2px;
+}
+.composer-device .reasoning-dial__setting:not(.reasoning-dial__setting--active) > span:first-child {
+  display: none;
+}
+.composer-device .reasoning-dial__light {
+  width: 4px;
+  height: 4px;
+}
+
+/* ---------------- Send dial ---------------- */
+.composer-device .send-dial {
+  margin-left: 0;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+}
+.composer-device .send-dial svg {
+  width: 19px;
+  height: 19px;
+}

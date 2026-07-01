@@ -184,6 +184,16 @@ export class AppService {
     return this.projects.all().find((p) => p.id === projectId)!;
   }
 
+  /** Set a project's check command (run in the worktree before local merges).
+   *  Empty/whitespace clears it. Returns the updated project. */
+  setCheckCommand(projectId: string, command: string | null): Project {
+    const exists = this.projects.all().some((p) => p.id === projectId);
+    if (!exists) throw new Error(`Unknown project: ${projectId}`);
+    this.projects.setCheckCommand(projectId, command?.trim() || null);
+    this.notify();
+    return this.projects.all().find((p) => p.id === projectId)!;
+  }
+
   /** Pin the model Work Queue agents use for this project. null = pi default. */
   setAgentModel(projectId: string, model: AutomationModel | null): Project {
     const exists = this.projects.all().some((p) => p.id === projectId);

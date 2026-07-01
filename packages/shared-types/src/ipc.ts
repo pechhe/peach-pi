@@ -298,6 +298,16 @@ export const ipcContracts = {
     if (workflow !== "pr" && workflow !== "local")
       throw new Error("workflow must be 'pr' or 'local'");
   }),
+  /** Set a project's optional check command (typecheck/tests), run in the
+   *  worktree before any local merge — the local workflow's CI substitute.
+   *  null/empty clears it. Returns the updated project. */
+  "projects:setCheckCommand": invoke<[projectId: string, command: string | null], Project>(
+    (id, command) => {
+      requireNonEmptyString(id, "projectId");
+      if (command !== null && typeof command !== "string")
+        throw new Error("command must be a string or null");
+    },
+  ),
   /** Pin the model Work Queue agents use for this project. null clears the pin
    *  (pi picks its default). Returns the updated project. */
   "projects:setAgentModel": invoke<
@@ -585,18 +595,24 @@ export const ipcContracts = {
   "git:mergePr": invoke<[threadId: ThreadId], GitMergePrResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
-  "git:mergeToLocal": invoke<[threadId: ThreadId], GitMergeResult>((id) =>
-    requireNonEmptyString(id, "threadId"),
-  ),
+  /** The local integration pipeline for a worktree thread: rebase onto the
+   *  latest default branch → run the project's check command → merge --no-ff
+   *  into the default branch in the main checkout. No push — the caller
+   *  offers that separately. A dirty main checkout refuses with `dirtyLocal`
+   *  unless `opts.stashLocal` (explicit "Stash local & retry"). */
+  "git:mergeToLocal": invoke<
+    [threadId: ThreadId, opts?: { stashLocal?: boolean }],
+    GitMergeResult
+  >((id) => requireNonEmptyString(id, "threadId")),
   "git:pushLocal": invoke<[threadId: ThreadId], GitPushLocalResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
   "git:pull": invoke<[threadId: ThreadId], GitPullResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
-  /** Rebase a thread's branch onto the latest default branch and run tests.
-   *  Used by the batch-merge flow to bring a worktree branch up to date against
-   *  main in its own isolated cwd before its PR is merged. */
+  /** Rebase a thread's branch onto the latest default branch. Used by the
+   *  batch-merge flow to bring a worktree branch up to date against main in
+   *  its own isolated cwd before it is merged. */
   "git:rebaseOntoDefault": invoke<[threadId: ThreadId], GitRebaseResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),

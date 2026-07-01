@@ -240,4 +240,13 @@ export const migrations: Migration[] = [
       db.exec("DROP TABLE IF EXISTS connectors");
     },
   },
+  {
+    version: 14,
+    up: (db) => {
+      // Optional per-project check command (typecheck/tests), run in the
+      // worktree after the rebase and before any local merge — the local
+      // workflow's CI substitute. NULL = no gate.
+      db.exec("ALTER TABLE projects ADD COLUMN check_command TEXT");
+    },
+  },
 ];

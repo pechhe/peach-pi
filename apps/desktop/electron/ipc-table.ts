@@ -197,6 +197,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "projects:reorder": appService.reorderProjects.bind(appService),
       "projects:setCollapsed": appService.setProjectCollapsed.bind(appService),
       "projects:setMergeWorkflow": appService.setMergeWorkflow.bind(appService),
+      "projects:setCheckCommand": appService.setCheckCommand.bind(appService),
       "projects:setAgentModel": appService.setAgentModel.bind(appService),
       "projects:setAgentThinking": appService.setAgentThinking.bind(appService),
       "worktrees:rename": appService.renameWorktree.bind(appService),

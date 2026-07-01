@@ -7,6 +7,8 @@ import "./styles/composer/composer-device-dark.css";
 import "./styles/composer/composer-device-parts.css";
 import "./styles/composer/composer-device-overrides.css";
 import "./styles/composer/metal-dye.css";
+// Phone-size chassis geometry — must load last so it wins the cascade.
+import "./styles/composer/composer-device-mobile.css";
 
 // QR pairing: if opened via a `#connect?…` deep link, fold it into a saved
 // master and land on its sessions before the first render.
