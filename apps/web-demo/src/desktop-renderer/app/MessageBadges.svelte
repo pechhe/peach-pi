@@ -11,6 +11,7 @@
   //
   // The message body left after stripping the hint block is yielded to the
   // `children` snippet as `{ body }`, so the caller renders the bubble text.
+  import type { Snippet } from "svelte";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import { parseSecretsHint } from "../lib/composer/hints";
 
@@ -21,7 +22,7 @@
   }: {
     text: string;
     variant?: "rich" | "hud";
-    children: (args: { body: string }) => unknown;
+    children: Snippet<[{ body: string }]>;
   } = $props();
 
   const sec = $derived(parseSecretsHint(text));

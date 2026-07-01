@@ -18,13 +18,12 @@
   import FlaskConicalOff from "@lucide/svelte/icons/flask-conical-off";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import BellRing from "@lucide/svelte/icons/bell-ring";
-  import Plug from "@lucide/svelte/icons/plug";
+  import Settings from "@lucide/svelte/icons/settings";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Radio from "@lucide/svelte/icons/radio";
   import Gauge from "@lucide/svelte/icons/gauge";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
-  import Settings from "@lucide/svelte/icons/settings";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";

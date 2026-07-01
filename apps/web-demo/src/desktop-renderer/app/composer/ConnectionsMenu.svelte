@@ -116,10 +116,6 @@
     }
     return false;
   }
-
-  // Expose the picker's referencable type so the host can build Referenced*
-  // values from a SecMenuItem without re-declaring it.
-  export type { SecMenuItem as SecMenuItemType, type ReferencedSecret };
 </script>
 
 {#if query !== null}

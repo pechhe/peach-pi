@@ -131,7 +131,6 @@ export type AppView =
   | "skills"
   | "extensions"
   | "automations"
-  | "connections"
   | "testing"
   | "bws"
   | "remote"
