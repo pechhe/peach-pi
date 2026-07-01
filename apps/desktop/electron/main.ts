@@ -11,8 +11,11 @@ import { composeServices } from "./compose-services.ts";
 import { registerIpcTable } from "./ipc-table.ts";
 import { HudLifecycle } from "./hud-lifecycle.ts";
 
-// TEMP DEBUG: enable CDP for renderer layout inspection.
-app.commandLine.appendSwitch("remote-debugging-port", "9222");
+// CDP for renderer layout inspection — dev/unpackaged only, never in a
+// shipped build (an open debugging port in production is a security hole).
+if (!app.isPackaged) {
+  app.commandLine.appendSwitch("remote-debugging-port", "9222");
+}
 
 // Test isolation: override userData before any path use.
 if (process.env.PEACH_PI_USER_DATA) {

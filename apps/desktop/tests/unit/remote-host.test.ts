@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   RemoteHostService,
   authorizeRequest,
@@ -218,6 +221,91 @@ test("forwardRoster is a no-op when no roster listeners are attached", async () 
   // buildRoster is exercised publicly via /sessions; forwardRoster internally
   // short-circuits at `rosterListeners.size === 0`. Should not reject.
   await assert.doesNotReject(() => h.forwardRoster());
+});
+
+// ── persistence: load/persist must round-trip intent + token, and persist()
+//  must be a no-op until load() has restored state (regression for the bug
+//  where a fresh, un-loaded service clobbered the on-disk config with a fresh
+//  random token + enabled:false, flipping the relay off and rotating the
+//  passkey across restarts — most reproducibly when this unit suite ran).
+async function withTempConfig<T>(
+  fn: (configPath: string) => Promise<T>,
+): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), "peach-remote-host-"));
+  try {
+    return await fn(join(dir, "peach-remote-host.json"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("persist() is a no-op until load() restores state, so a fresh service cannot clobber the config", async () => {
+  // A fresh instance (load() never called) must NOT write the file — otherwise
+  // a fresh random token + enabled:false overwrites the real passkey + intent.
+  await withTempConfig(async (configPath) => {
+    const h = new RemoteHostService(
+      deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+      configPath,
+    );
+    // setHostEnabled(false) internally fires persist(); with `loaded` still
+    // false it must short-circuit before touching the on-disk file.
+    await h.setHostEnabled(false);
+    await assert.rejects(() => readFile(configPath, "utf8"), /ENOENT/);
+  });
+});
+
+test("load() restores the persisted token + serving intent, keeping the same passkey across restarts", async () => {
+  await withTempConfig(async (configPath) => {
+    // First "run": enable serving and persist a real token + intent.
+    const first = new RemoteHostService(
+      deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+      configPath,
+    );
+    await first.load(); // loaded=true, so persist() below writes for real.
+    const enabled = await first.setHostEnabled(false); // false path is network-free
+    assert.equal(enabled.enabled, false);
+    // Simulate the user turning it on: set intent + a known token, then persist.
+    // (We avoid setHostEnabled(true) here since it binds a real tailnet socket.)
+    await first.regenerateToken();
+    const persisted = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(persisted.enabled, false);
+    assert.ok(typeof persisted.token === "string" && persisted.token.length >= 16);
+
+    // Second "run" (quit + relaunch): a fresh instance loads the same file and
+    // must restore the exact token (same passkey) + intent — not a fresh random.
+    const second = new RemoteHostService(
+      deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+      configPath,
+    );
+    await second.load();
+    const restored = await second.status();
+    assert.equal(restored.token, persisted.token); // same passkey survives
+    assert.equal(second.hostEnabledIntent(), persisted.enabled);
+  });
+});
+
+test("a fresh, pre-load instance reports intent off + a token that is NOT yet restored from disk", async () => {
+  // Documents the window the persist() guard protects: before load(), intent
+  // is the default (false) and the token is a fresh random — which is exactly
+  // why a pre-load persist must be forbidden (it would clobber the real file).
+  await withTempConfig(async (configPath) => {
+    // Seed a file with a known token + enabled:true.
+    await writeFile(configPath, JSON.stringify({ token: "s".repeat(32), enabled: true, serveAll: true, servedProjects: [] }), "utf8");
+    const h = new RemoteHostService(
+      deps([{ id: "t1", projectId: "p1" }]) as RelayDeps,
+      configPath,
+    );
+    // Pre-load: intent is default-false and token is a fresh random, NOT the
+    // seeded one — so a persist here would destroy the seeded passkey.
+    assert.equal(h.hostEnabledIntent(), false);
+    const pre = await h.status();
+    assert.notEqual(pre.token, "s".repeat(32));
+    // After load(), the seeded state is restored.
+    await h.load();
+    assert.equal(h.hostEnabledIntent(), true);
+    const post = await h.status();
+    assert.equal(post.token, "s".repeat(32));
+  });
 });
 
 // NOTE: skipped — these bind a real HTTP server on an ephemeral port and

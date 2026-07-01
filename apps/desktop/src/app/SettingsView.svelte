@@ -29,6 +29,7 @@
   import ComputerUseSection from "../features/settings/sections/ComputerUseSection.svelte";
   import AboutSection from "../features/settings/sections/AboutSection.svelte";
   import { snapshot } from "../stores/snapshot.svelte";
+  import { Separator } from "../components/ui/separator/index.js";
 
   let { initialQuery = "", onOpenPlayroom }: { initialQuery?: string; onOpenPlayroom?: () => void } = $props();
 
@@ -88,7 +89,16 @@
   function groupHasMatch(g: NavGroup): boolean {
     return g.items.some((it) => hit(it.id));
   }
+  /** First section id in a group that passes the current search filter. */
+  function firstVisibleInGroup(g: NavGroup): string | undefined {
+    return g.items.find((it) => hit(it.id))?.id;
+  }
   const anyMatch = $derived(q === "" || NAV_ITEMS.some((it) => it.keywords.includes(q)));
+
+  const groupById = new Map(NAV.map((g) => [g.id, g] as const));
+  // First group (in NAV order) with at least one visible section — suppresses
+  // the leading separator above it so the page doesn't start with a rule.
+  const firstVisibleGroupId = $derived(NAV.find((g) => groupHasMatch(g))?.id);
 
   /* --- In-page sidebar scrollspy --- */
   let activeId = $state<string>("");
@@ -240,7 +250,14 @@
       {#each NAV as g (g.id)}
         {#if groupHasMatch(g)}
           <div class="mb-4">
-            <p class="settings-nav-group mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-fainter">{g.label}</p>
+            <button
+              type="button"
+              class="settings-nav-group mb-1 block rounded-md px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-fainter transition-colors hover:text-fg-soft"
+              onclick={() => {
+                const id = firstVisibleInGroup(g);
+                if (id) scrollToSection(id);
+              }}
+            >{g.label}</button>
             <ul class="flex flex-col gap-0.5">
               {#each g.items as it (it.id)}
                 {#if hit(it.id)}
@@ -260,20 +277,33 @@
       {/each}
     </nav>
 
+    <Separator orientation="vertical" />
+
     <div bind:this={scrollEl} class="flex-1 overflow-y-auto px-6 py-6">
       <div class="mx-auto flex max-w-xl flex-col gap-4">
+        {#snippet groupHeader(g: NavGroup)}
+          {#if groupHasMatch(g)}
+            {#if g.id !== firstVisibleGroupId}
+              <Separator class="mt-6 mb-6" />
+            {/if}
+            <h2 class="px-1 text-xl font-semibold tracking-wide text-fg-soft">{g.label}</h2>
+          {/if}
+        {/snippet}
+
         {#if !anyMatch}
           <p class="text-center text-xs text-fainter" data-testid="settings-search-empty">
             No settings match “{query.trim()}”.
           </p>
         {/if}
 
+        {@render groupHeader(groupById.get("account")!)}
         {#if hit("providers")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="providers" use:sectionAction={"providers"}>
           <ProvidersSection />
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("appearance")!)}
         {#if hit("playroom")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="playroom" use:sectionAction={"playroom"}>
           <PlayroomSection {onOpenPlayroom} />
@@ -328,6 +358,7 @@
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("sounds")!)}
         {#if hit("sounds")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="sounds" use:sectionAction={"sounds"}>
           <SoundsSection />
@@ -358,6 +389,7 @@
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("behavior")!)}
         {#if hit("autoCompact")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="autoCompact" use:sectionAction={"autoCompact"}>
           <AutoCompactSection />
@@ -398,6 +430,7 @@
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("models")!)}
         {#if hit("utilityModel")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="utilityModel" use:sectionAction={"utilityModel"}>
           <UtilityModelSection />
@@ -416,6 +449,7 @@
         </section>
         {/if}
 
+        {@render groupHeader(groupById.get("system")!)}
         {#if hit("computerUse")}
         <section class="settings-section rounded-lg border border-border bg-surface/50 p-4" data-settings-section="computerUse" data-testid="computer-use-section" use:sectionAction={"computerUse"}>
           <ComputerUseSection />
@@ -434,9 +468,6 @@
 
 <style>
   /* In-page settings sidebar — local to this view. */
-  .settings-nav {
-    border-right: 1px solid var(--color-border);
-  }
   .settings-nav-item.is-active {
     background: var(--color-surface-2);
     color: var(--color-fg);

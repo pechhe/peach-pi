@@ -92,6 +92,7 @@
       disabled={!canGoBack}
       data-testid="nav-back"
       data-press="self"
+      data-kbd-hint="⌘["
       title="Back (⌘[)"
     >
       <ArrowLeft size={15} />
@@ -102,6 +103,7 @@
       disabled={!canGoForward}
       data-testid="nav-forward"
       data-press="self"
+      data-kbd-hint="⌘]"
       title="Forward (⌘])"
     >
       <ArrowRight size={15} />
@@ -119,6 +121,7 @@
       class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg"
       onclick={onOpenSearch}
       data-testid="nav-search"
+      data-kbd-hint="⌘K"
       title="Search (⌘K)"
     >
       <Search size={15} /><kbd class="text-[10px] text-fainter">⌘K</kbd>

@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 
 import type { McpServer } from "@peach-pi/shared-types";
+import { EXECUTOR_MCP_URL, delay, readExecutorToken } from "./executor-daemon.ts";
 
 /** pi-mcp-adapter config: `{ "mcpServers": { <name>: { command, args } } }`.
  *  Owned by the adapter. peach-pi toggles load by moving an entry between
@@ -16,6 +17,9 @@ const MCP_CACHE = join(homedir(), ".pi", "agent", "mcp-cache.json");
 interface RawServerSpec {
   command?: string;
   args?: string[];
+  url?: string;
+  auth?: "oauth" | "bearer" | false;
+  bearerToken?: string;
 }
 
 interface CacheEntry {
@@ -61,7 +65,9 @@ export class McpService {
     }
 
     const build = (name: string, spec: RawServerSpec, isDisabled: boolean): McpServer => {
-      const command = [spec.command, ...(spec.args ?? [])].filter(Boolean).join(" ");
+      const command = spec.command
+        ? [spec.command, ...(spec.args ?? [])].filter(Boolean).join(" ")
+        : (spec.url ?? "");
       const entry = cache?.servers?.[name];
       const fresh = entry?.configHash === configHash(spec);
       return {
@@ -80,15 +86,35 @@ export class McpService {
     return out;
   }
 
-  /** Ensure the bundled Executor MCP server is registered. Writes an
-   *  `mcpServers.executor` entry pointing at the absolute path of the bundled
-   *  binary (a Finder-launched app has no shell PATH, so a bare `executor`
-   *  won't resolve). `executor mcp` itself attaches to an existing local
-   *  daemon or elects a new owner over the default `~/.executor` data dir, so
-   *  the user's existing Executor connections appear automatically. Idempotent:
-   *  preserves all other keys and leaves a user-disabled entry alone. */
-  async ensureExecutorServer(binPath: string): Promise<{ ok: boolean; error?: string }> {
+  /** Register the bundled Executor MCP server over its daemon's **HTTP
+   *  (StreamableHTTP) MCP endpoint**, not the `executor mcp` stdio bridge. The
+   *  stdio bridge is broken (both 1.5.25 and 1.5.27): it answers `initialize`
+   *  locally but never propagates the MCP `mcp-session-id` to its own daemon,
+   *  so every forwarded `tools/list` fails with "Server not initialized" and pi
+   *  registers zero Executor tools. The daemon's `/mcp` endpoint is a compliant
+   *  StreamableHTTP server that works with a static bearer token.
+   *
+   *  The caller (`ensureExecutorDaemon`) guarantees the correctly-scoped daemon
+   *  is running before this runs; here we only write the HTTP
+   *  `mcpServers.executor` entry with the daemon's stable bearer token.
+   *  Idempotent: preserves all other keys and leaves a user-disabled entry
+   *  alone. */
+  async ensureExecutorServer(): Promise<{ ok: boolean; error?: string }> {
     try {
+      // Token is created on first daemon start and stable thereafter; retry
+      // briefly in case the daemon was only just launched.
+      let token = await readExecutorToken();
+      for (let i = 0; i < 8 && !token; i++) {
+        await delay(250);
+        token = await readExecutorToken();
+      }
+
+      const entry: RawServerSpec = {
+        url: EXECUTOR_MCP_URL,
+        auth: "bearer",
+        ...(token ? { bearerToken: token } : {}),
+      };
+
       let raw: {
         mcpServers?: Record<string, RawServerSpec>;
         peachDisabledMcpServers?: Record<string, RawServerSpec>;
@@ -100,12 +126,12 @@ export class McpService {
       }
       const active = raw.mcpServers ?? {};
       const disabled = raw.peachDisabledMcpServers ?? {};
-      // Respect a deliberate disable; only refresh the binary path if active.
+      // Respect a deliberate disable; only refresh the entry if active.
       if (disabled.executor) {
-        disabled.executor = { command: binPath, args: ["mcp"] };
+        disabled.executor = entry;
         raw.peachDisabledMcpServers = disabled;
       } else {
-        active.executor = { command: binPath, args: ["mcp"] };
+        active.executor = entry;
         raw.mcpServers = active;
       }
       await writeFile(MCP_CONFIG, `${JSON.stringify(raw, null, 2)}\n`, "utf8");

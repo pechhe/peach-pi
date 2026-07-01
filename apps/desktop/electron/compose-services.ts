@@ -11,6 +11,7 @@ import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
 import { IssuesService } from "./services/issues-service.ts";
+import { WorkQueueService } from "./services/work-queue-service.ts";
 import { SideChatService } from "./services/side-chat-service.ts";
 import { DevTapInstallService } from "./services/devtap-install-status.ts";
 import { FallowService } from "./services/fallow-service.ts";
@@ -18,13 +19,14 @@ import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { InsomniaService } from "./services/insomnia.ts";
 import { PiUpdateService } from "./services/pi-update-service.ts";
 import { AutoUpdateService, initMainSentry } from "./services/telemetry-service.ts";
-import { setDevTapStateProvider } from "@devtap/electron";
+import { setDevTapStateProvider, emitDevTapEvent } from "@devtap/electron";
 import { RecordingService } from "./services/recording-service.ts";
 import { ClipService } from "./services/clip-service.ts";
 import { BwsService } from "./services/bws-service.ts";
 import { CliService } from "./services/cli-service.ts";
 import { McpService } from "./services/mcp-service.ts";
 import { ExecutorService } from "./services/executor-service.ts";
+import { ensureExecutorDaemon } from "./services/executor-daemon.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
 import { UsageService } from "./services/usage/usage-service.ts";
@@ -60,6 +62,7 @@ export interface ServiceComposition {
   remoteHost: RemoteHostService;
   remoteClient: RemoteClientService;
   issuesService: IssuesService;
+  workQueueService: WorkQueueService;
   piUpdateService: PiUpdateService;
   autoUpdateService: AutoUpdateService;
   insomniaService: InsomniaService;
@@ -217,7 +220,18 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   // peach-remote-host.json). Hooks are set first (synchronously) so
   // onStatusChange fires during the auto-resumed setHostEnabled(true).
   void remoteHost.load().then(() => {
-    if (remoteHost.hostEnabledIntent()) void remoteHost.setHostEnabled(true);
+    if (!remoteHost.hostEnabledIntent()) return;
+    // Auto-resume serving. If start() rejects (e.g. the Tailscale daemon
+    // hasn't published the tailnet interface in the first second after boot),
+    // intent stays persisted-true and the next launch tries again — surface
+    // the failure rather than swallowing an unhandled rejection.
+    void remoteHost.setHostEnabled(true).catch((err) => {
+      emitDevTapEvent({
+        area: "lifecycle",
+        event: "remoteHost.autoResumeFailed",
+        message: String(err),
+      });
+    });
   });
   remoteHost.setHostHooks({
     enableServe,
@@ -296,6 +310,13 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
         .filter((w) => w.projectId === id && w.archivedAt == null)
         .map((w) => w.name),
   );
+  const workQueueService = new WorkQueueService({
+    emit,
+    appService,
+    threadService,
+    gitService,
+    issuesService,
+  });
   const piUpdateService = new PiUpdateService(db, emit, () =>
     appService.snapshot().threads.some((t) => t.status === "running"),
     () => appService.snapshot().projects.map((p) => p.path),
@@ -314,14 +335,27 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const bwsService = new BwsService(emit);
   const cliService = new CliService(emit);
   const mcpService = new McpService();
-  // Register the bundled Executor CLI as an MCP server. Absolute path: a
+  // Register the bundled Executor as an MCP server. Absolute path: a
   // Finder-launched app has no shell PATH, so a bare `executor` won't resolve.
-  // `executor mcp` attaches to an existing local daemon or elects a new owner
-  // over the default ~/.executor data dir, so existing connections appear.
+  // ensureExecutorDaemon runs the one app-owned daemon pinned to a stable scope
+  // (and the one-time tenant migration); ensureExecutorServer then registers
+  // its HTTP MCP endpoint — the `executor mcp` stdio bridge is broken (drops
+  // the daemon MCP session), so we bypass it.
   const executorBin = app.isPackaged
     ? path.join(process.resourcesPath, "executor", "executor")
     : path.join(app.getAppPath(), "build", "executor", "executor");
-  void mcpService.ensureExecutorServer(executorBin);
+  // Gate pi-session creation on Executor readiness: pi-mcp-adapter binds MCP
+  //  tools once, at session start, so a session created before the executor
+  //  entry lands in mcp.json would never see them (boot race). Best-effort —
+  //  ensureExecutorDaemon self-bounds (~10s) and we swallow errors so a broken
+  //  Executor can't hang session creation.
+  const executorReady = (async () => {
+    await ensureExecutorDaemon(executorBin);
+    await mcpService.ensureExecutorServer();
+  })().catch((err) => {
+    console.error("Executor bring-up failed; sessions start without it:", err);
+  });
+  threadService.setExecutorReady(executorReady);
   const executorService = new ExecutorService(executorBin, emit);
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
@@ -354,6 +388,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     remoteHost,
     remoteClient,
     issuesService,
+    workQueueService,
     piUpdateService,
     autoUpdateService,
     insomniaService,

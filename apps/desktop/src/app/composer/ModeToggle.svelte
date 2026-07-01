@@ -20,6 +20,7 @@
     onclick={onToggle}
     data-press="self"
     data-testid="mode-toggle"
+    data-kbd-hint="⌘B/P"
     title="⌘B build · ⌘P plan"
   >
     <span class="composer-mode__label {mode !== 'plan' ? 'composer-mode__label--active' : ''}">Build</span>
