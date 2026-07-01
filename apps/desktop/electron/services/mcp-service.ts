@@ -46,6 +46,14 @@ interface RawServerSpec {
   url?: string;
   auth?: "oauth" | "bearer" | false;
   bearerToken?: string;
+  /** pi-mcp-adapter: register this server's tools as NATIVE pi tools (full
+   *  cached descriptions, lazy-connect on call) instead of only via the `mcp`
+   *  gateway. See `directTools` / direct-tools.ts in pi-mcp-adapter. */
+  directTools?: boolean;
+  /** Connect at session start and never idle-disconnect, so the metadata
+   *  cache that backs direct-tool descriptions stays fresh as the user
+   *  adds/removes connections. */
+  lifecycle?: "keep-alive" | "lazy" | "eager";
 }
 
 interface CacheEntry {
@@ -135,9 +143,19 @@ export class McpService {
         token = await readExecutorToken();
       }
 
+      // directTools + lifecycle(eager): pi-mcp-adapter exposes Executor's
+      //   `execute`/`resume` as NATIVE pi tools — present in the agent's tool
+      //   list from session 1, with their full description (incl. the live
+      //   "Available connection prefixes" block, so Notion/PostHog/etc. are
+      //   visible without a manual connect). "eager" connects at startup and
+      //   keeps those descriptions fresh as connections change. These flags are
+      //   excluded from the adapter's server-identity hash, so adding them does
+      //   not invalidate the existing metadata cache.
       const entry: RawServerSpec = {
         url: EXECUTOR_MCP_URL,
         auth: "bearer",
+        directTools: true,
+        lifecycle: "eager",
         ...(token ? { bearerToken: token } : {}),
       };
 
