@@ -45,14 +45,15 @@ final class NotchModel: ObservableObject {
 
     var closedNotchSize: CGSize { geometry.notchSize }
 
-    /// Opened panel size, sized to the running + finished session lists
-    /// (plus a section header for each non-empty group).
+    /// Opened panel size, sized to the running + finished session lists.
+    /// Metrics mirror NotchView: 34pt rows + 3pt spacing, ~22pt section
+    /// headers, 10pt bottom pad. Tall lists cap at 70% of the screen and the
+    /// view scrolls the remainder.
     var openedSize: CGSize {
         let headers = (running.isEmpty ? 0 : 1) + (completed.isEmpty ? 0 : 1)
         let rows = max(running.count + completed.count, 1)
-        let h = min(
-            geometry.screenRect.height - 8,
-            closedNotchSize.height + 16 + CGFloat(headers) * 22 + CGFloat(rows) * 38 + 14)
+        let content = CGFloat(headers) * 22 + CGFloat(rows) * 37 + 10
+        let h = min(geometry.screenRect.height * 0.7, closedNotchSize.height + content + 6)
         return CGSize(width: min(geometry.screenRect.width * 0.42, 400), height: h)
     }
 

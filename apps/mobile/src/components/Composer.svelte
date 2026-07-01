@@ -57,23 +57,23 @@
   const activeModel = $derived(overrideModel ?? sessionModel);
   const activeThinking = $derived(overrideThinking ?? sessionThinking);
 
-  // Pinned slider slots: STABLE first-three scoped models (catalog order). The
-  // thumb slides to whichever slot is active — slots never reorder (that was
-  // the "it just replaces the first one" bug). Mirrors desktop ModelSelector:
-  // when the active model isn't one of the three pinned, it's appended as a
-  // 4th overflow slot so the thumb still has somewhere to point.
+  // Three fixed slider detents: the top-two scoped models (catalog order,
+  // stable — they never reorder) pinned at 0/1, and detent 2 is the overflow
+  // slot. Overflow shows "…" and opens the full picker; when the active model
+  // isn't pinned, its name takes the slot and the thumb points there.
   const keyOf = (m: ScopedModel | ModelInfo) => `${m.provider}:${m.id}`;
   const activeKey = $derived(activeModel ? keyOf(activeModel) : null);
   const scopedModels = $derived(models.filter((m) => m.scoped));
-  const pinnedSlots = $derived(scopedModels.slice(0, 3));
-  const overflowSlot = $derived.by(() => {
-    if (!activeKey || pinnedSlots.some((m) => keyOf(m) === activeKey)) return null;
-    return scopedModels.find((m) => keyOf(m) === activeKey) ?? null;
+  const pinnedSlots = $derived(scopedModels.slice(0, 2));
+  const overflowModel = $derived.by(() => {
+    if (!activeModel || !activeKey) return null;
+    return pinnedSlots.some((m) => keyOf(m) === activeKey) ? null : activeModel;
   });
-  const sliderSlots = $derived(overflowSlot ? [...pinnedSlots, overflowSlot] : pinnedSlots);
-  const sliderSpan = $derived(Math.max(1, sliderSlots.length - 1));
+  // Span includes the overflow detent: [pinned0, pinned1, overflow].
+  const sliderSpan = $derived(Math.max(1, pinnedSlots.length));
   const sliderPosition = $derived.by(() => {
-    const idx = sliderSlots.findIndex((m) => keyOf(m) === activeKey);
+    if (overflowModel) return pinnedSlots.length;
+    const idx = pinnedSlots.findIndex((m) => keyOf(m) === activeKey);
     return idx >= 0 ? idx : 0;
   });
 
@@ -115,9 +115,10 @@
     dragFrac = frac;
     const idx = Math.max(0, Math.min(sliderSpan, Math.round(frac * sliderSpan)));
     if (idx !== dragSlot) {
-      dragSlot = idx; // crossed into a new model slot → detent
-      const m = sliderSlots[idx];
+      dragSlot = idx; // crossed into a new detent
+      const m = pinnedSlots[idx];
       if (m) pickSlot(m); // pickSlot fires the haptic
+      else haptic(6); // overflow detent — picker opens on release
     }
   }
 
@@ -136,6 +137,10 @@
     if (!dragging) return;
     dragging = false;
     (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    // Released on the overflow detent with no overflow model active → the user
+    // is asking for more models: open the full picker (thumb snaps back if
+    // they dismiss it without choosing).
+    if (dragSlot >= pinnedSlots.length && !overflowModel) showPicker = true;
   }
   function onSliderPointerCancel(): void {
     dragging = false;
@@ -286,6 +291,13 @@
     images = images.filter((i) => i.id !== id);
   }
 
+  let fileInput = $state<HTMLInputElement | null>(null);
+  function onFilePick(e: Event): void {
+    const input = e.currentTarget as HTMLInputElement;
+    void addFiles(Array.from(input.files ?? []));
+    input.value = ""; // allow re-picking the same file
+  }
+
   function onPaste(e: ClipboardEvent): void {
     const cd = e.clipboardData;
     if (!cd) return;
@@ -310,7 +322,7 @@
   };
 </script>
 
-<div class="composer-device border-t border-border px-3 pt-2 pb-3">{#if running}
+<div class="composer-device px-3 pt-1 pb-3">{#if running}
     <!-- Mid-run delivery mode: queue as a follow-up (default) or steer the
          current turn now. Mirrors the desktop composer's steer affordance. -->
     <div class="mb-2 inline-flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5 text-[11px] font-medium">
@@ -409,6 +421,22 @@
       <!-- Controls strip: model slider · reasoning dial · send dial · overflow -->
       <div class="composer__footer-row">
         <div class="composer__controls">
+          <input
+            bind:this={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            class="hidden"
+            onchange={onFilePick}
+          />
+          <button
+            class="composer__attach"
+            type="button"
+            onclick={() => fileInput?.click()}
+            aria-label="Attach image"
+          >
+            <Icon name="plus" size={15} sw={2.2} />
+          </button>
           <span class="composer__key-mount">
             <span
               class="model-selector__badge model-selector__badge--slider{dragging ? ' is-dragging' : ''}"
@@ -436,7 +464,7 @@
                 <span class="model-selector__slider-thumb"></span>
               </span>
 
-              {#each sliderSlots as option, index (keyOf(option))}
+              {#each pinnedSlots as option, index (keyOf(option))}
                 {@const isActive = keyOf(option) === activeKey}
                 <button
                   class="model-selector__slider-label model-selector__slider-label--slot model-selector__slider-label--slot-{index}{isActive
@@ -451,15 +479,19 @@
                 </button>
               {/each}
 
-              {#if sliderSlots.length < 4}
-                <button
-                  class="model-selector__slider-label model-selector__slider-label--slot model-selector__slider-label--slot-3 model-selector__slider-label--menu"
-                  type="button"
-                  aria-label="Open full model & reasoning menu"
-                  aria-expanded={showPicker}
-                  onclick={() => (showPicker = true)}
-                >…</button>
-              {/if}
+              <!-- Overflow detent: "…" opens the picker; a non-pinned active
+                   model takes over the label and reads as selected. -->
+              <button
+                class="model-selector__slider-label model-selector__slider-label--slot model-selector__slider-label--slot-{pinnedSlots.length}{overflowModel
+                  ? ' model-selector__slider-label--selected'
+                  : ' model-selector__slider-label--menu'}"
+                type="button"
+                aria-label={overflowModel
+                  ? `Model ${overflowModel.name ?? overflowModel.id} — open model menu`
+                  : "Open full model & reasoning menu"}
+                aria-expanded={showPicker}
+                onclick={() => (showPicker = true)}
+              >{overflowModel ? shortLabel(overflowModel.name ?? overflowModel.id) : "…"}</button>
             </span>
           </span>
 

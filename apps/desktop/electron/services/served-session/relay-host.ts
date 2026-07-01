@@ -755,7 +755,10 @@ export class RemoteHostService {
   private async handlePost(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     const a = this.deps.actions;
     const seg = url.pathname.split("/").filter(Boolean); // e.g. ["sessions","<id>","git","pr"]
-    const body = await readJsonBody(req);
+    // Message bodies may carry image attachments (≤8 × ~10MB base64, enforced
+    // per-image below), so the cap must fit them — the 64KiB default silently
+    // truncated image sends, parsing to `{}` and 400ing with "text required".
+    const body = await readJsonBody(req, { maxBytes: 120 * 1024 * 1024 });
 
     // Create routes (no thread to gate on — project membership checked inside).
     if (seg.length === 1 && seg[0] === "threads") {

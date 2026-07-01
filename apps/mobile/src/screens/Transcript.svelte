@@ -47,6 +47,9 @@
       if (frame.seq <= remoteSeq) return; // already folded into the backfill
       items = applyTranscriptOps(items, frame.ops);
       remoteSeq = frame.seq;
+      // The tap wire has no meta frame, so context usage would freeze mid-run
+      // (exactly when it's moving). Piggyback a throttled refetch on activity.
+      maybeRefreshMeta();
     } else if (frame.kind === "checkpoint") {
       lastCheckpointSha = frame.sha;
       checkpoints = [...checkpoints, { sha: frame.sha, after: items.length }];
@@ -67,6 +70,14 @@
     nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
     showJump = !nearBottom;
   }
+  // A finger-scroll over the transcript dismisses the soft keyboard — touchmove
+  // (not onscroll) so programmatic autoscroll from streaming frames never blurs
+  // the composer mid-typing.
+  function dismissKeyboard(): void {
+    const el = document.activeElement;
+    if (el instanceof HTMLElement && (el.tagName === "TEXTAREA" || el.tagName === "INPUT")) el.blur();
+  }
+
   function jumpToLatest(): void {
     nearBottom = true;
     showJump = false;
@@ -91,8 +102,17 @@
     void refreshMeta();
   }
 
+  let lastMetaFetch = 0;
+  function maybeRefreshMeta(): void {
+    const now = Date.now();
+    if (now - lastMetaFetch < 4000) return;
+    lastMetaFetch = now;
+    void refreshMeta();
+  }
+
   async function refreshMeta(): Promise<void> {
     if (!master) return;
+    lastMetaFetch = Date.now();
     try {
       meta = await getSessionMeta(master, threadId);
     } catch {
@@ -188,9 +208,13 @@
   </div>
 {/if}
 
+<!-- role=log: the transcript is a live append-only feed; also satisfies the
+     a11y rule for the (non-interactive) touchmove keyboard-dismiss handler. -->
 <div
   bind:this={scroller}
+  role="log"
   onscroll={onScroll}
+  ontouchmove={dismissKeyboard}
   class="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-6 transition-opacity {reconnecting
     ? 'opacity-50'
     : ''}"
