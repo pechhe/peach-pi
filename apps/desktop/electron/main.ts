@@ -11,6 +11,7 @@ import { composeServices } from "./compose-services.ts";
 import { registerIpcTable } from "./ipc-table.ts";
 import { HudLifecycle } from "./hud-lifecycle.ts";
 import { registerFinishCue } from "./services/finish-cue-router.ts";
+import { NotchService } from "./services/notch-service.ts";
 
 // CDP for renderer layout inspection — dev/unpackaged only, never in a
 // shipped build (an open debugging port in production is a security hole).
@@ -56,6 +57,16 @@ async function boot(): Promise<void> {
     emit,
     hud,
   });
+  // Notch surface (ADR-0016): a native Swift sidecar showing running/finished
+  // counts + finish toasts. Subscribes to the same frame bus as the finish-cue
+  // above; a missing helper binary disables it gracefully.
+  const notch = new NotchService({
+    threadService: svc.threadService,
+    appService: svc.appService,
+    emit,
+    hud,
+  });
+  notch.start();
 
   registerIpcTable(svc, hud);
 
@@ -106,6 +117,7 @@ async function boot(): Promise<void> {
     emitDevTapEvent({ area: "lifecycle", event: "app.before-quit" });
     stopDevTapControlChannel();
     globalShortcut.unregisterAll();
+    notch.dispose();
     svc.appService.stop();
     svc.automationService.stop();
     svc.piUpdateService.stop();

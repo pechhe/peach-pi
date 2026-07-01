@@ -79,6 +79,9 @@ const config: ForgeConfig = {
     extraResource: [
       path.join(__dirname, "build/cua-driver/CuaDriver.app"),
       path.join(__dirname, "build/executor"),
+      // Native notch helper (ADR-0016), built by the prePackage hook. Lands at
+      // Contents/Resources/notch-helper where NotchService spawns it.
+      path.join(__dirname, "native/notch/.build/release/notch-helper"),
     ],
     // Native N-API prebuilds (clipboard, pi-tui) must live outside the asar.
     // node-pty's prebuilds dir also holds the spawn-helper executable.
@@ -106,6 +109,10 @@ const config: ForgeConfig = {
         stdio: "inherit",
       });
       execFileSync(process.execPath, [path.join(__dirname, "scripts/fetch-executor.mjs")], {
+        stdio: "inherit",
+      });
+      // Build the native notch helper (ADR-0016) so extraResource can copy it.
+      execFileSync("bash", [path.join(__dirname, "native/notch/build.sh")], {
         stdio: "inherit",
       });
     },
