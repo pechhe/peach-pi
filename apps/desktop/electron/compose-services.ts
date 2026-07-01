@@ -26,6 +26,7 @@ import { BwsService } from "./services/bws-service.ts";
 import { CliService } from "./services/cli-service.ts";
 import { McpService } from "./services/mcp-service.ts";
 import { ExecutorService } from "./services/executor-service.ts";
+import { ensureExecutorDaemon } from "./services/executor-daemon.ts";
 import { CuaDriverService } from "./services/cua-driver-service.ts";
 import { AgentBrowserService } from "./services/agent-browser-service.ts";
 import { UsageService } from "./services/usage/usage-service.ts";
@@ -336,13 +337,17 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const mcpService = new McpService();
   // Register the bundled Executor as an MCP server. Absolute path: a
   // Finder-launched app has no shell PATH, so a bare `executor` won't resolve.
-  // ensureExecutorServer starts the local daemon (over the default ~/.executor
-  // data dir) and registers its HTTP MCP endpoint — the `executor mcp` stdio
-  // bridge is broken (drops the daemon MCP session), so we bypass it.
+  // ensureExecutorDaemon runs the one app-owned daemon pinned to a stable scope
+  // (and the one-time tenant migration); ensureExecutorServer then registers
+  // its HTTP MCP endpoint — the `executor mcp` stdio bridge is broken (drops
+  // the daemon MCP session), so we bypass it.
   const executorBin = app.isPackaged
     ? path.join(process.resourcesPath, "executor", "executor")
     : path.join(app.getAppPath(), "build", "executor", "executor");
-  void mcpService.ensureExecutorServer(executorBin);
+  void (async () => {
+    await ensureExecutorDaemon(executorBin);
+    await mcpService.ensureExecutorServer();
+  })();
   const executorService = new ExecutorService(executorBin, emit);
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
