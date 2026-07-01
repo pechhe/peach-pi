@@ -17,6 +17,11 @@ export interface Project {
    *   'local' merges the worktree branch into the repo's default branch in the
    *   project's main checkout then pushes (no PR). Per-project. Defaults 'pr'. */
   mergeWorkflow: "pr" | "local";
+  /** Optional check command (e.g. `pnpm typecheck && pnpm test`) run in the
+   *   worktree after the rebase and before any local merge — the local
+   *   workflow's CI substitute. null/empty = no gate. The PR workflow relies
+   *   on GitHub CI instead. */
+  checkCommand?: string | null;
   /** Optional pinned model for Work Queue agent launches in this project.
    *   null = pi picks its default. Mirrors `Automation.model`. */
   agentModel?: AutomationModel | null;
@@ -787,7 +792,9 @@ export type GitMergePrResult =
   | { ok: true; prNumber: number; prUrl: string }
   | { ok: false; error: string };
 
-/** Merge a worktree's branch (--no-ff) into the local project's current branch. */
+/** Merge a worktree's branch (--no-ff) into the local project's default
+ *  branch (`main`/`master`) — the single local integration lane shared by the
+ *  GitWidget button and the Work Queue 'local' workflow. */
 export type GitMergeResult =
   | { ok: true; target: string; branch: string; hasRemote: boolean; warning?: string }
   | {
@@ -812,12 +819,14 @@ export type GitPullResult =
   | { ok: true; branch: string }
   | { ok: false; error: string; conflict?: true };
 
-/** Rebase a thread's branch onto the latest default branch and run the
- *  project's tests. Used by the batch-merge flow to bring a worktree branch
- *  up to date against main before it is merged, so the merge is clean. */
+/** Rebase a thread's branch onto the latest default branch. Used by the
+ *  local merge pipeline to bring a worktree branch up to date against main
+ *  in its own isolated cwd, so conflicts surface there — not on main.
+ *  `conflict` marks a real rebase conflict (aborted, worktree left clean),
+ *  as opposed to a precondition failure (dirty tree, no default branch…). */
 export type GitRebaseResult =
   | { ok: true; branch: string; base: string }
-  | { ok: false; error: string }
+  | { ok: false; error: string; conflict?: true }
 
 /** A scheduled prompt. Fires into a fresh thread (project) or chat (null). */
 export interface AutomationModel {
