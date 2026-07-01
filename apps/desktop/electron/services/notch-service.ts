@@ -15,8 +15,8 @@ import {
   type NotchThread,
 } from "./notch-state.ts";
 
-/** main → helper: full surface state (running count + unread finished list). */
-type StateMsg = { type: "state"; running: number; completed: NotchThread[] };
+/** main → helper: full surface state (running + unread finished session lists). */
+type StateMsg = { type: "state"; running: NotchThread[]; completed: NotchThread[] };
 /** main → helper: a run just finished cleanly → pop a toast out of the notch. */
 type FinishMsg = { type: "finish" } & NotchThread;
 /** helper → main: the user clicked a finished thread → open it. */

@@ -67,7 +67,7 @@ struct NotchView: View {
     private var header: some View {
         HStack(spacing: 0) {
             ZStack {
-                if model.running > 0 { runningBadge }
+                if !model.running.isEmpty { runningBadge }
             }
             .frame(width: sideWidth)
             Color.clear.frame(width: max(0, model.closedNotchSize.width - 12))
@@ -81,8 +81,8 @@ struct NotchView: View {
 
     private var runningBadge: some View {
         HStack(spacing: 4) {
-            Spinner()
-            Text("\(model.running)").foregroundStyle(.white).font(.system(size: 12, weight: .semibold))
+            HexDotMatrix()
+            Text("\(model.running.count)").foregroundStyle(.white).font(.system(size: 12, weight: .semibold))
         }
     }
 
@@ -95,51 +95,52 @@ struct NotchView: View {
         }
     }
 
-    // MARK: - Opened: header row + finished-thread list.
+    // MARK: - Opened: running + finished session lists.
     private var openedContent: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                if model.running > 0 { runningBadge }
+                if !model.running.isEmpty { runningBadge }
                 if !model.completed.isEmpty { completedBadge }
                 Spacer()
-                Text("Finished").foregroundStyle(.white.opacity(0.5)).font(.system(size: 11, weight: .medium))
             }
             .padding(.top, model.closedNotchSize.height - 6)
 
-            ForEach(model.completed) { t in
-                Button(action: { model.openThread(t.id) }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
-                        Text(t.title.isEmpty ? "Untitled thread" : t.title)
-                            .foregroundStyle(.white).font(.system(size: 13)).lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.06)))
-                }
-                .buttonStyle(.plain)
+            if !model.running.isEmpty {
+                sectionHeader("Running")
+                ForEach(model.running) { t in row(t, running: true) }
             }
-            if model.completed.isEmpty {
-                Text("No finished sessions").foregroundStyle(.white.opacity(0.4))
-                    .font(.system(size: 12)).padding(.vertical, 8)
+            if !model.completed.isEmpty {
+                sectionHeader("Finished")
+                ForEach(model.completed) { t in row(t, running: false) }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14).padding(.bottom, 12)
     }
-}
 
-/// A small rotating arc for the running indicator.
-private struct Spinner: View {
-    @State private var spin = false
-    var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.72)
-            .stroke(Color.green, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            .frame(width: 12, height: 12)
-            .rotationEffect(.degrees(spin ? 360 : 0))
-            .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
-            .onAppear { spin = true }
+    private func sectionHeader(_ label: String) -> some View {
+        Text(label.uppercased())
+            .foregroundStyle(.white.opacity(0.4))
+            .font(.system(size: 10, weight: .semibold)).kerning(0.6)
+            .padding(.top, 2)
+    }
+
+    private func row(_ t: NotchThread, running: Bool) -> some View {
+        Button(action: { model.openThread(t.id) }) {
+            HStack(spacing: 8) {
+                if running {
+                    HexDotMatrix(dotSize: 2.0, gap: 1.6)
+                } else {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue)
+                }
+                Text(t.title.isEmpty ? "Untitled thread" : t.title)
+                    .foregroundStyle(.white).font(.system(size: 13)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.06)))
+        }
+        .buttonStyle(.plain)
     }
 }

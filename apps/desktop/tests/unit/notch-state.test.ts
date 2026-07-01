@@ -47,14 +47,14 @@ test("reduceInbox: is pure (does not mutate the input set)", () => {
   assert.deepEqual([...input], ["a"]);
 });
 
-test("computeNotchState: running counts live; completed = unread that still exist", () => {
+test("computeNotchState: running lists live; completed = unread that still exist", () => {
   const threads = [
     { id: id("a"), title: "Alpha", status: "running" as const },
     { id: id("b"), title: "Bravo", status: "completed" as const },
     { id: id("c"), title: "Cee", status: "idle" as const },
   ];
   const state = computeNotchState(threads, new Set([id("b")]));
-  assert.equal(state.running, 1);
+  assert.deepEqual(state.running, [{ id: "a", title: "Alpha" }]);
   assert.deepEqual(state.completed, [{ id: "b", title: "Bravo" }]);
   assert.equal(state.visible, true);
 });
@@ -63,7 +63,7 @@ test("computeNotchState: drops unread ids whose thread no longer exists", () => 
   const threads = [{ id: id("a"), title: "Alpha", status: "idle" as const }];
   const state = computeNotchState(threads, new Set([id("gone")]));
   assert.deepEqual(state.completed, []);
-  assert.equal(state.running, 0);
+  assert.deepEqual(state.running, []);
   assert.equal(state.visible, false);
 });
 

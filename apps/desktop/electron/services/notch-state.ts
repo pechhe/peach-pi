@@ -6,7 +6,7 @@ export type NotchThread = { id: ThreadId; title: string };
 /** What the notch surface should show right now. `visible` folds the
  *  "only show when something's running/finished" rule so the helper never
  *  decides visibility itself. */
-export type NotchState = { running: number; completed: NotchThread[]; visible: boolean };
+export type NotchState = { running: NotchThread[]; completed: NotchThread[]; visible: boolean };
 
 /** A run finished cleanly → pop a notch toast. Only a clean `completed`
  *  transition cues (mirrors `routeFinishCue`): `failed`/`idle`/`running` never
@@ -33,15 +33,18 @@ export function reduceInbox(
 }
 
 /** Derive the notch surface from the live thread list + the unread inbox.
- *  Running count is always live (from the snapshot); completed = unread finished
- *  threads that still exist (inbox ids whose thread is gone are dropped). */
+ *  Running is always live (from the snapshot); completed = unread finished
+ *  threads that still exist (inbox ids whose thread is gone are dropped). Both
+ *  are lists of `{id,title}` so the notch can name each session on hover. */
 export function computeNotchState(
   threads: readonly { id: ThreadId; title: string; status: ThreadStatus }[],
   unread: ReadonlySet<ThreadId>,
 ): NotchState {
-  const running = threads.filter((t) => t.status === "running").length;
+  const running = threads
+    .filter((t) => t.status === "running")
+    .map((t) => ({ id: t.id, title: t.title }));
   const completed = threads
     .filter((t) => unread.has(t.id))
     .map((t) => ({ id: t.id, title: t.title }));
-  return { running, completed, visible: running > 0 || completed.length > 0 };
+  return { running, completed, visible: running.length > 0 || completed.length > 0 };
 }

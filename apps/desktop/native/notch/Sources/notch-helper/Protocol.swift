@@ -8,11 +8,11 @@ struct NotchThread: Codable, Identifiable, Equatable {
 }
 
 /// One NDJSON line from Electron main (see notch-service.ts).
-///   { "type": "state", "running": N, "completed": [{id,title}] }
+///   { "type": "state", "running": [{id,title}], "completed": [{id,title}] }
 ///   { "type": "finish", "id": "...", "title": "..." }
 struct Incoming: Decodable {
     let type: String
-    let running: Int?
+    let running: [NotchThread]?
     let completed: [NotchThread]?
     let id: String?
     let title: String?

@@ -11,7 +11,7 @@ enum NotchStatus { case closed, hint, opened }
 @MainActor
 final class NotchModel: ObservableObject {
     // Data pushed from Electron main.
-    @Published private(set) var running: Int = 0
+    @Published private(set) var running: [NotchThread] = []
     @Published private(set) var completed: [NotchThread] = []
     /// A just-finished thread → pulse the notch (the "bounce out").
     @Published private(set) var flash: Bool = false
@@ -41,15 +41,19 @@ final class NotchModel: ObservableObject {
     }
 
     /// Something is running, or a finish is unread → the notch is on screen.
-    var hasActivity: Bool { running > 0 || !completed.isEmpty }
+    var hasActivity: Bool { !running.isEmpty || !completed.isEmpty }
 
     var closedNotchSize: CGSize { geometry.notchSize }
 
-    /// Opened panel size, sized to the finished-thread list.
+    /// Opened panel size, sized to the running + finished session lists
+    /// (plus a section header for each non-empty group).
     var openedSize: CGSize {
-        let rows = max(completed.count, 1)
-        let h = min(geometry.screenRect.height - 8, closedNotchSize.height + 20 + CGFloat(rows) * 40 + 14)
-        return CGSize(width: min(geometry.screenRect.width * 0.4, 380), height: h)
+        let headers = (running.isEmpty ? 0 : 1) + (completed.isEmpty ? 0 : 1)
+        let rows = max(running.count + completed.count, 1)
+        let h = min(
+            geometry.screenRect.height - 8,
+            closedNotchSize.height + 16 + CGFloat(headers) * 22 + CGFloat(rows) * 38 + 14)
+        return CGSize(width: min(geometry.screenRect.width * 0.42, 400), height: h)
     }
 
     // MARK: - Incoming frames
@@ -57,7 +61,7 @@ final class NotchModel: ObservableObject {
     func apply(_ frame: Incoming) {
         switch frame.type {
         case "state":
-            running = frame.running ?? 0
+            running = frame.running ?? []
             completed = frame.completed ?? []
             if !hasActivity, status != .opened { close() }
         case "finish":
