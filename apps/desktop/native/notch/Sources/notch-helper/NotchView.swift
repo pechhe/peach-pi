@@ -12,6 +12,8 @@ struct NotchView: View {
     private let openAnim = Animation.spring(response: 0.42, dampingFraction: 0.78)
     private let closeAnim = Animation.spring(response: 0.45, dampingFraction: 1.0)
     private let flashAnim = Animation.spring(response: 0.3, dampingFraction: 0.55)
+    // Snappy, slightly springy tracking so the peek follows the cursor live.
+    private let peekAnim = Animation.interactiveSpring(response: 0.24, dampingFraction: 0.66)
 
     private var isOpen: Bool { model.status == .opened }
     private var visible: Bool { model.hasActivity || model.status != .closed }
@@ -35,11 +37,17 @@ struct NotchView: View {
                 .frame(width: size.width, height: size.height, alignment: .top)
                 .background(.black)
                 .clipShape(NotchShape(topCornerRadius: topRadius, bottomCornerRadius: bottomRadius))
+                // Proximity peek: stretch downward toward the approaching cursor.
+                .scaleEffect(x: 1 + (isOpen ? 0 : model.peek * 0.05),
+                             y: 1 + (isOpen ? 0 : model.peek * 0.30),
+                             anchor: .top)
                 .scaleEffect(model.flash ? 1.06 : 1.0, anchor: .top)
-                .shadow(color: isOpen ? .black.opacity(0.6) : .clear, radius: 8, y: 4)
+                .shadow(color: (isOpen || model.peek > 0.01) ? .black.opacity(0.5) : .clear,
+                        radius: 8, y: 4)
                 .animation(isOpen ? openAnim : closeAnim, value: model.status)
                 .animation(openAnim, value: size)
                 .animation(flashAnim, value: model.flash)
+                .animation(peekAnim, value: model.peek)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .opacity(visible ? 1 : 0)

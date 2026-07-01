@@ -15,6 +15,9 @@ final class NotchModel: ObservableObject {
     @Published private(set) var completed: [NotchThread] = []
     /// A just-finished thread → pulse the notch (the "bounce out").
     @Published private(set) var flash: Bool = false
+    /// Cursor proximity to the notch, 0 (far) → 1 (at the notch). Drives the
+    /// live "peek" stretch toward the mouse before it fully opens.
+    @Published private(set) var peek: CGFloat = 0
 
     // Interaction state.
     @Published private(set) var status: NotchStatus = .closed
@@ -79,6 +82,7 @@ final class NotchModel: ObservableObject {
     }
 
     private func handleMove(_ loc: CGPoint) {
+        updatePeek(loc)
         let inNotch = geometry.isPointInNotch(loc)
         let inOpened = status == .opened && geometry.isPointInOpened(loc, size: openedSize)
         let hovering = inNotch || inOpened
@@ -86,12 +90,14 @@ final class NotchModel: ObservableObject {
         isHovering = hovering
         hoverTimer?.cancel(); hoverTimer = nil
         if hovering, status != .opened, hasActivity {
+            // Short dwell so brushing past doesn't fully open, but close enough
+            // that reaching the notch after the peek expands promptly.
             let work = DispatchWorkItem { [weak self] in
                 guard let self, self.isHovering else { return }
                 self.open()
             }
             hoverTimer = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
         } else if !hovering, status == .opened {
             // Leaving the opened panel collapses it after a short grace period.
             let work = DispatchWorkItem { [weak self] in
@@ -113,10 +119,27 @@ final class NotchModel: ObservableObject {
         }
     }
 
+    /// Continuous proximity: 1 when the cursor is at the notch, fading to 0 by
+    /// `radius` points below/beside it. Only active while closed with activity.
+    private func updatePeek(_ loc: CGPoint) {
+        guard hasActivity, status != .opened else {
+            if peek != 0 { peek = 0 }
+            return
+        }
+        let near = geometry.notchRect.insetBy(dx: -46, dy: 0)
+        let dx = max(near.minX - loc.x, loc.x - near.maxX, 0)
+        let dy = max(near.minY - loc.y, 0) // distance below the notch bottom
+        let dist = (dx * dx + dy * dy).squareRoot()
+        let radius: CGFloat = 80
+        let p = max(0, min(1, 1 - dist / radius))
+        if abs(p - peek) > 0.01 { peek = p }
+    }
+
     // MARK: - Transitions
 
     func open() {
         hintTimer?.cancel(); hoverTimer?.cancel()
+        peek = 0
         setStatus(.opened)
     }
 
