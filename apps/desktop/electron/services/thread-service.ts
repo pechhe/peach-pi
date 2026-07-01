@@ -922,8 +922,6 @@ export class ThreadService {
 
   private setStatus(threadId: string, status: Thread["status"]): void {
     const prev = this.threads.get(threadId)?.status ?? "idle";
-    const wasRunning = prev === "running";
-    const nowRunning = status === "running";
     this.threads.setStatus(threadId, status);
     this.onThreadsChanged();
     // The status frame carries `prev` so run-lifecycle subscribers (sleep

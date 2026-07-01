@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification } from "electron";
+import { app } from "electron";
 import { homedir } from "node:os";
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -81,13 +81,6 @@ export interface ServiceComposition {
   bwsResolver: BwsResolver;
   listTailnetPeersDefault: typeof listTailnetPeersDefault;
   enableServe: typeof enableServe;
-  /** Refresh the App↔Thread cycle ownership predicate (used by boot's
-   *  notification routing, which needs to know when the HUD owns finish cues). */
-  setHudUpPredicate: (fn: () => boolean) => void;
-  /** Show the main window (created lazily). Boot wires this to the
-   *  HudLifecycle so the thread-finished notification click can surface the
-   *  app without compose-services depending on the HUD module. */
-  setShowMainWindow: (fn: () => void) => void;
 }
 
 /**
@@ -97,9 +90,10 @@ export interface ServiceComposition {
  * bearing and `initAppCollaborator` throws on double-wire.
  *
  * `userData` is the Electron `app.getPath("userData")` root used for the sqlite
- * db + chats/worktrees dirs. The HUD-up predicate (handed back via
- * `setHudUpPredicate`) lets finish cues route to the HUD instead of a system
- * notification when the HUD is on screen.
+ * db + chats/worktrees dirs. Run finish cues (HUD vs system notification) are
+ * wired in `boot()` as a `ThreadService` frame subscriber (see finish-cue.ts),
+ * not here — that subscriber needs the `HudLifecycle`, which is built after
+ * this function returns.
  */
 export function composeServices(userData: string, emit: Emit): ServiceComposition {
   const db = openDb(path.join(userData, "peach-pi.sqlite"));
@@ -112,56 +106,13 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const handoffService = createHandoffService(db, emit);
   setDevTapStateProvider(() => ({ app: appService.snapshot() }));
 
-  // HUD-up predicate injected by boot() once the HudLifecycle is built, so the
-  // thread-finished notification knows whether the HUD is owning finish cues.
-  let hudUpPredicate: () => boolean = () => false;
-  const setHudUpPredicate = (fn: () => boolean): void => {
-    hudUpPredicate = fn;
-  };
-  // Show-main-window hook injected by boot(); the thread-finished notification
-  // click surfaces the app. Kept as a callback so compose-services doesn't import
-  // the HUD module (avoids a cycle: HudLifecycle takes AppService/ThreadService).
-  let showMainWindowFn: () => void = () => undefined;
-  const setShowMainWindow = (fn: () => void): void => {
-    showMainWindowFn = fn;
-  };
-
   const threadService = new ThreadService(
     db,
     emit,
     () => appService.notify(),
     path.join(userData, "chats"),
-    (thread) => {
-      // HUD up → route to the HUD as an ambient cue instead of a system
-      // notification (the renderer decides pulse/expand/badge via routeFinishCue).
-      if (hudUpPredicate()) {
-        emit("event:hudFinish", { threadId: thread.id });
-        return;
-      }
-      // Run finished while the app is in the background → notify (Phase 6).
-      if (BrowserWindow.getFocusedWindow() || !Notification.isSupported()) return;
-      const note = new Notification({
-        title: thread.title || "Thread finished",
-        body: "Run complete — click to open.",
-        silent: true, // app has its own done sound
-      });
-      note.on("click", () => {
-        showMainWindowFn();
-        emit("event:focusThread", thread.id);
-      });
-      note.show();
-    },
     () => appService.getUtilityModel(),
     () => appService.getAutoCompact(),
-    (running) => {
-      if (running) insomniaService.onRunStart();
-      else {
-        insomniaService.onRunEnd();
-        // Flush any update queued while runs were active. Safe to call even
-        // when no update is queued; piUpdateService re-checks hasActiveRuns.
-        piUpdateService.onRunsIdle();
-      }
-    },
   );
   const automationService = new AutomationService(
     db,
@@ -327,6 +278,24 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
 
   const insomniaService = new InsomniaService();
   void getPiSettings().then((s) => insomniaService.setEnabled(s.insomnia));
+  // Run-lifecycle seam: sleep-prevention and the deferred-update flush used to
+  // be constructor lambdas on ThreadService. They now subscribe to the status
+  // frame and detect the running↔idle transition from `prev` — one emitter, N
+  // adapters (the HUD/notification cue lives in finish-cue.ts, wired in boot).
+  threadService.subscribe((frame) => {
+    if (frame.kind !== "status") return;
+    const wasRunning = frame.prev === "running";
+    const nowRunning = frame.status === "running";
+    if (wasRunning === nowRunning) return;
+    if (nowRunning) {
+      insomniaService.onRunStart();
+    } else {
+      insomniaService.onRunEnd();
+      // Flush any update queued while runs were active. Safe to call even
+      // when no update is queued; piUpdateService re-checks hasActiveRuns.
+      piUpdateService.onRunsIdle();
+    }
+  });
   // Init Sentry main if consent already granted. Revocation is rare; main
   // process Sentry can't be cleanly torn down per-launch, so a revoked user
   // is honored on next launch (no new crashes are sent once disabled).
@@ -412,7 +381,5 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     bwsResolver,
     listTailnetPeersDefault,
     enableServe,
-    setHudUpPredicate,
-    setShowMainWindow,
   };
 }

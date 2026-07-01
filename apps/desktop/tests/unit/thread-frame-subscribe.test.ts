@@ -53,13 +53,13 @@ test("subscribe: the full frame stream (transcript, status, queue, idle) reaches
   const { frames } = tap(svc);
 
   emit(svc, { kind: "transcript", threadId: "t1", ops: [], seq: 1 });
-  emit(svc, { kind: "status", threadId: "t1", status: "running" });
+  emit(svc, { kind: "status", threadId: "t1", status: "running", prev: "idle" });
   emit(svc, { kind: "queue", threadId: "t1", steering: ["fix bug"], followUp: [] });
   emit(svc, { kind: "idle", threadId: "t1", cwd: "/repo" });
 
   assert.equal(frames.length, 4);
   assert.deepEqual(frames[0], { kind: "transcript", threadId: "t1", ops: [], seq: 1 });
-  assert.deepEqual(frames[1], { kind: "status", threadId: "t1", status: "running" });
+  assert.deepEqual(frames[1], { kind: "status", threadId: "t1", status: "running", prev: "idle" });
   assert.deepEqual(frames[2], {
     kind: "queue",
     threadId: "t1",
@@ -76,11 +76,11 @@ test("subscribe: a second subscriber fans out from the same emit (3rd-subscriber
   svc.subscribe((f) => a.push(f));
   svc.subscribe((f) => b.push(f));
 
-  emit(svc, { kind: "status", threadId: "t2", status: "running" });
+  emit(svc, { kind: "status", threadId: "t2", status: "running", prev: "completed" });
   emit(svc, { kind: "transcript", threadId: "t2", ops: [], seq: 5 });
 
   assert.deepEqual(a, [
-    { kind: "status", threadId: "t2", status: "running" },
+    { kind: "status", threadId: "t2", status: "running", prev: "completed" },
     { kind: "transcript", threadId: "t2", ops: [], seq: 5 },
   ]);
   assert.deepEqual(b, a, "second subscriber received the identical stream");
@@ -93,12 +93,12 @@ test("subscribe: disposer detaches exactly one subscriber", () => {
   svc.subscribe((f) => a.push(f));
   const off = svc.subscribe((f) => b.push(f));
 
-  emit(svc, { kind: "status", threadId: "t3", status: "running" });
+  emit(svc, { kind: "status", threadId: "t3", status: "running", prev: "idle" });
   off();
   emit(svc, { kind: "idle", threadId: "t3", cwd: null });
 
   // A received both frames; B stopped after the disposer fired.
   assert.equal(a.length, 2);
   assert.equal(b.length, 1);
-  assert.deepEqual(b[0], { kind: "status", threadId: "t3", status: "running" });
+  assert.deepEqual(b[0], { kind: "status", threadId: "t3", status: "running", prev: "idle" });
 });

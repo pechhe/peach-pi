@@ -10,6 +10,7 @@ import { computePiHealth } from "./services/pi-health.ts";
 import { composeServices } from "./compose-services.ts";
 import { registerIpcTable } from "./ipc-table.ts";
 import { HudLifecycle } from "./hud-lifecycle.ts";
+import { registerFinishCue } from "./services/finish-cue-router.ts";
 
 // CDP for renderer layout inspection — dev/unpackaged only, never in a
 // shipped build (an open debugging port in production is a security hole).
@@ -45,11 +46,16 @@ async function boot(): Promise<void> {
   const svc = composeServices(app.getPath("userData"), emit);
 
   const hud = new HudLifecycle(svc.appService, svc.threadService);
-  // Wire the HUD-up predicate so thread-finish cues route to the HUD when it
-  // owns the screen, and the show-main-window hook so the finish notification
-  // click surfaces the app.
-  svc.setHudUpPredicate(() => hud.isHudUp());
-  svc.setShowMainWindow(() => hud.showMainWindow());
+  // Run-lifecycle finish cues (HUD vs system notification) subscribe to
+  // ThreadService's frame bus here — the HudLifecycle is built after
+  // composeServices, and the cue is now a subscriber (not a constructor
+  // callback), so the cycle-breaking setters it used to need are gone.
+  registerFinishCue({
+    threadService: svc.threadService,
+    appService: svc.appService,
+    emit,
+    hud,
+  });
 
   registerIpcTable(svc, hud);
 
