@@ -117,17 +117,14 @@
     data-testid="shortcuts-overlay"
     class="pointer-events-none fixed inset-0 z-[100]"
   >
-    <!-- Dim + blur scrim (same tokens as the ⌘K palette). Clicking dismisses a
-         pinned overlay; a peek is dismissed by releasing ⌘. -->
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: open ? 1 : 0 }}
-      transition={{ duration: open ? 0.16 : 0.1, ease: EASE_OUT }}
-      onclick={() => (pinned = false)}
-      class="absolute inset-0 bg-bg/40 [backdrop-filter:blur(4px)_saturate(120%)] [-webkit-backdrop-filter:blur(4px)_saturate(120%)] {open
-        ? 'pointer-events-auto'
-        : 'pointer-events-none'}"
-    ></motion.div>
+    <!-- No dim/blur — the app stays fully visible so you can see what the
+         shortcuts act on. Transparent click-catcher only when pinned, so a
+         click dismisses it; a peek is dismissed by releasing ⌘. -->
+    {#if pinned}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="pointer-events-auto absolute inset-0" onclick={() => (pinned = false)}></div>
+    {/if}
 
     {#if open}
       {#each hints as hint, i (i)}
