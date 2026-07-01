@@ -201,6 +201,13 @@ export const ipcContracts = {
       throw new Error("tokens must be a non-negative number or null");
     }
   }),
+  /** Read the model used for smart auto-compaction summaries
+   *  (`smartCompact.summaryModel` in ~/.pi/agent/settings.json). Null = use the
+   *  active session model. */
+  "app:getCompactionModel": invoke<[], ModelInfo | null>(),
+  /** Persist the smart-compaction model. Pass null to restore the default
+   *  (active session model). Must be one of the scoped models. */
+  "app:setCompactionModel": invoke<[model: ModelInfo | null], ModelInfo | null>(),
   /** Read the pi settings subset exposed in the GUI. */
   "app:getPiSettings": invoke<[], PiSettings>(),
   /** Whether the `npm:pi-vision-proxy` package is listed among pi's packages. */

@@ -1,9 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { Select } from "../../../components/ui/select";
   import { autoCompact } from "../../../stores/auto-compact.svelte";
+  import { compactionModel } from "../../../stores/compaction-model.svelte";
+  import { settingsModels, keyOf } from "../models-store.svelte";
+
+  /** provider:id of the selected compaction model; "" = use the active model. */
+  const selectedKey = $derived(compactionModel.selected ? keyOf(compactionModel.selected) : "");
 
   onMount(() => {
     void autoCompact.load();
+    void settingsModels.load();
+    void compactionModel.load();
   });
 
   function saveAutoCompactPercent(e: Event) {
@@ -16,6 +24,15 @@
     const raw = (e.currentTarget as HTMLInputElement).value.trim();
     const tokens = raw === "" ? null : Math.max(0, Math.round(Number(raw)));
     void autoCompact.set({ percent: autoCompact.percent, tokens });
+  }
+
+  async function pickCompactionModel(key: string) {
+    if (key === "") {
+      await compactionModel.set(null);
+      return;
+    }
+    const model = settingsModels.byKey.get(key);
+    if (model) await compactionModel.set(model);
   }
 </script>
 
@@ -55,4 +72,24 @@
       aria-label="Auto-compact token count"
     />
   </label>
+  <div>
+    <label class="mb-1 block text-xs text-fg">Compaction model</label>
+    <Select
+      class="w-full rounded-md bg-surface-2"
+      value={selectedKey}
+      onValueChange={pickCompactionModel}
+      items={[
+        { value: "", label: "Default (use active model)" },
+        ...settingsModels.grouped.flatMap((group) =>
+          group.items.map((m) => ({ value: keyOf(m), label: m.name, group: group.provider })),
+        ),
+      ]}
+      data-testid="compaction-model-select"
+      aria-label="Compaction model"
+    />
+    <p class="mt-1 text-[11px] text-fainter">
+      The model that writes smart auto-compaction summaries. Defaults to the
+      active session model; choose a fast scoped model to save on the main one.
+    </p>
+  </div>
 </div>

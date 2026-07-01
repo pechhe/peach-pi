@@ -16,6 +16,10 @@ import {
   setVisionProxyMode,
   setVisionProxyModel,
 } from "./services/pi-vision-proxy.ts";
+import {
+  getCompactionModel,
+  setCompactionModel,
+} from "./services/pi-smart-compact.ts";
 import { computePiHealth } from "./services/pi-health.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { githubToken } from "./services/issues-service.ts";
@@ -127,6 +131,8 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "app:getRemoteClientId": appService.getRemoteClientId.bind(appService),
       "app:getAutoCompact": appService.getAutoCompact.bind(appService),
       "app:setAutoCompact": appService.setAutoCompact.bind(appService),
+      "app:getCompactionModel": getCompactionModel,
+      "app:setCompactionModel": setCompactionModel,
       "app:getPiSettings": getPiSettings,
       "app:getVisionProxyInstallState": getVisionProxyInstallState,
       "app:getVisionProxyConfig": getVisionProxyConfig,
