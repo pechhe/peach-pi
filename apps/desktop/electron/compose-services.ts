@@ -15,7 +15,7 @@ import { WorkQueueService } from "./services/work-queue-service.ts";
 import { SideChatService } from "./services/side-chat-service.ts";
 import { DevTapInstallService } from "./services/devtap-install-status.ts";
 import { FallowService } from "./services/fallow-service.ts";
-import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
+import { ensureCompactionDisabled, getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { InsomniaService } from "./services/insomnia.ts";
 import { PiUpdateService } from "./services/pi-update-service.ts";
 import { AutoUpdateService, initMainSentry } from "./services/telemetry-service.ts";
@@ -347,6 +347,9 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   void ensureBwsExtension();
   void ensureExecutorSkill();
   void ensurePeachVisionConsentExtension();
+  // Disable the SDK's built-in auto-compaction trigger so a dropped connection
+  // during retries can't spuriously compact (smart-compact handles triggering).
+  void ensureCompactionDisabled();
 
   return {
     db,
