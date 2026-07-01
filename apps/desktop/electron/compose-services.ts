@@ -350,7 +350,12 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   //  ensureExecutorDaemon self-bounds (~10s) and we swallow errors so a broken
   //  Executor can't hang session creation.
   const executorReady = (async () => {
-    await ensureExecutorDaemon(executorBin);
+    // Enable pi-mcp-adapter (the extension that surfaces execute/resume) and
+    //  bring up the daemon + mcp.json entry in parallel, then confirm both.
+    await Promise.all([
+      mcpService.ensureAdapterEnabled((channel, payload) => emit(channel, payload)),
+      ensureExecutorDaemon(executorBin),
+    ]);
     await mcpService.ensureExecutorServer();
   })().catch((err) => {
     console.error("Executor bring-up failed; sessions start without it:", err);
