@@ -828,11 +828,9 @@
           class="composer__screen {dragActive ? 'ring-2 ring-accent' : ''}"
           onmousedown={(e) => {
             const t = e.target as HTMLElement;
-            console.log("[composer] mousedown target:", t.tagName, t.className);
             if (t.closest("textarea, button, .composer__context")) return;
             e.preventDefault();
             textareaEl?.focus();
-            console.log("[composer] focus called, textareaEl:", !!textareaEl);
           }}
         >
           {#if draft.command}
@@ -855,8 +853,8 @@
           {/if}
           <textarea
             bind:this={textareaEl}
+            data-kbd-hint="⌘L"
             style:text-indent={draft.command ? `${chipWidth + 8}px` : null}
-            onfocus={() => console.log("[composer] textarea FOCUSED")}
             onscroll={onTextareaScroll}
             placeholder={running
               ? "enter queues · ⌘enter steers · esc stops"
@@ -951,6 +949,7 @@
               onpointercancel={() => releaseSend(false)}
               data-has-input={draft.text.trim() || draft.attachments.length > 0 ? "" : undefined}
               data-testid="send"
+              data-kbd-hint="↵"
               title={compacting ? "Compacting…" : running ? "Queue message" : "Send message"}
               aria-label={compacting ? "Compacting" : running ? "Queue message" : "Send message"}
               aria-busy={compacting ? "true" : undefined}

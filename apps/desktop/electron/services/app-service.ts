@@ -146,7 +146,7 @@ export class AppService {
   addProject(path: string): Project {
     const kind = existsSync(`${path}/.git`) ? "repo" : "folder";
     const project = this.projects.add(path, basename(path), kind);
-    this.publish();
+    this.notify();
     return project;
   }
 
@@ -155,13 +155,13 @@ export class AppService {
     this.saveUiState({
       collapsedProjects: this.loadUiState().collapsedProjects.filter((cid) => cid !== id),
     });
-    this.publish();
+    this.notify();
   }
 
   /** Persist a new sidebar order (full ordered list of project IDs). */
   reorderProjects(orderedIds: string[]): void {
     this.projects.reorder(orderedIds);
-    this.publish();
+    this.notify();
   }
 
   /** Collapse/expand a project's thread list in the sidebar. */
@@ -170,7 +170,7 @@ export class AppService {
     if (collapsed) collapsedProjects.add(projectId);
     else collapsedProjects.delete(projectId);
     this.saveUiState({ collapsedProjects: [...collapsedProjects] });
-    this.publish();
+    this.notify();
   }
 
   /** Set a project's Work Queue merge workflow ('pr' | 'local'). Returns the
@@ -179,7 +179,7 @@ export class AppService {
     const exists = this.projects.all().some((p) => p.id === projectId);
     if (!exists) throw new Error(`Unknown project: ${projectId}`);
     this.projects.setMergeWorkflow(projectId, workflow);
-    this.publish();
+    this.notify();
     return this.projects.all().find((p) => p.id === projectId)!;
   }
 
@@ -188,7 +188,7 @@ export class AppService {
     const exists = this.projects.all().some((p) => p.id === projectId);
     if (!exists) throw new Error(`Unknown project: ${projectId}`);
     this.projects.setAgentModel(projectId, model);
-    this.publish();
+    this.notify();
     return this.projects.all().find((p) => p.id === projectId)!;
   }
 
@@ -197,20 +197,20 @@ export class AppService {
     const exists = this.projects.all().some((p) => p.id === projectId);
     if (!exists) throw new Error(`Unknown project: ${projectId}`);
     this.projects.setAgentThinking(projectId, level);
-    this.publish();
+    this.notify();
     return this.projects.all().find((p) => p.id === projectId)!;
   }
 
   /** Persist the sidebar width (clamped to a sane range). */
   setSidebarWidth(width: number): void {
     this.saveUiState({ sidebarWidth: Math.round(Math.min(560, Math.max(200, width))) });
-    this.publish();
+    this.notify();
   }
 
   /** Persist whether the sidebar is collapsed (hidden, reveal-on-hover). */
   setSidebarCollapsed(collapsed: boolean): void {
     this.saveUiState({ sidebarCollapsed: collapsed });
-    this.publish();
+    this.notify();
   }
 
   addWorktree(projectId: string, dir: string, name?: string): Worktree {
@@ -219,7 +219,7 @@ export class AppService {
       dir,
       name: name ?? this.worktrees.nextName(projectId),
     });
-    this.publish();
+    this.notify();
     return wt;
   }
 
@@ -229,7 +229,7 @@ export class AppService {
 
   renameWorktree(id: string, name: string): void {
     this.worktrees.setName(id, name);
-    this.publish();
+    this.notify();
   }
 
   /** Mark a worktree archived; returns its live (non-archived) thread ids so
@@ -240,7 +240,7 @@ export class AppService {
     const threadIds = this.threads.all()
       .filter((t) => t.worktreeId === id && !t.archivedAt)
       .map((t) => t.id);
-    this.publish();
+    this.notify();
     return threadIds;
   }
 
@@ -261,7 +261,7 @@ export class AppService {
   setSelectedThread(threadId: string | null): void {
     this.saveUiState({ selectedThreadId: threadId });
     if (threadId) this.threads.markSeen(threadId);
-    this.publish();
+    this.notify();
   }
 
   /** Read the HUD's active thread (independent of `selectedThreadId`). */
@@ -272,7 +272,7 @@ export class AppService {
   /** Point the HUD at a thread. Does NOT touch the Main Window selection. */
   setHudThread(threadId: string | null): void {
     this.saveUiState({ hudThreadId: threadId });
-    this.publish();
+    this.notify();
   }
 
   /**
@@ -301,7 +301,7 @@ export class AppService {
 
   setHudAutoReveal(on: boolean): void {
     this.saveUiState({ hudAutoRevealOnFinish: on });
-    this.publish();
+    this.notify();
   }
 
   /** Read the persisted "don't warn me" flag for archiving a sole-thread
@@ -318,17 +318,17 @@ export class AppService {
 
   snoozeThread(threadId: string, until: string): void {
     this.threads.setSnoozedUntil(threadId, until);
-    this.publish();
+    this.notify();
   }
 
   unsnoozeThread(threadId: string): void {
     this.threads.setSnoozedUntil(threadId, null);
-    this.publish();
+    this.notify();
   }
 
   unmarkToTest(threadId: string): void {
     this.threads.setToTest(threadId, null, null);
-    this.publish();
+    this.notify();
   }
 
   /** All auth-configured models (global). Lazy import keeps pi SDK out of boot path. */
@@ -358,7 +358,7 @@ export class AppService {
 
   private wakeExpiredSnoozes(): void {
     const woken = this.threads.clearExpiredSnoozes(new Date().toISOString());
-    if (woken.length > 0) this.publish();
+    if (woken.length > 0) this.notify();
   }
 
   /** Schedule a coalesced snapshot-patch emit. External collaborators (ThreadService
@@ -377,10 +377,6 @@ export class AppService {
       if (patch) this.emit("event:snapshotPatch", patch);
       this.lastEmitted = next;
     }, 0);
-  }
-
-  private publish(): void {
-    this.notify();
   }
 
   /** Diff `next` against `prev` (the last-emitted snapshot, with stable refs)
