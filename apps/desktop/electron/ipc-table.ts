@@ -25,6 +25,7 @@ import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { githubToken } from "./services/issues-service.ts";
 import { importTheme } from "./services/theme-import-service.ts";
 import { pullConflict } from "./services/recovery-prompts.ts";
+import { isExternalUrl } from "./windows/url-guard.ts";
 import { initMainSentry } from "./services/telemetry-service.ts";
 import type { ServiceComposition } from "./compose-services.ts";
 import type { HudLifecycle } from "./hud-lifecycle.ts";
@@ -252,6 +253,9 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "automations:previewNext": automationService.previewNext.bind(automationService),
       "hud:setThread": appService.setHudThread.bind(appService),
       "hud:setAutoReveal": appService.setHudAutoReveal.bind(appService),
+      "shell:openExternal": (url) => {
+        if (isExternalUrl(url)) void shell.openExternal(url);
+      },
       "terminal:open": terminalService.open.bind(terminalService),
       "terminal:input": terminalService.input.bind(terminalService),
       "terminal:resize": terminalService.resize.bind(terminalService),

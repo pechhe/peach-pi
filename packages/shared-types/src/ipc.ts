@@ -605,6 +605,11 @@ export const ipcContracts = {
   "terminal:open": invoke<[threadId: ThreadId], { buffer: string }>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
+  /** Open an http(s)/mailto URL in the OS default handler. Non-external URLs
+   *  are ignored by the main process. Used by clickable terminal links. */
+  "shell:openExternal": invoke<[url: string], void>((url) =>
+    requireNonEmptyString(url, "url"),
+  ),
   "terminal:input": invoke<[threadId: ThreadId, data: string], void>(),
   "terminal:resize": invoke<[threadId: ThreadId, cols: number, rows: number], void>(),
   "terminal:kill": invoke<[threadId: ThreadId], void>(),
