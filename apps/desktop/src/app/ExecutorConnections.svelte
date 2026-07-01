@@ -9,7 +9,6 @@
   import { executorStore, execDisplayName } from "../lib/executor-store.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
@@ -195,16 +194,14 @@
       <h2 class="text-lg font-semibold text-fg">{selected ? execDisplayName(selected.slug) : "Executor"}</h2>
       <p class="text-sm text-fainter">{headerSubtitle}</p>
     </div>
-    <button
-      class="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-muted transition-colors hover:bg-surface hover:text-fg"
-      onclick={() => void executorStore.load()}
-      data-testid="executor-refresh"
-    ><RefreshCw size={13} /> Refresh</button>
-    <button
-      class="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-sm font-medium text-primary-fg transition-colors hover:opacity-90"
-      onclick={openConnect}
-      data-testid="executor-connect"
-    ><Plus size={14} /> Connect</button>
+    {#if selected}
+      <button
+        class="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-sm font-medium text-primary-fg transition-colors hover:opacity-90 disabled:opacity-50"
+        disabled={busy === `add:${selected.slug}`}
+        onclick={() => void addConnection(selected.slug)}
+        data-testid="executor-connect"
+      ><Plus size={14} /> {busy === `add:${selected.slug}` ? "Opening…" : "Connect"}</button>
+    {/if}
   </div>
 
   {#if handoff}
@@ -234,12 +231,6 @@
     <div class="mt-6 overflow-hidden rounded-xl border border-border bg-surface" data-testid={`executor-integration-${selected.slug}`}>
       <div class="flex items-center gap-2 px-4 py-3">
         <span class="rounded-md bg-bg px-1.5 py-0.5 text-[11px] text-fainter">{selected.kind}</span>
-        <button
-          class="ml-auto flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:bg-bg hover:text-fg disabled:opacity-50"
-          disabled={busy === `add:${selected.slug}`}
-          onclick={() => void addConnection(selected.slug)}
-          data-testid={`executor-add-${selected.slug}`}
-        ><Plus size={12} /> {busy === `add:${selected.slug}` ? "Opening…" : "Add connection"}</button>
       </div>
       {#if conns.length > 0}
         {#each conns as c (c.name)}
@@ -260,7 +251,7 @@
           </div>
         {/each}
       {:else}
-        <p class="border-t border-border px-4 py-3 text-sm text-fainter">No connections yet. Use “Add connection” to add one.</p>
+        <p class="border-t border-border px-4 py-3 text-sm text-fainter">No connections yet. Use “Connect” to add one.</p>
       {/if}
     </div>
   {/if}
