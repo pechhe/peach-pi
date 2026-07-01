@@ -1,96 +1,35 @@
 <script lang="ts">
-  // @-connections picker — the `@` menu.
+  // @-secrets picker — the `@` menu.
   //
-  // Extracted from Composer.svelte (issue #27). Owns the connections + BWS
-  // secrets catalogs (loaded lazily on first `@`), the ensure* loaders, the
-  // `event:connectorsChanged` / `event:bwsChanged` invalidation subscriptions,
-  // and the match list filtering the catalog by the active `@query`.
+  // Extracted from Composer.svelte (issue #27). Owns the BWS secrets catalog
+  // (loaded lazily on first `@`) and the match list filtering it by the
+  // active `@query`.
   //
   // The host (Composer) drives caret context: it derives `query` from the
   // textarea and calls `handleMenuKey(e)` for ArrowUp/Down/Enter navigation so
   // the keyboard matrix stays in one place. Picks delegate back to the host,
   // which mutates the pinned-draft chips and re-syncs the textarea.
-  import type { Connection, CustomConnection, ReferencedConnection, ReferencedSecret } from "@peach-pi/shared-types";
+  import type { ReferencedSecret } from "@peach-pi/shared-types";
   import KeyRound from "@lucide/svelte/icons/key-round";
-  import ConnectorIcon from "../ConnectorIcon.svelte";
   import { api } from "../../lib/ipc";
 
-  /**
-   * One selectable row in the picker: a custom HTTP connection, a Composio
-   * toolkit, or a BWS secret (the latter carries an id for `bws_get_secret`).
-   */
-  export type ConnMenuItem = {
-    kind: "custom" | "composio";
-    name: string;
-    toolkitSlug?: string;
-    baseUrl?: string;
-    logoUrl: string | null;
-  };
   export type SecMenuItem = { id: string; name: string; projectId: string };
 
   let {
     /** Active `@token` left of the caret, or null when the menu is closed. */
     query,
-    /** Active index into the virtual (connections ++ secrets) list. Bindable. */
+    /** Active index into the secrets list. Bindable. */
     index = $bindable(0),
-    /** Pin a connection chip (host mutates the draft + refocuses). */
-    onPickConnection,
     /** Pin a BWS secret chip (host mutates the draft + refocuses). */
     onPickSecret,
   }: {
     query: string | null;
     index?: number;
-    onPickConnection: (c: ConnMenuItem) => void;
     onPickSecret: (s: SecMenuItem) => void;
   } = $props();
 
-  let connectionsCatalog = $state<ConnMenuItem[]>([]);
-  let connectionsLoaded = $state(false);
   let secretsCatalog = $state<SecMenuItem[]>([]);
   let secretsLoaded = $state(false);
-
-  // Connections are global, not per-thread; load once on first `@` and refresh
-  // when the connector set changes.
-  async function ensureConnections() {
-    if (connectionsLoaded) return;
-    connectionsLoaded = true;
-    try {
-      const [composio, custom] = await Promise.all([
-        api.invoke("connectors:list"),
-        api.invoke("customConnections:list"),
-      ]);
-      const bySlug = new Map<string, ConnMenuItem>();
-      for (const c of composio as Connection[]) {
-        if (c.status !== "ACTIVE") continue; // pending/expired aren't callable yet
-        if (bySlug.has(c.toolkitSlug)) continue; // one row per toolkit (N accounts)
-        bySlug.set(c.toolkitSlug, {
-          kind: "composio",
-          name: c.name,
-          toolkitSlug: c.toolkitSlug,
-          logoUrl: c.logoUrl,
-        });
-      }
-      const customs = (custom as CustomConnection[]).map((c) => ({
-        kind: "custom" as const,
-        name: c.name,
-        baseUrl: c.baseUrl,
-        logoUrl: c.logoUrl,
-      }));
-      connectionsCatalog = [...customs, ...bySlug.values()];
-    } catch {
-      connectionsLoaded = false; // allow retry on next `@`
-    }
-  }
-
-  /** Refresh the cached catalog when connections change elsewhere in the app
-   *  (ConnectorsView add/remove/reconnect) so the `@` picker stays current. */
-  $effect(() => {
-    const off = api.on("event:connectorsChanged", () => {
-      connectionsLoaded = false;
-      connectionsCatalog = [];
-    });
-    return off;
-  });
 
   // BWS secrets available to pin with `@`. Values are never loaded — only
   // names + ids + project, so the picker (and any future transcript) shows no
@@ -123,26 +62,13 @@
     return off;
   });
 
-  // Load both catalogs on `@`; keep open while the query stays non-null.
+  // Load the catalog on `@`; keep open while the query stays non-null.
   $effect(() => {
     if (query !== null) {
-      void ensureConnections();
       void ensureSecrets();
     }
   });
 
-  const atMatches = $derived.by(() => {
-    if (query === null) return [];
-    const q = query;
-    return connectionsCatalog
-      .filter((c) => c.name.toLowerCase().includes(q))
-      .sort((a, b) => {
-        const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-        const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
-        return ap - bp;
-      })
-      .slice(0, 20);
-  });
   const secretMatches = $derived.by(() => {
     if (query === null) return [];
     const q = query;
@@ -156,11 +82,10 @@
       .slice(0, 20);
   });
 
-  /** Combined list length for the virtual index (connections then secrets). */
-  const total = $derived(atMatches.length + secretMatches.length);
+  /** List length for the virtual index. */
+  const total = $derived(secretMatches.length);
 
   $effect(() => {
-    void atMatches;
     void secretMatches;
     index = 0;
   });
@@ -186,19 +111,11 @@
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (index < atMatches.length) {
-        onPickConnection(atMatches[index]!);
-      } else {
-        onPickSecret(secretMatches[index - atMatches.length]!);
-      }
+      onPickSecret(secretMatches[index]!);
       return true;
     }
     return false;
   }
-
-  // Expose the picker's referencable types so the host can build Referenced*
-  // values from a ConnMenuItem/SecMenuItem without re-declaring them.
-  export type { ConnMenuItem as ConnMenuItemType, SecMenuItem as SecMenuItemType };
 </script>
 
 {#if query !== null}
@@ -207,48 +124,31 @@
     data-testid="connections-menu"
   >
     <div class="border-b border-border-strong px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-fainter">
-      Connections &amp; Secrets <span class="font-normal normal-case text-fainter">· pick to pin @</span>
+      Secrets <span class="font-normal normal-case text-fainter">· pick to pin @</span>
     </div>
     <div class="max-h-80 overflow-y-auto">
-      {#if !connectionsLoaded || !secretsLoaded}
+      {#if !secretsLoaded}
         <div class="px-3 py-2 text-xs text-faint">Loading…</div>
-      {:else if atMatches.length === 0 && secretMatches.length === 0}
+      {:else if secretMatches.length === 0}
         <div class="px-3 py-2 text-xs text-faint">
-          {connectionsCatalog.length === 0 && secretsCatalog.length === 0
-            ? "No connections or secrets yet — add one in Connections / Secrets"
+          {secretsCatalog.length === 0
+            ? "No secrets yet — add one in Secrets"
             : "No matching items"}
         </div>
       {:else}
-        {#if atMatches.length > 0}
-          <div class="border-b border-border-strong/50 px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Connections</div>
-          {#each atMatches as c, i (c.kind + ":" + c.name)}
-            <div class="flex items-center {i === index ? 'bg-surface-2' : ''} hover:bg-surface-2">
-              <button
-                class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
-                onclick={() => onPickConnection(c)}
-              >
-                <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={18} />
-                <span class="min-w-0 truncate text-fg">{c.name}</span>
-                <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide {c.kind === 'custom' ? 'bg-violet-500/15 text-violet-700' : 'bg-sky-500/15 text-sky-700'}">{c.kind}</span>
-              </button>
-            </div>
-          {/each}
-        {/if}
-        {#if secretMatches.length > 0}
-          <div class="border-b border-border-strong/50 px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Secrets</div>
-          {#each secretMatches as s, j (s.id)}
-            <div class="flex items-center {atMatches.length + j === index ? 'bg-surface-2' : ''} hover:bg-surface-2">
-              <button
-                class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
-                onclick={() => onPickSecret(s)}
-              >
-                <KeyRound size={18} class="shrink-0 text-amber-600" />
-                <span class="min-w-0 truncate font-mono text-fg">{s.name}</span>
-                <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-amber-500/15 text-amber-700">secret</span>
-              </button>
-            </div>
-          {/each}
-        {/if}
+        <div class="border-b border-border-strong/50 px-3 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-faint">Secrets</div>
+        {#each secretMatches as s, i (s.id)}
+          <div class="flex items-center {i === index ? 'bg-surface-2' : ''} hover:bg-surface-2">
+            <button
+              class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-sm"
+              onclick={() => onPickSecret(s)}
+            >
+              <KeyRound size={18} class="shrink-0 text-amber-600" />
+              <span class="min-w-0 truncate font-mono text-fg">{s.name}</span>
+              <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-amber-500/15 text-amber-700">secret</span>
+            </button>
+          </div>
+        {/each}
       {/if}
     </div>
   </div>

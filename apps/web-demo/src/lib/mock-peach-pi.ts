@@ -477,10 +477,6 @@ Want me to also add the same validation rule to the sign-up flow, or keep this s
       case "remote:abort":
       case "remote:attach":
         return Promise.resolve(undefined);
-      // ─── Connectors ──────────────────────────────────────────────────────
-      case "connectors:list":
-      case "connectors:catalogue":
-      case "customConnections:list":
       case "mcp:list":
         return Promise.resolve([]);
       // ─── App-level channels used by SettingsView onMount + prefs stores ────

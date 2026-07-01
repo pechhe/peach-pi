@@ -10,8 +10,6 @@ import type {
   CavemanState,
   CommandInfo,
   CuaDriverStatus,
-  Connection,
-  ConnectStartResult,
   DevTapProjectStatus,
   Automation,
   AutomationModel,
@@ -32,16 +30,7 @@ import type {
   MergeBatchResult,
   MergeProgressPayload,
   WorkQueueOpenCountResult,
-  CustomConnection,
-  CustomConnectionInput,
-  ProposedConnectionConfig,
-  ConnSetupDeltaPayload,
-  ConnSetupProbePayload,
-  ConnSetupConfigPayload,
-  ConnSetupDonePayload,
   McpServer,
-  ToolkitCatalogEntry,
-  ToolkitDetail,
   SubagentAgentInfo,
   SubagentAgentPatch,
   ExtensionStatusPayload,
@@ -642,83 +631,6 @@ export const ipcContracts = {
     void
   >(),
 
-  // connectors (Composio toolkits). Composio owns auth + token storage; the
-  // main process holds the API key and proxies catalogue/connect/execute. The
-  // renderer only ever sees toolkit metadata + connection status — never a
-  // token. OAuth completion is async and reported via event:connectorsChanged.
-  /** Search the Composio toolkit catalogue. Empty query → popular toolkits. */
-  "connectors:catalogue": invoke<[query: string], ToolkitCatalogEntry[]>(),
-  /** Full detail for one toolkit (metadata + tool list) for the detail pane. */
-  "connectors:toolkit": invoke<[toolkitSlug: string], ToolkitDetail>((s) =>
-    requireNonEmptyString(s, "toolkitSlug"),
-  ),
-  /** The local user's connected accounts (ACTIVE + pending). */
-  "connectors:list": invoke<[], Connection[]>(),
-  /** Begin connecting a toolkit. OAuth → opens the hosted authorize URL via
-   *  shell.openExternal and returns its redirectUrl; completion arrives later
-   *  via event:connectorsChanged. API-key schemes are rejected here — use
-   *  connectors:connectApiKey. */
-  "connectors:connect": invoke<[toolkitSlug: string], ConnectStartResult>((s) =>
-    requireNonEmptyString(s, "toolkitSlug"),
-  ),
-  /** Connect a non-OAuth toolkit with user-supplied credential fields (e.g.
-   *  Metabase base URL + API key). `fields` keys are the Composio field names
-   *  from ToolkitDetail.authFields. Completes synchronously. */
-  "connectors:connectFields": invoke<
-    [toolkitSlug: string, fields: Record<string, string>],
-    Connection
-  >((slug) => requireNonEmptyString(slug, "toolkitSlug")),
-  /** Disconnect: delete the connected account at Composio. */
-  "connectors:disconnect": invoke<[connectionId: string], void>((id) =>
-    requireNonEmptyString(id, "connectionId"),
-  ),
-
-  // custom connections (local API key + URL, independent of Composio). Stored
-  // on-device; the agent uses them via the `custom_request` tool. Raw keys
-  // never reach the renderer.
-  /** List saved custom connections (keys masked). */
-  "customConnections:list": invoke<[], CustomConnection[]>(),
-  /** Save a new custom connection. */
-  "customConnections:create": invoke<[input: CustomConnectionInput], CustomConnection>(
-    (input) => {
-      requireNonEmptyString(input?.name, "name");
-      requireNonEmptyString(input?.baseUrl, "baseUrl");
-      requireNonEmptyString(input?.apiKey, "apiKey");
-    },
-  ),
-  /** Delete a custom connection by id. */
-  "customConnections:delete": invoke<[id: string], void>((id) =>
-    requireNonEmptyString(id, "id"),
-  ),
-
-  // connection setup assistant (interactive, utility-model driven). The raw
-  // key is held in the main process for the session and injected into probe
-  // requests; it never reaches the model. Activity streams via event:connSetup*.
-  /** Start a setup session: fetch the docs URL (or accept pasted docs text),
-   *  hold the key, and kick off the first assistant turn. */
-  "connectionSetup:start": invoke<
-    [input: { docs: string; apiKey: string; name?: string }],
-    { sessionId: string }
-  >((input) => {
-    requireNonEmptyString(input?.docs, "docs");
-    requireNonEmptyString(input?.apiKey, "apiKey");
-  }),
-  /** Send a user reply into a setup session; the answer streams back. */
-  "connectionSetup:send": invoke<[sessionId: string, text: string], void>((id, t) => {
-    requireNonEmptyString(id, "sessionId");
-    requireNonEmptyString(t, "text");
-  }),
-  /** Save the proposed config using the session's held key; returns the saved
-   *  connection and ends the session. */
-  "connectionSetup:save": invoke<
-    [sessionId: string, config: ProposedConnectionConfig],
-    CustomConnection
-  >((id) => requireNonEmptyString(id, "sessionId")),
-  /** Discard a setup session and wipe its held key from memory. */
-  "connectionSetup:close": invoke<[sessionId: string], void>((id) =>
-    requireNonEmptyString(id, "sessionId"),
-  ),
-
   // MCP servers (read-only display). Configuration lives in
   // ~/.pi/agent/mcp.json and is managed by the pi-mcp-adapter extension
   // (`/mcp` commands). peach-pi surfaces them in the Connections view; it
@@ -957,11 +869,6 @@ export const ipcContracts = {
   "event:extensionStatus": event<ExtensionStatusPayload>(),
   "event:sideDelta": event<SideDeltaPayload>(),
   "event:sideDone": event<SideDonePayload>(),
-  /** Connection-setup assistant streaming + activity. */
-  "event:connSetupDelta": event<ConnSetupDeltaPayload>(),
-  "event:connSetupProbe": event<ConnSetupProbePayload>(),
-  "event:connSetupConfig": event<ConnSetupConfigPayload>(),
-  "event:connSetupDone": event<ConnSetupDonePayload>(),
   /** Notification click — main window should select this thread. */
   "event:focusThread": event<ThreadId>(),
   /** A run finished while the HUD is up — renderer turns this into an ambient cue. */
@@ -970,9 +877,6 @@ export const ipcContracts = {
   /** The global `enabledModels` scope changed (settings.json). Live pi sessions
    *  reload settings + republish meta; the renderer re-lists scoped models. */
   "event:scopeChanged": event<void>(),
-  /** A connector's status changed (connected/revoked/refreshed). Renderer
-   *  re-lists via `connectors:list`. */
-  "event:connectorsChanged": event<void>(),
   "event:terminalData": event<{ threadId: ThreadId; data: string }>(),
   "event:terminalExit": event<{ threadId: ThreadId; exitCode: number }>(),
   /** A render frame from an extension's `custom()` TUI, for the xterm overlay. */

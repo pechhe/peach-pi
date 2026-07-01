@@ -2,12 +2,10 @@
   import { Dialog } from "bits-ui";
   import type {
     Project,
-    ReferencedConnection,
     Automation,
   } from "@peach-pi/shared-types";
   import { api } from "../lib/ipc";
   import { playButtonClick } from "../lib/sound/button-click-sound";
-  import { buildConnectionsHint } from "../lib/composer/hints";
   import { scopedModels } from "../stores/scoped-models.svelte";
   import {
     DEFAULT_SCHEDULE,
@@ -54,7 +52,6 @@
 
   let name = $state("");
   let prompt = $state("");
-  let connections = $state<ReferencedConnection[]>([]);
   let projectId = $state("");
   let environment = $state<"local" | "worktree">("local");
   let frequency = $state<AutomationFrequency>(DEFAULT_SCHEDULE.frequency);
@@ -101,7 +98,6 @@
       if (automation) {
         name = automation.name;
         prompt = automation.prompt;
-        connections = [];
         projectId = automation.projectId ?? "";
         environment = automation.environment;
         const parsed = cronToSchedule(automation.cron);
@@ -112,7 +108,6 @@
       } else {
         name = "";
         prompt = "";
-        connections = [];
         projectId = "";
         environment = "local";
         frequency = DEFAULT_SCHEDULE.frequency;
@@ -142,12 +137,8 @@
 
   async function save() {
     createError = "";
-    // Bake the @-connection hints into the stored prompt so the fired thread
-    // prefers them (the engine sends the raw prompt verbatim). Appended after
-    // the body so a leading `/skill` stays first and pi still expands it.
     const body = prompt.trim();
-    const hint = buildConnectionsHint(connections);
-    const finalPrompt = hint ? `${body}\n\n${hint}` : body;
+    const finalPrompt = body;
     const fields = {
       name: name.trim(),
       cron,
@@ -202,9 +193,8 @@
 
       <AutomationPromptField
         bind:value={prompt}
-        bind:connections
         projectId={projectId || null}
-        placeholder="Prompt to run. Type / for skills, @ for connections."
+        placeholder="Prompt to run. Type / for skills."
       />
 
       <div class="grid grid-cols-2 gap-3">

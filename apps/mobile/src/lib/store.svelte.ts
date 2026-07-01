@@ -66,12 +66,25 @@ class Store {
   push(route: Route): void {
     this.dir = "forward";
     this.stack = [...this.stack, route];
+    // Mirror the in-app stack into browser history so the Android hardware /
+    // browser back button pops a screen instead of exiting the PWA.
+    history.pushState({ depth: this.stack.length }, "");
   }
 
+  /** In-app back (chevron / edge swipe). Routes through the browser history so
+   *  the history stack and nav stack stay aligned — `popstate` does the pop. */
   pop(): void {
-    if (this.stack.length > 1) {
+    if (this.stack.length > 1) history.back();
+  }
+
+  /** Fold a `popstate` back into the nav stack. `state.depth` was written by
+   *  push(); the initial entry has no state (depth 1). Forward navigations
+   *  (depth beyond the stack) are ignored — the app can't reconstruct them. */
+  handlePopState(state: unknown): void {
+    const depth = (state as { depth?: number } | null)?.depth ?? 1;
+    if (depth < this.stack.length) {
       this.dir = "backward";
-      this.stack = this.stack.slice(0, -1);
+      this.stack = this.stack.slice(0, Math.max(1, depth));
     }
   }
 
@@ -161,6 +174,8 @@ class Store {
     if (!host || !token) return false;
     const master = this.upsertByHost({ name, host, port: 0, token });
     this.stack = [{ name: "masters" }, { name: "sessions", masterId: master.id }];
+    // Keep browser history aligned with the two-deep stack so back → masters.
+    history.pushState({ depth: 2 }, "");
     return true;
   }
 

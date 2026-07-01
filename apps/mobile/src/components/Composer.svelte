@@ -94,6 +94,19 @@
   let dragFrac = $state(0);
   let dragSlot = -1;
 
+  // The desktop chassis positions the thumb/glow via `--model-slider-x` in
+  // PIXELS (its badge is a fixed 360px). The phone badge flexes, so we measure
+  // it and feed the same var in px — the port's transform pipeline (snap
+  // transitions, press previews) then works untouched. 25px inset = the rail's
+  // 14px track inset + the 22px thumb's 11px radius, so the thumb sits fully
+  // on the rail at both extremes.
+  let sliderW = $state(0);
+  const thumbX = $derived.by(() => {
+    if (sliderW <= 50) return 25;
+    const frac = dragging ? dragFrac : sliderPosition / sliderSpan;
+    return Math.round((25 + frac * (sliderW - 50)) * 10) / 10;
+  });
+
   function applyDrag(clientX: number): void {
     if (!sliderEl) return;
     const r = sliderEl.getBoundingClientRect();
@@ -129,6 +142,12 @@
   }
 
   const hasText = $derived(text.trim().length > 0);
+
+  // A steer toggle only makes sense mid-run; reset when the run ends so the
+  // next idle message doesn't silently try to steer.
+  $effect(() => {
+    if (!running) steer = false;
+  });
   // Empty + running → the button stops the run (mirrors the desktop send-dial).
   const isStop = $derived(running && !hasText);
 
@@ -291,7 +310,22 @@
   };
 </script>
 
-<div class="composer-device border-t border-border px-3 pt-2 pb-3">{#if followUp.length > 0}
+<div class="composer-device border-t border-border px-3 pt-2 pb-3">{#if running}
+    <!-- Mid-run delivery mode: queue as a follow-up (default) or steer the
+         current turn now. Mirrors the desktop composer's steer affordance. -->
+    <div class="mb-2 inline-flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5 text-[11px] font-medium">
+      <button
+        class="rounded-full px-2.5 py-1 transition-colors {steer ? 'text-faint' : 'bg-surface-3 text-fg'}"
+        onclick={() => { steer = false; haptic(6); }}
+        aria-pressed={!steer}
+      >Queue</button>
+      <button
+        class="rounded-full px-2.5 py-1 transition-colors {steer ? 'bg-accent/15 text-accent' : 'text-faint'}"
+        onclick={() => { steer = true; haptic(6); }}
+        aria-pressed={steer}
+      >Steer now</button>
+    </div>
+  {/if}{#if followUp.length > 0}
     <div class="mb-2 flex flex-col gap-1.5">
       {#each followUp as msg, i (i)}
         <div class="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5">
@@ -378,10 +412,11 @@
           <span class="composer__key-mount">
             <span
               class="model-selector__badge model-selector__badge--slider{dragging ? ' is-dragging' : ''}"
-              style="--model-slider-position: {sliderPosition}; --slider-span: {sliderSpan}; --drag-frac: {dragFrac}"
+              style="--model-slider-x: {thumbX}px"
             >
               <span
                 bind:this={sliderEl}
+                bind:clientWidth={sliderW}
                 class="model-selector__slider"
                 aria-hidden="true"
                 onpointerdown={onSliderPointerDown}
@@ -483,128 +518,11 @@
 </div>
 
 <style>
-  /* Mobile composer: the metallic chassis from composer-device.css is the base,
-     so we only override what the phone layout needs. The desktop is scaled by
-     zoom:0.78 on a 985px-wide frame; the phone runs at ~full viewport width,
-     so the slider badge is narrowed and the footer wraps to a second row when
-     the phone can't fit the full strip. dpi-scale stays 1 (no zoom needed —
-     the phone is already a small physical device). */
-  .composer-device .composer__frame {
-    width: 100%;
-    max-width: 100%;
-    margin-inline: 0;
-    zoom: 1;
-  }
-  /* The desktop chassis renders its parts at full pixel size under zoom:0.78.
-     The phone runs zoom:1 at full width, so the dial/send/slider come out
-     ~30% too large. Shrink the individual parts (not the whole frame, which
-     would leave a gutter) to bring the chassis to a phone-native height. */
-  .composer-device .composer__surface {
-    padding: 8px 8px 7px;
-    border-radius: 13px;
-    overflow: hidden;
-  }
-  .composer-device .composer__screen {
-    min-height: 50px;
-    padding: 9px 12px;
-    border-radius: 11px;
-  }
-  /* Desktop uses display:contents so the footer lays out its tools directly.
-     On the phone we want controls to be a real flex row holding slider + dial,
-     with the send dial pulled out to the actions cluster on the right edge. */
-  .composer-device .composer__controls,
-  .composer-device .composer__actions {
-    display: flex;
-    align-items: center;
-  }
-  .composer-device .composer__controls {
-    min-width: 0;
-    flex: 1 1 auto;
-    gap: 6px;
-  }
-  .composer-device .composer__actions {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  /* Two-row chassis like desktop: screen, then a single controls row. The
-     controls never wrap — the slider flexes to fill, the dial/send are fixed
-     compact widths. */
-  .composer-device .composer__key-mount {
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-  }
-  .composer-device .reasoning-dial {
-    --dial-size: 36px;
-    flex: 0 0 auto;
-  }
-  .composer-device .send-dial,
-  .composer-device .send-dial--stop {
-    width: 38px;
-    min-width: 38px;
-    height: 38px;
-    margin-left: 4px;
-    flex: 0 0 auto;
-  }
-  /* The slider badge is 360px on desktop with fixed-px thumb/tick geometry
-     (52px + pos*128px) that overflows a phone. Let it flex full width and
-     re-derive the thumb/ticks as percentages of the actual track so nothing
-     spills past the viewport (was the source of horizontal scroll). */
-  .composer-device .model-selector__badge--slider,
-  :root[data-composer="dark"].composer-device .model-selector__badge--slider {
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    height: 56px;
-  }
-  /* Keep the three model captions from colliding when the slider is narrow:
-     each is capped to a third of the track and anchored to its tick. */
-  .composer-device .model-selector__badge--slider .model-selector__slider-label--slot {
-    width: 34%;
-    max-width: 34%;
-  }
-  .composer-device .model-selector__badge--slider .model-selector__slider-label--slot-2 {
-    left: auto;
-    right: 0;
-  }
-  .composer-device .model-selector__slider {
-    pointer-events: auto;
-    touch-action: none;
-    cursor: pointer;
-  }
-  /* Percentage thumb/tick geometry keyed off --slider-span (= slots - 1).
-     20px inset keeps the ~40px thumb fully on-track at the extremes. */
-  .composer-device .model-selector__badge--slider .model-selector__slider-thumb,
-  .composer-device .model-selector__badge--slider .model-selector__slider-glow {
-    left: calc(20px + (var(--model-slider-position, 0) / var(--slider-span, 2)) * (100% - 40px));
-  }
-  .composer-device .model-selector__badge--slider .model-selector__slider-ticks {
-    left: 0;
-    right: 0;
-  }
-  .composer-device .model-selector__badge--slider .model-selector__slider-tick--0 { left: 20px; }
-  .composer-device .model-selector__badge--slider .model-selector__slider-tick--1 { left: 50%; }
-  .composer-device .model-selector__badge--slider .model-selector__slider-tick--2 { left: calc(100% - 20px); }
-  .composer-device .model-selector__badge--slider .model-selector__slider-label--slot-2 {
-    right: 0;
-  }
-  /* While dragging: thumb tracks the pointer continuously (--drag-frac),
-     no transition lag. On release the class drops and the 460ms transition
-     snaps it back to the discrete slot. */
-  .composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-thumb,
-  .composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-glow {
-    left: calc(20px + var(--drag-frac, 0) * (100% - 40px)) !important;
-    transition: none !important;
-  }
-  .composer-device .composer__footer-row {
-    flex-wrap: nowrap;
-    gap: 4px;
-    justify-content: flex-start;
-    min-height: 0;
-    padding: 8px 8px 2px;
-  }
+  /* Chassis geometry lives in styles/composer/composer-device-mobile.css — a
+     plain stylesheet, NOT here: Svelte scopes component CSS, so selectors
+     aimed at child-component internals (e.g. .reasoning-dial) compile to
+     `:where(.svelte-hash)` forms that match nothing. Only styles for this
+     component's own elements (the image chips) belong here. */
   .composer__images {
     display: flex;
     flex-wrap: wrap;

@@ -201,6 +201,13 @@ export const ipcContracts = {
       throw new Error("tokens must be a non-negative number or null");
     }
   }),
+  /** Read the model used for smart auto-compaction summaries
+   *  (`smartCompact.summaryModel` in ~/.pi/agent/settings.json). Null = use the
+   *  active session model. */
+  "app:getCompactionModel": invoke<[], ModelInfo | null>(),
+  /** Persist the smart-compaction model. Pass null to restore the default
+   *  (active session model). Must be one of the scoped models. */
+  "app:setCompactionModel": invoke<[model: ModelInfo | null], ModelInfo | null>(),
   /** Read the pi settings subset exposed in the GUI. */
   "app:getPiSettings": invoke<[], PiSettings>(),
   /** Whether the `npm:pi-vision-proxy` package is listed among pi's packages. */
@@ -291,6 +298,16 @@ export const ipcContracts = {
     if (workflow !== "pr" && workflow !== "local")
       throw new Error("workflow must be 'pr' or 'local'");
   }),
+  /** Set a project's optional check command (typecheck/tests), run in the
+   *  worktree before any local merge — the local workflow's CI substitute.
+   *  null/empty clears it. Returns the updated project. */
+  "projects:setCheckCommand": invoke<[projectId: string, command: string | null], Project>(
+    (id, command) => {
+      requireNonEmptyString(id, "projectId");
+      if (command !== null && typeof command !== "string")
+        throw new Error("command must be a string or null");
+    },
+  ),
   /** Pin the model Work Queue agents use for this project. null clears the pin
    *  (pi picks its default). Returns the updated project. */
   "projects:setAgentModel": invoke<
@@ -578,18 +595,24 @@ export const ipcContracts = {
   "git:mergePr": invoke<[threadId: ThreadId], GitMergePrResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
-  "git:mergeToLocal": invoke<[threadId: ThreadId], GitMergeResult>((id) =>
-    requireNonEmptyString(id, "threadId"),
-  ),
+  /** The local integration pipeline for a worktree thread: rebase onto the
+   *  latest default branch → run the project's check command → merge --no-ff
+   *  into the default branch in the main checkout. No push — the caller
+   *  offers that separately. A dirty main checkout refuses with `dirtyLocal`
+   *  unless `opts.stashLocal` (explicit "Stash local & retry"). */
+  "git:mergeToLocal": invoke<
+    [threadId: ThreadId, opts?: { stashLocal?: boolean }],
+    GitMergeResult
+  >((id) => requireNonEmptyString(id, "threadId")),
   "git:pushLocal": invoke<[threadId: ThreadId], GitPushLocalResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
   "git:pull": invoke<[threadId: ThreadId], GitPullResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
-  /** Rebase a thread's branch onto the latest default branch and run tests.
-   *  Used by the batch-merge flow to bring a worktree branch up to date against
-   *  main in its own isolated cwd before its PR is merged. */
+  /** Rebase a thread's branch onto the latest default branch. Used by the
+   *  batch-merge flow to bring a worktree branch up to date against main in
+   *  its own isolated cwd before it is merged. */
   "git:rebaseOntoDefault": invoke<[threadId: ThreadId], GitRebaseResult>((id) =>
     requireNonEmptyString(id, "threadId"),
   ),
@@ -597,6 +620,11 @@ export const ipcContracts = {
   // integrated terminal (one PTY per thread, lives in main)
   "terminal:open": invoke<[threadId: ThreadId], { buffer: string }>((id) =>
     requireNonEmptyString(id, "threadId"),
+  ),
+  /** Open an http(s)/mailto URL in the OS default handler. Non-external URLs
+   *  are ignored by the main process. Used by clickable terminal links. */
+  "shell:openExternal": invoke<[url: string], void>((url) =>
+    requireNonEmptyString(url, "url"),
   ),
   "terminal:input": invoke<[threadId: ThreadId, data: string], void>(),
   "terminal:resize": invoke<[threadId: ThreadId, cols: number, rows: number], void>(),

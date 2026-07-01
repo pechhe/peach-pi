@@ -43,6 +43,7 @@ interface RawSettingsFile {
   insomnia?: boolean;
   telemetryConsent?: boolean | null;
   topbar?: { devtap?: boolean; fallow?: boolean };
+  compaction?: { enabled?: boolean; [key: string]: unknown };
   [key: string]: unknown;
 }
 
@@ -82,6 +83,13 @@ export async function getPiSettings(): Promise<PiSettings> {
   };
 }
 
+function applyCompactionFlag(raw: RawSettingsFile): void {
+  // The SDK's auto-compaction must stay off; enforced here so any write path
+  // through this module keeps it disabled (see ensureCompactionDisabled).
+  if (raw.compaction?.enabled === false) return;
+  raw.compaction = { ...raw.compaction, enabled: false };
+}
+
 /** Merge a partial patch into the settings file, preserving unknown keys. */
 export async function setPiSettings(patch: Partial<PiSettings>): Promise<PiSettings> {
   const raw = await readRaw();
@@ -108,9 +116,24 @@ export async function setPiSettings(patch: Partial<PiSettings>): Promise<PiSetti
       ...patch.topbar,
     };
   }
+  applyCompactionFlag(raw);
 
   await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
   await writeFile(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
 
   return getPiSettings();
+}
+
+/** Enforce that the SDK's built-in auto-compaction trigger stays disabled.
+ *  That path estimates tokens on error messages and compacts even when the
+ *  "error" is a dropped connection (so it fires during a network outage and
+ *  its own summarization call then fails too). Auto-compaction of the
+ *  `pi-smart-auto-compact` extension (clean turn_end + real usage tokens) is
+ *  the sole trigger, so this must stay off. Best-effort: a read/write failure
+ *  never blocks boot. */
+export async function ensureCompactionDisabled(): Promise<void> {
+  const raw = await readRaw();
+  applyCompactionFlag(raw);
+  await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
+  await writeFile(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
 }

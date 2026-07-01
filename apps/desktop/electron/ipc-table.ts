@@ -16,11 +16,16 @@ import {
   setVisionProxyMode,
   setVisionProxyModel,
 } from "./services/pi-vision-proxy.ts";
+import {
+  getCompactionModel,
+  setCompactionModel,
+} from "./services/pi-smart-compact.ts";
 import { computePiHealth } from "./services/pi-health.ts";
 import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { githubToken } from "./services/issues-service.ts";
 import { importTheme } from "./services/theme-import-service.ts";
 import { pullConflict } from "./services/recovery-prompts.ts";
+import { isExternalUrl } from "./windows/url-guard.ts";
 import { initMainSentry } from "./services/telemetry-service.ts";
 import type { ServiceComposition } from "./compose-services.ts";
 import type { HudLifecycle } from "./hud-lifecycle.ts";
@@ -127,6 +132,8 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "app:getRemoteClientId": appService.getRemoteClientId.bind(appService),
       "app:getAutoCompact": appService.getAutoCompact.bind(appService),
       "app:setAutoCompact": appService.setAutoCompact.bind(appService),
+      "app:getCompactionModel": getCompactionModel,
+      "app:setCompactionModel": setCompactionModel,
       "app:getPiSettings": getPiSettings,
       "app:getVisionProxyInstallState": getVisionProxyInstallState,
       "app:getVisionProxyConfig": getVisionProxyConfig,
@@ -190,6 +197,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "projects:reorder": appService.reorderProjects.bind(appService),
       "projects:setCollapsed": appService.setProjectCollapsed.bind(appService),
       "projects:setMergeWorkflow": appService.setMergeWorkflow.bind(appService),
+      "projects:setCheckCommand": appService.setCheckCommand.bind(appService),
       "projects:setAgentModel": appService.setAgentModel.bind(appService),
       "projects:setAgentThinking": appService.setAgentThinking.bind(appService),
       "worktrees:rename": appService.renameWorktree.bind(appService),
@@ -246,6 +254,9 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "automations:previewNext": automationService.previewNext.bind(automationService),
       "hud:setThread": appService.setHudThread.bind(appService),
       "hud:setAutoReveal": appService.setHudAutoReveal.bind(appService),
+      "shell:openExternal": (url) => {
+        if (isExternalUrl(url)) void shell.openExternal(url);
+      },
       "terminal:open": terminalService.open.bind(terminalService),
       "terminal:input": terminalService.input.bind(terminalService),
       "terminal:resize": terminalService.resize.bind(terminalService),

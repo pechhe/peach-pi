@@ -185,10 +185,16 @@ export function applyTranscriptOps(
  *  "second subscriber" seam). One shape per emission path; new frame types or
  *  new subscribers are added here + at the one emit site, not in 4 hooks.
  *  This is the in-process subscriber seam — `RemoteTapFrame` below is the
- *  SSE wire type the relay builds from these. */
+ *  SSE wire type the relay builds from these.
+ *
+ *  The `status` frame carries `prev` (the status before this change) so
+ *  subscribers can detect run-lifecycle transitions without state. The run
+ *  finish-cue consumers (HUD cue / system notification, sleep-prevention,
+ *  deferred-update flush) subscribe here instead of being threaded through
+ *  `ThreadService`'s constructor — one emitter, N adapters. */
 export type ThreadFrame =
   | { kind: "transcript"; threadId: ThreadId; ops: TranscriptOp[]; seq: number }
-  | { kind: "status"; threadId: ThreadId; status: ThreadStatus }
+  | { kind: "status"; threadId: ThreadId; status: ThreadStatus; prev: ThreadStatus }
   | { kind: "queue"; threadId: ThreadId; steering: string[]; followUp: string[] }
   | { kind: "idle"; threadId: ThreadId; cwd: string | null };
 

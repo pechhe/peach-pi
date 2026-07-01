@@ -38,6 +38,7 @@
 </script>
 
 <svg
+  class={name === "spinner" ? "pp-spin" : undefined}
   width={size}
   height={size}
   viewBox="0 0 24 24"

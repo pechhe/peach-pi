@@ -1,28 +1,13 @@
-import type { ReferencedConnection, ReferencedSecret } from "@peach-pi/shared-types";
+import type { ReferencedSecret } from "@peach-pi/shared-types";
 
 /**
- * Co-located producer/parser pair for the @-pinned connections + secrets hint
- * format.
+ * Producer/parser pair for the @-pinned BWS secrets hint format.
  *
  * The same plain-text hint block is built before a prompt is sent
- * (`buildConnectionsHint` / `buildSecretsHint`) and parsed back out of a
- * stored message before it is rendered (`parseConnectionsHint` /
- * `parseSecretsHint`). Keeping build + parse in one module guarantees the
- * wording stays in lockstep — see connections-message.test.ts and
- * secrets-message.test.ts.
+ * (`buildSecretsHint`) and parsed back out of a stored message before it is
+ * rendered (`parseSecretsHint`). Keeping build + parse in one module
+ * guarantees the wording stays in lockstep — see secrets-message.test.ts.
  */
-
-/** Build a prompt hint to prepend when the user has @-pinned connections. */
-export function buildConnectionsHint(connections: ReferencedConnection[]): string {
-  if (connections.length === 0) return "";
-  const items = connections.map((c) => {
-    if (c.kind === "custom") {
-      return `- custom connection "${c.name}"${c.baseUrl ? ` (base URL: ${c.baseUrl})` : ""}`;
-    }
-    return `- composio toolkit "${c.name}"${c.toolkitSlug ? ` (slug: ${c.toolkitSlug})` : ""}`;
-  });
-  return ["The user has pinned these connections for this task. Use them preferentially:", ...items].join("\n");
-}
 
 /** Build a prompt hint for @-pinned BWS secrets. Inputs only names + ids — never
  *  values — so the model knows what's available without the value ever entering
@@ -36,46 +21,6 @@ export function buildSecretsHint(secrets: ReferencedSecret[]): string {
     "Do not echo the secret value back to the user unless they explicitly ask.",
     ...items,
   ].join("\n");
-}
-
-/**
- * `@`-pinned connections are prepended to the outgoing user prompt as a plain
- * hint block (see buildConnectionsHint above):
- *
- *   The user has pinned these connections for this task. Use them preferentially:
- *   - custom connection "Leadmagic" (base URL: https://api.leadmagic.io)
- *
- *   <the actual message body>
- *
- * The model needs that text, but the transcript should show compact badges
- * instead. We detect the leading block, pull out the connection names, and
- * return the remaining body so the bubble renders only what the user typed.
- */
-export interface ParsedConnectionsHint {
-  connections: { kind: "custom" | "composio"; name: string }[];
-  /** The message body after the hint block (what the user actually typed). */
-  body: string;
-}
-
-// The hint block is always prepended, so it anchors at the start: the fixed
-// prefix line followed by one or more "- …" bullet lines, then the body.
-const HINT_RE =
-  /^The user has pinned these connections for this task\. Use them preferentially:\n((?:- [^\n]*(?:\n|$))+)\n*/;
-const ITEM_RE = /^- (custom connection|composio toolkit) "([^"]+)"/gm;
-
-export function parseConnectionsHint(text: string): ParsedConnectionsHint | null {
-  const m = HINT_RE.exec(text);
-  if (!m) return null;
-  const bullets = m[1] ?? "";
-  const connections: ParsedConnectionsHint["connections"] = [];
-  for (const item of bullets.matchAll(ITEM_RE)) {
-    connections.push({
-      kind: item[1] === "custom connection" ? "custom" : "composio",
-      name: item[2] ?? "",
-    });
-  }
-  if (connections.length === 0) return null;
-  return { connections, body: text.slice(m[0].length) };
 }
 
 /** Counterpart to buildSecretsHint: strips the pinned-secrets hint block so the

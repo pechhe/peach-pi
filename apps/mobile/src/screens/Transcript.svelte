@@ -61,9 +61,16 @@
   }
 
   let nearBottom = true;
+  let showJump = $state(false);
   function onScroll(): void {
     if (!scroller) return;
     nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
+    showJump = !nearBottom;
+  }
+  function jumpToLatest(): void {
+    nearBottom = true;
+    showJump = false;
+    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
   }
   function queueScroll(): void {
     if (!nearBottom) return;
@@ -161,7 +168,7 @@
       </span>
     {:else if reconnecting}
       <span class="flex items-center gap-1.5 text-warning-fg">
-        <span class="pp-spin text-warning-fg"><Icon name="spinner" size={11} sw={3} /></span>reconnecting
+        <span class="text-warning-fg"><Icon name="spinner" size={11} sw={3} /></span>reconnecting
       </span>
     {:else if ended}
       <span class="flex items-center gap-1.5 text-faint">
@@ -206,11 +213,25 @@
 
   {#if items.length === 0 && status.kind !== "ended"}
     <p class="flex items-center justify-center gap-2 pt-10 text-[13px] text-faint">
-      <span class="pp-spin"><Icon name="spinner" size={13} sw={3} /></span>
+      <span><Icon name="spinner" size={13} sw={3} /></span>
       {status.kind === "connecting" ? "Connecting…" : "Loading transcript…"}
     </p>
   {/if}
 </div>
+
+{#if showJump}
+  <!-- Floating "jump to latest" — anchored to the scroller's bottom edge so
+       new frames don't silently pile up below the fold. -->
+  <div class="pointer-events-none relative z-20 h-0">
+    <button
+      class="pp-fade-in pointer-events-auto absolute bottom-3 right-4 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface-2 text-muted shadow-lg"
+      onclick={jumpToLatest}
+      aria-label="Jump to latest"
+    >
+      <Icon name="chevron-down" size={18} sw={2.2} />
+    </button>
+  </div>
+{/if}
 
 {#if reconnecting && status.kind === "reconnecting"}
   <div class="flex justify-center px-4 pb-5 pt-3">

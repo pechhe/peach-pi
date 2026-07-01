@@ -24,6 +24,7 @@ interface ProjectRow {
   created_at: string;
   archived_at: string | null;
   merge_workflow: string;
+  check_command: string | null;
   agent_model: string | null;
   agent_thinking: string | null;
 }
@@ -56,6 +57,7 @@ const toProject = (r: ProjectRow): Project => ({
   createdAt: r.created_at,
   archivedAt: r.archived_at ?? undefined,
   mergeWorkflow: r.merge_workflow === "local" ? "local" : "pr",
+  checkCommand: r.check_command,
   agentModel: parseModel(r.agent_model),
   agentThinking: toThinkingLevel(r.agent_thinking),
 });
@@ -127,6 +129,11 @@ export class ProjectRepo {
   /** Set a project's Work Queue merge workflow ('pr' | 'local'). */
   setMergeWorkflow(id: string, workflow: Project["mergeWorkflow"]): void {
     this.db.prepare("UPDATE projects SET merge_workflow = ? WHERE id = ?").run(workflow, id);
+  }
+
+  /** Set a project's check command (run before local merges). null clears. */
+  setCheckCommand(id: string, command: string | null): void {
+    this.db.prepare("UPDATE projects SET check_command = ? WHERE id = ?").run(command, id);
   }
 
   /** Pin the model used by Work Queue agent launches for this project.

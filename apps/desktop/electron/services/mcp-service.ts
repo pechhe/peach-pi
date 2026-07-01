@@ -1,10 +1,36 @@
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { promisify } from "node:util";
 
 import type { McpServer } from "@peach-pi/shared-types";
 import { EXECUTOR_MCP_URL, delay, readExecutorToken } from "./executor-daemon.ts";
+
+const execFileAsync = promisify(execFile);
+
+/** pi's enabled-resources file. pi only loads an installed npm package when its
+ *  `npm:<name>` spec is listed here; `pi install` adds it. */
+const SETTINGS_PATH = join(homedir(), ".pi", "agent", "settings.json");
+/** The extension that connects MCP servers (incl. our executor HTTP endpoint)
+ *  and exposes `execute`/`resume`. Bundled in node_modules but inert until
+ *  enabled here. */
+const MCP_ADAPTER_SPEC = "npm:pi-mcp-adapter";
+
+/** GUI apps don't inherit the login-shell PATH — probe common pi install dirs
+ *  (mirrors agent-browser-service). */
+function findPiBin(): string {
+  const candidates = [
+    join(homedir(), ".npm-global", "bin", "pi"),
+    join(homedir(), ".local", "bin", "pi"),
+    "/opt/homebrew/bin/pi",
+    "/usr/local/bin/pi",
+  ];
+  for (const c of candidates) if (existsSync(c)) return c;
+  return "pi";
+}
 
 /** pi-mcp-adapter config: `{ "mcpServers": { <name>: { command, args } } }`.
  *  Owned by the adapter. peach-pi toggles load by moving an entry between
@@ -20,6 +46,14 @@ interface RawServerSpec {
   url?: string;
   auth?: "oauth" | "bearer" | false;
   bearerToken?: string;
+  /** pi-mcp-adapter: register this server's tools as NATIVE pi tools (full
+   *  cached descriptions, lazy-connect on call) instead of only via the `mcp`
+   *  gateway. See `directTools` / direct-tools.ts in pi-mcp-adapter. */
+  directTools?: boolean;
+  /** Connect at session start and never idle-disconnect, so the metadata
+   *  cache that backs direct-tool descriptions stays fresh as the user
+   *  adds/removes connections. */
+  lifecycle?: "keep-alive" | "lazy" | "eager";
 }
 
 interface CacheEntry {
@@ -109,9 +143,19 @@ export class McpService {
         token = await readExecutorToken();
       }
 
+      // directTools + lifecycle(eager): pi-mcp-adapter exposes Executor's
+      //   `execute`/`resume` as NATIVE pi tools — present in the agent's tool
+      //   list from session 1, with their full description (incl. the live
+      //   "Available connection prefixes" block, so Notion/PostHog/etc. are
+      //   visible without a manual connect). "eager" connects at startup and
+      //   keeps those descriptions fresh as connections change. These flags are
+      //   excluded from the adapter's server-identity hash, so adding them does
+      //   not invalidate the existing metadata cache.
       const entry: RawServerSpec = {
         url: EXECUTOR_MCP_URL,
         auth: "bearer",
+        directTools: true,
+        lifecycle: "eager",
         ...(token ? { bearerToken: token } : {}),
       };
 
@@ -138,6 +182,36 @@ export class McpService {
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
+    }
+  }
+
+  /** Ensure pi actually loads pi-mcp-adapter. The package is bundled into
+   *  `~/.pi/agent/npm/node_modules`, but pi's DefaultResourceLoader only loads
+   *  it when `npm:pi-mcp-adapter` is listed in settings.json `packages` —
+   *  without it the adapter never runs, so the executor `execute`/`resume`
+   *  tools never appear no matter how the daemon or mcp.json is set up. Mirrors
+   *  the agent-browser pattern: idempotent `pi install` (skipped when already
+   *  enabled). Takes effect for sessions started afterwards. */
+  async ensureAdapterEnabled(
+    emit?: (channel: "event:notice", payload: { message: string; level: "info" | "error" }) => void,
+  ): Promise<void> {
+    try {
+      const parsed = JSON.parse(await readFile(SETTINGS_PATH, "utf8")) as { packages?: unknown[] };
+      if (Array.isArray(parsed.packages) && parsed.packages.includes(MCP_ADAPTER_SPEC)) return;
+    } catch {
+      /* no settings yet — fall through and let `pi install` create it */
+    }
+    try {
+      await execFileAsync(findPiBin(), ["install", MCP_ADAPTER_SPEC], {
+        timeout: 5 * 60 * 1000,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+    } catch (err) {
+      const stderr = (err as { stderr?: string }).stderr;
+      emit?.("event:notice", {
+        message: `Could not enable pi-mcp-adapter: ${stderr?.slice(-300) || String(err)}`,
+        level: "error",
+      });
     }
   }
 

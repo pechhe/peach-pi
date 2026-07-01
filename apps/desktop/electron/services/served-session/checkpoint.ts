@@ -1,4 +1,5 @@
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -83,6 +84,40 @@ export async function checkpointTip(cwd: string, threadId: string): Promise<stri
   const ok = await gitOk(["rev-parse", "--verify", `refs/heads/${checkpointBranch(threadId)}`], cwd);
   if (!ok) return null;
   return (await git(["rev-parse", checkpointBranch(threadId)], cwd)).trim();
+}
+
+/** Check out `sha` (detached) into a stable per-thread worktree, creating it
+ *  on first pull — never touches the project's HEAD. Reusing the same path
+ *  keeps dev servers watching one dir and lets `node_modules` survive between
+ *  pulls (laptop side of ADR-0009). Returns the worktree's previous HEAD sha,
+ *  or null when the worktree was (re)created. */
+export async function checkoutIntoStableWorktree(
+  projectDir: string,
+  dir: string,
+  sha: string,
+): Promise<string | null> {
+  if (existsSync(path.join(dir, ".git"))) {
+    let prev: string | null = null;
+    try {
+      prev = (await git(["rev-parse", "HEAD"], dir)).trim() || null;
+    } catch {
+      prev = null;
+    }
+    try {
+      // The worktree is disposable test space — force past any local edits.
+      await git(["checkout", "--force", "--detach", sha], dir);
+      return prev;
+    } catch {
+      // Corrupt/stale worktree — remove and recreate below.
+      await git(["worktree", "remove", "--force", dir], projectDir).catch(() => {});
+    }
+  }
+  await mkdir(path.dirname(dir), { recursive: true });
+  // Prune stale registrations (e.g. a manually deleted worktree dir) so
+  // `worktree add` on the same path doesn't refuse.
+  await git(["worktree", "prune"], projectDir).catch(() => {});
+  await git(["worktree", "add", "--detach", dir, sha], projectDir);
+  return null;
 }
 
 /** Record a checkpoint for a thread (snapshot + push), returning the result. */

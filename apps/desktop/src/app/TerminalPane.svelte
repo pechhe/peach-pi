@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Terminal } from "@xterm/xterm";
   import { FitAddon } from "@xterm/addon-fit";
+  import { WebLinksAddon } from "@xterm/addon-web-links";
   import "@xterm/xterm/css/xterm.css";
   import { api } from "../lib/ipc";
   import X from "@lucide/svelte/icons/x";
@@ -32,6 +33,12 @@
     term = t;
     const fit = new FitAddon();
     t.loadAddon(fit);
+    t.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        event.preventDefault();
+        void api.invoke("shell:openExternal", uri);
+      }),
+    );
     t.open(container);
     fit.fit();
     t.focus();

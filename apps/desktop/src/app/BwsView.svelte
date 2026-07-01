@@ -338,14 +338,14 @@
             No Bitwarden account needed. peach-pi reads provider keys the same way
             pi does — straight from your environment. Export them in your shell rc
             file and restart the app, and every <code class="rounded bg-bg px-1 text-xs">$VAR</code>
-            reference in a provider config or custom connection resolves automatically.
+            reference in a provider config resolves automatically.
           </p>
           <div class="mt-3 rounded-lg border border-border-strong/60 bg-bg/50 p-3 text-xs text-fg-soft">
             <p class="font-semibold text-fg">Put your keys in <code class="rounded bg-bg px-1">~/.zshrc</code> (or a file you source from it):</p>
             <pre class="mt-2 overflow-x-auto rounded bg-bg p-2 font-mono text-[11px] text-fg-soft">export OPENAI_API_KEY="sk-…"
 export ANTHROPIC_API_KEY="sk-ant-…"
 export BWS_ACCESS_TOKEN="0.48…"   # optional</pre>
-            <p class="mt-2 text-fainter">Then <strong>restart peach-pi</strong> so it picks up the new environment. You can also add HTTP credentials without env vars under <strong>Connectors</strong>.</p>
+            <p class="mt-2 text-fainter">Then <strong>restart peach-pi</strong> so it picks up the new environment. You can also connect HTTP APIs under <strong>Connections</strong> (via Executor).</p>
           </div>
           <div class="mt-4 flex justify-between gap-2">
             <button

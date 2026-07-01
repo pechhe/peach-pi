@@ -220,6 +220,16 @@
     // The snapshot event will refresh `project` (and hence `workflow`).
   }
 
+  // Optional check command (typecheck/tests) run in the worktree before any
+  // local merge — the local workflow's CI substitute. Empty clears it.
+  const checkCommand = $derived(project?.checkCommand ?? "");
+  async function setCheckCommand(e: Event) {
+    if (!projectId) return;
+    const value = (e.currentTarget as HTMLInputElement).value.trim();
+    if (value === checkCommand) return;
+    await api.invoke("projects:setCheckCommand", projectId, value || null);
+  }
+
   // ── Work Queue agent model + reasoning overrides ───────────────────
   // Per-project pins applied to every agent launch from the Work Queue
   // (startAgent / startAllReady / startPrdAgent / breakdownPrd). Mirrors the
@@ -397,6 +407,14 @@
           title="Merge the worktree branch into the default branch locally and push"
         >Local</button>
       </div>
+      <input
+        class="w-44 rounded-md border border-border bg-transparent px-2 py-0.5 font-mono text-xs outline-none placeholder:text-fainter focus:border-border-focus titlebar-no-drag"
+        placeholder="Check command (optional)"
+        value={checkCommand}
+        onchange={setCheckCommand}
+        data-testid="check-command-input"
+        title="Run this in the worktree before any local merge (e.g. pnpm typecheck && pnpm test). Empty = no gate."
+      />
       <div
         class="flex items-center gap-1.5 titlebar-no-drag"
         data-testid="agent-model-select"

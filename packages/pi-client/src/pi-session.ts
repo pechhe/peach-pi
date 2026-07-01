@@ -123,6 +123,23 @@ export class PiSession {
         // microtask if it's not yet false (retry / emit-before-finally).
         this.wakeCompactionWaiters();
       }
+      if (event.type === "auto_retry_end" && !event.success) {
+        // A cancelled/exhausted auto-retry ends the run, but the SDK only
+        // emits a trailing `agent_end` (which flips running→false) when the
+        // retry budget is *exhausted*: the agent_end before the backoff sleep
+        // was stamped willRetry:true. If the user aborts (Esc) during that
+        // backoff, the SDK aborts the sleep and emits `auto_retry_end`
+        // (finalError "Retry cancelled") with NO further agent_end — so
+        // onRunningChange(false) never fires and the app is stuck showing
+        // "Working…" forever (Esc no-ops thereafter: nothing is streaming
+        // left to abort). Reconcile the run flag here, mirroring the
+        // compaction_end path. Idempotent on the exhausted path, where a
+        // willRetry:false agent_end already cleared it.
+        if (!this.session.isStreaming) {
+          this.callbacks.onRunningChange(false);
+          this.callbacks.onMetaChange?.();
+        }
+      }
       if (event.type === "thinking_level_changed") this.callbacks.onMetaChange?.();
       if (event.type === "queue_update") {
         this.callbacks.onQueueChange?.([...event.steering], [...event.followUp]);

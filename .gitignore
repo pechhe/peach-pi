@@ -17,5 +17,7 @@ apps/desktop/build/executor/
 .vercel
 apps/desktop/.vite-build-check/
 apps/desktop/electron/build/extensions/
+# SwiftPM build output for the native notch helper (built by prePackage hook).
+apps/desktop/native/notch/.build/
 .env
 .wrangler/

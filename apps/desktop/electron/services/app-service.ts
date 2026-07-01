@@ -17,7 +17,6 @@ import type {
 import type { AppDb } from "../persistence/db.ts";
 import { seedHudThreadId } from "@peach-pi/shared-types";
 import {
-  AUTO_COMPACT_KV_KEY,
   AutomationRepo,
   REMOTE_CLIENT_ID_KV_KEY,
   UTILITY_MODEL_KV_KEY,
@@ -28,11 +27,9 @@ import {
   WorktreeRepo,
 } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
+import { getAutoCompactThresholds, setAutoCompactThresholds } from "./pi-smart-compact.ts";
 
 const UI_STATE_KEY = "ui-state";
-
-/** Default auto-compaction thresholds (matches the historical 80% behaviour). */
-const DEFAULT_AUTO_COMPACT: AutoCompactSettings = { percent: 80, tokens: null };
 
 /** Owns app state; publishes snapshots after every mutation. */
 export class AppService {
@@ -58,6 +55,10 @@ export class AppService {
   /** Supplies synthetic threads mirrored from remote masters (set by main.ts),
    *  merged into the snapshot so they render in the sidebar tagged as remote. */
   private remoteThreads: () => Thread[] = () => [];
+  /** Main-process listener fired when a thread is opened/seen (see
+   *  `setSelectedThread`). The notch registers here to clear its unread inbox
+   *  when the user opens a finished thread in the app, not just via the notch. */
+  private threadSeenListener: ((threadId: string) => void) | null = null;
   /** The last snapshot the renderer is known to hold, with stable entity refs.
    *  Each publish diffs the freshly-queried `snapshot()` against this and emits
    *  only changed entities on `event:snapshotPatch`; this is where identity is
@@ -183,6 +184,16 @@ export class AppService {
     return this.projects.all().find((p) => p.id === projectId)!;
   }
 
+  /** Set a project's check command (run in the worktree before local merges).
+   *  Empty/whitespace clears it. Returns the updated project. */
+  setCheckCommand(projectId: string, command: string | null): Project {
+    const exists = this.projects.all().some((p) => p.id === projectId);
+    if (!exists) throw new Error(`Unknown project: ${projectId}`);
+    this.projects.setCheckCommand(projectId, command?.trim() || null);
+    this.notify();
+    return this.projects.all().find((p) => p.id === projectId)!;
+  }
+
   /** Pin the model Work Queue agents use for this project. null = pi default. */
   setAgentModel(projectId: string, model: AutomationModel | null): Project {
     const exists = this.projects.all().some((p) => p.id === projectId);
@@ -260,8 +271,18 @@ export class AppService {
 
   setSelectedThread(threadId: string | null): void {
     this.saveUiState({ selectedThreadId: threadId });
-    if (threadId) this.threads.markSeen(threadId);
+    if (threadId) {
+      this.threads.markSeen(threadId);
+      this.threadSeenListener?.(threadId);
+    }
     this.notify();
+  }
+
+  /** Register a main-process "thread opened/seen" listener. Fires from
+   *  `setSelectedThread`, mirroring `markSeen`, so surfaces outside the
+   *  renderer (the notch) can drop the thread's unread accent too. */
+  onThreadSeen(listener: (threadId: string) => void): void {
+    this.threadSeenListener = listener;
   }
 
   /** Read the HUD's active thread (independent of `selectedThreadId`). */
@@ -347,13 +368,17 @@ export class AppService {
     return this.getUtilityModel();
   }
 
+  /** Auto-compaction thresholds. Backed by the `smartCompact` block in
+   *  `~/.pi/agent/settings.json` — the single source of truth the
+   *  `pi-smart-auto-compact` extension actually enforces — so the Settings UI
+   *  and context-bar marker reflect the real trigger (previously these read a
+   *  KV key nothing consumed). */
   getAutoCompact(): AutoCompactSettings {
-    return this.kv.get<AutoCompactSettings>(AUTO_COMPACT_KV_KEY) ?? DEFAULT_AUTO_COMPACT;
+    return getAutoCompactThresholds();
   }
 
   setAutoCompact(settings: AutoCompactSettings): AutoCompactSettings {
-    this.kv.set(AUTO_COMPACT_KV_KEY, settings);
-    return this.getAutoCompact();
+    return setAutoCompactThresholds(settings);
   }
 
   private wakeExpiredSnoozes(): void {

@@ -302,16 +302,17 @@ export class WorkQueueService {
     return { ok: true, items };
   }
 
-  /** Merge a worktree branch into the local repo. When the target is the
-   *  repo's default branch and the worktree is linked to a work-queue issue
-   *  (`issue-<n>`), close that issue — the local-merge equivalent of a PR's
-   *  `Closes #N`, so the Work Queue reflects "done". Worktree teardown stays
-   *  the user's choice (the GitWidget Move/Delete buttons). */
-  async mergeToLocalAndCloseIssue(threadId: string): Promise<GitMergeResult> {
-    const result = await this.gitService.mergeToLocal(threadId);
+  /** Run the local merge pipeline (rebase → check → merge into the default
+   *  branch) for a worktree thread. When the worktree is linked to a
+   *  work-queue issue (`issue-<n>`), close that issue — the local-merge
+   *  equivalent of a PR's `Closes #N`, so the Work Queue reflects "done".
+   *  Worktree teardown stays the user's choice (the GitWidget buttons). */
+  async mergeToLocalAndCloseIssue(
+    threadId: string,
+    opts?: { stashLocal?: boolean },
+  ): Promise<GitMergeResult> {
+    const result = await this.gitService.mergeToLocal(threadId, opts);
     if (!result.ok) return result;
-    const info = await this.gitService.info(threadId);
-    if (!info.defaultBranch || result.target !== info.defaultBranch) return result;
     const snap = this.appService.snapshot();
     const wtId = snap.threads.find((t) => t.id === threadId)?.worktreeId;
     const wt = wtId ? snap.worktrees.find((w) => w.id === wtId) : undefined;

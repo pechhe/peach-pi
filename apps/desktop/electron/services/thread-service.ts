@@ -95,8 +95,6 @@ export class ThreadService {
   private emit: Emit;
   private onThreadsChanged: () => void;
   private chatsDir: string;
-  private onRunIdle?: (thread: Thread) => void;
-  private onRunningChange?: (running: boolean) => void;
   private sessions = new Map<string, PiSession>();
   private pendingOps = new Map<string, TranscriptOp[]>();
   /** Threads with an in-flight compaction; their extension toasts are suppressed. */
@@ -136,18 +134,14 @@ export class ThreadService {
     emit: Emit,
     onThreadsChanged: () => void,
     chatsDir: string,
-    onRunIdle?: (thread: Thread) => void,
     getUtilityModel?: () => ModelInfo | null,
     getAutoCompact?: () => AutoCompactSettings,
-    onRunningChange?: (running: boolean) => void,
   ) {
     this.threads = new ThreadRepo(db);
     this.projects = new ProjectRepo(db);
     this.emit = emit;
     this.onThreadsChanged = onThreadsChanged;
     this.chatsDir = chatsDir;
-    this.onRunIdle = onRunIdle;
-    this.onRunningChange = onRunningChange;
     this.getUtilityModel = getUtilityModel ?? (() => null);
     this.getAutoCompact = getAutoCompact ?? (() => ({ percent: 80, tokens: null }));
   }
@@ -927,17 +921,14 @@ export class ThreadService {
   }
 
   private setStatus(threadId: string, status: Thread["status"]): void {
-    const prev = this.threads.get(threadId)?.status;
-    const wasRunning = prev === "running";
-    const nowRunning = status === "running";
+    const prev = this.threads.get(threadId)?.status ?? "idle";
     this.threads.setStatus(threadId, status);
     this.onThreadsChanged();
-    this.emitFrame({ kind: "status", threadId, status });
-    if (wasRunning !== nowRunning && this.onRunningChange) this.onRunningChange(nowRunning);
-    if (status === "completed" && this.onRunIdle) {
-      const thread = this.threads.get(threadId);
-      if (thread) this.onRunIdle(thread);
-    }
+    // The status frame carries `prev` so run-lifecycle subscribers (sleep
+    // prevention, deferred-update flush, finish cues) can detect the
+    // running↔idle transition from one emission, without per-subscriber state
+    // or constructor callbacks (the RunLifecycle seam).
+    this.emitFrame({ kind: "status", threadId, status, prev });
     if (status === "completed") {
       // Idle→checkpoint frame: subscribers (e.g. the relay) record the wip/
       // branch. Kept as a frame, not a separate hook, so a new subscriber gets

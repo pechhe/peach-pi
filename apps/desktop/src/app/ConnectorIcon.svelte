@@ -1,7 +1,7 @@
 <script lang="ts">
-  // Toolkit icon for a catalogue tile / connection row. Renders the Composio
-  // logo when we have a URL; otherwise a deterministic monogram tile (so a
-  // toolkit needs no logo to be listed).
+  // Toolkit icon for a connection row / catalogue tile. Renders the
+  // integration's logo (favicon URL) when we have one; otherwise a
+  // deterministic monogram tile (so a connection needs no logo to be listed).
   let {
     logoUrl = null,
     label,

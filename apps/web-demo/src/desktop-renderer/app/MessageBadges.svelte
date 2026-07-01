@@ -1,59 +1,34 @@
 <script lang="ts">
-  // Renders the @-connection and @-secret badges for a stored user message.
+  // Renders the @-secret badges for a stored user message.
   //
   // A pinned prompt arrives as a plain-text hint block prepended to the body
   // (see lib/composer/hints.ts). The transcript shouldn't show that block — it
-  // should show compact badges plus the body the user actually typed. This
-  // component owns the two-step parse chain (connections, then secrets on the
-  // remaining body) so callers don't have to duplicate it.
+  // should show compact badges plus the body the user actually typed.
   //
   // `variant`:
-  //   - "rich": full badges with logos + icons (Main Window timeline).
+  //   - "rich": full badges with icons (Main Window timeline).
   //   - "hud":  minimal text badges (HUD composer peek).
   //
-  // The message body left after stripping both hint blocks is yielded to the
+  // The message body left after stripping the hint block is yielded to the
   // `children` snippet as `{ body }`, so the caller renders the bubble text.
+  import type { Snippet } from "svelte";
   import KeyRound from "@lucide/svelte/icons/key-round";
-  import ConnectorIcon from "./ConnectorIcon.svelte";
-  import { parseConnectionsHint, parseSecretsHint } from "../lib/composer/hints";
+  import { parseSecretsHint } from "../lib/composer/hints";
 
   let {
     text,
     variant = "rich",
-    connLogos = new Map<string, string | null>(),
     children,
   }: {
     text: string;
     variant?: "rich" | "hud";
-    /** name → logoUrl (rich variant only). */
-    connLogos?: Map<string, string | null>;
-    children: (args: { body: string }) => unknown;
+    children: Snippet<[{ body: string }]>;
   } = $props();
 
-  const conn = $derived(parseConnectionsHint(text));
-  const sec = $derived(parseSecretsHint(conn ? conn.body : text));
-  const body = $derived(sec ? sec.body : conn ? conn.body : text);
+  const sec = $derived(parseSecretsHint(text));
+  const body = $derived(sec ? sec.body : text);
 </script>
 
-{#if conn}
-  {#if variant === "rich"}
-    <div class="flex flex-wrap justify-end gap-1.5" data-testid="connection-badges">
-      {#each conn.connections as c (c.kind + ":" + c.name)}
-        <span
-          class="inline-flex items-center gap-1.5 rounded-full border border-border-strong/50 bg-surface-2/80 py-0.5 pl-1 pr-2.5 text-[11.5px] font-medium text-fg-soft"
-          title={`${c.kind === "custom" ? "Custom connection" : "Composio toolkit"}: ${c.name}`}
-        >
-          <ConnectorIcon logoUrl={connLogos.get(c.name) ?? null} label={c.name} size={16} />
-          <span>@{c.name}</span>
-        </span>
-      {/each}
-    </div>
-  {:else}
-    <div class="msg-badges-row">
-      {#each conn.connections as c (c.kind + ":" + c.name)}<span class="msg-badge">@{c.name}</span>{/each}
-    </div>
-  {/if}
-{/if}
 {#if sec}
   {#if variant === "rich"}
     <div class="flex flex-wrap justify-end gap-1.5" data-testid="secret-badges">

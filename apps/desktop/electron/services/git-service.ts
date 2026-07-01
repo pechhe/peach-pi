@@ -148,26 +148,64 @@ export class GitService {
   }
 
   /** True when the worktree's HEAD is already an ancestor of the local
-   *  project's current branch (work merged back). */
+   *  project's default branch (work merged back). Falls back to the local
+   *  checkout's current branch when no default branch is determinable. */
   private async isMergedToLocal(threadId: string, cwd: string): Promise<boolean> {
     const projectPath = this.projectPathFor(threadId);
     if (!projectPath) return false;
     try {
       const wtHead = (await gitRead(["rev-parse", "HEAD"], cwd)).trim();
-      const target = (await gitRead(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
+      const target =
+        (await this.defaultBranch(projectPath)) ??
+        (await gitRead(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
       return await gitReadOk(["merge-base", "--is-ancestor", wtHead, target], projectPath);
     } catch {
       return false;
     }
   }
 
-  /** Repo default branch from origin/HEAD; null when undetermined. */
+  /** Repo default branch from origin/HEAD, falling back to a local
+   *  `main`/`master` for repos without a remote; null when undetermined. */
   private async defaultBranch(cwd: string): Promise<string | null> {
     try {
       const ref = (await gitRead(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd)).trim();
-      return ref.replace(/^origin\//, "") || null;
+      const name = ref.replace(/^origin\//, "");
+      if (name) return name;
     } catch {
-      return null;
+      // No origin/HEAD — fall through to local detection.
+    }
+    for (const name of ["main", "master"]) {
+      if (await gitReadOk(["rev-parse", "--verify", `refs/heads/${name}`], cwd)) return name;
+    }
+    return null;
+  }
+
+  /** Run the project's optional check command (typecheck/tests) in `cwd` —
+   *  the local workflow's CI substitute, run post-rebase and pre-merge. A
+   *  missing/empty command passes. On failure the error carries the tail of
+   *  the command output so the nudged agent (or the user) sees what broke. */
+  private async runCheck(
+    threadId: string,
+    cwd: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const thread = this.threads.get(threadId);
+    const project = thread?.projectId
+      ? this.projects.all().find((p) => p.id === thread.projectId)
+      : null;
+    const command = project?.checkCommand?.trim();
+    if (!command) return { ok: true };
+    try {
+      await runExec("/bin/sh", ["-lc", command], {
+        cwd,
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 15 * 60 * 1000,
+      });
+      return { ok: true };
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string; message?: string };
+      const combined = `${err.stdout ?? ""}\n${err.stderr ?? ""}`.trim();
+      const tail = combined.split("\n").filter(Boolean).slice(-20).join("\n");
+      return { ok: false, error: `Check failed (\`${command}\`):\n${tail || err.message || String(e)}` };
     }
   }
 
@@ -417,11 +455,18 @@ export class GitService {
   }
 
   /**
-   * Merge this worktree's branch into the local project repo's current branch
-   * with --no-ff (keeps a thread-boundary merge commit). Local only — no push.
-   * Aborts cleanly on conflict.
+   * The GitWidget "Merge to local" pipeline — the same lane as the Work Queue
+   * 'local' workflow: rebase the worktree branch onto the latest default
+   * branch (conflicts surface here, in the worktree — not on main), then
+   * delegate to {@link mergeBranchToDefault} (check gate → merge --no-ff into
+   * the default branch) without pushing — the widget offers the push
+   * separately. A dirty main checkout refuses with `dirtyLocal` unless
+   * `opts.stashLocal` (the explicit "Stash local & retry" action).
    */
-  async mergeToLocal(threadId: string): Promise<GitMergeResult> {
+  async mergeToLocal(
+    threadId: string,
+    opts?: { stashLocal?: boolean },
+  ): Promise<GitMergeResult> {
     const cwd = this.cwdFor(threadId);
     if (!cwd) return { ok: false, error: "No working directory" };
     const thread = this.threads.get(threadId);
@@ -432,37 +477,35 @@ export class GitService {
     const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
     if (branch === "HEAD") return { ok: false, error: "Nothing committed yet" };
 
-    const projectPath = this.projectPathFor(threadId);
-    if (!projectPath) return { ok: false, error: "No local project repo" };
-    const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
-    if (target === branch) return { ok: false, error: `Local repo is on ${branch}` };
+    const rebase = await this.rebaseOntoDefault(threadId);
+    if (!rebase.ok) {
+      // A real rebase conflict is surfaced with `conflict` + `target` so the
+      // UI can hand the resolve to the agent in its own worktree.
+      if (rebase.conflict) {
+        const base = await this.defaultBranch(cwd);
+        return { ok: false, error: rebase.error, conflict: true, target: base ?? undefined, branch };
+      }
+      return { ok: false, error: rebase.error };
+    }
 
-    // Stash dirty local work, merge --no-ff, restore — the shared invariant.
-    // Local-only: no checkout (merge into whatever the checkout is on), no push.
-    // A conflict return lets the UI hand the resolve to the agent: it merges
-    // <target> into <branch> in its own worktree (refs are shared), resolves,
-    // commits — then merge-to-local runs clean.
-    const localDirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
-    return this.mergeNoFfWithStash(projectPath, branch, target, {
-      stashMessage: "peach-pi merge-to-local",
-      dirty: localDirty,
-    });
+    return this.mergeBranchToDefault(threadId, { stashLocal: opts?.stashLocal, push: false });
   }
 
   /** Merge a worktree thread's branch into the repo's default branch (e.g.
    *  `main`/`master`) in the project's main checkout, then push the default
-   *  branch to origin. Unlike {@link mergeToLocal}, this deliberately targets
-   *  the default branch — it's the Work Queue 'local' workflow's merge step,
-   *  gated behind a fresh `rebaseOntoDefault` so the branch is current.
-   *  Leaves the main checkout on the default branch after the merge.
+   *  branch to origin (`opts.push`, default true — {@link mergeToLocal} passes
+   *  false and offers the push separately). The shared merge step of the
+   *  local workflow, gated behind a fresh `rebaseOntoDefault` (callers run
+   *  it first) and the project's check command — the CI substitute that a PR
+   *  would otherwise provide. Leaves the main checkout on the default branch.
    *
    *  A dirty main checkout blocks the merge unless `opts.stashLocal` is set,
-   *  in which case the local WIP is stashed + restored around the merge
-   *  (mirror of {@link mergeToLocal}). Without it the result carries
-   *  `dirtyLocal` so the caller can offer a stash-and-retry action. */
+   *  in which case the local WIP is stashed + restored around the merge.
+   *  Without it the result carries `dirtyLocal` so the caller can offer a
+   *  stash-and-retry action. */
   async mergeBranchToDefault(
     threadId: string,
-    opts?: { stashLocal?: boolean },
+    opts?: { stashLocal?: boolean; push?: boolean },
   ): Promise<GitMergeResult> {
     const cwd = this.cwdFor(threadId);
     if (!cwd) return { ok: false, error: "No working directory" };
@@ -476,7 +519,14 @@ export class GitService {
     const projectPath = this.projectPathFor(threadId);
     if (!projectPath) return { ok: false, error: "No local project repo" };
     const base = await this.defaultBranch(projectPath);
-    if (!base) return { ok: false, error: "No default branch (origin/HEAD)" };
+    if (!base) return { ok: false, error: "No default branch" };
+    if (branch === base) return { ok: false, error: `Worktree is on ${base} — branch first` };
+
+    // The verification gate: run the project's check command in the worktree
+    // (post-rebase) before anything touches the default branch. This is the
+    // local workflow's stand-in for PR CI.
+    const check = await this.runCheck(threadId, cwd);
+    if (!check.ok) return { ok: false, error: check.error, branch };
 
     // Dirty main checkout blocks a merge unless the caller asked to stash.
     // Without stashing, surface a distinct `dirtyLocal` flag so the UI can
@@ -489,12 +539,12 @@ export class GitService {
       return { ok: false, error: `Local is dirty — stash on ${base} and retry`, dirtyLocal: true, base };
 
     // Stash (when permitted), check out the default branch, merge --no-ff,
-    // push, restore — the shared invariant.
+    // push (unless the caller defers it), restore — the shared invariant.
     return this.mergeNoFfWithStash(projectPath, branch, base, {
-      stashMessage: "peach-pi merge-batch",
+      stashMessage: "peach-pi merge-local",
       dirty,
       checkout: true,
-      push: true,
+      push: opts?.push ?? true,
     });
   }
 
@@ -629,11 +679,12 @@ export class GitService {
   }
 
   /** Rebase this thread's branch onto the latest default branch (fetched from
-   *  origin). Used by the batch-merge flow: each worktree branch built against
-   *  an older main is brought up to date in its own isolated cwd before it is
-   *  merged, so conflicts surface here — not on main — and main stays linear.
-   *  Aborts cleanly on rebase conflict. No test gate — branch correctness is
-   *  the agent's job, not the merge queue's. */
+   *  origin when one exists; local `main`/`master` otherwise). The first step
+   *  of the local merge pipeline: each worktree branch built against an older
+   *  main is brought up to date in its own isolated cwd before it is merged,
+   *  so conflicts surface here — not on main — and main stays linear. Aborts
+   *  cleanly on rebase conflict (flagged `conflict`). The check gate runs
+   *  after this, in {@link mergeBranchToDefault}. */
   async rebaseOntoDefault(threadId: string): Promise<GitRebaseResult> {
     const cwd = this.cwdFor(threadId);
     if (!cwd) return { ok: false, error: "No working directory" };
@@ -642,23 +693,29 @@ export class GitService {
     const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
     if (!branch || branch === "HEAD") return { ok: false, error: "Detached HEAD — commit first" };
     const base = await this.defaultBranch(cwd);
-    if (!base) return { ok: false, error: "No default branch (origin/HEAD)" };
+    if (!base) return { ok: false, error: "No default branch" };
+    if (branch === base) return { ok: false, error: `Worktree is on ${base} — branch first` };
     // Fetch the latest default branch so the rebase is against current main,
     // not whatever the worktree last saw.
     await git(["fetch", "origin", base], cwd).catch(() => undefined);
+    // Rebase onto the remote-tracking ref when it exists; local-only repos
+    // (no origin) rebase onto the local default branch instead.
+    const upstream = (await gitOk(["rev-parse", "--verify", `refs/remotes/origin/${base}`], cwd))
+      ? `origin/${base}`
+      : base;
     // Refuse to rebase with a dirty tree — cleaner than git's raw error.
     if ((await git(["status", "--porcelain"], cwd)).trim()) {
       return { ok: false, error: "Cannot rebase with uncommitted changes. Commit or stash them first." };
     }
     try {
-      await git(["rebase", `origin/${base}`], cwd);
+      await git(["rebase", upstream], cwd);
     } catch {
       // Rebase stopped on a conflict. Abort so the worktree is left clean —
       // the caller decides whether to retry, resolve manually, or skip.
       if (await gitOk(["rev-parse", "--git-path", "rebase-merge"], cwd)) {
         await git(["rebase", "--abort"], cwd).catch(() => undefined);
       }
-      return { ok: false, error: `Rebase conflict on ${branch} — aborted` };
+      return { ok: false, error: `Rebase conflict on ${branch} — aborted`, conflict: true };
     }
     return { ok: true, branch, base };
   }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { store } from "./lib/store.svelte.ts";
   import Masters from "./screens/Masters.svelte";
   import AddMaster from "./screens/AddMaster.svelte";
@@ -55,7 +56,7 @@
   {#key route.name + ("masterId" in route ? route.masterId : "") + ("threadId" in route ? route.threadId : "")}
     <div
       class="flex min-h-0 flex-1 flex-col overflow-hidden"
-      in:fly={{ x: enterX, duration: 220, opacity: 1, easing: (t) => t }}
+      in:fly={{ x: enterX, duration: 260, opacity: 1, easing: cubicOut }}
     >
       {#if route.name === "masters"}
         <Masters />

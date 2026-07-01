@@ -18,13 +18,12 @@
   import FlaskConicalOff from "@lucide/svelte/icons/flask-conical-off";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import BellRing from "@lucide/svelte/icons/bell-ring";
-  import Plug from "@lucide/svelte/icons/plug";
+  import Settings from "@lucide/svelte/icons/settings";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Radio from "@lucide/svelte/icons/radio";
   import Gauge from "@lucide/svelte/icons/gauge";
   import BookOpen from "@lucide/svelte/icons/book-open";
   import Puzzle from "@lucide/svelte/icons/puzzle";
-  import Settings from "@lucide/svelte/icons/settings";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
@@ -869,14 +868,6 @@
         data-testid="nav-settings"
       >
         <span class="flex items-center gap-2.5"><Settings size={15} /> Settings</span>
-      </button>
-      <button
-        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-          {activeView === 'connections' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-        onclick={() => onOpenView("connections")}
-        data-testid="nav-connections"
-      >
-        <span class="flex items-center gap-2.5"><Plug size={15} /> Connections</span>
       </button>
       <button
         class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]

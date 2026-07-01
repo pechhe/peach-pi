@@ -23,14 +23,13 @@
  */
 import type {
   ImagePayload,
-  ReferencedConnection,
   ReferencedSecret,
   Thread,
   ToolMode,
 } from "@peach-pi/shared-types";
 import type { ComposerAttachment } from "./attachments.ts";
 import type { ComposerMode } from "./mode.ts";
-import { buildConnectionsHint, buildSecretsHint } from "./hints.ts";
+import { buildSecretsHint } from "./hints.ts";
 import { composeOutgoingPrompt } from "./mode.ts";
 
 export type OutgoingChannel =
@@ -58,7 +57,6 @@ export interface OutgoingDraft {
   readonly attachments: ComposerAttachment[];
   readonly mode: ComposerMode;
   readonly command: { name: string; kind: "skill" | "extension" | "prompt" | "system" } | null;
-  readonly connections: ReferencedConnection[];
   readonly secrets: ReferencedSecret[];
   /** Plan-mode full instructions already sent once in this thread. */
   readonly planPromptSent: boolean;
@@ -103,12 +101,10 @@ export function buildOutgoing(
           isFirst: !draft.planPromptSent,
         });
 
-  // @-connections + @-secrets hints prepend before anything else; orthogonal
-  // to mode/slash-wrapping.
-  const connectionsHint = buildConnectionsHint(draft.connections);
+  // @-secrets hint prepends before anything else; orthogonal to
+  // mode/slash-wrapping.
   const secretsHint = buildSecretsHint(draft.secrets);
-  const hints = [connectionsHint, secretsHint].filter(Boolean).join("\n\n");
-  const outgoingWithHints = hints ? `${hints}\n\n${outgoing}` : outgoing;
+  const outgoingWithHints = secretsHint ? `${secretsHint}\n\n${outgoing}` : outgoing;
 
   const toolMode: ToolMode = draft.mode === "plan" && !isSlashCommand ? "readOnly" : "all";
 

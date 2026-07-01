@@ -22,8 +22,11 @@
   let pushPrompt = $state<string | null>(null);
   let pushChecked = $state(true);
   // After a merge-to-local conflict: the target branch to ask the agent to
-  // merge into its worktree. null = no conflict pending.
+  // rebase onto in its worktree. null = no conflict pending.
   let conflictTarget = $state<string | null>(null);
+  // The main checkout is dirty and blocked the merge: offer an explicit
+  // "Stash local & retry" instead of silently stashing the user's WIP.
+  let dirtyLocalBase = $state<string | null>(null);
 
   // PR only makes sense on a feature branch (not the repo default branch).
   const canPr = $derived(
@@ -130,14 +133,15 @@
     }
   }
 
-  async function mergeToLocal() {
+  async function mergeToLocal(opts?: { stashLocal?: boolean }) {
     if (merging) return;
     merging = true;
     lastResult = "";
     pushPrompt = null;
     try {
-      const result = await api.invoke("git:mergeToLocal", thread.id);
+      const result = await api.invoke("git:mergeToLocal", thread.id, opts);
       conflictTarget = null;
+      dirtyLocalBase = null;
       if (result.ok) {
         lastResult = result.warning
           ? `⚠ Merged ${result.branch} → ${result.target}; ${result.warning}`
@@ -149,6 +153,7 @@
       } else {
         lastResult = `✕ ${result.error}`;
         if (result.conflict && result.target) conflictTarget = result.target;
+        else if (result.dirtyLocal) dirtyLocalBase = result.base ?? null;
       }
       await refresh();
     } finally {
@@ -173,19 +178,20 @@
     }
   }
 
-  // Hand the conflict to the agent in this chat: it merges <target> into this
-  // worktree's branch (refs are shared), resolves, commits — then Merge to
-  // local runs clean. Sends the prompt straight into the current thread.
+  // Hand the conflict to the agent in this chat: it rebases this worktree's
+  // branch onto <target> (a shared ref, reachable from the worktree),
+  // resolves, continues — then Merge to local runs clean. Sends the prompt
+  // straight into the current thread.
   function askAgentToResolve() {
     const target = conflictTarget;
     if (!target) return;
     const prompt =
-      `Merging this worktree's branch into \`${target}\` hit merge conflicts. ` +
+      `Rebasing this worktree's branch onto \`${target}\` hit conflicts. ` +
       `Resolve it here in the worktree:\n\n` +
-      `1. Run \`git merge ${target}\` (the branch is a shared ref, so this works from the worktree).\n` +
-      `2. Resolve every conflicted file.\n` +
-      `3. Commit the merge so the working tree is clean.\n\n` +
-      `Once committed I'll click "Merge to local" again and it will merge cleanly.`;
+      `1. Run \`git rebase ${target}\` (the branch is a shared ref, so this works from the worktree).\n` +
+      `2. Resolve the conflict markers in every conflicted file, then \`git rebase --continue\` (repeat until it completes).\n` +
+      `3. Leave the working tree clean.\n\n` +
+      `Once done I'll click "Merge to local" again and it will merge cleanly.`;
     void api.invoke("threads:prompt", thread.id, prompt, [], "all").catch(console.error);
     conflictTarget = null;
     lastResult = "→ Asked the agent to resolve the conflict";
@@ -295,10 +301,10 @@
           {#if canMergeLocal}
             <button
               class="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-fg transition-opacity disabled:opacity-40"
-              onclick={mergeToLocal}
+              onclick={() => mergeToLocal()}
               disabled={merging}
               data-testid="merge-to-local"
-              title="Merge this worktree's branch into the local repo (--no-ff)"
+              title="Rebase onto the default branch, run the project's checks, then merge into it locally (--no-ff)"
             >
               {merging ? "Merging…" : "Merge to local"}
             </button>
@@ -328,6 +334,20 @@
           <p class="border-b border-border/80 px-3 py-1.5 text-[11px] {lastResult.startsWith('✓') || lastResult.startsWith('→') ? 'text-success' : 'text-danger'}">
             {lastResult}
           </p>
+        {/if}
+        {#if dirtyLocalBase}
+          <div class="flex items-center justify-between gap-2 border-b border-border/80 bg-surface/40 px-3 py-2">
+            <span class="text-[11px] text-muted">The local checkout has uncommitted work on <span class="font-mono text-fg-soft">{dirtyLocalBase}</span>.</span>
+            <button
+              class="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-fg transition-opacity disabled:opacity-40"
+              onclick={() => mergeToLocal({ stashLocal: true })}
+              disabled={merging}
+              data-testid="stash-local-retry"
+              title="Stash the local checkout's changes, merge, then restore them"
+            >
+              Stash local & retry
+            </button>
+          </div>
         {/if}
         {#if conflictTarget}
           <div class="flex items-center justify-between gap-2 border-b border-border/80 bg-surface/40 px-3 py-2">

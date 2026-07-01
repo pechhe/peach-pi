@@ -6,6 +6,7 @@
   import Icon from "../components/Icon.svelte";
   import HexSpinner from "../components/HexSpinner.svelte";
   import StatusSheet from "../components/StatusSheet.svelte";
+  import { haptic } from "../lib/haptic.ts";
 
   let { masterId }: { masterId: string } = $props();
   const master = $derived(store.master(masterId));
@@ -124,7 +125,38 @@
   }
 
   function openSession(s: RemoteSessionInfo): void {
+    if (longPressed) {
+      longPressed = false; // the long-press consumed this gesture
+      return;
+    }
     store.push({ name: "transcript", masterId, threadId: s.threadId, title: s.title || s.threadId });
+  }
+
+  // Long-press a row → status sheet (snooze / mark-to-test / archive). A tap
+  // still opens the transcript; movement (scroll) cancels the press.
+  let pressTimer: ReturnType<typeof setTimeout> | null = null;
+  let longPressed = false;
+  let pressX = 0;
+  let pressY = 0;
+
+  function onRowDown(e: PointerEvent, s: RemoteSessionInfo): void {
+    longPressed = false;
+    pressX = e.clientX;
+    pressY = e.clientY;
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      longPressed = true;
+      haptic(10);
+      statusFor = s;
+    }, 450);
+  }
+  function onRowMove(e: PointerEvent): void {
+    if (!pressTimer) return;
+    if (Math.abs(e.clientX - pressX) > 10 || Math.abs(e.clientY - pressY) > 10) cancelPress();
+  }
+  function cancelPress(): void {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
   }
 
   function onStatusDone(): void {
@@ -147,7 +179,7 @@
       {:else if rosterStatus.kind === "connecting"}
         <span class="text-faint"><Icon name="spinner" size={12} sw={3} /></span>
       {:else if rosterStatus.kind === "reconnecting"}
-        <span class="pp-spin text-warning-fg"><Icon name="spinner" size={12} sw={3} /></span>
+        <span class="text-warning-fg"><Icon name="spinner" size={12} sw={3} /></span>
       {:else}
         <span class="h-1.5 w-1.5 rounded-full bg-fainter"></span>
       {/if}
@@ -176,7 +208,7 @@
   {:else if sessions.length === 0 && !error}
     <div class="flex flex-col items-center justify-center gap-3.5 px-10 pt-24 text-center">
       <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-surface-2 text-fainter">
-        <Icon name="wifi-off" size={26} />
+        <Icon name="inbox" size={26} />
       </div>
       <div>
         <div class="text-[16px] font-semibold">No sessions served</div>
@@ -205,7 +237,7 @@
           <div class="flex flex-col gap-1">
             {#each group.threads as s (s.threadId)}
               <div
-                class="pp-tap flex w-full items-center gap-2.5 rounded-[11px] border border-border bg-surface px-3 py-2 text-left transition-colors {s.status ===
+                class="pp-tap flex w-full select-none items-center gap-2.5 rounded-[11px] border border-border bg-surface px-3 py-2 text-left transition-colors {s.status ===
                 'running'
                   ? 'border-accent/30'
                   : ''} active:bg-surface-2"
@@ -213,6 +245,11 @@
                 tabindex="0"
                 onclick={() => openSession(s)}
                 onkeydown={(e) => e.key === 'Enter' && openSession(s)}
+                onpointerdown={(e) => onRowDown(e, s)}
+                onpointermove={onRowMove}
+                onpointerup={cancelPress}
+                onpointercancel={cancelPress}
+                oncontextmenu={(e) => e.preventDefault()}
               >
                 {#if s.status === "running"}
                   <span class="shrink-0 text-accent"><HexSpinner size={15} dotSize={2} /></span>
@@ -245,7 +282,7 @@
             <span class="text-fainter"><Icon name={meta.icon} size={14} sw={1.8} /></span>
             {meta.label}
             <span class="rounded-full bg-surface-2 px-2 py-0.5 text-[10px] text-faint">{lanes[meta.key].length}</span>
-            <span class="ml-auto text-fainter">
+            <span class="ml-auto text-fainter transition-transform" style="transform: rotate({open ? 90 : 0}deg)">
               <Icon name="chevron-right" size={14} sw={2} />
             </span>
           </button>
@@ -259,11 +296,16 @@
                   </div>
                   <div class="flex flex-col gap-1">
                     {#each group.threads as s (s.threadId)}
-                      <div class="pp-tap flex w-full items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-1.5 text-left active:bg-surface-3"
+                      <div class="pp-tap flex w-full select-none items-center gap-2 rounded-[10px] border border-border bg-surface-2 px-3 py-1.5 text-left active:bg-surface-3"
                         role="button"
                         tabindex="0"
                         onclick={() => openSession(s)}
                         onkeydown={(e) => e.key === 'Enter' && openSession(s)}
+                        onpointerdown={(e) => onRowDown(e, s)}
+                        onpointermove={onRowMove}
+                        onpointerup={cancelPress}
+                        onpointercancel={cancelPress}
+                        oncontextmenu={(e) => e.preventDefault()}
                       >
                         <span class="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{s.title || s.threadId}</span>
                         {#if meta.key === "snoozed" && s.snoozedUntil}

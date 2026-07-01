@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -16,7 +18,7 @@ import type {
 } from "@peach-pi/shared-types";
 import type { Emit } from "../../ipc/registry.ts";
 import type { RemoteHostService } from "./relay-host.ts";
-import { checkpointBranch } from "./checkpoint.ts";
+import { checkpointBranch, checkoutIntoStableWorktree } from "./checkpoint.ts";
 import {
   messagePath,
   steerPath,
@@ -101,6 +103,8 @@ export class RemoteClientService {
   /** This machine's stable client identity, sent on every request so the master
    *  can attribute the steering lease + archive actions (set by main.ts). */
   clientIdentity: (() => { id: string; name: string }) | null = null;
+  /** threadIds with an in-flight pull (auto-pull re-entrancy guard). */
+  private pulling = new Set<ThreadId>();
 
   constructor(
     private emit: Emit,
@@ -337,6 +341,10 @@ export class RemoteClientService {
               // sidebar row + composer morph send↔stop instantly, not on the
               // 6s poll.
               if (frame.kind === "status") this.patchRemoteStatus(hostId, frame.threadId, frame.status);
+              // Fresh checkpoint from the master: refresh the stable worktree
+              // so local dev servers hot-reload the new code (opt-in via a
+              // first manual pull — see maybeAutoPull).
+              if (frame.kind === "checkpoint") this.maybeAutoPull(hostId, frame.threadId);
               this.emit("event:remoteTap", frame);
             } catch {
               // Ignore malformed lines (comments/heartbeats).
@@ -378,11 +386,26 @@ export class RemoteClientService {
     this.active.clear();
   }
 
+  /** Auto-pull a fresh checkpoint into the thread's stable worktree — but only
+   *  if that worktree already exists (i.e. the user pulled at least once); the
+   *  first pull stays an explicit action. Best-effort, never throws. */
+  private maybeAutoPull(hostId: string, threadId: ThreadId): void {
+    if (!existsSync(join(this.worktreesDir, threadId))) return;
+    if (this.pulling.has(threadId)) return;
+    this.pulling.add(threadId);
+    void this.pullToTest(hostId, threadId)
+      .catch(() => {
+        /* origin unreachable / checkpoint push failed — next frame retries */
+      })
+      .finally(() => this.pulling.delete(threadId));
+  }
+
   /**
    * Pull a checkpoint branch into an isolated worktree. Matches the session's
    * origin URL to a local project, fetches the shared `wip/sync` checkpoint
-   * branch from origin, and checks it out detached into a fresh worktree under
-   * the worktrees dir.
+   * branch from origin, and checks it out detached into a **stable per-thread
+   * worktree** (`<worktreesDir>/<threadId>`). Reusing the same path keeps dev
+   * servers watching one dir and lets `node_modules` survive between pulls.
    */
   async pullToTest(hostId: string, threadId: ThreadId): Promise<RemotePullResult> {
     const sessions = await this.listSessions(hostId);
@@ -412,9 +435,32 @@ export class RemoteClientService {
       .replace(/^refs\/.+\//, "");
     if (!sha || !/^[0-9a-f]{7,40}$/.test(sha)) throw new Error("checkpoint branch not found on origin");
 
-    const dir = join(this.worktreesDir, `${threadId}-${Date.now()}`);
-    // Detached worktree on the checkpoint sha — never touches the project's HEAD.
-    await git(["worktree", "add", "--detach", dir, sha], projectDir);
+    const dir = join(this.worktreesDir, threadId);
+    const prevSha = await checkoutIntoStableWorktree(projectDir, dir, sha);
+    if (prevSha && prevSha !== sha) void this.installIfLockfileChanged(dir, prevSha, sha);
     return { worktreePath: dir, sha };
+  }
+
+  /** If the root lockfile changed between two checkpoints, reinstall deps in
+   *  the worktree (fire-and-forget). ADR-0009 leaves env setup manual; this
+   *  only covers the common lockfile-drift case so the dev server keeps
+   *  working across pulls. */
+  private async installIfLockfileChanged(dir: string, fromSha: string, toSha: string): Promise<void> {
+    const lockfiles: Array<{ lock: string; cmd: string; args: string[] }> = [
+      { lock: "pnpm-lock.yaml", cmd: "pnpm", args: ["install"] },
+      { lock: "package-lock.json", cmd: "npm", args: ["install"] },
+      { lock: "yarn.lock", cmd: "yarn", args: ["install"] },
+    ];
+    try {
+      const changed = (await git(["diff", "--name-only", fromSha, toSha], dir)).split("\n");
+      for (const { lock, cmd, args } of lockfiles) {
+        if (!changed.includes(lock) || !existsSync(join(dir, lock))) continue;
+        const child = spawn(cmd, args, { cwd: dir, stdio: "ignore" });
+        child.on("error", () => {});
+        return;
+      }
+    } catch {
+      // Best-effort — a failed install never blocks the pull result.
+    }
   }
 }

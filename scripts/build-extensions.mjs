@@ -3,7 +3,7 @@
 // the Forge `packageAfterCopy` hook (packaged, out = buildPath/electron/build),
 // alongside vendorPiSdk.
 //
-// The extension source (e.g. packages/pi-client/src/extensions/peach-connectors.ts)
+// The extension source (e.g. packages/pi-client/src/extensions/peach-secrets.ts)
 // is real TypeScript in the type graph: it imports the typed tools contract
 // from `@peach-pi/shared-types` in type positions. The pi strip-types loader
 // cannot resolve `@peach-pi/shared-types` (a peach-pi workspace package, not an
