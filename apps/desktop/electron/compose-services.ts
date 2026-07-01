@@ -334,10 +334,11 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const bwsService = new BwsService(emit);
   const cliService = new CliService(emit);
   const mcpService = new McpService();
-  // Register the bundled Executor CLI as an MCP server. Absolute path: a
+  // Register the bundled Executor as an MCP server. Absolute path: a
   // Finder-launched app has no shell PATH, so a bare `executor` won't resolve.
-  // `executor mcp` attaches to an existing local daemon or elects a new owner
-  // over the default ~/.executor data dir, so existing connections appear.
+  // ensureExecutorServer starts the local daemon (over the default ~/.executor
+  // data dir) and registers its HTTP MCP endpoint — the `executor mcp` stdio
+  // bridge is broken (drops the daemon MCP session), so we bypass it.
   const executorBin = app.isPackaged
     ? path.join(process.resourcesPath, "executor", "executor")
     : path.join(app.getAppPath(), "build", "executor", "executor");
