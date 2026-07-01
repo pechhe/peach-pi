@@ -45,12 +45,15 @@ export class AnthropicUsageProvider implements UsageProvider {
       return { summary: null, state: "unknown", note: null };
     }
     try {
-      const res = await fetch(USAGE_URL, {
-        headers: { Authorization: `Bearer ${cred.accessToken}` },
-        signal: AbortSignal.timeout(15_000),
-      });
+      // Anthropic's usage endpoint intermittently returns HTTP 429 (rate
+      // limited); it lifts seconds later. Retry with a short backoff instead
+      // of flipping the card to an error every time the throttle hits.
+      const res = await fetchWithRetry(USAGE_URL, cred.accessToken);
       if (res.status === 401) {
         return { summary: null, state: "unknown", note: "Anthropic token rejected — re-run pi login." };
+      }
+      if (res.status === 429) {
+        return { summary: null, state: "unknown", note: "Anthropic usage API rate-limited — try again shortly." };
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as UsageResponse;
@@ -73,4 +76,40 @@ function toWindow(d: WindowData | undefined): UsageWindow | null {
   const remainingPct = Math.max(0, Math.min(100, 100 - d.utilization));
   const resetAt = d.resets_at ?? null;
   return { remainingPct, resetAt };
+}
+
+/** Fetch the usage endpoint, retrying transient 429 (rate-limit) responses.
+ *  Anthropic lifts the throttle within seconds, so 2 retries with a short
+ *  backoff (honouring `Retry-After` when present) clear most throttles within
+ *  the 15s per-request timeout. */
+const MAX_429_RETRIES = 2;
+
+async function fetchWithRetry(url: string, accessToken: string): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.status !== 429 || attempt >= MAX_429_RETRIES) return res;
+    const wait = retryAfterMs(res.headers.get("retry-after")) ?? backoffMs(attempt);
+    await sleep(wait);
+  }
+}
+
+function retryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs)) return Math.min(secs * 1000, 10_000);
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.max(0, Math.min(date - Date.now(), 10_000));
+  return null;
+}
+
+function backoffMs(attempt: number): number {
+  // ~1s, ~2s — small enough to stay well under the per-request 15s timeout.
+  return 1000 * (attempt + 1);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }

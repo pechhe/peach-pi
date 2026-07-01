@@ -81,3 +81,50 @@ test("AnthropicUsageProvider.run: manual credential (not logged in) → unsuppor
   assert.equal(result.state, "unsupported");
   assert.equal(result.note, "Run `pi login` …");
 });
+
+test("AnthropicUsageProvider.run: transient 429 retried, then succeeds → ok state", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = ((() => {
+    calls++;
+    if (calls === 1) return Promise.resolve(new Response("rate limited", { status: 429 }));
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          five_hour: { utilization: 25, resets_at: "2026-07-01T00:00:00Z" },
+          seven_day: { utilization: 5, resets_at: "2026-07-07T00:00:00Z" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+  }) as any) as any;
+  try {
+    const provider = new AnthropicUsageProvider();
+    const result = await provider.run({ kind: "oauth", accessToken: "tok" });
+    assert.equal(result.state, "ok");
+    assert.equal(calls, 2);
+    const q = result.summary as { kind: "quota"; fiveHours: { remainingPct: number } | null };
+    assert.equal(q.fiveHours?.remainingPct, 75);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("AnthropicUsageProvider.run: persistent 429 after retries → unknown with rate-limit note", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (() => {
+    calls++;
+    return Promise.resolve(new Response("rate limited", { status: 429 }));
+  }) as any;
+  try {
+    const provider = new AnthropicUsageProvider();
+    const result = await provider.run({ kind: "oauth", accessToken: "tok" });
+    assert.equal(result.state, "unknown");
+    assert.match(result.note ?? "", /rate-limited/);
+    // initial + MAX_429_RETRIES
+    assert.equal(calls, 3);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
