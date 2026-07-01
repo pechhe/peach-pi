@@ -12,17 +12,24 @@
  * pattern `pi-settings.ts` uses for the GUI subset of `settings.json`.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ModelInfo } from "@peach-pi/shared-types";
+import type { AutoCompactSettings, ModelInfo } from "@peach-pi/shared-types";
 
 const AGENT_DIR = join(homedir(), ".pi", "agent");
 const SETTINGS_PATH = join(AGENT_DIR, "settings.json");
 
 interface RawSmartCompact {
   summaryModel?: unknown;
+  minContextPercent?: unknown;
+  minTokenThreshold?: unknown;
   [key: string]: unknown;
 }
+
+/** Default trigger percent enforced by the `pi-smart-auto-compact` extension
+ *  when `smartCompact.minContextPercent` is unset (mirrors its DEFAULT_SETTINGS). */
+const DEFAULT_MIN_CONTEXT_PERCENT = 60;
 interface RawSettings {
   smartCompact?: RawSmartCompact;
   [key: string]: unknown;
@@ -34,6 +41,46 @@ async function readRaw(): Promise<RawSettings> {
   } catch {
     return {};
   }
+}
+
+function readRawSync(): RawSettings {
+  try {
+    return JSON.parse(readFileSync(SETTINGS_PATH, "utf8")) as RawSettings;
+  } catch {
+    return {};
+  }
+}
+
+/** Read the smart auto-compaction thresholds the `pi-smart-auto-compact`
+ *  extension actually enforces (`smartCompact.minContextPercent` /
+ *  `minTokenThreshold`). Sync so `AppService.getAutoCompact` stays synchronous —
+ *  the extension itself reads this file synchronously on every turn. */
+export function getAutoCompactThresholds(): AutoCompactSettings {
+  const sc = readRawSync().smartCompact ?? {};
+  const percent =
+    typeof sc.minContextPercent === "number" && Number.isFinite(sc.minContextPercent)
+      ? Math.max(1, Math.min(100, Math.round(sc.minContextPercent)))
+      : DEFAULT_MIN_CONTEXT_PERCENT;
+  const tokens =
+    typeof sc.minTokenThreshold === "number" && sc.minTokenThreshold > 0
+      ? Math.round(sc.minTokenThreshold)
+      : null;
+  return { percent, tokens };
+}
+
+/** Persist the thresholds into the `smartCompact` block, merge-preserving the
+ *  rest of the block (e.g. summaryModel, autoTrigger) and the file. A null/0
+ *  token cap clears the key → percentage-only trigger. */
+export function setAutoCompactThresholds(settings: AutoCompactSettings): AutoCompactSettings {
+  const raw = readRawSync();
+  const block: RawSmartCompact = { ...(raw.smartCompact ?? {}) };
+  block.minContextPercent = Math.max(1, Math.min(100, Math.round(settings.percent)));
+  if (settings.tokens != null && settings.tokens > 0) block.minTokenThreshold = Math.round(settings.tokens);
+  else delete block.minTokenThreshold;
+  raw.smartCompact = block;
+  mkdirSync(AGENT_DIR, { recursive: true });
+  writeFileSync(SETTINGS_PATH, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+  return getAutoCompactThresholds();
 }
 
 /** Parse a "provider/model" string. Returns null when unset/malformed. */

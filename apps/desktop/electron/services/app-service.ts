@@ -17,7 +17,6 @@ import type {
 import type { AppDb } from "../persistence/db.ts";
 import { seedHudThreadId } from "@peach-pi/shared-types";
 import {
-  AUTO_COMPACT_KV_KEY,
   AutomationRepo,
   REMOTE_CLIENT_ID_KV_KEY,
   UTILITY_MODEL_KV_KEY,
@@ -28,11 +27,9 @@ import {
   WorktreeRepo,
 } from "../persistence/repositories.ts";
 import type { Emit } from "../ipc/registry.ts";
+import { getAutoCompactThresholds, setAutoCompactThresholds } from "./pi-smart-compact.ts";
 
 const UI_STATE_KEY = "ui-state";
-
-/** Default auto-compaction thresholds (matches the historical 80% behaviour). */
-const DEFAULT_AUTO_COMPACT: AutoCompactSettings = { percent: 80, tokens: null };
 
 /** Owns app state; publishes snapshots after every mutation. */
 export class AppService {
@@ -347,13 +344,17 @@ export class AppService {
     return this.getUtilityModel();
   }
 
+  /** Auto-compaction thresholds. Backed by the `smartCompact` block in
+   *  `~/.pi/agent/settings.json` — the single source of truth the
+   *  `pi-smart-auto-compact` extension actually enforces — so the Settings UI
+   *  and context-bar marker reflect the real trigger (previously these read a
+   *  KV key nothing consumed). */
   getAutoCompact(): AutoCompactSettings {
-    return this.kv.get<AutoCompactSettings>(AUTO_COMPACT_KV_KEY) ?? DEFAULT_AUTO_COMPACT;
+    return getAutoCompactThresholds();
   }
 
   setAutoCompact(settings: AutoCompactSettings): AutoCompactSettings {
-    this.kv.set(AUTO_COMPACT_KV_KEY, settings);
-    return this.getAutoCompact();
+    return setAutoCompactThresholds(settings);
   }
 
   private wakeExpiredSnoozes(): void {
