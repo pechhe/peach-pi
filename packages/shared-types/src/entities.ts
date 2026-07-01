@@ -426,7 +426,6 @@ export const PORTABLE_PI_CONFIG_FILES = [
   "promptsmith-settings.json",
   "fancy-footer.json",
   "peach-vision-consent.json",
-  "peach-custom-connections.json",
   "peach-bws.json",
   /** Extension enable/disable list (pi settings' packages/extensions arrays). */
   "package.json",
