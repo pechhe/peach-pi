@@ -12,10 +12,11 @@
   import { motion } from "motion-sv";
   import { portal } from "../lib/beui/portal";
   import { EASE_OUT } from "../lib/beui/ease";
+  import * as Kbd from "../components/ui/kbd";
 
-  const HOLD_MS = 500;
+  const HOLD_MS = 800;
 
-  type Hint = { keys: string[]; left: number; top: number };
+  type Hint = { text: string; left: number; top: number; transform: string };
 
   let pinned = $state(false);
   let peek = $state(false);
@@ -29,13 +30,16 @@
     mounted = true;
   });
 
-  // Measure every visible [data-kbd-hint] control and place a badge at its
-  // top-right corner. Skips elements that are display:none / zero-size / fully
-  // off-screen so hidden panels (collapsed sidebar, no open thread) contribute
-  // nothing.
+  // Measure every visible [data-kbd-hint] control and float a badge centered
+  // below it ("under the arrows / model name / dial"). When the control sits too
+  // close to the bottom edge (e.g. the Send dial), flip the badge above it so it
+  // never falls off-screen. Skips hidden / zero-size / off-screen elements so
+  // collapsed panels and a missing thread contribute nothing.
   function measure() {
-    const vw = window.innerWidth;
     const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    const gap = 8;
+    const badgeH = 22; // approx height of one Kbd row
     const next: Hint[] = [];
     for (const el of document.querySelectorAll<HTMLElement>("[data-kbd-hint]")) {
       const r = el.getBoundingClientRect();
@@ -43,10 +47,15 @@
       if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) continue;
       const raw = el.dataset.kbdHint ?? "";
       if (!raw) continue;
+      const cx = r.left + r.width / 2;
+      const below = r.bottom + gap + badgeH <= vh || r.top - gap - badgeH < 0;
+      const top = below ? r.bottom + gap : r.top - gap;
+      const transform = below ? "translate(-50%, 0)" : "translate(-50%, -100%)";
       next.push({
-        keys: raw.split(/\s+/).filter(Boolean),
-        left: Math.min(vw - 8, r.right),
-        top: Math.max(8, r.top),
+        text: raw,
+        left: Math.min(vw - 8, Math.max(8, cx)),
+        top: Math.max(8, top),
+        transform,
       });
     }
     hints = next;
@@ -128,12 +137,12 @@
 
     {#if open}
       {#each hints as hint, i (i)}
-        <!-- Plain positioned wrapper (string style + centering translate); the
+        <!-- Positioned wrapper carries the centering + flip transform; the
              inner motion.div owns the scale/opacity pop so its inline transform
-             never clobbers the translate. -->
+             never clobbers the placement transform. -->
         <div
-          class="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2"
-          style="left:{hint.left}px;top:{hint.top}px"
+          class="pointer-events-none absolute z-10"
+          style="left:{hint.left}px;top:{hint.top}px;transform:{hint.transform}"
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.8 }}
@@ -141,13 +150,7 @@
             transition={{ duration: 0.16, ease: EASE_OUT, delay: Math.min(i * 0.012, 0.12) }}
             class="flex items-center gap-0.5"
           >
-            {#each hint.keys as key}
-              <kbd
-                class="rounded border border-border-strong bg-surface px-1.5 py-0.5 text-[11px] font-medium text-fg shadow-lg"
-              >
-                {key}
-              </kbd>
-            {/each}
+            <Kbd.Root class="shadow-lg ring-1 ring-black/10">{hint.text}</Kbd.Root>
           </motion.div>
         </div>
       {/each}

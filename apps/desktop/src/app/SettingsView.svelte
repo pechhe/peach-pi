@@ -273,7 +273,7 @@
         {#snippet groupHeader(g: NavGroup)}
           {#if groupHasMatch(g)}
             {#if g.id !== firstVisibleGroupId}
-              <Separator class="mt-2 mb-1" />
+              <Separator class="mt-3 mb-4" />
             {/if}
             <h2 class="px-1 text-[11px] font-semibold uppercase tracking-wider text-fainter">{g.label}</h2>
           {/if}
