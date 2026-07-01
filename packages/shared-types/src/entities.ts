@@ -413,7 +413,7 @@ export interface RemoteSettingsSnapshot {
 /** Allowlisted `~/.pi/agent` files ported over `GET /pi-config` on connect
  *  (ADR-0011). Excludes machine-identity / local-path files:
  *  peach-remote-host.json (the client's own serving identity),
- *  peach-connectors*.json + mcp.json (local binary paths / OAuth clients),
+ *  mcp.json (local server paths / OAuth clients),
  *  caches (peach-*-cache.json, codex-pool.json, package*.json, .DS_Store). */
 export const PORTABLE_PI_CONFIG_FILES = [
   "models.json",

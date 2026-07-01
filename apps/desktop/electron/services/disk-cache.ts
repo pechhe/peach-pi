@@ -45,7 +45,7 @@ export class DiskCache<T> {
 
 /** True for errors that mean "couldn't reach the network", so callers can serve
  *  a cached snapshot or surface a clear offline message instead of a raw stack.
- *  Matches both Node socket codes (Composio SDK / fetch) and `bws` CLI stderr. */
+ *  Matches both Node socket codes (Executor / fetch) and `bws` CLI stderr. */
 export function isOfflineError(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   const code =

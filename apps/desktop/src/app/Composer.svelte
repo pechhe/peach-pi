@@ -356,7 +356,7 @@
   // + BWS secrets). The child owns the catalogs, ensure* loaders,
   // event invalidation, and match filtering; the host owns caret context,
   // the active index (bindable), and the chip pin/remove (draft mutations +
-  // textarea refocus). Underlying tools (custom_request / connector_execute)
+  // textarea refocus). Underlying tools (executor_execute / bws_get_secret)
   // are always available; @ is a nudge + an exact-name handoff.
   // Active `@token` immediately left of the caret (same framing rules as the
   // slash menu: must start a line or follow whitespace, no whitespace inside).

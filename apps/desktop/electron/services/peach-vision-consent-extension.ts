@@ -12,7 +12,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
  * Why a separate peach extension: peach-pi does not bundle pi-vision-proxy —
  * it shells out to `pi install npm:pi-vision-proxy`, so patching the installed
  * package in node_modules would not survive a reinstall/upgrade. This extension
- * is peach-pi-owned source written to disk (like peach-connectors /
+ * is peach-pi-owned source written to disk (like peach-secrets /
  * peach-cua-driver), so it is durable.
  *
  * How it works:

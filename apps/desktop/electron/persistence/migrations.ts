@@ -229,4 +229,15 @@ export const migrations: Migration[] = [
       db.exec("ALTER TABLE projects ADD COLUMN agent_thinking TEXT");
     },
   },
+  {
+    version: 13,
+    up: (db) => {
+      // The pre-Executor "connectors" system (BYO OAuth client / API keys,
+      // version 7) is sunset — connections now live in Executor. The table has
+      // been orphaned (no reads/writes, no `Connector` entity) since the
+      // migration, so drop it and its index. `IF EXISTS` keeps this a no-op on
+      // fresh installs that never had it.
+      db.exec("DROP TABLE IF EXISTS connectors");
+    },
+  },
 ];
