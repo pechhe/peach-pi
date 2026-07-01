@@ -88,6 +88,10 @@ class SidebarStore {
   // shell (effects can't run in a `.svelte.ts` module).
   now = $state(Date.now());
 
+  // Collapsed state for the "Chats" section header (active chats list).
+  // Transient UI state, like the Done accordion's `expanded` record.
+  chatsCollapsed = $state(false);
+
   // Auto-hide for "Done" dropdowns only: collapse after DONE_HIDE_MS of no
   // pointer interaction. Cancel-while-hovered, restart-on-leave. Plain
   // (non-reactive) record; cleared by a shell teardown effect.
@@ -178,7 +182,7 @@ class SidebarStore {
     ...this.byProject
       .filter((g) => !this.isCollapsed(g.project.id))
       .flatMap((g) => [...g.masterActive, ...g.worktreeFlatActive, ...g.worktreeNested.flatMap((wg) => wg.active)]),
-    ...this.chatGroups.active,
+    ...(this.chatsCollapsed ? [] : this.chatGroups.active),
   ].map((t) => t.id));
 
   previewSelector = $derived(
@@ -220,6 +224,9 @@ class SidebarStore {
 
   isCollapsed(projectId: string): boolean {
     return this.collapsedProjects.includes(projectId);
+  }
+  toggleChatsCollapsed() {
+    this.chatsCollapsed = !this.chatsCollapsed;
   }
   toggleCollapse(project: Project) {
     void api.invoke("projects:setCollapsed", project.id, !this.isCollapsed(project.id));
