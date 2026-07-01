@@ -26,7 +26,7 @@ export const options = {
 		app: ({ head, body, assets, nonce, env }) => "<!doctype html>\n<html lang=\"en\" data-theme=\"dark\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23101012' stroke='%2338bdf8' stroke-width='4'/%3E%3Ctext x='50' y='66' font-size='52' text-anchor='middle' fill='%2338bdf8' font-family='system-ui'%3E%CF%80%3C/text%3E%3C/svg%3E\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <meta name=\"theme-color\" content=\"#101012\" />\n    " + head + "\n    <title>Peach Pi — live demo</title>\n  </head>\n  <body data-sveltekit-preload-data=\"hover\">\n    <div style=\"display: contents\">" + body + "</div>\n  </body>\n</html>\n",
 		error
 	},
-	version_hash: "xdsm66"
+	version_hash: "12pmgk"
 };
 
 export async function get_hooks() {

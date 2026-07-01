@@ -256,7 +256,7 @@
               onclick={() => {
                 const id = firstVisibleInGroup(g);
                 if (id) scrollToSection(id);
-              }}"
+              }}
             >{g.label}</button>
             <ul class="flex flex-col gap-0.5">
               {#each g.items as it (it.id)}
