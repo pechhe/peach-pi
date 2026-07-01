@@ -94,6 +94,19 @@
   let dragFrac = $state(0);
   let dragSlot = -1;
 
+  // The desktop chassis positions the thumb/glow via `--model-slider-x` in
+  // PIXELS (its badge is a fixed 360px). The phone badge flexes, so we measure
+  // it and feed the same var in px — the port's transform pipeline (snap
+  // transitions, press previews) then works untouched. 25px inset = the rail's
+  // 14px track inset + the 22px thumb's 11px radius, so the thumb sits fully
+  // on the rail at both extremes.
+  let sliderW = $state(0);
+  const thumbX = $derived.by(() => {
+    if (sliderW <= 50) return 25;
+    const frac = dragging ? dragFrac : sliderPosition / sliderSpan;
+    return Math.round((25 + frac * (sliderW - 50)) * 10) / 10;
+  });
+
   function applyDrag(clientX: number): void {
     if (!sliderEl) return;
     const r = sliderEl.getBoundingClientRect();
@@ -399,10 +412,11 @@
           <span class="composer__key-mount">
             <span
               class="model-selector__badge model-selector__badge--slider{dragging ? ' is-dragging' : ''}"
-              style="--model-slider-position: {sliderPosition}; --slider-span: {sliderSpan}; --drag-frac: {dragFrac}"
+              style="--model-slider-x: {thumbX}px"
             >
               <span
                 bind:this={sliderEl}
+                bind:clientWidth={sliderW}
                 class="model-selector__slider"
                 aria-hidden="true"
                 onpointerdown={onSliderPointerDown}

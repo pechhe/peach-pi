@@ -81,9 +81,12 @@
   display: none;
 }
 
-.composer-device .model-selector__badge--slider .model-selector__slider-rail {
-  left: 10px;
-  right: 10px;
+/* Thumb/glow positioning is NOT overridden here: the desktop pipeline moves
+   both via `transform: translate3d(calc(var(--model-slider-x) - 50%)) 
+   !important`, and Composer.svelte feeds `--model-slider-x` in px measured
+   from the real badge width. The track keeps its 14px desktop inset —
+   `--model-slider-track-x` is derived as (x - 14px) and must stay aligned. */
+.composer-device .model-selector__badge--slider .model-selector__slider-track {
   top: 15px;
   height: 9px;
 }
@@ -92,49 +95,22 @@
   height: 22px;
   top: 8px;
 }
-.composer-device .model-selector__badge--slider .model-selector__slider-glow {
-  width: 32px;
-  height: 6px;
-  top: 16px;
+.composer-device .model-selector__badge--slider .model-selector__slider-track .model-selector__slider-glow {
+  width: 90px;
+  height: 9px;
 }
 
-/* Detents as fractions of the actual track. 21px inset keeps the 22px thumb
-   fully on the rail at both extremes. --model-slider-position/--slider-span
-   are set inline on the badge by Composer.svelte. */
-.composer-device .model-selector__badge--slider .model-selector__slider-thumb,
-.composer-device .model-selector__badge--slider .model-selector__slider-glow {
-  left: calc(21px + (var(--model-slider-position, 0) / var(--slider-span, 2)) * (100% - 42px));
-}
-
-/* Neutralise the desktop press-preview jumps (they target the 360px badge's
-   pixel detents and would fling the thumb off-track mid-tap). */
-.model-selector__badge--slider:has(.model-selector__slider-label--slot-0:active) .model-selector__slider-thumb,
-.model-selector__badge--slider:has(.model-selector__slider-label--slot-0:active) .model-selector__slider-glow {
-  left: 21px;
-}
-.model-selector__badge--slider:has(.model-selector__slider-label--slot-1:active) .model-selector__slider-thumb,
-.model-selector__badge--slider:has(.model-selector__slider-label--slot-1:active) .model-selector__slider-glow {
-  left: calc(21px + (1 / var(--slider-span, 2)) * (100% - 42px));
-}
-.model-selector__badge--slider:has(.model-selector__slider-label--slot-2:active) .model-selector__slider-thumb,
-.model-selector__badge--slider:has(.model-selector__slider-label--slot-2:active) .model-selector__slider-glow {
-  left: calc(21px + (2 / var(--slider-span, 2)) * (100% - 42px));
-}
-.model-selector__badge--slider:has(.model-selector__slider-label--menu:active) .model-selector__slider-thumb {
-  left: calc(21px + (var(--model-slider-position, 0) / var(--slider-span, 2)) * (100% - 42px));
-  transform: translateX(-50%);
-}
-
-/* While dragging the thumb tracks the pointer continuously; on release the
-   class drops and the snap transition takes it to the discrete slot. */
+/* While dragging the thumb tracks the pointer continuously (Composer updates
+   --model-slider-x per pointermove); on release the class drops and the
+   desktop snap transition takes it to the discrete slot. */
 .composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-thumb,
-.composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-glow {
-  left: calc(21px + var(--drag-frac, 0) * (100% - 42px)) !important;
+.composer-device .model-selector__badge--slider.is-dragging .model-selector__slider-track .model-selector__slider-glow {
   transition: none !important;
 }
 
-/* Labels: one ellipsised line under the rail, edge-anchored like the desktop
-   (centre-anchoring would push the outer labels off the chassis). */
+/* Labels: up to two wrapped lines under the rail (like the desktop),
+   edge-anchored — centre-anchoring would push the outer labels off the
+   chassis. */
 .composer-device .model-selector__badge--slider .model-selector__slider-label--slot {
   top: auto;
   bottom: 2px;
@@ -144,12 +120,13 @@
   display: block;
   width: 33%;
   max-width: 33%;
-  font-size: 7.5px;
-  letter-spacing: 0.06em;
+  font-size: 7px;
+  letter-spacing: 0.05em;
   line-height: 1.2;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-height: 18px;
   overflow: hidden;
-  text-overflow: ellipsis;
   transform: none;
 }
 .composer-device .model-selector__badge--slider .model-selector__slider-label--slot-0 {
