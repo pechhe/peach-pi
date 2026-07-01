@@ -115,6 +115,13 @@ export class ThreadService {
   private getAutoCompact: () => AutoCompactSettings;
   /** Git boundary for rewind file snapshots; injected post-construction. */
   private gitService: GitService | null = null;
+  /** Resolves once the app-owned Executor daemon is up and its `executor` entry
+   *  is written to mcp.json. Gating session creation on this closes the boot
+   *  race where a PiSession created before Executor is ready never enumerates
+   *  the executor MCP server — pi-mcp-adapter binds MCP tools once, at session
+   *  start. Best-effort and self-bounded (never rejects), so a broken Executor
+   *  can't hang session creation. */
+  private executorReady: Promise<unknown> = Promise.resolve();
   private handoff: HandoffHook | null = null;
   /** In-memory rewind snapshots: threadId → (prior-turn entryId | "root") → sha. */
   private rewindSnapshots = new Map<string, Map<string, string>>();
@@ -148,6 +155,12 @@ export class ThreadService {
   /** Wire the git boundary after construction (resolves service ordering). */
   setGitService(gitService: GitService): void {
     this.gitService = gitService;
+  }
+
+  /** Inject the Executor-readiness gate after construction: ThreadService is
+   *  built before the Executor bring-up promise exists. */
+  setExecutorReady(ready: Promise<unknown>): void {
+    this.executorReady = ready;
   }
 
   /** App↔Thread collaborator (ADR-0015): the worktree/snapshot/archive subset
@@ -826,6 +839,11 @@ export class ThreadService {
     // Lazy import: keeps pi SDK out of the boot path (and out of the
     // packaged-app critical path until packaging of externals lands).
     const { PiSession } = await import("@peach-pi/pi-client");
+    // Wait for the Executor MCP entry to land in mcp.json before the pi runtime
+    //  boots its extensions: pi-mcp-adapter connects MCP servers once, at
+    //  session start, so a session created before Executor is ready would never
+    //  expose its tools. Resolves fast for every session after the first.
+    await this.executorReady;
     const session = await PiSession.create(
       cwd,
       {

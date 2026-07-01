@@ -344,10 +344,18 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   const executorBin = app.isPackaged
     ? path.join(process.resourcesPath, "executor", "executor")
     : path.join(app.getAppPath(), "build", "executor", "executor");
-  void (async () => {
+  // Gate pi-session creation on Executor readiness: pi-mcp-adapter binds MCP
+  //  tools once, at session start, so a session created before the executor
+  //  entry lands in mcp.json would never see them (boot race). Best-effort —
+  //  ensureExecutorDaemon self-bounds (~10s) and we swallow errors so a broken
+  //  Executor can't hang session creation.
+  const executorReady = (async () => {
     await ensureExecutorDaemon(executorBin);
     await mcpService.ensureExecutorServer();
-  })();
+  })().catch((err) => {
+    console.error("Executor bring-up failed; sessions start without it:", err);
+  });
+  threadService.setExecutorReady(executorReady);
   const executorService = new ExecutorService(executorBin, emit);
   const cuaDriverService = new CuaDriverService();
   const agentBrowserService = new AgentBrowserService();
