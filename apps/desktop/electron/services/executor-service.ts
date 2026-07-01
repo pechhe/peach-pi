@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
+import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -163,34 +164,69 @@ export class ExecutorService {
   /** Build the signed Executor web-UI "add integration" URL for a plugin. The
    *  IPC handler opens it; Executor resolves the spec/endpoint and the user
    *  enters the credential there. */
-  buildAddUrl(
+  async buildAddUrl(
     pluginKey: string,
     opts: { preset?: string; url?: string; namespace?: string },
-  ): string {
-    const u = new URL(`/integrations/add/${pluginKey}`, this.daemonOrigin());
+  ): Promise<string> {
+    const u = new URL(`/integrations/add/${pluginKey}`, await this.daemonOrigin());
     if (opts.preset) u.searchParams.set("preset", opts.preset);
     if (opts.url) u.searchParams.set("url", opts.url);
     if (opts.namespace) u.searchParams.set("namespace", opts.namespace);
     return this.signUrl(u.toString());
   }
 
-  /** Origin of the running daemon (the web UI is served there). Read from the
-   *  daemon record in the Executor data dir; falls back to the default port. */
-  private daemonOrigin(): string {
+  /** Origin of the running daemon (the web UI is served there). Reads the
+   *  most recent `daemon-active-*.json` record from the Executor data dir but
+   *  never trusts it blindly: the record's pid must be alive AND the recorded
+   *  host:port must accept a TCP connection. A stale record (dead daemon that
+   *  exited without cleaning up) is deleted and we fall back to the default
+   *  port; if nothing is reachable we throw so the caller shows a real error
+   *  instead of opening a blank `localhost` page. */
+  private async daemonOrigin(): Promise<string> {
+    const defaultOrigin = "http://localhost:4788";
+    const dataDir = resolve(process.env.EXECUTOR_DATA_DIR ?? join(homedir(), ".executor"));
+
+    let files: string[] = [];
     try {
-      const dataDir = resolve(process.env.EXECUTOR_DATA_DIR ?? join(homedir(), ".executor"));
-      const file = readdirSync(dataDir)
+      files = readdirSync(dataDir)
         .filter((f) => f.startsWith("daemon-active-") && f.endsWith(".json"))
         .map((f) => join(dataDir, f))
-        .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
-      if (file) {
-        const r = JSON.parse(readFileSync(file, "utf8")) as { hostname?: string; port?: number };
-        if (r.hostname && r.port) return `http://${r.hostname}:${r.port}`;
-      }
+        .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
     } catch {
-      /* fall through */
+      /* data dir missing — skip straight to the default */
     }
-    return "http://localhost:4788";
+
+    for (const file of files) {
+      try {
+        const r = JSON.parse(readFileSync(file, "utf8")) as {
+          hostname?: string;
+          port?: number;
+          pid?: number;
+        };
+        const hostname = typeof r.hostname === "string" ? r.hostname : null;
+        const port = typeof r.port === "number" ? r.port : null;
+        if (!hostname || !port) {
+          rmSync(file, { force: true });
+          continue;
+        }
+        const origin = `http://${hostname}:${port}`;
+        if (pidAlive(r.pid) && (await canConnect(hostname, port))) {
+          return origin;
+        }
+        // Record points at a dead/unreachable daemon — it's stale, drop it.
+        rmSync(file, { force: true });
+      } catch {
+        rmSync(file, { force: true });
+      }
+    }
+
+    // No usable record; verify the default port instead of trusting it blindly.
+    if (await canConnect("localhost", 4788)) return defaultOrigin;
+
+    throw new Error(
+      "Executor daemon is not running. Start peach-pi's desktop app (it runs the " +
+        "daemon on localhost:4788), or run `executor daemon run --port 4788 --hostname localhost --foreground`.",
+    );
   }
 
   async removeConnection(owner: "org" | "user", integration: string, name: string): Promise<void> {

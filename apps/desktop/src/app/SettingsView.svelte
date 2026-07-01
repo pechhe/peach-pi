@@ -275,7 +275,7 @@
             {#if g.id !== firstVisibleGroupId}
               <Separator class="mt-6 mb-6" />
             {/if}
-            <h2 class="px-1 text-base font-semibold tracking-wide text-fg-soft">{g.label}</h2>
+            <h2 class="px-1 text-xl font-semibold tracking-wide text-fg-soft">{g.label}</h2>
           {/if}
         {/snippet}
 
