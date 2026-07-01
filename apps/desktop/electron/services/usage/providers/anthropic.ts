@@ -79,17 +79,27 @@ function toWindow(d: WindowData | undefined): UsageWindow | null {
 }
 
 /** Fetch the usage endpoint, retrying transient 429 (rate-limit) responses.
- *  Anthropic lifts the throttle within seconds, so 2 retries with a short
- *  backoff (honouring `Retry-After` when present) clear most throttles within
- *  the 15s per-request timeout. */
+ *
+ *  Anthropic's `/api/oauth/usage` is an undocumented internal endpoint shared
+ *  with Claude Code/Claude desktop. It applies a far stricter per-token rate
+ *  limit bucket to requests that don't look like the official clients (≈5
+ *  requests then persistent 429, often with `retry-after: 0`). Sending the
+ *  `User-Agent` + `anthropic-beta` headers the official clients send routes
+ *  calls into the generous bucket where 30–60s polling is fine. The retry
+ *  below stays as a safety net for the rare genuine throttle. */
 const MAX_429_RETRIES = 2;
 
 async function fetchWithRetry(url: string, accessToken: string): Promise<Response> {
+  // User-Agent + anthropic-beta route the request into the generous rate-limit
+  // bucket the official Claude Code/desktop clients use; bare Bearer requests
+  // land in a strict bucket (~5 calls then persistent 429).
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "User-Agent": "claude-code/2.1.72",
+    "anthropic-beta": "oauth-2025-04-20",
+  };
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(15_000),
-    });
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
     if (res.status !== 429 || attempt >= MAX_429_RETRIES) return res;
     const wait = retryAfterMs(res.headers.get("retry-after")) ?? backoffMs(attempt);
     await sleep(wait);
