@@ -16,6 +16,37 @@ import type { Emit } from "../ipc/registry.ts";
 
 const run = promisify(execFile);
 
+/** True if a process with `pid` currently exists AND looks like ours.
+ *  `process.kill(pid, 0)` is a zero-signal query: it returns if the pid is
+ *  live. We only trust it on success — ESRCH (no such pid) or EPERM (pid is
+ *  another user's process) both mean the record is stale/unrelated. */
+function pidAlive(pid: number | undefined | null): boolean {
+  if (!pid || typeof pid !== "number") return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    // EPERM = process exists but is owned by another user (still alive).
+    return false;
+  }
+}
+
+/** True if a TCP connection to `host:port` can be opened within `timeoutMs`.
+ *  Used to reject stale daemon records that point at unbound ports. */
+function canConnect(host: string, port: number, timeoutMs = 400): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port });
+    const done = (ok: boolean) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+  });
+}
+
 /** Raw connection shape from `coreTools.connections.list`; we map it to the
  *  renderer-facing ExecConnection (dropping the numeric-string sentinels). */
 interface RawConnection {

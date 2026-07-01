@@ -89,6 +89,10 @@
   function groupHasMatch(g: NavGroup): boolean {
     return g.items.some((it) => hit(it.id));
   }
+  /** First section id in a group that passes the current search filter. */
+  function firstVisibleInGroup(g: NavGroup): string | undefined {
+    return g.items.find((it) => hit(it.id))?.id;
+  }
   const anyMatch = $derived(q === "" || NAV_ITEMS.some((it) => it.keywords.includes(q)));
 
   const groupById = new Map(NAV.map((g) => [g.id, g] as const));
@@ -246,7 +250,14 @@
       {#each NAV as g (g.id)}
         {#if groupHasMatch(g)}
           <div class="mb-4">
-            <p class="settings-nav-group mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-fainter">{g.label}</p>
+            <button
+              type="button"
+              class="settings-nav-group mb-1 block rounded-md px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-fainter transition-colors hover:text-fg-soft"
+              onclick={() => {
+                const id = firstVisibleInGroup(g);
+                if (id) scrollToSection(id);
+              }}"
+            >{g.label}</button>
             <ul class="flex flex-col gap-0.5">
               {#each g.items as it (it.id)}
                 {#if hit(it.id)}

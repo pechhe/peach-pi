@@ -162,7 +162,7 @@ export function registerIpcTable(svc: ServiceComposition, hud: HudLifecycle): vo
       "executor:detect": executorService.detect.bind(executorService),
       "executor:catalogue": executorService.catalogue.bind(executorService),
       "executor:openAddPage": async (pluginKey, opts) => {
-        void shell.openExternal(executorService.buildAddUrl(pluginKey, opts));
+        void shell.openExternal(await executorService.buildAddUrl(pluginKey, opts));
       },
       "bws:status": bwsService.status.bind(bwsService),
       "bws:setAccessToken": bwsService.setAccessToken.bind(bwsService),
