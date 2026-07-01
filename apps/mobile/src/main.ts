@@ -12,6 +12,9 @@ import "./styles/composer/metal-dye.css";
 // master and land on its sessions before the first render.
 store.consumeConnectLink();
 
+// Hardware/browser back pops the in-app stack (see store.push/handlePopState).
+window.addEventListener("popstate", (e) => store.handlePopState(e.state));
+
 // Follow the system theme (the desktop ships both; the prototype mirrors them).
 function applyTheme(): void {
   const light = window.matchMedia("(prefers-color-scheme: light)").matches;

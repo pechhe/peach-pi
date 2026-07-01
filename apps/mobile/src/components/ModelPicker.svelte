@@ -97,7 +97,7 @@
       </span>
     </span>
     <span class="flex items-center gap-1 text-[11px] text-faint">
-      <Icon name="spinner" size={12} sw={2.5} />
+      <Icon name="refresh" size={12} sw={2.5} />
       tap to cycle
     </span>
   </button>

@@ -129,6 +129,12 @@
   }
 
   const hasText = $derived(text.trim().length > 0);
+
+  // A steer toggle only makes sense mid-run; reset when the run ends so the
+  // next idle message doesn't silently try to steer.
+  $effect(() => {
+    if (!running) steer = false;
+  });
   // Empty + running → the button stops the run (mirrors the desktop send-dial).
   const isStop = $derived(running && !hasText);
 
@@ -291,7 +297,22 @@
   };
 </script>
 
-<div class="composer-device border-t border-border px-3 pt-2 pb-3">{#if followUp.length > 0}
+<div class="composer-device border-t border-border px-3 pt-2 pb-3">{#if running}
+    <!-- Mid-run delivery mode: queue as a follow-up (default) or steer the
+         current turn now. Mirrors the desktop composer's steer affordance. -->
+    <div class="mb-2 inline-flex items-center gap-0.5 rounded-full border border-border bg-surface p-0.5 text-[11px] font-medium">
+      <button
+        class="rounded-full px-2.5 py-1 transition-colors {steer ? 'text-faint' : 'bg-surface-3 text-fg'}"
+        onclick={() => { steer = false; haptic(6); }}
+        aria-pressed={!steer}
+      >Queue</button>
+      <button
+        class="rounded-full px-2.5 py-1 transition-colors {steer ? 'bg-accent/15 text-accent' : 'text-faint'}"
+        onclick={() => { steer = true; haptic(6); }}
+        aria-pressed={steer}
+      >Steer now</button>
+    </div>
+  {/if}{#if followUp.length > 0}
     <div class="mb-2 flex flex-col gap-1.5">
       {#each followUp as msg, i (i)}
         <div class="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5">
