@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openDb, migrate } from "../../electron/persistence/db.ts";
+import { migrations } from "../../electron/persistence/migrations.ts";
 import { AutomationRepo, ProjectRepo, ThreadRepo, WorktreeRepo, KvRepo } from "../../electron/persistence/repositories.ts";
 import { DatabaseSync } from "node:sqlite";
 
@@ -14,7 +15,7 @@ test("migrations are idempotent", () => {
   const db = memoryDb();
   migrate(db); // second run = no-op
   const v = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  assert.equal(v.user_version, 12);
+  assert.equal(v.user_version, migrations.at(-1)!.version);
 });
 
 test("automation lifecycle: insert, due, fire, runs, disable", () => {
