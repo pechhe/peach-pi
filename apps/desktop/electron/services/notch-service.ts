@@ -70,6 +70,10 @@ export class NotchService {
     });
     child.stdout.on("data", (b: Buffer) => this.onStdout(b));
 
+    // Opening a finished thread in the app (not just via the notch) clears its
+    // unread accent — mirror that here so the notch notification disappears too.
+    this.deps.appService.onThreadSeen((id) => this.markOpened(id as ThreadId));
+
     this.disposeSub = this.deps.threadService.subscribe((frame) => {
       if (frame.kind !== "status") return;
       this.unread = reduceInbox(this.unread, frame.threadId, frame.status, frame.prev);
@@ -117,12 +121,19 @@ export class NotchService {
   private handle(msg: OpenMsg): void {
     if (msg?.type !== "open" || typeof msg.id !== "string") return;
     const id = msg.id as ThreadId;
-    // Opening a finished thread clears it from the unread inbox.
+    this.markOpened(id);
+    this.deps.hud.showMainWindow();
+    this.deps.emit("event:focusThread", id);
+  }
+
+  /** Drop a thread from the unread inbox + re-publish. Triggered both by a
+   *  notch row click and by the app opening the thread (`onThreadSeen`), so the
+   *  notification clears whichever way the user reaches the thread. */
+  private markOpened(id: ThreadId): void {
+    if (!this.unread.has(id)) return;
     const next = new Set(this.unread);
     next.delete(id);
     this.unread = next;
-    this.deps.hud.showMainWindow();
-    this.deps.emit("event:focusThread", id);
     this.publish();
   }
 

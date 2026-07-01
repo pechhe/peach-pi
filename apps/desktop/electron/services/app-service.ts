@@ -55,6 +55,10 @@ export class AppService {
   /** Supplies synthetic threads mirrored from remote masters (set by main.ts),
    *  merged into the snapshot so they render in the sidebar tagged as remote. */
   private remoteThreads: () => Thread[] = () => [];
+  /** Main-process listener fired when a thread is opened/seen (see
+   *  `setSelectedThread`). The notch registers here to clear its unread inbox
+   *  when the user opens a finished thread in the app, not just via the notch. */
+  private threadSeenListener: ((threadId: string) => void) | null = null;
   /** The last snapshot the renderer is known to hold, with stable entity refs.
    *  Each publish diffs the freshly-queried `snapshot()` against this and emits
    *  only changed entities on `event:snapshotPatch`; this is where identity is
@@ -257,8 +261,18 @@ export class AppService {
 
   setSelectedThread(threadId: string | null): void {
     this.saveUiState({ selectedThreadId: threadId });
-    if (threadId) this.threads.markSeen(threadId);
+    if (threadId) {
+      this.threads.markSeen(threadId);
+      this.threadSeenListener?.(threadId);
+    }
     this.notify();
+  }
+
+  /** Register a main-process "thread opened/seen" listener. Fires from
+   *  `setSelectedThread`, mirroring `markSeen`, so surfaces outside the
+   *  renderer (the notch) can drop the thread's unread accent too. */
+  onThreadSeen(listener: (threadId: string) => void): void {
+    this.threadSeenListener = listener;
   }
 
   /** Read the HUD's active thread (independent of `selectedThreadId`). */
