@@ -20,18 +20,12 @@
     automationCount = 0,
     onOpenView,
     remoteFirst = false,
-    hostActive = false,
   }: {
     activeView: AppView;
     automationCount?: number;
     onOpenView: (view: AppView) => void;
     remoteFirst?: boolean;
-    hostActive?: boolean;
   } = $props();
-
-  // The Remote lamp pulses quiet green whenever the remote "is active" —
-  // either remote-first handoff is on, or the relay host is serving sessions.
-  const remoteLit = $derived(remoteFirst || hostActive);
 
   let usageAnchor: HTMLButtonElement | null = $state(null);
   let usageOpen = $state(false);
@@ -119,9 +113,9 @@
       onclick={() => onOpenView("remote")}
       data-testid="nav-remote"
       data-press="rotary"
-      data-remote-first={remoteLit ? "on" : undefined}
+      data-remote-first={remoteFirst ? "on" : undefined}
     >
-      <span class="flex items-center gap-2.5 {remoteLit ? 'remote-first-pulse' : ''}">
+      <span class="flex items-center gap-2.5 {remoteFirst ? 'remote-first-pulse' : ''}">
         <Radio size={15} /> Remote
       </span>
     </button>

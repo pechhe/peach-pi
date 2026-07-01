@@ -11,7 +11,6 @@
   import { extensionUi } from "../stores/extension-ui.svelte";
   import { scopedModels } from "../stores/scoped-models.svelte";
   import { remoteFirst } from "../stores/remote-first.svelte";
-  import { remoteHost } from "../stores/remote-host.svelte";
   import { workQueue } from "../stores/work-queue.svelte";
   import { sideChat } from "../stores/side-chat.svelte";
   import { usage } from "../stores/usage.svelte";
@@ -42,7 +41,6 @@
   import ExtensionDialog from "./ExtensionDialog.svelte";
   import TerminalCustomOverlay from "./TerminalCustomOverlay.svelte";
   import ImageLightbox from "./ImageLightbox.svelte";
-  import ShortcutsOverlay from "./ShortcutsOverlay.svelte";
   import TextAttachmentViewer from "./TextAttachmentViewer.svelte";
   import SkillDialog from "./SkillDialog.svelte";
   import Toasts from "./Toasts.svelte";
@@ -440,7 +438,6 @@
     usagePrefs.init();
     scopedModels.init();
     remoteFirst.init();
-    remoteHost.init();
     void telemetry.load();
     const offTelemetry = subscribeTelemetry();
     void snapshot.init();
@@ -495,7 +492,6 @@
     activeView={view}
     onSelect={selectThread}
     remoteFirst={remoteFirst.mode.enabled}
-    hostActive={remoteHost.active}
     onNewChat={() => startNewThread(null)}
     onOpenView={openView}
     onOpenTesting={openTesting}
@@ -642,7 +638,6 @@
     <TerminalCustomOverlay frame={extensionUi.terminalCustom} threadId={extensionUi.terminalCustom.threadId} />
   {/if}
   <ImageLightbox />
-  <ShortcutsOverlay />
   <TextAttachmentViewer />
   <SkillDialog />
   <Toasts />
