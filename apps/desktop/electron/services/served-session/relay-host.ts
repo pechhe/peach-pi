@@ -7,7 +7,7 @@ import {
 } from "node:http";
 import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import type {
   GitCommitPushResult,
   GitMergeResult,
@@ -62,7 +62,7 @@ import {
   type ClientIdentity,
 } from "../movable-execution/steering-lease.ts";
 
-const DEFAULT_CONFIG_PATH = join(homedir(), ".pi", "agent", "peach-remote-host.json");
+const CONFIG_PATH = join(homedir(), ".pi", "agent", "peach-remote-host.json");
 
 /** Open CORS so the mobile PWA (a different origin) can read responses.
  *  Responses stay token-gated, so this widens reachability, not trust. */
@@ -216,14 +216,6 @@ export class RemoteHostService {
    *  `enabled` (live server state) so status() reflects the bound relay, not
    *  just intent. */
   private hostEnabled = false;
-  /** True once `load()` has applied persisted state. `persist()` is a no-op
-   *  until this flips, so an in-flight caller (early IPC toggle, auto-resume)
-   *  can never clobber the on-disk file with constructor defaults — a fresh
-   *  random token + `hostEnabled: false` — before `load()` has restored the
-   *  real token + intent. Without this guard the file was being overwritten
-   *  with defaults on some boots, silently flipping the relay off and
-   *  rotating the passkey across restarts. */
-  private loaded = false;
   /** SSE listeners per thread: late-joiners get a backfill, all get the tail. */
   private listeners = new Map<ThreadId, Set<ServerResponse>>();
   /** Roster SSE listeners (the phone's sessions list). Each gets a full
@@ -242,10 +234,6 @@ export class RemoteHostService {
   private leases = new SteeringLeaseStore();
 
   private deps: RelayDeps;
-  /** On-disk config path. Injectable so tests never touch the real
-   *  ~/.pi/agent/peach-remote-host.json (an earlier test clobbered the user's
-   *  real passkey + serving intent because the path was hardcoded). */
-  private readonly configPath: string;
   /** Fronts the relay with Tailscale Serve HTTPS so the watch app can reach it
    *  without a separate step. Injected so tests don't shell out to tailscale.
    *  Null = Tailscale unavailable; enableServe failures are surfaced via
@@ -255,9 +243,8 @@ export class RemoteHostService {
    *  Injected so the relay stays free of the typed-Emit coupling. */
   private onStatusChange?: () => void;
 
-  constructor(deps: RelayDeps, configPath: string = DEFAULT_CONFIG_PATH) {
+  constructor(deps: RelayDeps) {
     this.deps = deps;
-    this.configPath = configPath;
   }
 
   /** Wire the Tailscale-Serve fronting hook + status-change notifier (main.ts
@@ -287,7 +274,7 @@ export class RemoteHostService {
    *  reads hostEnabledIntent() after this resolves to decide that. */
   async load(): Promise<void> {
     try {
-      const raw = JSON.parse(await readFile(this.configPath, "utf8")) as {
+      const raw = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as {
         token?: string;
         enabled?: boolean;
         serveAll?: boolean;
@@ -301,8 +288,6 @@ export class RemoteHostService {
       }
     } catch {
       // No persisted config yet — keep defaults.
-    } finally {
-      this.loaded = true;
     }
   }
 
@@ -313,14 +298,9 @@ export class RemoteHostService {
   }
 
   async persist(): Promise<void> {
-    // Never write before load() has restored persisted state — otherwise an
-    // in-flight caller (early IPC toggle, auto-resume) clobbers the file with
-    // constructor defaults (fresh random token + enabled:false), which is what
-    // flipped the relay off and rotated the passkey across restarts.
-    if (!this.loaded) return;
-    await mkdir(dirname(this.configPath), { recursive: true });
+    await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
     await writeFile(
-      this.configPath,
+      CONFIG_PATH,
       JSON.stringify(
         {
           token: this.token,

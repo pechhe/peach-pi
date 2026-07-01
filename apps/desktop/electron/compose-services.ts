@@ -11,7 +11,6 @@ import { TerminalService } from "./services/terminal-service.ts";
 import { GitService } from "./services/git-service.ts";
 import { SubagentService, setupSubagentEnvironment } from "./services/subagent-service.ts";
 import { IssuesService } from "./services/issues-service.ts";
-import { WorkQueueService } from "./services/work-queue-service.ts";
 import { SideChatService } from "./services/side-chat-service.ts";
 import { DevTapInstallService } from "./services/devtap-install-status.ts";
 import { FallowService } from "./services/fallow-service.ts";
@@ -19,7 +18,7 @@ import { getPiSettings, setPiSettings } from "./services/pi-settings.ts";
 import { InsomniaService } from "./services/insomnia.ts";
 import { PiUpdateService } from "./services/pi-update-service.ts";
 import { AutoUpdateService, initMainSentry } from "./services/telemetry-service.ts";
-import { setDevTapStateProvider, emitDevTapEvent } from "@devtap/electron";
+import { setDevTapStateProvider } from "@devtap/electron";
 import { RecordingService } from "./services/recording-service.ts";
 import { ClipService } from "./services/clip-service.ts";
 import { BwsService } from "./services/bws-service.ts";
@@ -61,7 +60,6 @@ export interface ServiceComposition {
   remoteHost: RemoteHostService;
   remoteClient: RemoteClientService;
   issuesService: IssuesService;
-  workQueueService: WorkQueueService;
   piUpdateService: PiUpdateService;
   autoUpdateService: AutoUpdateService;
   insomniaService: InsomniaService;
@@ -219,18 +217,7 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
   // peach-remote-host.json). Hooks are set first (synchronously) so
   // onStatusChange fires during the auto-resumed setHostEnabled(true).
   void remoteHost.load().then(() => {
-    if (!remoteHost.hostEnabledIntent()) return;
-    // Auto-resume serving. If start() rejects (e.g. the Tailscale daemon
-    // hasn't published the tailnet interface in the first second after boot),
-    // intent stays persisted-true and the next launch tries again — surface
-    // the failure rather than swallowing an unhandled rejection.
-    void remoteHost.setHostEnabled(true).catch((err) => {
-      emitDevTapEvent({
-        area: "lifecycle",
-        event: "remoteHost.autoResumeFailed",
-        message: String(err),
-      });
-    });
+    if (remoteHost.hostEnabledIntent()) void remoteHost.setHostEnabled(true);
   });
   remoteHost.setHostHooks({
     enableServe,
@@ -309,13 +296,6 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
         .filter((w) => w.projectId === id && w.archivedAt == null)
         .map((w) => w.name),
   );
-  const workQueueService = new WorkQueueService({
-    emit,
-    appService,
-    threadService,
-    gitService,
-    issuesService,
-  });
   const piUpdateService = new PiUpdateService(db, emit, () =>
     appService.snapshot().threads.some((t) => t.status === "running"),
     () => appService.snapshot().projects.map((p) => p.path),
@@ -374,7 +354,6 @@ export function composeServices(userData: string, emit: Emit): ServiceCompositio
     remoteHost,
     remoteClient,
     issuesService,
-    workQueueService,
     piUpdateService,
     autoUpdateService,
     insomniaService,

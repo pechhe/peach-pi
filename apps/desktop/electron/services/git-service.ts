@@ -353,69 +353,6 @@ export class GitService {
     }
   }
 
-  /** The shared "integrate while dirty" invariant behind {@link mergeToLocal}
-   *  and {@link mergeBranchToDefault}: stash dirty local work → (optionally)
-   *  check out `target` → merge `branch` with --no-ff → (optionally) push
-   *  `target` → restore the stash, keeping it if the pop conflicts. Aborts the
-   *  merge cleanly on conflict. `target` is the destination branch in all its
-   *  roles (checkout, push, and conflict/result messaging). */
-  private async mergeNoFfWithStash(
-    projectPath: string,
-    branch: string,
-    target: string,
-    opts: { stashMessage: string; dirty: boolean; checkout?: boolean; push?: boolean },
-  ): Promise<GitMergeResult> {
-    const { stashMessage, dirty } = opts;
-    if (dirty) await git(["stash", "push", "-u", "-m", stashMessage], projectPath);
-
-    if (opts.checkout) {
-      const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
-      if (current !== target) {
-        try {
-          await git(["checkout", target], projectPath);
-        } catch (e) {
-          if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
-          return { ok: false, error: `Could not check out ${target}: ${String(e)}` };
-        }
-      }
-    }
-
-    try {
-      await git(["merge", "--no-ff", branch], projectPath);
-    } catch {
-      await git(["merge", "--abort"], projectPath).catch(() => undefined);
-      if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
-      return { ok: false, error: `Merge conflict on ${target} — aborted`, conflict: true, target, branch };
-    }
-
-    const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);
-    if (opts.push && hasRemote) {
-      try {
-        await git(["push", "origin", target], projectPath);
-      } catch (e) {
-        // Merge landed locally but the push failed (e.g. rejected non-fast-
-        // forward). Restore stashed work so the user isn't left mid-pop, then
-        // surface as a warning rather than rolling back the merge.
-        if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
-        return { ok: true, target, branch, hasRemote, warning: `Merged into ${target} but push failed: ${String(e)}` };
-      }
-    }
-
-    if (dirty) {
-      // pop succeeds silently; on conflict it leaves markers + keeps the stash.
-      const restored = await gitOk(["stash", "pop"], projectPath);
-      if (!restored)
-        return {
-          ok: true,
-          target,
-          branch,
-          hasRemote,
-          warning: "local changes conflict with the merge — resolve in working tree (stash kept)",
-        };
-    }
-    return { ok: true, target, branch, hasRemote };
-  }
-
   /**
    * Merge this worktree's branch into the local project repo's current branch
    * with --no-ff (keeps a thread-boundary merge commit). Local only — no push.
@@ -437,16 +374,43 @@ export class GitService {
     const target = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
     if (target === branch) return { ok: false, error: `Local repo is on ${branch}` };
 
-    // Stash dirty local work, merge --no-ff, restore — the shared invariant.
-    // Local-only: no checkout (merge into whatever the checkout is on), no push.
-    // A conflict return lets the UI hand the resolve to the agent: it merges
-    // <target> into <branch> in its own worktree (refs are shared), resolves,
-    // commits — then merge-to-local runs clean.
+    // Stash any uncommitted local work so the --no-ff merge has a clean tree,
+    // then restore it on top of the merge (the "integrate while dirty" pattern).
     const localDirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
-    return this.mergeNoFfWithStash(projectPath, branch, target, {
-      stashMessage: "peach-pi merge-to-local",
-      dirty: localDirty,
-    });
+    if (localDirty) await git(["stash", "push", "-u", "-m", "peach-pi merge-to-local"], projectPath);
+
+    try {
+      await git(["merge", "--no-ff", branch], projectPath);
+    } catch {
+      await git(["merge", "--abort"], projectPath).catch(() => undefined);
+      if (localDirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
+      // Conflict flagged so the UI can offer to hand the resolve to the agent:
+      // it merges <target> into <branch> inside its own worktree (refs are
+      // shared), resolves, commits — then merge-to-local runs clean.
+      return {
+        ok: false,
+        error: `Merge conflict on ${target} — aborted`,
+        conflict: true,
+        target,
+        branch,
+      };
+    }
+
+    const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);
+    if (localDirty) {
+      // pop succeeds silently; on conflict it leaves markers + keeps the stash.
+      const restored = await gitOk(["stash", "pop"], projectPath);
+      if (!restored) {
+        return {
+          ok: true,
+          target,
+          branch,
+          hasRemote,
+          warning: "local changes conflict with the merge — resolve in working tree (stash kept)",
+        };
+      }
+    }
+    return { ok: true, target, branch, hasRemote };
   }
 
   /** Merge a worktree thread's branch into the repo's default branch (e.g.
@@ -487,15 +451,58 @@ export class GitService {
     const dirty = Boolean((await git(["status", "--porcelain"], projectPath)).trim());
     if (dirty && !opts?.stashLocal)
       return { ok: false, error: `Local is dirty — stash on ${base} and retry`, dirtyLocal: true, base };
+    if (dirty)
+      await git(["stash", "push", "-u", "-m", "peach-pi merge-batch"], projectPath);
 
-    // Stash (when permitted), check out the default branch, merge --no-ff,
-    // push, restore — the shared invariant.
-    return this.mergeNoFfWithStash(projectPath, branch, base, {
-      stashMessage: "peach-pi merge-batch",
-      dirty,
-      checkout: true,
-      push: true,
-    });
+    // Ensure the main checkout is on the default branch before merging.
+    const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], projectPath)).trim();
+    if (current !== base) {
+      try {
+        await git(["checkout", base], projectPath);
+      } catch (e) {
+        if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
+        return { ok: false, error: `Could not check out ${base}: ${String(e)}` };
+      }
+    }
+
+    try {
+      await git(["merge", "--no-ff", branch], projectPath);
+    } catch {
+      await git(["merge", "--abort"], projectPath).catch(() => undefined);
+      if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
+      return { ok: false, error: `Merge conflict on ${base} — aborted`, conflict: true, target: base, branch };
+    }
+
+    const hasRemote = await gitOk(["remote", "get-url", "origin"], projectPath);
+    if (hasRemote) {
+      try {
+        await git(["push", "origin", base], projectPath);
+      } catch (e) {
+        // Merge landed locally but the push failed (e.g. rejected non-fast-
+        // forward). Restore stashed work so the user isn't left mid-pop, then
+        // surface as a warning rather than rolling back the merge.
+        if (dirty) await git(["stash", "pop"], projectPath).catch(() => undefined);
+        return {
+          ok: true,
+          target: base,
+          branch,
+          hasRemote,
+          warning: `Merged into ${base} but push failed: ${String(e)}`,
+        };
+      }
+    }
+    if (dirty) {
+      const restored = await gitOk(["stash", "pop"], projectPath);
+      if (!restored)
+        return {
+          ok: true,
+          target: base,
+          branch,
+          hasRemote,
+          warning: "local changes conflict with the merge — resolve in working tree (stash kept)",
+        };
+    }
+    return { ok: true, target: base, branch, hasRemote };
   }
 
   /** Push the local project repo's current branch (post merge-to-local). */

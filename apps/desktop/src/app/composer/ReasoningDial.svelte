@@ -55,7 +55,6 @@
 
 <button
   class="reasoning-dial control-anchor"
-  data-kbd-hint="⌘↑↓"
   data-label="Reasoning"
   style="--dial-angle: {angle}deg"
   onclick={onCycle}

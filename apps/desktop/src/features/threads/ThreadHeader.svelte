@@ -195,8 +195,7 @@
             ? 'bg-surface-2 text-fg'
             : 'text-faint hover:bg-surface hover:text-fg-soft'}"
           onclick={() => terminal.toggle()}
-          data-testid="terminal-toggle"
-          data-kbd-hint="⌘J">&gt;_</button
+          data-testid="terminal-toggle">&gt;_</button
         >
       </Tooltip>
       {#if thread.worktreeId}
