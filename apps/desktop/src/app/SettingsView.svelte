@@ -180,16 +180,39 @@
     return () => io?.disconnect();
   });
 
+  // Group header anchors (the in-page <h2> per group) so clicking a nav group
+  // parks the header itself at the top, not the first section beneath it.
+  let groupEls = new Map<string, HTMLElement>();
+  function groupAction(node: HTMLElement, id: string) {
+    groupEls.set(id, node);
+    return {
+      destroy() {
+        if (groupEls.get(id) === node) groupEls.delete(id);
+      },
+    };
+  }
+
+  /** Jump to a group's header, keeping the scrollspy active on its first section. */
+  function scrollToGroup(g: NavGroup) {
+    const el = groupEls.get(g.id);
+    const activeSectionId = firstVisibleInGroup(g);
+    if (el && activeSectionId) animateScrollTo(el, activeSectionId);
+  }
+
   // Snappy-but-smooth custom scroll. The native `behavior: "smooth"` easing is
   // lethargic; this runs a short ease-out (~220ms) so clicks feel immediate.
   let scrollAnim = $state<number | null>(null);
   function scrollToSection(id: string) {
-    const root = scrollEl;
     const el = sectionEls.get(id);
-    if (!root || !el) return;
-    activeId = id;
+    if (el) animateScrollTo(el, id);
+  }
+  /** Ease-scroll the container so `el`'s top rests at the content anchor, marking `activeSectionId` active. */
+  function animateScrollTo(el: HTMLElement, activeSectionId: string) {
+    const root = scrollEl;
+    if (!root) return;
+    activeId = activeSectionId;
     programmaticScroll = true;
-    scrollTargetId = id;
+    scrollTargetId = activeSectionId;
     if (scrollAnim != null) cancelAnimationFrame(scrollAnim);
     const styles = getComputedStyle(root);
     const paddingTop = parseFloat(styles.paddingTop) || 0;
@@ -253,10 +276,7 @@
             <button
               type="button"
               class="settings-nav-group mb-1 block rounded-md px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-fainter transition-colors hover:text-fg-soft"
-              onclick={() => {
-                const id = firstVisibleInGroup(g);
-                if (id) scrollToSection(id);
-              }}
+              onclick={() => scrollToGroup(g)}
             >{g.label}</button>
             <ul class="flex flex-col gap-0.5">
               {#each g.items as it (it.id)}
@@ -286,7 +306,7 @@
             {#if g.id !== firstVisibleGroupId}
               <Separator class="mt-6 mb-6" />
             {/if}
-            <h2 class="px-1 text-xl font-semibold tracking-wide text-fg-soft">{g.label}</h2>
+            <h2 class="px-1 text-xl font-semibold tracking-wide text-fg-soft" use:groupAction={g.id}>{g.label}</h2>
           {/if}
         {/snippet}
 
