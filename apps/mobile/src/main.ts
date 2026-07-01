@@ -28,6 +28,26 @@ window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", ap
 
 const app = mount(App, { target: document.getElementById("app")! });
 
+// iOS keyboard handling: Safari overlays the keyboard on the layout viewport
+// instead of resizing it (`interactive-widget` is Chrome-only), which buries
+// the bottom-anchored composer. In the installed app we size #app to the
+// visual viewport so the composer rides above the keyboard; where the layout
+// viewport already resizes (Chrome), vv.height matches and this is a no-op.
+const standalone =
+  window.matchMedia("(display-mode: standalone)").matches ||
+  (navigator as { standalone?: boolean }).standalone === true;
+const vv = window.visualViewport;
+if (standalone && vv) {
+  const root = document.getElementById("app")!;
+  const sync = (): void => {
+    root.style.height = `${Math.round(vv.height)}px`;
+    // iOS sometimes pans the page when focusing an input — pin it back.
+    window.scrollTo(0, 0);
+  };
+  vv.addEventListener("resize", sync);
+  sync();
+}
+
 // Register the app-shell service worker (PWA install / offline shell).
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {

@@ -21,7 +21,7 @@
 
 {#if item.kind === "user"}
   <div class="self-end max-w-[80%] rounded-2xl bg-bubble px-[15px] py-[11px]">
-    <div class="whitespace-pre-wrap text-[14.5px] leading-[1.5]">{item.text}</div>
+    <div data-selectable class="whitespace-pre-wrap text-[14.5px] leading-[1.5]">{item.text}</div>
   </div>
 {:else if item.kind === "assistant"}
   {#if item.thinking}
@@ -32,7 +32,7 @@
       <span>Thinking</span>
     </button>
     {#if showThinking}
-      <div class="whitespace-pre-wrap pl-3.5 font-mono text-[13px] leading-[1.5] text-faint">
+      <div data-selectable class="whitespace-pre-wrap pl-3.5 font-mono text-[13px] leading-[1.5] text-faint">
         {item.thinking}
       </div>
     {/if}
