@@ -11,7 +11,6 @@
   import SkillsView from "../desktop-renderer/app/SkillsView.svelte";
   import ExtensionsView from "../desktop-renderer/app/ExtensionsView.svelte";
   import SettingsView from "../desktop-renderer/app/SettingsView.svelte";
-  import ConnectorsView from "../desktop-renderer/app/ConnectorsView.svelte";
   import BwsView from "../desktop-renderer/app/BwsView.svelte";
   import RemoteView from "../desktop-renderer/app/RemoteView.svelte";
   import PlayroomView from "../desktop-renderer/app/PlayroomView.svelte";
@@ -135,8 +134,6 @@
                   automations={snapshot.current.automations}
                   onSelectThread={selectThread}
                 />
-              {:else if view === "connections"}
-                <ConnectorsView />
               {:else if view === "bws"}
                 <BwsView />
               {:else if view === "remote"}

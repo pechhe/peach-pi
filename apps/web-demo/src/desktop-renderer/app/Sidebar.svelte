@@ -872,14 +872,6 @@
       </button>
       <button
         class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
-          {activeView === 'connections' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
-        onclick={() => onOpenView("connections")}
-        data-testid="nav-connections"
-      >
-        <span class="flex items-center gap-2.5"><Plug size={15} /> Connections</span>
-      </button>
-      <button
-        class="main-nav-item flex items-center justify-between rounded-md px-2.5 py-1.5 text-[13px]
           {activeView === 'bws' ? 'main-nav-item--active text-fg' : 'text-muted hover:text-fg'}"
         onclick={() => onOpenView("bws")}
         data-testid="nav-bws"

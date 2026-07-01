@@ -374,7 +374,7 @@ export interface RemoteSettingsSnapshot {
 /** Allowlisted `~/.pi/agent` files ported over `GET /pi-config` on connect
  *  (ADR-0011). Excludes machine-identity / local-path files:
  *  peach-remote-host.json (the client's own serving identity),
- *  peach-connectors*.json + mcp.json (local binary paths / OAuth clients),
+ *  mcp.json (local server paths / OAuth clients),
  *  caches (peach-*-cache.json, codex-pool.json, package*.json, .DS_Store). */
 export const PORTABLE_PI_CONFIG_FILES = [
   "models.json",
@@ -931,41 +931,6 @@ export interface AppThreadCollaborator {
   archiveWorktree: (id: string) => string[];
 }
 
-/** A locally-saved API credential for an arbitrary HTTP service, independent
- *  of Composio. Stored on-device; the agent calls it via the `custom_request`
- *  tool. The raw key never crosses IPC to the renderer (only `keyPreview`). */
-export interface CustomConnection {
-  id: string;
-  name: string;
-  /** e.g. "https://metabase.acme.com" — no trailing slash needed. */
-  baseUrl: string;
-  /** Header the key is sent in, e.g. "Authorization" or "X-API-Key". */
-  headerName: string;
-  /** Prefix prepended to the key, e.g. "Bearer " or "" (raw). */
-  headerPrefix: string;
-  /** Masked tail of the key for display, e.g. "••••7f3a". */
-  keyPreview: string;
-  /** Favicon URL for the row icon (derived from baseUrl); null = monogram. */
-  logoUrl: string | null;
-  createdAt: string;
-}
-
-/** A connection the user pinned in the composer with `@` so the model prefers
- *  it for that task. The hint is prepended to the outgoing prompt; the underlying
- *  tools (custom_request / connector_execute) are always available regardless. */
-export interface ReferencedConnection {
-  /** "custom" = saved HTTP connection; "composio" = connected Composio toolkit. */
-  kind: "custom" | "composio";
-  /** Display name (custom connection name or Composio toolkit name). */
-  name: string;
-  /** Base URL (kind === "custom" only). */
-  baseUrl?: string;
-  /** Composio toolkit slug (kind === "composio" only); filters connectors_search_tools. */
-  toolkitSlug?: string;
-  /** Favicon/logo for the chip. */
-  logoUrl?: string | null;
-}
-
 /** A Bitwarden Secrets Manager secret the user pinned with `@` so the model
  *  knows it is available for this task. Only the secret *name* + *id* are
  *  stored here — never the value. The model fetches the value at runtime via
@@ -977,132 +942,6 @@ export interface ReferencedSecret {
   name: string;
   /** BWS project id the secret lives in. */
   projectId: string;
-}
-
-/** A connection config the setup assistant proposes after verifying it; the
- *  user reviews + saves it. The held API key is never echoed here. */
-export interface ProposedConnectionConfig {
-  name: string;
-  baseUrl: string;
-  headerName: string;
-  headerPrefix: string;
-}
-
-/** Streaming assistant text from the connection-setup assistant. */
-export interface ConnSetupDeltaPayload {
-  sessionId: string;
-  text: string;
-}
-
-/** A read-only verification probe the assistant ran against the user's API. */
-export interface ConnSetupProbePayload {
-  sessionId: string;
-  /** e.g. "GET /api/user/current → 200". */
-  summary: string;
-  ok: boolean;
-}
-
-/** The assistant proposed a final, verified config to prefill the save form. */
-export interface ConnSetupConfigPayload {
-  sessionId: string;
-  config: ProposedConnectionConfig;
-}
-
-/** A setup-assistant turn finished (now idle, awaiting the user) or errored. */
-export interface ConnSetupDonePayload {
-  sessionId: string;
-  error?: string;
-}
-
-/** Params for creating a custom connection (includes the raw key). */
-export interface CustomConnectionInput {
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-  headerName?: string;
-  headerPrefix?: string;
-  logoUrl?: string | null;
-}
-
-/** Connection status as reported by Composio for a connected account. */
-export type ConnectionStatus = "ACTIVE" | "INITIATED" | "EXPIRED" | "FAILED" | "INACTIVE";
-
-/** One toolkit in the Composio catalogue (a searchable connect target).
- *  Sourced live from `toolkits.list`; nothing about it is persisted. */
-export interface ToolkitCatalogEntry {
-  /** Composio toolkit slug, e.g. "gmail", "github", "notion". */
-  slug: string;
-  /** Display name, e.g. "Gmail". */
-  name: string;
-  description: string;
-  logoUrl: string | null;
-  /** Primary auth scheme: "OAUTH2", "API_KEY", "BEARER_TOKEN", … */
-  authScheme: string;
-  /** How many ACTIVE connected accounts the local user has for this toolkit.
-   *  >0 still allows connecting more (e.g. a second Gmail account). */
-  connectedCount: number;
-}
-
-/** One tool a toolkit exposes, for the detail pane. `readOnly` is derived from
- *  Composio's MCP-style hint tags (readOnlyHint). */
-export interface ToolInfo {
-  slug: string;
-  name: string;
-  description: string;
-  readOnly: boolean;
-}
-
-/** One credential field a non-OAuth toolkit asks for at connect time, e.g.
- *  Metabase's base URL + API key. Sourced from Composio's
- *  `connectedAccountInitiation` schema; the `name` is the exact key Composio
- *  expects back. */
-export interface AuthField {
-  /** Composio field key, e.g. "full", "generic_api_key", "subdomain". */
-  name: string;
-  label: string;
-  description: string;
-  required: boolean;
-  /** True for secret fields (rendered as password inputs). */
-  secret: boolean;
-}
-
-/** Full view of one toolkit for the detail pane: metadata + its tool list.
- *  Fetched live on selection; nothing persisted. */
-export interface ToolkitDetail {
-  slug: string;
-  name: string;
-  description: string;
-  logoUrl: string | null;
-  authScheme: string;
-  /** Category labels from Composio meta, e.g. ["email"]. */
-  categories: string[];
-  /** Fields to collect for a manual (non-OAuth) connection. Empty for OAuth. */
-  authFields: AuthField[];
-  tools: ToolInfo[];
-}
-
-/** A connected account: one provider the local user has authenticated through
- *  Composio. Composio holds the tokens; peach-pi holds only this metadata. */
-export interface Connection {
-  /** Composio connected-account id (ca_…). */
-  id: string;
-  toolkitSlug: string;
-  name: string;
-  /** User/provider label distinguishing multiple accounts of one toolkit
-   *  (e.g. two Gmail addresses). Null when Composio has none. */
-  alias: string | null;
-  logoUrl: string | null;
-  status: ConnectionStatus;
-  createdAt: string;
-}
-
-/** Result of starting a connect flow. For OAuth, `redirectUrl` is the
- *  Composio-hosted authorize URL the renderer opens; completion is reported
- *  later via `event:connectorsChanged`. Null for non-redirect (API-key)
- *  schemes, which complete synchronously. */
-export interface ConnectStartResult {
-  redirectUrl: string | null;
-  connectionRequestId: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

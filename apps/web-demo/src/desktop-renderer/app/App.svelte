@@ -32,7 +32,6 @@
   import AutomationsView from "./AutomationsView.svelte";
   import PlayroomView from "./PlayroomView.svelte";
   import RecordingBar from "./RecordingBar.svelte";
-  import ConnectorsView from "./ConnectorsView.svelte";
   import BwsView from "./BwsView.svelte";
   import TestingView from "./TestingView.svelte";
   import WorkQueueView from "./WorkQueueView.svelte";
@@ -567,8 +566,6 @@
         automations={snapshot.current.automations}
         onSelectThread={selectThread}
       />
-    {:else if view === "connections"}
-      <ConnectorsView />
     {:else if view === "bws"}
       <BwsView />
     {:else if view === "remote"}

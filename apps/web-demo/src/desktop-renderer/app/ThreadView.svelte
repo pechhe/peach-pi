@@ -93,30 +93,6 @@
   import { workQueue } from "../stores/work-queue.svelte";
   import FindBar from "./FindBar.svelte";
 
-  // Logo lookup for @-connection badges. The hint text only carries names, so we
-  // map name → logoUrl from the live connection lists (favicon, monogram
-  // fallback handled by ConnectorIcon). Refreshed when connections change.
-  let connLogos = $state<Map<string, string | null>>(new Map());
-  async function loadConnLogos() {
-    try {
-      const [composio, custom] = await Promise.all([
-        api.invoke("connectors:list"),
-        api.invoke("customConnections:list"),
-      ]);
-      const m = new Map<string, string | null>();
-      for (const c of composio) m.set(c.name, c.logoUrl);
-      for (const c of custom) m.set(c.name, c.logoUrl);
-      connLogos = m;
-    } catch {
-      // Best-effort: badges fall back to a monogram without a logo.
-    }
-  }
-  $effect(() => {
-    void loadConnLogos();
-    const off = api.on("event:connectorsChanged", () => void loadConnLogos());
-    return off;
-  });
-
   let { thread, onSetEnvironment, onSelectThread, onNewThread, onCloneThread, onForkThread, pendingFind, onFindConsumed }: {
     thread: Thread;
     /** Flip a brand-new (unsent) thread between its project dir and a worktree. */
@@ -1038,7 +1014,7 @@
               </div>
             {/if}
             {#if item.text}
-              <MessageBadges text={item.text} connLogos={connLogos}>
+              <MessageBadges text={item.text}>
                 {#snippet children({ body })}
                   {@const skill = parseSkillInvocation(body)}
                   {#if skill}

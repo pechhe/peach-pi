@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CommandInfo, ReferencedConnection, ReferencedSecret, Thread } from "@peach-pi/shared-types";
+  import type { CommandInfo, ReferencedSecret, Thread } from "@peach-pi/shared-types";
   import { buildOutgoing } from "../lib/composer/submit";
   import {
     extractFilesFromDataTransfer,
@@ -39,9 +39,8 @@
   import ModelSelector from "./composer/ModelSelector.svelte";
   import ModelScopeSelect from "../components/ui/model-scope-select/model-scope-select.svelte";
   import QuickSlots from "./composer/QuickSlots.svelte";
-  import ConnectorIcon from "./ConnectorIcon.svelte";
   import SlashMenu from "./composer/SlashMenu.svelte";
-  import ConnectionsMenu, { type ConnMenuItem, type SecMenuItem } from "./composer/ConnectionsMenu.svelte";
+  import ConnectionsMenu, { type SecMenuItem } from "./composer/ConnectionsMenu.svelte";
   import { captureEvent } from "../lib/telemetry";
 
   let { thread, onRewind, onNewThread, onCloneThread, onForkPicker, centered = false }: {
@@ -375,13 +374,13 @@
     textareaEl?.focus();
   });
 
-  // ── @-connections menu ────────────────────────────────────────────────
-  // Typing `@` opens the ConnectionsMenu picker (custom HTTP + Composio
-  // toolkits + BWS secrets). The child owns the catalogs, ensure* loaders,
-  // event invalidation, and match filtering; the host owns caret context,
-  // the active index (bindable), and the chip pin/remove (draft mutations +
-  // textarea refocus). Underlying tools (custom_request / connector_execute)
-  // are always available; @ is a nudge + an exact-name handoff.
+  // ── @-secrets menu ────────────────────────────────────────────────────
+  // Typing `@` opens the ConnectionsMenu picker (BWS secrets). The child
+  // owns the catalog, ensure* loader, event invalidation, and match
+  // filtering; the host owns caret context, the active index (bindable), and
+  // the chip pin/remove (draft mutations + textarea refocus). The underlying
+  // bws_get_secret tool is always available; @ is a nudge + an exact-name
+  // handoff.
   // Active `@token` immediately left of the caret (same framing rules as the
   // slash menu: must start a line or follow whitespace, no whitespace inside).
   const atContext = $derived.by(() => {
@@ -401,33 +400,6 @@
   let connectionsMenu = $state<{ handleMenuKey: (e: KeyboardEvent) => boolean } | null>(null);
   // Imperative handle into SlashMenu for Tab/ArrowUp/Down/Enter navigation.
   let slashMenu = $state<{ handleMenuKey: (e: KeyboardEvent) => boolean } | null>(null);
-
-  function pickConnection(c: ConnMenuItem) {
-    const ctx = atContext;
-    const text = draft.text;
-    // Strip the `@query` token so it doesn't leak into the message text.
-    const stripped = ctx ? text.slice(0, ctx.start) + text.slice(cursor) : "";
-    const ref: ReferencedConnection =
-      c.kind === "custom"
-        ? { kind: "custom", name: c.name, baseUrl: c.baseUrl, logoUrl: c.logoUrl }
-        : { kind: "composio", name: c.name, toolkitSlug: c.toolkitSlug, logoUrl: c.logoUrl };
-    // Dedupe by kind+name: pinning a connection twice is meaningless.
-    if (!draft.connections.some((r) => r.kind === ref.kind && r.name === ref.name)) {
-      drafts.update(thread.id, { text: stripped, connections: [...draft.connections, ref] });
-      captureEvent("connection_pinned", { kind: c.kind });
-    } else {
-      drafts.update(thread.id, { text: stripped });
-    }
-    textareaEl?.focus();
-    requestAnimationFrame(syncCursor);
-  }
-
-  function removeConnection(i: number) {
-    drafts.update(thread.id, {
-      connections: draft.connections.filter((_, idx) => idx !== i),
-    });
-    textareaEl?.focus();
-  }
 
   function pickSecret(s: SecMenuItem) {
     const ctx = atContext;
@@ -573,7 +545,6 @@
     const snapshotText = draft.text;
     const snapshotAttachments = draft.attachments;
     const snapshotCommand = draft.command;
-    const snapshotConnections = draft.connections;
     const snapshotSecrets = draft.secrets;
     drafts.clearText(thread.id);
     if (draft.mode === "plan" && !isSlashCommand) {
@@ -619,7 +590,6 @@
         text: snapshotText,
         attachments: snapshotAttachments,
         command: snapshotCommand,
-        connections: snapshotConnections,
         secrets: snapshotSecrets,
       });
       console.error("submit failed", err);
@@ -679,23 +649,10 @@
       return;
     }
     // Backspace at the start of an empty composer removes the last pinned
-    // @-connection chip (mirrors the skill-chip behaviour above).
+    // @-secret chip (mirrors the skill-chip behaviour above).
     if (
       e.key === "Backspace" &&
       !draft.command &&
-      draft.connections.length > 0 &&
-      !draft.text &&
-      textareaEl?.selectionStart === 0
-    ) {
-      e.preventDefault();
-      removeConnection(draft.connections.length - 1);
-      return;
-    }
-    // Once connections are gone, backspace removes the last pinned @-secret chip.
-    if (
-      e.key === "Backspace" &&
-      !draft.command &&
-      draft.connections.length === 0 &&
       draft.secrets.length > 0 &&
       !draft.text &&
       textareaEl?.selectionStart === 0
@@ -794,12 +751,11 @@
       onPick={pickSlash}
     />
 
-    <!-- @-menu: connections + secrets (child owns catalogs/matches/markup) -->
+    <!-- @-menu: secrets (child owns catalog/matches/markup) -->
     <ConnectionsMenu
       bind:this={connectionsMenu}
       query={atQuery}
       bind:index={atIndex}
-      onPickConnection={pickConnection}
       onPickSecret={pickSecret}
     />
 
@@ -850,24 +806,6 @@
           {/if}
         </div>
       </section>
-    {/if}
-
-    <!-- Pinned @-connections shelf -->
-    {#if draft.connections.length > 0}
-      <div class="mb-2 flex flex-wrap gap-2" data-testid="connections-shelf">
-        {#each draft.connections as c, i (c.kind + ":" + c.name)}
-          <div class="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-2.5 py-1 text-xs text-fg-soft">
-            <ConnectorIcon logoUrl={c.logoUrl} label={c.name} size={14} />
-            <span class="max-w-40 truncate">@{c.name}</span>
-            <button
-              class="ml-0.5 text-faint hover:text-danger"
-              onclick={() => removeConnection(i)}
-              title="Remove connection"
-              aria-label="Remove connection {c.name}"
-            ><X size={12} /></button>
-          </div>
-        {/each}
-      </div>
     {/if}
 
     <!-- Pinned @-secrets shelf (names only; values never enter the prompt) -->
