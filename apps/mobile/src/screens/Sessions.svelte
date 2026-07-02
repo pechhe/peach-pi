@@ -167,9 +167,16 @@
 
 <header class="px-4 pt-1.5 pb-1">
   <div class="flex items-center py-1">
-    <button class="-ml-1 flex items-center text-accent" onclick={() => store.pop()} aria-label="Back">
-      <Icon name="chevron-left" size={20} sw={2.4} />
-      <span class="ml-0.5 text-[15px]">{master?.name ?? "Master"}</span>
+    <!-- Sessions is the root screen: the machine name opens the machines &
+         settings screen (switch machine / add / remove) instead of a back. -->
+    <button
+      class="-ml-1 flex min-w-0 items-center gap-1.5"
+      onclick={() => store.push({ name: "masters" })}
+      aria-label="Machines & settings"
+    >
+      <span class="text-faint"><Icon name="laptop" size={16} sw={1.8} /></span>
+      <span class="truncate text-[15px] font-semibold">{master?.name ?? "Master"}</span>
+      <span class="text-fainter"><Icon name="chevron-down" size={13} sw={2.2} /></span>
     </button>
     <!-- Live roster indicator (replaces the manual refresh button). The list
          now streams via the roster tap; the dot reflects connection state. -->

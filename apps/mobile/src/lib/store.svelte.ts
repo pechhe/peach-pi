@@ -32,8 +32,24 @@ type Route =
   | { name: "transcript"; masterId: string; threadId: string; title: string };
 
 const MASTERS_KEY = "peach-remote.masters";
+const LAST_MASTER_KEY = "peach-remote.last-master";
 const seqKey = (masterId: string, threadId: string) =>
   `peach-remote.seq.${masterId}.${threadId}`;
+
+/** Once a machine is paired the app is "logged in": the thread list is the
+ *  top level. The masters screen becomes a pushed machines/settings screen.
+ *  Root = the last-used master's sessions (or the first saved one); only a
+ *  fresh install with no masters roots at the masters screen. */
+function initialStack(masters: Master[]): Route[] {
+  let lastId: string | null = null;
+  try {
+    lastId = localStorage.getItem(LAST_MASTER_KEY);
+  } catch {
+    // Storage unavailable — fall back to the first master.
+  }
+  const m = masters.find((x) => x.id === lastId) ?? masters[0];
+  return m ? [{ name: "sessions", masterId: m.id }] : [{ name: "masters" }];
+}
 
 function loadMasters(): Master[] {
   try {
@@ -55,7 +71,7 @@ class Store {
   /** Cached `/projects` per master (for the new-thread picker). */
   projects = $state<Record<string, RemoteProjectInfo[]>>({});
   /** Navigation stack; last entry is the visible screen. */
-  stack = $state<Route[]>([{ name: "masters" }]);
+  stack = $state<Route[]>(initialStack(this.masters));
   /** Last navigation direction — drives forward/backward slide transitions. */
   dir = $state<"forward" | "backward">("forward");
 
@@ -77,9 +93,30 @@ class Store {
     if (this.stack.length > 1) history.back();
   }
 
+  /** Replace the whole stack with a new root — switching machines, or landing
+   *  after pairing. Deeper history entries left behind carry depth ≥ 1, which
+   *  handlePopState ignores at root, so stray back-swipes can't overshoot. */
+  resetTo(route: Route): void {
+    this.dir = "forward";
+    this.stack = [route];
+    if (route.name === "sessions") this.persistLastMaster(route.masterId);
+    history.pushState({ depth: 1 }, "");
+  }
+
+  private persistLastMaster(id: string): void {
+    try {
+      localStorage.setItem(LAST_MASTER_KEY, id);
+    } catch {
+      // Non-fatal — next cold start roots at the first master instead.
+    }
+  }
+
   /** Fold a `popstate` back into the nav stack. `state.depth` was written by
    *  push(); the initial entry has no state (depth 1). Forward navigations
-   *  (depth beyond the stack) are ignored — the app can't reconstruct them. */
+   *  (depth beyond the stack) are ignored — the app can't reconstruct them.
+   *  Pops are clamped at the root, so a double back (the app's edge-swipe
+   *  gesture + iOS's native history swipe both firing) can't overshoot past
+   *  the thread list. */
   handlePopState(state: unknown): void {
     const depth = (state as { depth?: number } | null)?.depth ?? 1;
     if (depth < this.stack.length) {
@@ -173,9 +210,9 @@ class Store {
     const name = (p.get("name") ?? host).trim() || host;
     if (!host || !token) return false;
     const master = this.upsertByHost({ name, host, port: 0, token });
-    this.stack = [{ name: "masters" }, { name: "sessions", masterId: master.id }];
-    // Keep browser history aligned with the two-deep stack so back → masters.
-    history.pushState({ depth: 2 }, "");
+    // Paired → logged in: the machine's thread list is the root screen.
+    this.stack = [{ name: "sessions", masterId: master.id }];
+    this.persistLastMaster(master.id);
     return true;
   }
 
@@ -184,6 +221,15 @@ class Store {
     delete this.reach[id];
     delete this.sessions[id];
     this.persistMasters();
+    try {
+      if (localStorage.getItem(LAST_MASTER_KEY) === id) localStorage.removeItem(LAST_MASTER_KEY);
+    } catch {
+      // Non-fatal.
+    }
+    // If the root thread list belonged to the removed machine, re-root at the
+    // masters screen (the user is on it — they just deleted from there).
+    const root = this.stack[0];
+    if (root?.name === "sessions" && root.masterId === id) this.stack = [{ name: "masters" }];
   }
 
   setReach(id: string, r: Reachability): void {

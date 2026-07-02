@@ -35,8 +35,9 @@
   function open(s: RemoteSessionInfo): void {
     const list = store.sessions[masterId] ?? [];
     store.setSessions(masterId, [s, ...list.filter((x) => x.threadId !== s.threadId)]);
+    // Replace new-thread with the transcript at the same depth (sessions is
+    // the root) — browser history stays aligned, so no pushState needed.
     store.stack = [
-      { name: "masters" },
       { name: "sessions", masterId },
       { name: "transcript", masterId, threadId: s.threadId, title: s.title || s.threadId },
     ];

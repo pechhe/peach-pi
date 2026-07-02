@@ -38,18 +38,19 @@
       linkError = "That doesn't look like a peach connect link.";
       return;
     }
-    store.pop();
+    // Paired → logged in: land on the machine's thread list as the new root.
+    store.resetTo({ name: "sessions", masterId: m.id });
   }
 
   function saveManual(): void {
     if (!manualValid) return;
-    store.addMaster({
+    const m = store.addMaster({
       name: name.trim(),
       host: host.trim(),
       port: Number(port),
       token: token.trim(),
     });
-    store.pop();
+    store.resetTo({ name: "sessions", masterId: m.id });
   }
 </script>
 

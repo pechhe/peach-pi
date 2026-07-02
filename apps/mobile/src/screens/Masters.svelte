@@ -43,7 +43,8 @@
       dragX = { ...dragX, [m.id]: 0 }; // a swipe/closed card swallows the tap
       return;
     }
-    store.push({ name: "sessions", masterId: m.id });
+    // Switching machines re-roots the app at that machine's thread list.
+    store.resetTo({ name: "sessions", masterId: m.id });
   }
 
   function onDown(e: PointerEvent, id: string): void {
@@ -68,7 +69,18 @@
 
 <header class="px-5 pt-3 pb-3.5">
   <div class="flex items-center justify-between">
-    <h1 class="text-[28px] font-bold tracking-[-0.02em]">Remote</h1>
+    <div class="flex items-center gap-0.5">
+      {#if store.stack.length > 1}
+        <button
+          class="-ml-2.5 flex h-8 w-8 items-center justify-center text-accent"
+          onclick={() => store.pop()}
+          aria-label="Back"
+        >
+          <Icon name="chevron-left" size={20} sw={2.4} />
+        </button>
+      {/if}
+      <h1 class="text-[28px] font-bold tracking-[-0.02em]">Machines</h1>
+    </div>
     <button
       class="flex h-8 w-8 items-center justify-center rounded-[9px] border border-border bg-surface-2 text-muted"
       onclick={() => store.push({ name: "add-master" })}
